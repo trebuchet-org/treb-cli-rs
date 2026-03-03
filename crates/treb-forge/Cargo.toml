@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 treb-core = { workspace = true }
 treb-config = { workspace = true }
+treb-registry = { workspace = true }
 
 # Foundry
 foundry-config = { workspace = true }

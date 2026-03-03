@@ -9,6 +9,7 @@ pub mod broadcast;
 pub mod compiler;
 pub mod console;
 pub mod events;
+pub mod pipeline;
 pub mod script;
 pub mod sender;
 pub mod version;
@@ -26,6 +27,10 @@ pub use sender::{
     default_test_signers, in_memory_signer, resolve_all_senders, resolve_sender, ResolvedSender,
 };
 pub use version::{detect_forge_version, ForgeVersion};
+pub use pipeline::{
+    resolve_git_commit, PipelineConfig, PipelineContext, PipelineResult, RecordedDeployment,
+    RecordedTransaction, SkippedDeployment,
+};
 
 // Re-export foundry-linking for downstream use (Phase 8 deployment recording pipeline).
 pub use foundry_linking;
