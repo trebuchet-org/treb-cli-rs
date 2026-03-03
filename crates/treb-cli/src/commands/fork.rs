@@ -25,6 +25,10 @@ const CREATEX_ADDRESS: &str = "0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed";
 #[derive(Subcommand, Debug)]
 pub enum ForkSubcommand {
     /// Enter fork mode for a network: snapshot registry and record fork state
+    ///
+    /// Snapshots the current registry and records an active fork entry in
+    /// `fork-state.json`. Run `treb dev anvil start --network <name>` after
+    /// this to start a local node pointing at the forked chain.
     Enter {
         /// Network name (must match an entry in foundry.toml [rpc_endpoints])
         #[arg(long)]
@@ -37,12 +41,18 @@ pub enum ForkSubcommand {
         fork_block_number: Option<u64>,
     },
     /// Exit fork mode: restore registry from snapshot and remove fork state
+    ///
+    /// Restores the registry to the state it was in before `fork enter` and
+    /// removes the fork entry and its snapshot directory.
     Exit {
         /// Network name to exit
         #[arg(long)]
         network: String,
     },
     /// Revert the fork to its last snapshot
+    ///
+    /// Restores the registry from the snapshot taken when fork mode was entered,
+    /// discarding any deployments made during the fork session.
     Revert {
         /// Network name to revert
         #[arg(long)]
@@ -52,6 +62,9 @@ pub enum ForkSubcommand {
         all: bool,
     },
     /// Restart the fork from a new block
+    ///
+    /// Resets the local Anvil node to a fresh fork at the given block number
+    /// (or at the latest block if omitted) without exiting fork mode.
     Restart {
         /// Network name to restart
         #[arg(long)]
@@ -61,12 +74,18 @@ pub enum ForkSubcommand {
         fork_block_number: Option<u64>,
     },
     /// Show active fork status
+    ///
+    /// Lists all currently active forks with their network name, chain ID,
+    /// fork URL, and the Anvil RPC port if a local node is running.
     Status {
         /// Output as JSON
         #[arg(long)]
         json: bool,
     },
     /// Show fork history
+    ///
+    /// Displays the log of fork lifecycle events (enter, exit, revert, restart)
+    /// for all networks or a specific one.
     History {
         /// Filter by network name
         #[arg(long)]
@@ -76,6 +95,9 @@ pub enum ForkSubcommand {
         json: bool,
     },
     /// Diff current registry vs snapshot
+    ///
+    /// Shows deployments that were added or removed since fork mode was entered
+    /// by comparing the current registry against the saved snapshot.
     Diff {
         /// Network name to diff
         #[arg(long)]

@@ -49,6 +49,7 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 comfy-table = "7"
 nucleo-matcher = "0.3"
 dialoguer = { version = "0.11", features = ["fuzzy-select"] }

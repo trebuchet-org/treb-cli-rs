@@ -18,6 +18,10 @@ use crate::output;
 
 /// Arguments for the `treb prune` command.
 #[derive(Args, Debug)]
+#[command(long_about = "Scan the deployment registry for broken cross-references \
+(e.g., a deployment pointing to a missing transaction or vice versa) and remove \
+them. A timestamped backup is created under `.treb/backups/` before any \
+destructive operation. Use --dry-run to preview candidates without deleting.")]
 pub struct PruneArgs {
     /// Report prune candidates without deleting anything
     #[arg(long)]

@@ -2,7 +2,7 @@ mod commands;
 mod output;
 mod ui;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 
 /// treb — deployment orchestration for Foundry projects
 #[derive(Parser)]
@@ -19,6 +19,10 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Execute a deployment script
+    ///
+    /// Runs a Forge script and records deployments to the treb registry.
+    /// Supports dry-run mode, broadcast, legacy transactions, and interactive
+    /// network selection when no --network flag is provided.
     Run {
         /// Path to the Forge script (e.g., script/Deploy.s.sol)
         script: String,
@@ -72,6 +76,10 @@ enum Commands {
         non_interactive: bool,
     },
     /// List deployments in the registry
+    ///
+    /// Displays all deployments stored in the treb registry with optional
+    /// filters for network, namespace, type, tag, contract, and label.
+    /// Alias: `ls`.
     #[command(alias = "ls")]
     List {
         /// Filter by network name or chain ID
@@ -103,6 +111,10 @@ enum Commands {
         json: bool,
     },
     /// Show detailed information about a specific deployment
+    ///
+    /// Displays the full deployment record including address, contract name,
+    /// network, namespace, tags, verification status, and transaction details.
+    /// Omit the deployment argument to select interactively with a fuzzy search.
     Show {
         /// Deployment identifier (full ID, name, address, name:label, or namespace/name); omit to select interactively
         deployment: Option<String>,
@@ -111,17 +123,30 @@ enum Commands {
         json: bool,
     },
     /// Initialize a treb project
+    ///
+    /// Creates the `.treb/` directory structure and writes a default `treb.toml`
+    /// configuration file. Must be run inside a Foundry project (requires
+    /// `foundry.toml`). Use `--force` to reinitialize an existing project.
     Init {
         /// Overwrite local config even if already initialized
         #[arg(long)]
         force: bool,
     },
     /// Manage treb configuration
+    ///
+    /// View or modify treb's local configuration (`.treb/treb.toml`). Supports
+    /// `show` to display resolved config, `set` to update a key, and `remove`
+    /// to reset a key to its default value.
     Config {
         #[command(subcommand)]
         subcommand: ConfigSubcommand,
     },
     /// Verify deployed contracts on block explorers
+    ///
+    /// Submits contract source code to a verification provider (Etherscan,
+    /// Sourcify, or Blockscout). Use `--all` to verify all unverified
+    /// deployments in the registry. Omit the deployment argument to select
+    /// interactively.
     Verify {
         /// Deployment identifier (full ID, name, address, name:label, or namespace/name)
         deployment: Option<String>,
@@ -154,6 +179,10 @@ enum Commands {
         json: bool,
     },
     /// Manage tags on a deployment
+    ///
+    /// Add or remove semantic version tags (e.g., `v1.0.0`) on a deployment
+    /// record. Tags can be used to filter results with `treb list --tag`.
+    /// Omit the deployment argument to select interactively.
     Tag {
         /// Deployment identifier (full ID, name, address, name:label, or namespace/name); omit to select interactively
         deployment: Option<String>,
@@ -168,6 +197,10 @@ enum Commands {
         json: bool,
     },
     /// Register deployments from a historical transaction
+    ///
+    /// Traces an on-chain transaction to discover contract creations and adds
+    /// them to the treb registry. Useful for importing deployments that were
+    /// made outside of treb or from an older deployment script.
     Register {
         /// Transaction hash to trace for contract creations
         #[arg(long)]
@@ -201,6 +234,10 @@ enum Commands {
         json: bool,
     },
     /// Sync safe transaction state from the Safe Transaction Service
+    ///
+    /// Fetches the latest transaction status from the Safe Transaction Service
+    /// API and updates the local registry with confirmations, rejections, and
+    /// execution results for pending Safe multisig transactions.
     Sync {
         /// Filter sync to a specific network name or chain ID
         #[arg(long)]
@@ -228,6 +265,10 @@ enum Commands {
         json: bool,
     },
     /// Generate deployment scripts from templates
+    ///
+    /// Scaffolds a Forge deployment script for a contract using a built-in
+    /// template. Supports create, create2, and create3 strategies, as well as
+    /// proxy patterns (ERC1967, UUPS, transparent, beacon).
     GenDeploy {
         /// Contract name or artifact identifier (e.g., Counter or src/Counter.sol:Counter)
         artifact: String,
@@ -248,6 +289,10 @@ enum Commands {
         json: bool,
     },
     /// Compose multi-step deployment pipelines
+    ///
+    /// Executes a YAML-defined multi-step deployment pipeline. Each step can
+    /// run a Forge script, deploy libraries, or invoke arbitrary forge commands.
+    /// Use `--dry-run` to preview the execution plan without running it.
     Compose {
         /// Path to the compose YAML file
         file: String,
@@ -295,15 +340,31 @@ enum Commands {
         non_interactive: bool,
     },
     /// Remove stale or broken registry entries
+    ///
+    /// Scans the deployment registry for broken cross-references (e.g., a
+    /// deployment pointing to a missing transaction) and removes them. Creates
+    /// a timestamped backup before any destructive operation.
     Prune(commands::prune::PruneArgs),
     /// Reset registry state (with optional scope filters)
+    ///
+    /// Clears all deployments and transactions from the registry, optionally
+    /// scoped to a specific network or namespace. Creates a timestamped backup
+    /// before removing data.
     Reset(commands::reset::ResetArgs),
     /// Migrate config or registry to a newer format
+    ///
+    /// Handles forward migrations for both the `treb.toml` config file (v1→v2)
+    /// and the deployment registry schema. Use `--dry-run` to preview changes
+    /// without modifying any files.
     Migrate {
         #[command(subcommand)]
         subcommand: commands::migrate::MigrateSubcommand,
     },
     /// Fork a network for local testing
+    ///
+    /// Manages fork mode lifecycle: `enter` snapshots the registry and starts
+    /// a fork, `exit` restores the registry, `revert` and `restart` manage
+    /// snapshot state, and `status`/`history`/`diff` provide observability.
     Fork {
         #[command(subcommand)]
         subcommand: commands::fork::ForkSubcommand,
@@ -312,6 +373,20 @@ enum Commands {
     Dev {
         #[command(subcommand)]
         subcommand: commands::dev::DevSubcommand,
+    },
+    /// Generate shell completion scripts
+    ///
+    /// Outputs a shell completion script for the specified shell to stdout.
+    /// Source the output in your shell profile to enable tab-completion for
+    /// all treb commands and flags.
+    ///
+    /// Examples:
+    ///   treb completions bash >> ~/.bashrc
+    ///   treb completions zsh > ~/.zsh/completions/_treb
+    ///   treb completions fish > ~/.config/fish/completions/treb.fish
+    Completions {
+        /// Shell type: bash, zsh, fish, elvish, or powershell
+        shell: String,
     },
 }
 
@@ -509,6 +584,20 @@ async fn main() -> anyhow::Result<()> {
         Commands::Migrate { subcommand } => commands::migrate::run(subcommand).await?,
         Commands::Fork { subcommand } => commands::fork::run(subcommand).await?,
         Commands::Dev { subcommand } => commands::dev::run(subcommand).await?,
+        Commands::Completions { shell } => {
+            use clap_complete::{generate, Shell};
+            use std::io;
+            use std::str::FromStr;
+
+            let shell = Shell::from_str(&shell).map_err(|_| {
+                anyhow::anyhow!(
+                    "unsupported shell '{}'; supported shells: bash, zsh, fish, elvish, powershell",
+                    shell
+                )
+            })?;
+            let mut cmd = Cli::command();
+            generate(shell, &mut cmd, "treb", &mut io::stdout());
+        }
     }
 
     Ok(())

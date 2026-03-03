@@ -17,6 +17,9 @@ use crate::output;
 
 /// Arguments for the `treb reset` command.
 #[derive(Args, Debug)]
+#[command(long_about = "Clear all deployments and transactions from the registry, \
+optionally scoped to a specific network (by chain ID) or namespace. A timestamped \
+backup is created under `.treb/backups/` before removing any data.")]
 pub struct ResetArgs {
     /// Filter reset to a specific network (by chain ID)
     #[arg(long)]

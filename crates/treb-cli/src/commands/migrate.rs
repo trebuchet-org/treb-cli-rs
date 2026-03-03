@@ -24,6 +24,10 @@ use crate::output;
 #[derive(Subcommand, Debug)]
 pub enum MigrateSubcommand {
     /// Detect and convert treb.toml v1 → v2
+    ///
+    /// Reads the existing `treb.toml`, detects its format version, and writes
+    /// an equivalent v2 configuration. Use `--dry-run` to preview the result
+    /// without modifying any files.
     Config {
         /// Print v2 TOML to stdout without modifying any files
         #[arg(long)]
@@ -33,6 +37,9 @@ pub enum MigrateSubcommand {
         json: bool,
     },
     /// Apply versioned registry schema migrations
+    ///
+    /// Runs all pending schema migrations on the deployment registry. Use
+    /// `--dry-run` to list pending migrations without applying them.
     Registry {
         /// List pending migrations without applying them
         #[arg(long)]

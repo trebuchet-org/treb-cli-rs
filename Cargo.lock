@@ -8230,6 +8230,7 @@ dependencies = [
  "assert_cmd",
  "chrono",
  "clap",
+ "clap_complete",
  "comfy-table",
  "console 0.15.11",
  "dialoguer 0.11.0",
