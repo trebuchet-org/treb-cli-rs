@@ -39,6 +39,15 @@ pub fn load_treb_config_v2(path: &Path) -> Result<TrebFileConfigV2> {
     Ok(config)
 }
 
+/// Render a [`TrebFileConfigV2`] as a TOML string.
+///
+/// Uses `toml::to_string_pretty` for stable, readable output that can be
+/// round-tripped through [`load_treb_config_v2`].
+pub fn serialize_treb_config_v2(config: &TrebFileConfigV2) -> Result<String> {
+    toml::to_string_pretty(config)
+        .map_err(|e| TrebError::Config(format!("failed to serialize treb.toml v2 as TOML: {e}")))
+}
+
 /// Detects the format of a `treb.toml` file in the given project root.
 ///
 /// Returns `V2` if the file contains `[accounts]`, `[namespace]`, or `[fork]`
@@ -135,6 +144,48 @@ mod tests {
     use super::*;
     use crate::SenderType;
     use tempfile::TempDir;
+
+    // ---- serialize_treb_config_v2 ----
+
+    #[test]
+    fn serialize_v2_round_trips_with_load() {
+        use std::collections::HashMap;
+        use crate::{AccountConfig, ForkConfig, NamespaceRoles, SenderType, TrebFileConfigV2};
+
+        let mut accounts = HashMap::new();
+        accounts.insert(
+            "deployer".to_string(),
+            AccountConfig {
+                type_: Some(SenderType::PrivateKey),
+                private_key: Some("0xkey".to_string()),
+                ..Default::default()
+            },
+        );
+        let mut senders = HashMap::new();
+        senders.insert("deployer".to_string(), "deployer".to_string());
+        let mut namespace = HashMap::new();
+        namespace.insert(
+            "default".to_string(),
+            NamespaceRoles {
+                profile: Some("default".to_string()),
+                senders,
+            },
+        );
+        let config = TrebFileConfigV2 {
+            accounts,
+            namespace,
+            fork: ForkConfig::default(),
+        };
+
+        let toml_str = serialize_treb_config_v2(&config).unwrap();
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("treb.toml");
+        std::fs::write(&path, &toml_str).unwrap();
+
+        let reparsed = load_treb_config_v2(&path).unwrap();
+        assert_eq!(reparsed.accounts["deployer"].type_, Some(SenderType::PrivateKey));
+        assert_eq!(reparsed.namespace["default"].senders["deployer"], "deployer");
+    }
 
     // ---- load_treb_config_v2 ----
 

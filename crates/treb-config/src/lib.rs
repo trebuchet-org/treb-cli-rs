@@ -25,7 +25,7 @@ pub use types::{
 pub use local::{load_local_config, save_local_config};
 
 // Re-export treb.toml v2 parser functions.
-pub use trebfile::{detect_treb_config_format, expand_env_vars, load_treb_config_v2};
+pub use trebfile::{detect_treb_config_format, expand_env_vars, load_treb_config_v2, serialize_treb_config_v2};
 
 // Re-export treb.toml v1 parser functions.
 pub use trebfile_v1::{convert_v1_to_resolved, load_treb_config_v1};
