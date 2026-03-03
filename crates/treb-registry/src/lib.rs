@@ -2,10 +2,12 @@
 //! operations, lookup index, atomic file I/O, and migration detection.
 
 pub mod io;
+pub mod lookup;
 pub mod store;
 pub mod types;
 
 // Re-export registry types at crate root for convenience.
+pub use lookup::LookupStore;
 pub use store::{DeploymentStore, SafeTransactionStore, TransactionStore};
 pub use types::{LookupIndex, RegistryMeta};
 
