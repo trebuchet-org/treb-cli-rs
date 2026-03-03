@@ -64,6 +64,23 @@ pub struct SafeServiceConfirmation {
 }
 
 // ---------------------------------------------------------------------------
+// Safe info response (GET /safes/{address}/)
+// ---------------------------------------------------------------------------
+
+/// Response from the Safe Transaction Service `/safes/{address}/` endpoint.
+/// Used to retrieve the current nonce and other Safe metadata.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SafeInfoResponse {
+    pub address: String,
+    pub nonce: u64,
+    #[serde(default)]
+    pub threshold: u64,
+    #[serde(default)]
+    pub owners: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
 // Propose request
 // ---------------------------------------------------------------------------
 

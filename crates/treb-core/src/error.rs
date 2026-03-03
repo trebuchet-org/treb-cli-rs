@@ -17,6 +17,10 @@ pub enum TrebError {
     #[error("forge error: {0}")]
     Forge(String),
 
+    /// Safe Transaction Service errors.
+    #[error("safe error: {0}")]
+    Safe(String),
+
     /// I/O errors (file system, network).
     #[error(transparent)]
     Io(#[from] std::io::Error),
