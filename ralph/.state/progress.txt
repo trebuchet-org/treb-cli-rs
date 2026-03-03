@@ -1,4 +1,7 @@
 ## Codebase Patterns
+- `run_migrations` and `MigrationReport` live in `treb-registry/src/migrations.rs`, exported from crate root
+- `MIGRATIONS` static slice in `treb-registry` uses `(target_version, MigrationFn)` tuples; v0→v1 is a no-op migration that just bumps the version
+- To add future registry migrations: add `(N, migrate_vN-1_to_vN)` entries to `MIGRATIONS` in `migrations.rs`
 - TransactionStatus variants: Simulated, Queued, Executed, Failed — no "Pending"
 - GovernorProposal uses `proposal_id` (not `id`) as the primary key field
 - `treb_registry::io::read_json_file` / `write_json_file` are pub in the io module
@@ -68,4 +71,23 @@ Started: Tue Mar  3 09:39:47 PM CET 2026
   - `detect_treb_config_format` returns `TrebConfigFormat::None` when no treb.toml exists (not an error)
   - `toml::to_string_pretty` with HashMap produces non-deterministic key order — golden tests should parse result and compare fields, not strings
   - `async fn run_config` is private but accessible via `use super::*` in the test module; test with `#[tokio::test]`
+---
+
+## 2026-03-03 - P19-US-005
+- What was implemented: `treb migrate registry` — Versioned Registry Migration Runner
+  - Created `crates/treb-registry/src/migrations.rs` with `MigrationReport`, `MIGRATIONS` static slice, `run_migrations(registry_dir)`
+  - `MIGRATIONS` = `[(1, migrate_v0_to_v1)]` — v0→v1 is a no-op (just bumps the version in registry.json)
+  - Each migration step creates a backup at `.treb/backups/migrate-v{N}-<timestamp>/` before mutating
+  - Returns `TrebError::Registry` when version > REGISTRY_VERSION
+  - Exported `run_migrations` and `MigrationReport` from `treb-registry/src/lib.rs`
+  - Removed local `run_migrations`/`MigrationReport` from `treb-cli/src/commands/migrate.rs`; replaced with imports from `treb_registry`
+  - Updated `run_registry` to pass `&registry_dir` instead of `project_root`
+  - Updated existing tests in migrate.rs to call `run_migrations(&registry_dir)` instead of old `run_migrations(dir.path())`
+  - Added 5 unit tests in `migrations.rs`: up-to-date, v0 applies migration, v0 creates backup, newer version error, JSON serialization
+- Files changed: crates/treb-registry/src/migrations.rs (new), crates/treb-registry/src/lib.rs, crates/treb-cli/src/commands/migrate.rs
+- **Learnings for future iterations:**
+  - `run_migrations` takes `registry_dir` (`.treb/`) not `project_root` — since it's in treb-registry crate
+  - `TrebError` implements `std::error::Error`, so `?` converts it to `anyhow::Error` in async fn returning `anyhow::Result`
+  - `serde::Serialize` import in migrate.rs was only for `MigrationReport` — remove it when moving struct to another crate
+  - Tests for `run_migrations` belong in `treb-registry/src/migrations.rs`, not in `treb-cli` (canonical source of truth)
 ---
