@@ -7995,10 +7995,14 @@ name = "treb-safe"
 version = "0.1.0"
 dependencies = [
  "alloy-primitives 1.5.7",
+ "alloy-signer",
+ "alloy-sol-types",
  "chrono",
+ "foundry-wallets",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "tokio",
  "treb-core",
 ]
 
