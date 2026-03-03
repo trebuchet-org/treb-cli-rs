@@ -8,6 +8,7 @@ pub mod artifacts;
 pub mod broadcast;
 pub mod compiler;
 pub mod console;
+pub mod events;
 pub mod script;
 pub mod sender;
 pub mod version;
