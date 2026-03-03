@@ -1,0 +1,22 @@
+slow = true
+
+[ns.default]
+profile = "default"
+
+[ns.default.senders.deployer]
+type = "private_key"
+address = "0xDefaultDeployer"
+private_key = "0xDefaultKey"
+
+[ns.default.senders.admin]
+type = "ledger"
+address = "0xDefaultAdmin"
+
+[ns.live]
+profile = "optimized"
+slow = false
+
+[ns.live.senders.deployer]
+type = "ledger"
+address = "0xLiveDeployer"
+derivation_path = "m/44'/60'/0'/0/1"

@@ -103,7 +103,7 @@ pub fn expand_env_vars(s: &str) -> String {
 }
 
 /// Expands environment variables in all string fields of a `SenderConfig`.
-fn expand_sender_config_env_vars(config: &mut crate::SenderConfig) {
+pub(crate) fn expand_sender_config_env_vars(config: &mut crate::SenderConfig) {
     if let Some(ref mut v) = config.address {
         *v = expand_env_vars(v);
     }

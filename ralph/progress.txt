@@ -15,6 +15,8 @@ Started: Tue Mar  3 03:08:02 AM CET 2026
 - Test pattern for filesystem: use `tempfile::TempDir` for isolated temp directories in tests
 - Env var tests: never share env var names between tests that run in parallel — use unique names or inline fixture TOML to avoid race conditions
 - Format detection: inspect TOML line-by-line for section headers (`[accounts`, `[namespace`, `[ns.`) rather than parsing TOML
+- Shared helpers: use `pub(crate)` visibility for internal helpers shared between modules (e.g., `expand_sender_config_env_vars`)
+- V1 merge pattern: start with ns.default, overlay ns.<namespace> — senders use HashMap insert (namespace wins), profile/slow use if-let override
 
 ## 2026-03-03 - US-001
 - Implemented treb-config crate scaffold with all configuration data types
@@ -58,4 +60,19 @@ Started: Tue Mar  3 03:08:02 AM CET 2026
   - `detect_treb_config_format` uses line-by-line text inspection (not TOML parsing) — avoids errors on invalid TOML when just detecting format
   - `expand_sender_config_env_vars` mutates SenderConfig in-place after TOML parsing — applied to all string fields (address, private_key, safe, signer, derivation_path, governor, timelock, proposer)
   - File-not-found vs parse-error: use distinct `TrebError::Config` messages ("treb.toml not found" vs "invalid TOML in")
+---
+
+## 2026-03-03 - US-004
+- Implemented treb.toml v1 parser (legacy read-only) with `load_treb_config_v1` and `convert_v1_to_resolved`
+- Files changed:
+  - `crates/treb-config/src/trebfile.rs`: changed `expand_sender_config_env_vars` visibility to `pub(crate)` for reuse
+  - `crates/treb-config/src/trebfile_v1.rs`: new module with `load_treb_config_v1` (parse + env var expansion) and `convert_v1_to_resolved` (merge ns.default with ns.<namespace>) + 10 tests
+  - `crates/treb-config/src/lib.rs`: added `trebfile_v1` module declaration and re-exports
+  - `crates/treb-config/tests/fixtures/treb_v1.toml`: test fixture with [ns.default] and [ns.live] sections
+- **Learnings for future iterations:**
+  - `expand_sender_config_env_vars` was made `pub(crate)` in trebfile.rs to share between v1 and v2 parsers — no need to duplicate
+  - V1 merge strategy: start with ns.default senders, then overlay ns.<namespace> senders (namespace wins on conflicts)
+  - V1 slow flag precedence: top-level -> ns.default.slow -> ns.<namespace>.slow (most specific wins)
+  - When namespace doesn't exist in v1 config, fall back to defaults (don't error) — the resolver layer handles missing namespace errors
+  - `convert_v1_to_resolved` returns `ResolvedSenders` (not `Result`) — it never fails, just returns defaults for missing data
 ---
