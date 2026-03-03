@@ -755,7 +755,7 @@ pub async fn run(
         })?;
 
     // ── Detect library ───────────────────────────────────────────────────
-    let is_library = !artifact_match.has_bytecode;
+    let is_library = artifact_match.is_library;
 
     if is_library && proxy_lower.is_some() {
         bail!("libraries cannot be deployed behind proxies");
@@ -777,9 +777,13 @@ pub async fn run(
         .unwrap_or_default();
 
     // ── Build template context ───────────────────────────────────────────
+    // The source path may be absolute; make it relative to the project root
+    // so that the generated import path is correct.
     let artifact_path = artifact_match
         .artifact_id
         .source
+        .strip_prefix(&cwd)
+        .unwrap_or(&artifact_match.artifact_id.source)
         .to_string_lossy()
         .to_string();
 

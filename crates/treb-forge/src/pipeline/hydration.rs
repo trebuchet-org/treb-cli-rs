@@ -456,6 +456,7 @@ mod tests {
             abi: alloy_json_abi::JsonAbi::new(),
             has_bytecode: true,
             has_deployed_bytecode: true,
+            is_library: false,
         };
         extracted.artifact_match = Some(artifact_match);
 

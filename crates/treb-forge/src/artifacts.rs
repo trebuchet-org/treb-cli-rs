@@ -23,6 +23,15 @@ pub struct ArtifactMatch {
     pub has_bytecode: bool,
     /// Whether deployed bytecode is available.
     pub has_deployed_bytecode: bool,
+    /// Whether this artifact is a Solidity library, detected by the standard
+    /// `PUSH20 <placeholder>` prefix in the deployed bytecode.
+    pub is_library: bool,
+}
+
+/// Check if raw bytecode bytes have the standard Solidity library prefix:
+/// `PUSH20 (0x73)` followed by 20 zero bytes (the library address placeholder).
+fn is_library_bytecode_pattern(bytes: &[u8]) -> bool {
+    bytes.len() > 21 && bytes[0] == 0x73 && bytes[1..21].iter().all(|&b| b == 0)
 }
 
 /// Index over compiled contract artifacts for efficient lookups.
@@ -44,12 +53,21 @@ impl ArtifactIndex {
         self.inner
             .find_by_name_or_identifier(name)
             .map(|opt| {
-                opt.map(|(id, data)| ArtifactMatch {
-                    artifact_id: id.clone(),
-                    name: data.name.clone(),
-                    abi: data.abi.clone(),
-                    has_bytecode: data.bytecode.is_some(),
-                    has_deployed_bytecode: data.deployed_bytecode.is_some(),
+                opt.map(|(id, data)| {
+                    let is_library = data
+                        .deployed_bytecode
+                        .as_ref()
+                        .and_then(|db| db.object.as_ref())
+                        .and_then(|obj| obj.as_bytes())
+                        .is_some_and(|bytes| is_library_bytecode_pattern(bytes));
+                    ArtifactMatch {
+                        artifact_id: id.clone(),
+                        name: data.name.clone(),
+                        abi: data.abi.clone(),
+                        has_bytecode: data.bytecode.is_some(),
+                        has_deployed_bytecode: data.deployed_bytecode.is_some(),
+                        is_library,
+                    }
                 })
             })
             .map_err(|e| TrebError::Forge(format!("artifact lookup failed: {e}")))
@@ -61,12 +79,21 @@ impl ArtifactIndex {
     pub fn find_by_creation_code(&self, code: &[u8]) -> Option<ArtifactMatch> {
         self.inner
             .find_by_creation_code(code)
-            .map(|(id, data)| ArtifactMatch {
-                artifact_id: id.clone(),
-                name: data.name.clone(),
-                abi: data.abi.clone(),
-                has_bytecode: data.bytecode.is_some(),
-                has_deployed_bytecode: data.deployed_bytecode.is_some(),
+            .map(|(id, data)| {
+                let is_library = data
+                        .deployed_bytecode
+                        .as_ref()
+                        .and_then(|db| db.object.as_ref())
+                        .and_then(|obj| obj.as_bytes())
+                        .is_some_and(|bytes| is_library_bytecode_pattern(bytes));
+                ArtifactMatch {
+                    artifact_id: id.clone(),
+                    name: data.name.clone(),
+                    abi: data.abi.clone(),
+                    has_bytecode: data.bytecode.is_some(),
+                    has_deployed_bytecode: data.deployed_bytecode.is_some(),
+                    is_library,
+                }
             })
     }
 
@@ -76,12 +103,21 @@ impl ArtifactIndex {
     pub fn find_by_deployed_code(&self, code: &[u8]) -> Option<ArtifactMatch> {
         self.inner
             .find_by_deployed_code(code)
-            .map(|(id, data)| ArtifactMatch {
-                artifact_id: id.clone(),
-                name: data.name.clone(),
-                abi: data.abi.clone(),
-                has_bytecode: data.bytecode.is_some(),
-                has_deployed_bytecode: data.deployed_bytecode.is_some(),
+            .map(|(id, data)| {
+                let is_library = data
+                        .deployed_bytecode
+                        .as_ref()
+                        .and_then(|db| db.object.as_ref())
+                        .and_then(|obj| obj.as_bytes())
+                        .is_some_and(|bytes| is_library_bytecode_pattern(bytes));
+                ArtifactMatch {
+                    artifact_id: id.clone(),
+                    name: data.name.clone(),
+                    abi: data.abi.clone(),
+                    has_bytecode: data.bytecode.is_some(),
+                    has_deployed_bytecode: data.deployed_bytecode.is_some(),
+                    is_library,
+                }
             })
     }
 
@@ -111,6 +147,7 @@ mod tests {
             abi: JsonAbi::default(),
             has_bytecode: true,
             has_deployed_bytecode: true,
+            is_library: false,
         };
 
         assert_eq!(artifact_match.name, "Counter");
@@ -121,6 +158,7 @@ mod tests {
         );
         assert!(artifact_match.has_bytecode);
         assert!(artifact_match.has_deployed_bytecode);
+        assert!(!artifact_match.is_library);
         assert!(artifact_match.abi.functions.is_empty());
     }
 }
