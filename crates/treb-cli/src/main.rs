@@ -21,9 +21,16 @@ enum Commands {
     /// Show deployment details
     Show,
     /// Initialize a treb project
-    Init,
+    Init {
+        /// Overwrite local config even if already initialized
+        #[arg(long)]
+        force: bool,
+    },
     /// Manage treb configuration
-    Config,
+    Config {
+        #[command(subcommand)]
+        subcommand: ConfigSubcommand,
+    },
     /// Verify deployed contracts
     Verify,
     /// Tag a deployment snapshot
@@ -60,6 +67,28 @@ enum Commands {
     Dev,
 }
 
+#[derive(Subcommand)]
+enum ConfigSubcommand {
+    /// Display the resolved configuration
+    Show {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Set a local configuration value
+    Set {
+        /// Configuration key (namespace, network)
+        key: String,
+        /// Value to set
+        value: String,
+    },
+    /// Remove (reset) a local configuration value to its default
+    Remove {
+        /// Configuration key (namespace, network)
+        key: String,
+    },
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -68,8 +97,12 @@ async fn main() -> anyhow::Result<()> {
         Commands::Run => println!("run: not yet implemented"),
         Commands::List => println!("list: not yet implemented"),
         Commands::Show => println!("show: not yet implemented"),
-        Commands::Init => println!("init: not yet implemented"),
-        Commands::Config => println!("config: not yet implemented"),
+        Commands::Init { force } => commands::init::run(force).await?,
+        Commands::Config { subcommand } => match subcommand {
+            ConfigSubcommand::Show { json } => commands::config::show(json).await?,
+            ConfigSubcommand::Set { key, value } => commands::config::set(&key, &value).await?,
+            ConfigSubcommand::Remove { key } => commands::config::remove(&key).await?,
+        },
         Commands::Verify => println!("verify: not yet implemented"),
         Commands::Tag => println!("tag: not yet implemented"),
         Commands::Register => println!("register: not yet implemented"),
