@@ -20,7 +20,7 @@ pub use deployment::{
 pub use enums::{
     DeploymentMethod, DeploymentType, ProposalStatus, TransactionStatus, VerificationStatus,
 };
-pub use fork::{ForkEntry, ForkHistoryEntry, ForkState};
+pub use fork::{ForkEntry, ForkHistoryEntry, ForkState, SnapshotEntry};
 pub use governor_proposal::GovernorProposal;
 pub use ids::DeploymentId;
 pub use safe_transaction::{Confirmation, SafeTransaction, SafeTxData};

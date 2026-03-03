@@ -9,6 +9,24 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
+// SnapshotEntry
+// ---------------------------------------------------------------------------
+
+/// An EVM snapshot taken during a fork session.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotEntry {
+    /// Sequential index of this snapshot within the fork session.
+    pub index: u32,
+    /// The EVM snapshot ID returned by `evm_snapshot` (hex string).
+    pub snapshot_id: String,
+    /// The command/action that triggered this snapshot (e.g. "enter", "revert", "restart").
+    pub command: String,
+    /// When the snapshot was taken.
+    pub timestamp: DateTime<Utc>,
+}
+
+// ---------------------------------------------------------------------------
 // ForkEntry
 // ---------------------------------------------------------------------------
 
@@ -33,9 +51,26 @@ pub struct ForkEntry {
     pub snapshot_dir: String,
     /// When the fork was started.
     pub started_at: DateTime<Utc>,
-    /// EVM state snapshot ID taken after initial setup (used by `fork revert`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub evm_snapshot_id: Option<String>,
+    /// Environment variable name for this fork's RPC URL (Go-compatible).
+    #[serde(default)]
+    pub env_var_name: String,
+    /// Original RPC URL before fork mode was entered (Go-compatible).
+    #[serde(default)]
+    pub original_rpc: String,
+    /// PID of the Anvil process (Go-compatible).
+    #[serde(default)]
+    pub anvil_pid: i32,
+    /// Path to the PID file for the Anvil process (Go-compatible).
+    #[serde(default)]
+    pub pid_file: String,
+    /// Path to the log file for the Anvil process (Go-compatible).
+    #[serde(default)]
+    pub log_file: String,
+    /// When fork mode was entered (Go-compatible).
+    pub entered_at: DateTime<Utc>,
+    /// EVM snapshots taken during this fork session.
+    #[serde(default)]
+    pub snapshots: Vec<SnapshotEntry>,
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +122,7 @@ mod tests {
     use super::*;
 
     fn sample_fork_entry() -> ForkEntry {
+        let ts = Utc.with_ymd_and_hms(2026, 3, 3, 12, 0, 0).unwrap();
         ForkEntry {
             network: "mainnet".into(),
             rpc_url: "http://127.0.0.1:8545".into(),
@@ -95,8 +131,14 @@ mod tests {
             fork_url: "https://eth.llamarpc.com".into(),
             fork_block_number: Some(19_000_000),
             snapshot_dir: ".treb/snapshots/mainnet".into(),
-            started_at: Utc.with_ymd_and_hms(2026, 3, 3, 12, 0, 0).unwrap(),
-            evm_snapshot_id: None,
+            started_at: ts,
+            env_var_name: "ETH_RPC_URL".into(),
+            original_rpc: "https://eth.llamarpc.com".into(),
+            anvil_pid: 0,
+            pid_file: String::new(),
+            log_file: String::new(),
+            entered_at: ts,
+            snapshots: vec![],
         }
     }
 
@@ -123,6 +165,7 @@ mod tests {
         let json = serde_json::to_value(&entry).unwrap();
         let obj = json.as_object().unwrap();
 
+        // Existing fields
         assert!(obj.contains_key("network"));
         assert!(obj.contains_key("rpcUrl"));
         assert!(obj.contains_key("port"));
@@ -132,6 +175,15 @@ mod tests {
         assert!(obj.contains_key("snapshotDir"));
         assert!(obj.contains_key("startedAt"));
 
+        // Go-compatible fields
+        assert!(obj.contains_key("envVarName"));
+        assert!(obj.contains_key("originalRpc"));
+        assert!(obj.contains_key("anvilPid"));
+        assert!(obj.contains_key("pidFile"));
+        assert!(obj.contains_key("logFile"));
+        assert!(obj.contains_key("enteredAt"));
+        assert!(obj.contains_key("snapshots"));
+
         // No snake_case
         assert!(!obj.contains_key("rpc_url"));
         assert!(!obj.contains_key("chain_id"));
@@ -139,6 +191,13 @@ mod tests {
         assert!(!obj.contains_key("fork_block_number"));
         assert!(!obj.contains_key("snapshot_dir"));
         assert!(!obj.contains_key("started_at"));
+        assert!(!obj.contains_key("env_var_name"));
+        assert!(!obj.contains_key("original_rpc"));
+        assert!(!obj.contains_key("anvil_pid"));
+        assert!(!obj.contains_key("pid_file"));
+        assert!(!obj.contains_key("log_file"));
+        assert!(!obj.contains_key("entered_at"));
+        assert!(!obj.contains_key("evm_snapshot_id"));
     }
 
     #[test]

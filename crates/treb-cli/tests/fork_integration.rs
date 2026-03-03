@@ -30,6 +30,7 @@ fn make_project() -> (TempDir, PathBuf) {
 /// Build a minimal `ForkEntry` suitable for unit-testing fork state operations.
 fn sample_entry(treb_dir: &Path, network: &str) -> ForkEntry {
     let snapshot_dir = treb_dir.join("snapshots").join(network);
+    let now = Utc::now();
     ForkEntry {
         network: network.to_string(),
         rpc_url: String::new(),
@@ -38,8 +39,14 @@ fn sample_entry(treb_dir: &Path, network: &str) -> ForkEntry {
         fork_url: String::new(),
         fork_block_number: None,
         snapshot_dir: snapshot_dir.to_string_lossy().into_owned(),
-        started_at: Utc::now(),
-        evm_snapshot_id: None,
+        started_at: now,
+        env_var_name: String::new(),
+        original_rpc: String::new(),
+        anvil_pid: 0,
+        pid_file: String::new(),
+        log_file: String::new(),
+        entered_at: now,
+        snapshots: vec![],
     }
 }
 
@@ -132,6 +139,7 @@ fn fork_diff_with_no_changes() {
     fs::write(snapshot_dir.join(DEPLOYMENTS_FILE), deployments_json).unwrap();
 
     // Pre-populate fork state pointing to the snapshot dir.
+    let now = Utc::now();
     let entry = ForkEntry {
         network: network.to_string(),
         rpc_url: String::new(),
@@ -140,8 +148,14 @@ fn fork_diff_with_no_changes() {
         fork_url: String::new(),
         fork_block_number: None,
         snapshot_dir: snapshot_dir.to_string_lossy().into_owned(),
-        started_at: Utc::now(),
-        evm_snapshot_id: None,
+        started_at: now,
+        env_var_name: String::new(),
+        original_rpc: String::new(),
+        anvil_pid: 0,
+        pid_file: String::new(),
+        log_file: String::new(),
+        entered_at: now,
+        snapshots: vec![],
     };
     let mut store = ForkStateStore::new(&treb_dir);
     store.insert_active_fork(entry).unwrap();
@@ -172,6 +186,7 @@ fn fork_exit_restores_registry() {
     fs::write(snapshot_dir.join(DEPLOYMENTS_FILE), original).unwrap();
 
     // Pre-populate fork state.
+    let now = Utc::now();
     let entry = ForkEntry {
         network: network.to_string(),
         rpc_url: String::new(),
@@ -180,8 +195,14 @@ fn fork_exit_restores_registry() {
         fork_url: String::new(),
         fork_block_number: None,
         snapshot_dir: snapshot_dir.to_string_lossy().into_owned(),
-        started_at: Utc::now(),
-        evm_snapshot_id: None,
+        started_at: now,
+        env_var_name: String::new(),
+        original_rpc: String::new(),
+        anvil_pid: 0,
+        pid_file: String::new(),
+        log_file: String::new(),
+        entered_at: now,
+        snapshots: vec![],
     };
     let mut store = ForkStateStore::new(&treb_dir);
     store.insert_active_fork(entry).unwrap();
@@ -317,6 +338,7 @@ async fn signal_handling_sigterm_shuts_down_anvil_cleanly() {
         let snapshot_dir = treb_dir.join("snapshots").join(network);
         fs::create_dir_all(&snapshot_dir).unwrap();
 
+        let now = Utc::now();
         let entry = ForkEntry {
             network: network.to_string(),
             rpc_url: String::new(),
@@ -325,8 +347,14 @@ async fn signal_handling_sigterm_shuts_down_anvil_cleanly() {
             fork_url: fork_url.clone(),
             fork_block_number: None,
             snapshot_dir: snapshot_dir.to_string_lossy().into_owned(),
-            started_at: Utc::now(),
-            evm_snapshot_id: None,
+            started_at: now,
+            env_var_name: String::new(),
+            original_rpc: String::new(),
+            anvil_pid: 0,
+            pid_file: String::new(),
+            log_file: String::new(),
+            entered_at: now,
+            snapshots: vec![],
         };
         let mut store = ForkStateStore::new(&treb_dir);
         store.insert_active_fork(entry).unwrap();

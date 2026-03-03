@@ -144,7 +144,7 @@ pub async fn run_anvil_start(
         let snapshot_id = take_evm_snapshot_http(&rpc_url).await;
         match snapshot_id {
             Ok(id) => {
-                store_fork_state_snapshot_id(&treb_dir, net, id);
+                store_fork_state_snapshot(&treb_dir, net, id);
             }
             Err(e) => {
                 // Non-fatal: revert will just skip the EVM revert step.
@@ -364,12 +364,18 @@ pub(crate) async fn take_evm_snapshot_http(rpc_url: &str) -> anyhow::Result<Stri
         .ok_or_else(|| anyhow::anyhow!("unexpected evm_snapshot result: {json}"))
 }
 
-/// Store an EVM snapshot ID in the fork state for the given network (best-effort).
-pub(crate) fn store_fork_state_snapshot_id(treb_dir: &Path, network: &str, snapshot_id: String) {
+/// Store an EVM snapshot in the fork state for the given network (best-effort).
+pub(crate) fn store_fork_state_snapshot(treb_dir: &Path, network: &str, snapshot_id: String) {
     let mut store = ForkStateStore::new(treb_dir);
     if store.load().is_ok() {
         if let Some(mut entry) = store.get_active_fork(network).cloned() {
-            entry.evm_snapshot_id = Some(snapshot_id);
+            let next_index = entry.snapshots.len() as u32;
+            entry.snapshots.push(treb_core::types::fork::SnapshotEntry {
+                index: next_index,
+                snapshot_id,
+                command: "enter".into(),
+                timestamp: chrono::Utc::now(),
+            });
             store.update_active_fork(entry).ok();
         }
     }
@@ -526,6 +532,7 @@ mod tests {
     }
 
     fn sample_fork_entry(treb_dir: &std::path::Path, network: &str) -> ForkEntry {
+        let now = Utc::now();
         ForkEntry {
             network: network.to_string(),
             rpc_url: String::new(),
@@ -538,8 +545,14 @@ mod tests {
                 .join(network)
                 .to_string_lossy()
                 .into_owned(),
-            started_at: Utc::now(),
-            evm_snapshot_id: None,
+            started_at: now,
+            env_var_name: String::new(),
+            original_rpc: String::new(),
+            anvil_pid: 0,
+            pid_file: String::new(),
+            log_file: String::new(),
+            entered_at: now,
+            snapshots: vec![],
         }
     }
 

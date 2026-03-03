@@ -171,6 +171,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn sample_fork_entry(network: &str) -> ForkEntry {
+        let ts = Utc.with_ymd_and_hms(2026, 3, 3, 12, 0, 0).unwrap();
         ForkEntry {
             network: network.into(),
             rpc_url: "http://127.0.0.1:8545".into(),
@@ -179,8 +180,14 @@ mod tests {
             fork_url: "https://eth.llamarpc.com".into(),
             fork_block_number: Some(19_000_000),
             snapshot_dir: format!(".treb/snapshots/{network}"),
-            started_at: Utc.with_ymd_and_hms(2026, 3, 3, 12, 0, 0).unwrap(),
-            evm_snapshot_id: None,
+            started_at: ts,
+            env_var_name: String::new(),
+            original_rpc: String::new(),
+            anvil_pid: 0,
+            pid_file: String::new(),
+            log_file: String::new(),
+            entered_at: ts,
+            snapshots: vec![],
         }
     }
 

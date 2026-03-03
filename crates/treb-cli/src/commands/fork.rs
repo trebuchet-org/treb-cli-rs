@@ -170,16 +170,23 @@ pub async fn run_enter(
     snapshot_registry(&treb_dir, &snapshot_dir).context("failed to snapshot registry")?;
 
     // Build and insert fork entry (rpc_url/port are placeholders until dev anvil start)
+    let now = Utc::now();
     let entry = ForkEntry {
         network: network.clone(),
         rpc_url: String::new(),
         port: 0,
         chain_id,
-        fork_url,
+        fork_url: fork_url.clone(),
         fork_block_number,
         snapshot_dir: snapshot_dir.to_string_lossy().into_owned(),
-        started_at: Utc::now(),
-        evm_snapshot_id: None,
+        started_at: now,
+        env_var_name: format!("ETH_RPC_URL_{}", network.to_uppercase()),
+        original_rpc: fork_url,
+        anvil_pid: 0,
+        pid_file: String::new(),
+        log_file: String::new(),
+        entered_at: now,
+        snapshots: vec![],
     };
     store.insert_active_fork(entry).context("failed to record fork entry")?;
 
@@ -286,9 +293,9 @@ pub async fn run_revert(network: String, all: bool) -> anyhow::Result<()> {
             );
         }
 
-        // Revert EVM state to the stored snapshot (if we have one).
-        if let Some(ref snapshot_id) = entry.evm_snapshot_id {
-            let reverted = evm_revert_http(&client, &entry.rpc_url, snapshot_id)
+        // Revert EVM state to the last snapshot (if we have one).
+        if let Some(last_snapshot) = entry.snapshots.last() {
+            let reverted = evm_revert_http(&client, &entry.rpc_url, &last_snapshot.snapshot_id)
                 .await
                 .with_context(|| {
                     format!("failed to revert EVM state for network '{net}'")
@@ -297,13 +304,13 @@ pub async fn run_revert(network: String, all: bool) -> anyhow::Result<()> {
                 bail!(
                     "EVM revert failed for network '{}' (snapshot ID: {})",
                     net,
-                    snapshot_id
+                    last_snapshot.snapshot_id
                 );
             }
             println!("EVM state reverted for network '{net}'.");
         } else {
             println!(
-                "No EVM snapshot ID stored for network '{net}'; skipping EVM revert (registry will still be restored)."
+                "No EVM snapshots stored for network '{net}'; skipping EVM revert (registry will still be restored)."
             );
         }
 
@@ -319,9 +326,15 @@ pub async fn run_revert(network: String, all: bool) -> anyhow::Result<()> {
         restore_registry(&snapshot_dir, &treb_dir)
             .context("failed to restore registry from snapshot")?;
 
-        // Update the fork entry with the new snapshot ID.
+        // Update the fork entry with the new snapshot.
         let mut updated = entry.clone();
-        updated.evm_snapshot_id = Some(new_snapshot_id.clone());
+        let next_index = updated.snapshots.len() as u32;
+        updated.snapshots.push(treb_core::types::fork::SnapshotEntry {
+            index: next_index,
+            snapshot_id: new_snapshot_id.clone(),
+            command: "revert".into(),
+            timestamp: Utc::now(),
+        });
         store.update_active_fork(updated).context("failed to update fork entry")?;
 
         // Add history entry.
@@ -404,7 +417,13 @@ pub async fn run_restart(
     if let Some(b) = blk {
         updated.fork_block_number = Some(b);
     }
-    updated.evm_snapshot_id = Some(snapshot_id.clone());
+    let next_index = updated.snapshots.len() as u32;
+    updated.snapshots.push(treb_core::types::fork::SnapshotEntry {
+        index: next_index,
+        snapshot_id: snapshot_id.clone(),
+        command: "restart".into(),
+        timestamp: Utc::now(),
+    });
     store.update_active_fork(updated).context("failed to update fork entry")?;
 
     // Add history entry.
@@ -930,6 +949,7 @@ mod tests {
     }
 
     fn sample_entry(treb_dir: &std::path::Path, network: &str) -> ForkEntry {
+        let now = Utc::now();
         ForkEntry {
             network: network.to_string(),
             rpc_url: String::new(),
@@ -942,8 +962,14 @@ mod tests {
                 .join(network)
                 .to_string_lossy()
                 .into_owned(),
-            started_at: Utc::now(),
-            evm_snapshot_id: None,
+            started_at: now,
+            env_var_name: String::new(),
+            original_rpc: String::new(),
+            anvil_pid: 0,
+            pid_file: String::new(),
+            log_file: String::new(),
+            entered_at: now,
+            snapshots: vec![],
         }
     }
 
