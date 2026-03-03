@@ -5,12 +5,15 @@ use std::env;
 use std::path::PathBuf;
 
 use anyhow::{bail, Context};
+use serde::Serialize;
 use treb_config::{resolve_config, ResolveOpts};
-use treb_forge::pipeline::{PipelineConfig, PipelineContext, RunPipeline};
+use treb_forge::pipeline::{PipelineConfig, PipelineContext, PipelineResult, RunPipeline};
+use treb_forge::pipeline::resolve_git_commit;
 use treb_forge::script::build_script_config_with_senders;
 use treb_forge::sender::resolve_all_senders;
-use treb_forge::pipeline::resolve_git_commit;
 use treb_registry::Registry;
+
+use crate::output;
 
 const FOUNDRY_TOML: &str = "foundry.toml";
 const TREB_DIR: &str = ".treb";
@@ -141,8 +144,189 @@ pub async fn run(
         .await
         .context("pipeline execution failed")?;
 
-    // Stub: result display will be implemented in US-004.
-    let _ = (json, verbose, result);
+    // ── Display results ──────────────────────────────────────────────────
+    display_result(&result, json)?;
 
     Ok(())
+}
+
+// ── JSON output type ─────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct RunOutputJson {
+    success: bool,
+    dry_run: bool,
+    deployments: Vec<DeploymentJson>,
+    transactions: Vec<TransactionJson>,
+    skipped: Vec<SkippedJson>,
+    console_logs: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct DeploymentJson {
+    id: String,
+    contract_name: String,
+    address: String,
+    namespace: String,
+    chain_id: u64,
+    deployment_type: String,
+}
+
+#[derive(Serialize)]
+struct TransactionJson {
+    id: String,
+    hash: String,
+    status: String,
+}
+
+#[derive(Serialize)]
+struct SkippedJson {
+    contract_name: String,
+    address: String,
+    reason: String,
+}
+
+// ── Display logic ────────────────────────────────────────────────────────
+
+fn display_result(result: &PipelineResult, json: bool) -> anyhow::Result<()> {
+    if json {
+        display_result_json(result)?;
+    } else {
+        display_result_human(result);
+    }
+    Ok(())
+}
+
+fn display_result_json(result: &PipelineResult) -> anyhow::Result<()> {
+    let output = RunOutputJson {
+        success: result.success,
+        dry_run: result.dry_run,
+        deployments: result
+            .deployments
+            .iter()
+            .map(|rd| DeploymentJson {
+                id: rd.deployment.id.clone(),
+                contract_name: rd.deployment.contract_name.clone(),
+                address: rd.deployment.address.clone(),
+                namespace: rd.deployment.namespace.clone(),
+                chain_id: rd.deployment.chain_id,
+                deployment_type: rd.deployment.deployment_type.to_string(),
+            })
+            .collect(),
+        transactions: result
+            .transactions
+            .iter()
+            .map(|rt| TransactionJson {
+                id: rt.transaction.id.clone(),
+                hash: rt.transaction.hash.clone(),
+                status: rt.transaction.status.to_string(),
+            })
+            .collect(),
+        skipped: result
+            .skipped
+            .iter()
+            .map(|s| SkippedJson {
+                contract_name: s.deployment.contract_name.clone(),
+                address: s.deployment.address.clone(),
+                reason: s.reason.clone(),
+            })
+            .collect(),
+        console_logs: result.console_logs.clone(),
+    };
+
+    output::print_json(&output)?;
+    Ok(())
+}
+
+fn display_result_human(result: &PipelineResult) {
+    // Dry-run banner
+    if result.dry_run {
+        println!("[DRY RUN] No changes were written to the registry.");
+        println!();
+    }
+
+    // Console.log output
+    if !result.console_logs.is_empty() {
+        for log in &result.console_logs {
+            println!("{}", log);
+        }
+        println!();
+    }
+
+    // Deployment table
+    if !result.deployments.is_empty() {
+        let mut table = output::build_table(&[
+            "Contract",
+            "Address",
+            "Type",
+            "Namespace",
+            "Chain",
+        ]);
+
+        for rd in &result.deployments {
+            let d = &rd.deployment;
+            table.add_row(vec![
+                d.contract_name.as_str(),
+                &d.address,
+                &d.deployment_type.to_string(),
+                d.namespace.as_str(),
+                &d.chain_id.to_string(),
+            ]);
+        }
+
+        output::print_table(&table);
+        println!();
+    }
+
+    // Skipped deployments
+    if !result.skipped.is_empty() {
+        println!("Skipped:");
+        for s in &result.skipped {
+            println!(
+                "  {} ({}) — {}",
+                s.deployment.contract_name, s.deployment.address, s.reason
+            );
+        }
+        println!();
+    }
+
+    // Collisions
+    if !result.collisions.is_empty() {
+        println!("Collisions detected: {}", result.collisions.len());
+        println!();
+    }
+
+    // Summary
+    let dep_count = result.deployments.len();
+    let tx_count = result.transactions.len();
+    let skip_count = result.skipped.len();
+
+    if dep_count == 0 && skip_count == 0 {
+        println!("No deployments found in script output.");
+    } else {
+        let action = if result.dry_run { "would be recorded" } else { "recorded" };
+        let mut parts = Vec::new();
+        if dep_count > 0 {
+            parts.push(format!(
+                "{} deployment{} {}",
+                dep_count,
+                if dep_count == 1 { "" } else { "s" },
+                action
+            ));
+        }
+        if tx_count > 0 {
+            parts.push(format!(
+                "{} transaction{}",
+                tx_count,
+                if tx_count == 1 { "" } else { "s" }
+            ));
+        }
+        if skip_count > 0 {
+            parts.push(format!(
+                "{} skipped",
+                skip_count
+            ));
+        }
+        println!("{}", parts.join(", "));
+    }
 }
