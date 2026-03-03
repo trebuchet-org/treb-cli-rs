@@ -1,3 +1,21 @@
+## 2026-03-03 - P20-US-009
+- What was implemented: Final End-to-End Integration Test Suite
+  - Created `crates/treb-cli/tests/e2e_workflow.rs` with 6 full multi-command workflow tests
+  - `setup_project` helper: copies `gen-deploy-project` fixture (forge-std + SimpleContract.sol), writes `TrebDeploySimple.s.sol` deploy script that emits both `ContractDeployed` AND `TransactionSimulated` events, writes `treb.toml` with Anvil account 0 key, runs `treb init`
+  - `run_deployment` helper: calls `treb run script/TrebDeploySimple.s.sol --rpc-url <url> --broadcast --non-interactive`
+  - Tests: `e2e_init_run_list`, `e2e_run_show`, `e2e_run_tag_list_with_filter`, `e2e_run_prune_dry_run_clean`, `e2e_run_reset_list`, `e2e_list_no_color_has_no_ansi`
+  - All 6 tests pass; `cargo test --workspace` passes
+- Files changed: crates/treb-cli/tests/e2e_workflow.rs (new)
+- **Learnings for future iterations:**
+  - The pipeline's `hydrate_deployment` uses `format!("{:#x}", extracted.transaction_id)` — even `bytes32(0)` produces a non-empty string (`"0x000...0"`), so prune flags it as a broken ref
+  - To get a "clean" registry (no broken refs), the deploy script must emit BOTH `ContractDeployed` (with a real non-zero txId) AND `TransactionSimulated` (with the same txId) so both records exist
+  - Derive the txId in Solidity as `keccak256(abi.encode(block.chainid, block.number, address(deployed)))` — deterministic and unique per deployment
+  - Solidity struct field types and ordering must exactly match the alloy `sol!` macro definitions in `treb-forge/src/events/abi.rs` for correct ABI event signature matching
+  - `treb list --json` returns field `address` (not `contract_address`); `treb show --json` returns `contractName` and `chainId` (camelCase)
+  - `treb reset --yes` skips the confirmation prompt; `treb prune --dry-run` is safe to run on a clean registry (outputs "Nothing to prune")
+  - Reusing `gen-deploy-project` fixture avoids duplicating forge-std (large library) in a new fixture
+---
+
 ## 2026-03-03 - P20-US-008
 - What was implemented: Parasitic CI for Foundry Version Tracking
   - Created `.foundry-pin` at repo root containing the current pinned foundry tag (`v1.5.1`)
