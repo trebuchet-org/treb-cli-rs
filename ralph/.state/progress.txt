@@ -137,6 +137,35 @@ Started: Tue Mar  3 05:43:07 PM CET 2026
 
 ---
 
+## 2026-03-03 - P18-US-007
+- What was implemented:
+  - `run_status`: displays active forks table with port reachability, supports --json flag
+  - `run_history`: displays fork history filtered by --network, supports --json flag
+  - `run_diff`: compares current registry JSON vs snapshot, reports added/removed/modified, supports --json flag
+  - `run_revert`: calls evm_revert via HTTP JSON-RPC to restore EVM state, takes new EVM snapshot, restores registry files, adds revert history entry, supports --all flag
+  - `run_restart`: calls anvil_reset via HTTP JSON-RPC, re-deploys CreateX, takes new EVM snapshot, restores registry, adds restart history entry
+  - Added `evm_snapshot_id: Option<String>` field to `ForkEntry` (with serde default/skip_serializing_if)
+  - Updated `run_anvil_start` in dev.rs to take initial EVM snapshot after CreateX deploy and store it in fork state
+  - Added JSON-RPC helpers: `json_rpc_call`, `evm_snapshot_http`, `evm_revert_http`, `anvil_reset_http`, `deploy_createx_http`
+  - `take_evm_snapshot_http` and `store_fork_state_snapshot_id` helpers in dev.rs for dev anvil start
+  - 16 unit tests in fork.rs: all 6 existing + 10 new (status_with_no_forks, status_with_active_forks, history_filtering, history_with_empty_history, diff_detects_changes, diff_shows_clean_when_matching, + 4 parse tests unchanged)
+- Files changed:
+  - `crates/treb-core/src/types/fork.rs` (added evm_snapshot_id field + test update)
+  - `crates/treb-registry/src/store/fork_state.rs` (test sample_fork_entry update)
+  - `crates/treb-cli/src/commands/dev.rs` (added take_evm_snapshot_http, store_fork_state_snapshot_id, sample_fork_entry test update, run_anvil_start EVM snapshot logic)
+  - `crates/treb-cli/src/commands/fork.rs` (full implementations replacing stubs)
+  - `ralph/.state/prd.json` (P18-US-007 marked passes: true)
+- **Learnings for future iterations:**
+  - `evm_snapshot` via JSON-RPC returns snapshot ID as hex string (e.g., "0x1"); store as String in ForkEntry
+  - `evm_revert` CONSUMES the snapshot — must take a new EVM snapshot immediately after revert
+  - `anvil_reset` params: `[{"forking": {"jsonRpcUrl": "...", "blockNumber": N}}]` — blockNumber is optional
+  - `anvil_setCode` params: `[address, "0x...hex..."]` — bytecode must be 0x-prefixed hex string
+  - Adding optional fields to serde structs requires updating ALL struct initializations in tests (no partial struct init in Rust)
+  - `load_json_map` helper (returns `Option<Map<String, Value>>`) is a clean pattern for optional JSON file comparisons in diff logic
+  - BTreeSet is preferred over HashSet for deterministic diff output ordering
+
+---
+
 ## 2026-03-03 - P18-US-004
 - What was implemented:
   - `CREATEX_ADDRESS` constant (`address!("ba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed")`) in `createx.rs`
