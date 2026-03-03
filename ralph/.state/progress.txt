@@ -1,3 +1,25 @@
+## 2026-03-03 - P20-US-007
+- What was implemented: Release Packaging and trebup Installer Script
+  - Created `.github/workflows/release.yml` triggered via `workflow_run` on "Release Build" completion for tags starting with `v`
+  - Workflow downloads all 4 artifacts (`.tar.gz` + `.sha256` per target) using `actions/download-artifact@v4` with `merge-multiple: true`
+  - Uses `gh release create` with `GH_REPO` env var (no checkout needed) to publish the GitHub Release
+  - Created `scripts/trebup` as a POSIX sh installer script with executable bit set
+  - `trebup` detects platform via `uname -s` / `uname -m`; maps to 4 targets (x86_64-linux-musl, aarch64-linux-musl, x86_64-darwin, aarch64-darwin)
+  - Unsupported platforms exit with `"Unsupported platform: OS/ARCH"` message
+  - Downloads archive and `.sha256` file to a temp dir; verifies with `sha256sum` (Linux) or `shasum -a 256` (macOS) before installing
+  - Checksum failure exits non-zero without writing the binary to disk
+  - `TREB_INSTALL_DIR` env var overrides install path (default: `~/.local/bin`)
+  - `TREB_VERSION` env var overrides version to install (default: fetches latest from GitHub API)
+  - `TREB_REPO` env var overrides the GitHub repository
+- Files changed: .github/workflows/release.yml (new), scripts/trebup (new, executable)
+- **Learnings for future iterations:**
+  - `workflow_run` triggers have `github.event.workflow_run.head_branch` = tag name when triggered by tag push; use `startsWith(..., 'v')` to filter version tags
+  - `actions/download-artifact@v4` with `run-id` + `github-token` + `merge-multiple: true` downloads all artifacts from a different workflow run into one directory
+  - `gh release create` with `GH_REPO` env var doesn't need a checkout — eliminates a step in release workflows
+  - POSIX sh `install -m 755 src dst` is the idiomatic way to copy + set permissions atomically
+  - `trap 'rm -rf "$TMP_DIR"' EXIT INT TERM` cleans up temp dir on any exit
+---
+
 ## 2026-03-03 - P20-US-006
 - What was implemented: Cross-Compilation CI Matrix
   - Created `.github/workflows/release-build.yml` with a 4-target build matrix:
