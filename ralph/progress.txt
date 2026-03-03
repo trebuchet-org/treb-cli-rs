@@ -7,6 +7,12 @@ Started: Tue Mar  3 03:45:34 AM CET 2026
 - All JSON-facing structs use `#[serde(rename_all = "camelCase")]` for Go compatibility
 - Constants for file names go in `lib.rs`, types in `types.rs`, re-exports at crate root
 - Run `cargo clippy -p <crate> -- -D warnings` — treats all warnings as errors
+- Use `FileExt::unlock(&file)` (fully-qualified) instead of `file.unlock()` to avoid MSRV 1.85 vs std 1.89 conflict
+- For atomic JSON writes: `io::write_json_file` handles parent dirs, temp file, persist, trailing newline
+- For file locking: `io::with_file_lock(path, || { ... })` — pass data file path, lock file is auto-managed
+- Store pattern: `new(registry_dir)` → `load()` → CRUD ops; each mutation calls `save()` internally with locking
+- Golden file tests: load fixture via `serde_json::from_str`, insert each entry, re-read from disk, compare via `serde_json::Value` equality
+- Fixtures live in `crates/treb-core/tests/fixtures/` — reference via `env!("CARGO_MANIFEST_DIR")` relative paths
 
 ---
 
@@ -23,4 +29,33 @@ Started: Tue Mar  3 03:45:34 AM CET 2026
   - The existing TrebError::Registry variant in treb-core is ready for use — no need to add it
   - Workspace pattern: version.workspace, edition.workspace, etc. for all standard fields
   - Golden file fixtures exist in `crates/treb-core/tests/fixtures/` — can reuse for registry tests
+---
+
+## 2026-03-03 - US-002
+- Implemented atomic file I/O primitives and advisory file locking in `io.rs`
+- Files changed:
+  - `Cargo.toml` (workspace root) — added `fs2 = "0.4"` to workspace dependencies
+  - `Cargo.lock` — auto-updated
+  - `crates/treb-registry/Cargo.toml` — added `fs2` and moved `tempfile` to regular deps (needed at runtime for NamedTempFile)
+  - `crates/treb-registry/src/lib.rs` — added `pub mod io;`
+  - `crates/treb-registry/src/io.rs` — new module with read_json_file, read_json_file_or_default, write_json_file, with_file_lock, and 6 tests
+- **Learnings for future iterations:**
+  - `fs2::FileExt::unlock()` must be called via fully-qualified syntax (`FileExt::unlock(&self.file)`) because std `File::unlock` stabilised in Rust 1.89 (above MSRV 1.85) and clippy `incompatible_msrv` fires if you use method syntax
+  - `tempfile` crate is needed as a regular dep (not just dev-dep) for atomic writes via `NamedTempFile::new_in() + persist()`
+  - The `with_file_lock` pattern creates a `.lock` sibling file — downstream stores should pass the data file path and the lock is automatic
+  - `serde_json::to_string_pretty` uses 2-space indentation by default — no custom formatter needed
+---
+
+## 2026-03-03 - US-003
+- Implemented DeploymentStore with full CRUD operations in `store/deployments.rs`
+- Files changed:
+  - `crates/treb-registry/src/lib.rs` — added `pub mod store;` and `pub use store::DeploymentStore;`
+  - `crates/treb-registry/src/store/mod.rs` — new module organizing store sub-modules
+  - `crates/treb-registry/src/store/deployments.rs` — DeploymentStore with new, load, save, get, insert, update, remove, list, count + 8 tests including golden file
+- **Learnings for future iterations:**
+  - Store struct holds `path: PathBuf` and `data: HashMap<String, T>` — same pattern works for transactions and safe transactions
+  - `insert` checks for duplicates before inserting; `update` checks existence and sets `updated_at = Utc::now()`
+  - `list()` sorts by `created_at` ascending — for transactions this is `created_at`, for safe txs it's `proposed_at`
+  - Golden file test uses `serde_json::Value` equality which is order-independent for objects — perfect for HashMap round-trips
+  - The `make_deployment` test helper creates minimal deployments with configurable ID and timestamp offset — can be adapted for transactions
 ---
