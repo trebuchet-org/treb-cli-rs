@@ -1,0 +1,12 @@
+group: chain-deploy
+components:
+  libs:
+    script: script/DeployLibs.s.sol
+  core:
+    script: script/DeployCore.s.sol
+    deps:
+      - libs
+  periphery:
+    script: script/DeployPeriphery.s.sol
+    deps:
+      - core

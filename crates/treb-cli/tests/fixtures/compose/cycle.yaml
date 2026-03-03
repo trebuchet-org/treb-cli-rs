@@ -1,0 +1,14 @@
+group: cycle-deploy
+components:
+  alpha:
+    script: script/Alpha.s.sol
+    deps:
+      - gamma
+  beta:
+    script: script/Beta.s.sol
+    deps:
+      - alpha
+  gamma:
+    script: script/Gamma.s.sol
+    deps:
+      - beta

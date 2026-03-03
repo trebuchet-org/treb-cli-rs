@@ -1,0 +1,6 @@
+group: simple-deploy
+components:
+  token:
+    script: script/DeployToken.s.sol
+  registry:
+    script: script/DeployRegistry.s.sol

@@ -1,0 +1,17 @@
+group: diamond-deploy
+components:
+  base:
+    script: script/DeployBase.s.sol
+  left:
+    script: script/DeployLeft.s.sol
+    deps:
+      - base
+  right:
+    script: script/DeployRight.s.sol
+    deps:
+      - base
+  top:
+    script: script/DeployTop.s.sol
+    deps:
+      - left
+      - right

@@ -1,0 +1,6 @@
+group: bad-dep-deploy
+components:
+  token:
+    script: script/DeployToken.s.sol
+    deps:
+      - nonexistent
