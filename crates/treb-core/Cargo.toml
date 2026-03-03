@@ -5,3 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+
+[dependencies]
+foundry-config = { workspace = true }
+foundry-common = { workspace = true }
+alloy-primitives = { workspace = true }

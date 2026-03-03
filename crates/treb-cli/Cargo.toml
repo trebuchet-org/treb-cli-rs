@@ -7,4 +7,4 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-treb-core = { path = "../treb-core" }
+treb-core = { workspace = true }
