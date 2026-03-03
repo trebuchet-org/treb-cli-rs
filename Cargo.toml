@@ -19,6 +19,11 @@ foundry-common = { git = "https://github.com/foundry-rs/foundry", tag = "v1.5.1"
 # Alloy — version aligned with foundry v1.5.1
 alloy-primitives = "1.4.1"
 
+# Error handling & async
+thiserror = "2"
+anyhow = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
 # Patch: svm-rs-builds >=0.5.22 fixes duplicate SOLC_VERSION_0_8_31 constants
 # (see https://github.com/alloy-rs/svm-rs/pull/179)
 [patch.crates-io]

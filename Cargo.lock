@@ -6183,6 +6183,8 @@ dependencies = [
 name = "treb-cli"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "tokio",
  "treb-core",
 ]
 
@@ -6193,6 +6195,7 @@ dependencies = [
  "alloy-primitives",
  "foundry-common",
  "foundry-config",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

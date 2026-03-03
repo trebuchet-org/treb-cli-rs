@@ -8,3 +8,5 @@ license.workspace = true
 
 [dependencies]
 treb-core = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }

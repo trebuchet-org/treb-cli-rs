@@ -10,3 +10,4 @@ license.workspace = true
 foundry-config = { workspace = true }
 foundry-common = { workspace = true }
 alloy-primitives = { workspace = true }
+thiserror = { workspace = true }
