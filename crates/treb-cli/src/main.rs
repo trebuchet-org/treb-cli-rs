@@ -14,7 +14,58 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Execute a deployment script
-    Run,
+    Run {
+        /// Path to the Forge script (e.g., script/Deploy.s.sol)
+        script: String,
+        /// Function signature to call
+        #[arg(long, default_value = "run()")]
+        sig: String,
+        /// Arguments to pass to the script function
+        #[arg(long, num_args = 1..)]
+        args: Vec<String>,
+        /// Network name or chain ID
+        #[arg(long)]
+        network: Option<String>,
+        /// Explicit RPC URL (overrides network)
+        #[arg(long)]
+        rpc_url: Option<String>,
+        /// Deployment namespace
+        #[arg(long)]
+        namespace: Option<String>,
+        /// Broadcast transactions to the network
+        #[arg(long)]
+        broadcast: bool,
+        /// Simulate execution without recording to registry
+        #[arg(long)]
+        dry_run: bool,
+        /// Send transactions one at a time
+        #[arg(long)]
+        slow: bool,
+        /// Use legacy (pre-EIP-1559) transactions
+        #[arg(long)]
+        legacy: bool,
+        /// Verify deployed contracts on Etherscan
+        #[arg(long)]
+        verify: bool,
+        /// Show verbose output (labeled addresses, gas, config source)
+        #[arg(long, short)]
+        verbose: bool,
+        /// Enable Forge debugger
+        #[arg(long)]
+        debug: bool,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Set environment variables (KEY=VALUE)
+        #[arg(long, num_args = 1)]
+        env: Vec<String>,
+        /// Target contract to run (when multiple contracts in script)
+        #[arg(long)]
+        target_contract: Option<String>,
+        /// Skip interactive confirmation prompts
+        #[arg(long)]
+        non_interactive: bool,
+    },
     /// List deployments in the registry
     #[command(alias = "ls")]
     List {
@@ -128,7 +179,46 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Run => println!("run: not yet implemented"),
+        Commands::Run {
+            script,
+            sig,
+            args,
+            network,
+            rpc_url,
+            namespace,
+            broadcast,
+            dry_run,
+            slow,
+            legacy,
+            verify,
+            verbose,
+            debug,
+            json,
+            env,
+            target_contract,
+            non_interactive,
+        } => {
+            commands::run::run(
+                &script,
+                &sig,
+                args,
+                network,
+                rpc_url,
+                namespace,
+                broadcast,
+                dry_run,
+                slow,
+                legacy,
+                verify,
+                verbose,
+                debug,
+                json,
+                env,
+                target_contract,
+                non_interactive,
+            )
+            .await?
+        }
         Commands::List { network, namespace, r#type, tag, contract, label, fork, no_fork, json } => {
             commands::list::run(network, namespace, r#type, tag, contract, label, fork, no_fork, json).await?
         }
