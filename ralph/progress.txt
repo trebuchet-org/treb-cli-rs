@@ -10,6 +10,11 @@ Started: Tue Mar  3 03:08:02 AM CET 2026
 - Test pattern: serde round-trip tests iterate `(variant, expected_string)` tuples
 - Error pattern: all treb errors use `TrebError` from `treb-core::error` with variants like `Config(String)`
 - Type aliases: use `pub type Alias = OriginalType;` when two types share identical shape (e.g., `AccountConfig = SenderConfig`)
+- File I/O modules: return `Result<T>` using `treb_core::error::Result`; use `TrebError::Config(String)` for parse/validation errors, and `TrebError::Io` (via `From<std::io::Error>`) for filesystem errors
+- JSON output format: `serde_json::to_string_pretty` produces 2-space indentation; append `\n` for trailing newline to match Go format
+- Test pattern for filesystem: use `tempfile::TempDir` for isolated temp directories in tests
+- Env var tests: never share env var names between tests that run in parallel — use unique names or inline fixture TOML to avoid race conditions
+- Format detection: inspect TOML line-by-line for section headers (`[accounts`, `[namespace`, `[ns.`) rather than parsing TOML
 
 ## 2026-03-03 - US-001
 - Implemented treb-config crate scaffold with all configuration data types
@@ -25,4 +30,32 @@ Started: Tue Mar  3 03:08:02 AM CET 2026
   - LocalConfig default: namespace="default", network="" (empty string, not None)
   - ResolvedConfig does not derive Serialize/Deserialize — it's an internal-only struct
   - TrebFileConfigV2 uses `#[serde(default)]` on all fields so empty TOML parses to defaults
+---
+
+## 2026-03-03 - US-002
+- Implemented local config store for `.treb/config.local.json`
+- Files changed:
+  - `Cargo.toml` (workspace): added `tempfile = "3"` to workspace deps
+  - `crates/treb-config/Cargo.toml`: added `tempfile` dev-dependency
+  - `crates/treb-config/src/local.rs`: new module with `load_local_config` and `save_local_config` functions
+  - `crates/treb-config/src/lib.rs`: added `local` module declaration and re-exports
+- **Learnings for future iterations:**
+  - `serde_json::to_string_pretty` uses 2-space indentation by default — matches Go's `json.MarshalIndent("", "  ")`
+  - Must manually append `\n` after `to_string_pretty` for trailing newline (Go does this automatically)
+  - `TrebError::Io` auto-converts via `#[from] std::io::Error` — use `?` on fs operations, only wrap serde errors manually as `TrebError::Config`
+  - `tempfile::TempDir` auto-cleans up on drop — good for isolated filesystem tests
+---
+
+## 2026-03-03 - US-003
+- Implemented treb.toml v2 parser with env var expansion and format detection
+- Files changed:
+  - `crates/treb-config/src/trebfile.rs`: new module with `load_treb_config_v2`, `detect_treb_config_format`, `expand_env_vars`, and `expand_sender_config_env_vars` functions + 12 tests
+  - `crates/treb-config/src/lib.rs`: added `trebfile` module declaration and re-exports
+  - `crates/treb-config/tests/fixtures/treb_v2.toml`: test fixture with accounts, namespaces, fork config, and env var reference
+- **Learnings for future iterations:**
+  - Env var tests race when sharing env var names — use unique var names per test or use inline fixture TOML instead of shared fixture files
+  - `expand_env_vars` replaces `${VAR_NAME}` patterns; `$VAR` without braces is left as-is (matches Go behavior)
+  - `detect_treb_config_format` uses line-by-line text inspection (not TOML parsing) — avoids errors on invalid TOML when just detecting format
+  - `expand_sender_config_env_vars` mutates SenderConfig in-place after TOML parsing — applied to all string fields (address, private_key, safe, signer, derivation_path, governor, timelock, proposer)
+  - File-not-found vs parse-error: use distinct `TrebError::Config` messages ("treb.toml not found" vs "invalid TOML in")
 ---

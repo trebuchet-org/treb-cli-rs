@@ -1,0 +1,46 @@
+# treb.toml v2 format — accounts, namespace, and fork sections.
+
+[accounts.deployer]
+type = "private_key"
+address = "0xDeployerAddr"
+private_key = "${DEPLOYER_PRIVATE_KEY}"
+
+[accounts.ledger_signer]
+type = "ledger"
+address = "0xLedgerAddr"
+derivation_path = "m/44'/60'/0'/0/0"
+
+[accounts.multisig]
+type = "safe"
+address = "0xSafeAddr"
+safe = "0xSafeContract"
+signer = "deployer"
+
+[accounts.governor]
+type = "oz_governor"
+address = "0xGovAddr"
+governor = "0xGovernorContract"
+timelock = "0xTimelockContract"
+proposer = "deployer"
+
+[namespace.default]
+profile = "default"
+
+[namespace.default.senders]
+deployer = "deployer"
+
+[namespace.production]
+profile = "optimized"
+
+[namespace.production.senders]
+deployer = "ledger_signer"
+admin = "multisig"
+
+[namespace."production.ntt"]
+
+[namespace."production.ntt".senders]
+deployer = "deployer"
+governance = "governor"
+
+[fork]
+setup = "script/ForkSetup.s.sol"

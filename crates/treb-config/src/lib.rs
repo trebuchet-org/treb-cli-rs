@@ -6,6 +6,7 @@
 //! parse config files directly.
 
 pub mod local;
+pub mod trebfile;
 pub mod types;
 
 // Re-export all config types at the crate root for convenience.
@@ -17,3 +18,6 @@ pub use types::{
 
 // Re-export local config functions.
 pub use local::{load_local_config, save_local_config};
+
+// Re-export treb.toml v2 parser functions.
+pub use trebfile::{detect_treb_config_format, expand_env_vars, load_treb_config_v2};

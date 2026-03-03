@@ -32,7 +32,7 @@
         "cargo check, cargo test, and cargo clippy pass"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -47,7 +47,7 @@
         "cargo check, cargo test, and cargo clippy pass"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
