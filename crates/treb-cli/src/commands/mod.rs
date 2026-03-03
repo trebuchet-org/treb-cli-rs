@@ -5,4 +5,5 @@ pub mod networks;
 pub mod resolve;
 pub mod run;
 pub mod show;
+pub mod verify;
 pub mod version;

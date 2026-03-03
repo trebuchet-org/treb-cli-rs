@@ -116,8 +116,38 @@ enum Commands {
         #[command(subcommand)]
         subcommand: ConfigSubcommand,
     },
-    /// Verify deployed contracts
-    Verify,
+    /// Verify deployed contracts on block explorers
+    Verify {
+        /// Deployment identifier (full ID, name, address, name:label, or namespace/name)
+        deployment: Option<String>,
+        /// Verify all unverified deployments
+        #[arg(long)]
+        all: bool,
+        /// Verification provider (etherscan, sourcify, blockscout)
+        #[arg(long, default_value = "etherscan")]
+        verifier: String,
+        /// Verifier API URL override
+        #[arg(long)]
+        verifier_url: Option<String>,
+        /// Verifier API key
+        #[arg(long)]
+        verifier_api_key: Option<String>,
+        /// Re-verify already verified contracts
+        #[arg(long)]
+        force: bool,
+        /// Watch verification status until confirmed
+        #[arg(long)]
+        watch: bool,
+        /// Number of retry attempts
+        #[arg(long, default_value = "5")]
+        retries: u32,
+        /// Delay in seconds between retries
+        #[arg(long, default_value = "5")]
+        delay: u64,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Tag a deployment snapshot
     Tag,
     /// Register a contract in the registry
@@ -231,7 +261,32 @@ async fn main() -> anyhow::Result<()> {
             ConfigSubcommand::Set { key, value } => commands::config::set(&key, &value).await?,
             ConfigSubcommand::Remove { key } => commands::config::remove(&key).await?,
         },
-        Commands::Verify => println!("verify: not yet implemented"),
+        Commands::Verify {
+            deployment,
+            all,
+            verifier,
+            verifier_url,
+            verifier_api_key,
+            force,
+            watch,
+            retries,
+            delay,
+            json,
+        } => {
+            commands::verify::run(
+                deployment,
+                all,
+                &verifier,
+                verifier_url,
+                verifier_api_key,
+                force,
+                watch,
+                retries,
+                delay,
+                json,
+            )
+            .await?
+        }
         Commands::Tag => println!("tag: not yet implemented"),
         Commands::Register => println!("register: not yet implemented"),
         Commands::Sync => println!("sync: not yet implemented"),
