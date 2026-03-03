@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/treb-cli", "crates/treb-core", "crates/treb-config"]
+members = ["crates/treb-cli", "crates/treb-core", "crates/treb-config", "crates/treb-registry"]
 resolver = "3"
 
 [workspace.package]
@@ -12,6 +12,7 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 treb-core = { path = "crates/treb-core" }
 treb-config = { path = "crates/treb-config" }
+treb-registry = { path = "crates/treb-registry" }
 
 # Foundry — pinned to tag v1.5.1 (commit b0a9dd9ceda36f63e2326ce530c10e6916f4b8a2)
 foundry-config = { git = "https://github.com/foundry-rs/foundry", tag = "v1.5.1" }
