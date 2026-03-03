@@ -1,6 +1,161 @@
 //! `treb networks` command implementation.
+//!
+//! Lists all configured RPC endpoints from `foundry.toml` with their resolved
+//! chain IDs via `eth_chainId` JSON-RPC calls.
 
-pub async fn run(_json: bool) -> anyhow::Result<()> {
-    println!("networks: not yet implemented");
+use std::time::Duration;
+
+use serde::Serialize;
+
+use crate::output;
+
+/// Network information for a single RPC endpoint.
+#[derive(Serialize)]
+pub struct NetworkInfo {
+    pub name: String,
+    pub rpc_url: String,
+    pub chain_id: Option<u64>,
+    pub status: String,
+}
+
+/// Resolve the chain ID for a single RPC endpoint via `eth_chainId`.
+async fn resolve_chain_id(
+    client: &reqwest::Client,
+    url: &str,
+) -> (Option<u64>, String) {
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "eth_chainId",
+        "params": [],
+        "id": 1
+    });
+
+    let resp = match client.post(url).json(&body).send().await {
+        Ok(r) => r,
+        Err(_) => return (None, "unreachable".to_string()),
+    };
+
+    let json: serde_json::Value = match resp.json().await {
+        Ok(v) => v,
+        Err(_) => return (None, "invalid response".to_string()),
+    };
+
+    match json.get("result").and_then(|r| r.as_str()) {
+        Some(hex) => {
+            let hex = hex.strip_prefix("0x").unwrap_or(hex);
+            match u64::from_str_radix(hex, 16) {
+                Ok(id) => (Some(id), "ok".to_string()),
+                Err(_) => (None, "invalid chain id".to_string()),
+            }
+        }
+        None => (None, "no result".to_string()),
+    }
+}
+
+/// Returns true if the URL string contains unresolved environment variable
+/// references like `${VAR}` or `$VAR`.
+fn has_unresolved_env_vars(url: &str) -> bool {
+    url.contains("${") || url.contains("${{")
+}
+
+pub async fn run(json: bool) -> anyhow::Result<()> {
+    let cwd = std::env::current_dir()?;
+
+    // Check that foundry.toml actually exists
+    if !cwd.join("foundry.toml").exists() {
+        anyhow::bail!(
+            "no foundry.toml found in the current directory.\n\
+             Run this command from a Foundry project root, or create a foundry.toml file."
+        );
+    }
+
+    let config = treb_config::load_foundry_config(&cwd)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let endpoints = treb_config::rpc_endpoints(&config);
+
+    if endpoints.is_empty() {
+        println!("No RPC endpoints configured in foundry.toml.");
+        println!("Add endpoints under [rpc_endpoints] in your foundry.toml.");
+        return Ok(());
+    }
+
+    // Sort endpoints alphabetically by name
+    let mut names: Vec<&String> = endpoints.keys().collect();
+    names.sort();
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()?;
+
+    // Resolve chain IDs concurrently
+    let mut results: Vec<NetworkInfo> = Vec::with_capacity(names.len());
+    let mut futures = Vec::new();
+
+    for name in &names {
+        let url = endpoints[*name].clone();
+        let name = (*name).clone();
+        let client = client.clone();
+
+        futures.push(tokio::spawn(async move {
+            if has_unresolved_env_vars(&url) {
+                NetworkInfo {
+                    name,
+                    rpc_url: url,
+                    chain_id: None,
+                    status: "unresolved env var".to_string(),
+                }
+            } else {
+                let (chain_id, status) = resolve_chain_id(&client, &url).await;
+                NetworkInfo {
+                    name,
+                    rpc_url: url,
+                    chain_id,
+                    status,
+                }
+            }
+        }));
+    }
+
+    for handle in futures {
+        results.push(handle.await?);
+    }
+
+    // Sort results alphabetically by name (spawn order may differ)
+    results.sort_by(|a, b| a.name.cmp(&b.name));
+
+    if json {
+        output::print_json(&results)?;
+    } else {
+        let has_errors = results.iter().any(|r| r.status != "ok");
+
+        let headers: Vec<&str> = if has_errors {
+            vec!["Name", "RPC URL", "Chain ID", "Status"]
+        } else {
+            vec!["Name", "RPC URL", "Chain ID"]
+        };
+
+        let mut table = output::build_table(&headers);
+
+        for info in &results {
+            let chain_id_str = info
+                .chain_id
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "-".to_string());
+
+            if has_errors {
+                table.add_row(vec![
+                    &info.name,
+                    &info.rpc_url,
+                    &chain_id_str,
+                    &info.status,
+                ]);
+            } else {
+                table.add_row(vec![&info.name, &info.rpc_url, &chain_id_str]);
+            }
+        }
+
+        output::print_table(&table);
+    }
+
     Ok(())
 }
