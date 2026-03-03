@@ -36,6 +36,12 @@ pub const GOVERNOR_PROPOSALS_FILE: &str = "governor-txs.json";
 pub const LOOKUP_FILE: &str = "lookup.json";
 
 /// File storing the registry metadata.
+///
+/// Note: The Go CLI uses the same filename to store a `SolidityRegistry` map
+/// (`{chainId: {namespace: {name: address}}}`), which tracks on-chain
+/// registry contract addresses. Rust stores `RegistryMeta` (version and
+/// timestamps) instead. See [`RegistryMeta`] for the full compatibility
+/// analysis and chosen resolution.
 pub const REGISTRY_FILE: &str = "registry.json";
 
 /// Directory name for the registry inside the project root.

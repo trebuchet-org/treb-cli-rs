@@ -6,6 +6,20 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// Metadata stored in `registry.json` at the root of the `.treb/` directory.
+///
+/// # Schema compatibility with Go CLI
+///
+/// The Go CLI writes a `SolidityRegistry` map to `registry.json` with the
+/// shape `{chainId: {namespace: {name: address}}}`, tracking on-chain
+/// registry contract addresses. Rust does not use on-chain registries and
+/// instead stores versioning metadata (`version`, `createdAt`, `updatedAt`).
+///
+/// Resolution: these schemas serve different purposes and the Go CLI does
+/// not read Rust's `registry.json` for its own operation (and vice versa).
+/// Both CLIs tolerate unknown keys via serde's default behavior, so the
+/// files can coexist if a project switches between CLIs. If future
+/// interop requires it, the `SolidityRegistry` map can be added as an
+/// optional field here or written to a separate file.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistryMeta {

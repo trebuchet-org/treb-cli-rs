@@ -169,6 +169,9 @@ pub struct NamespaceConfigV1 {
 /// Local user config stored in `.treb/config.local.json`.
 ///
 /// Contains the user's default namespace and network selections.
+/// Field names (`namespace`, `network`) match the Go CLI's LocalConfig
+/// schema exactly — no camelCase rename is needed since both fields are
+/// already single lowercase words.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LocalConfig {
     pub namespace: String,
@@ -346,6 +349,31 @@ mod tests {
         // Verify the JSON contains the expected keys.
         assert!(json.contains("\"namespace\""));
         assert!(json.contains("\"network\""));
+    }
+
+    /// Verify that config.local.json field names match the Go CLI schema.
+    ///
+    /// Go's LocalConfig uses exactly `{"namespace": "...", "network": "..."}`.
+    /// This test ensures the Rust struct serializes with identical JSON keys.
+    #[test]
+    fn local_config_field_names_match_go_schema() {
+        let cfg = LocalConfig {
+            namespace: "prod".to_string(),
+            network: "mainnet".to_string(),
+        };
+        let value = serde_json::to_value(&cfg).unwrap();
+        let obj = value.as_object().unwrap();
+
+        // Must have exactly the Go-compatible keys.
+        assert!(obj.contains_key("namespace"), "missing 'namespace' key");
+        assert!(obj.contains_key("network"), "missing 'network' key");
+
+        // Must NOT have any extra keys (Rust-only fields would break Go).
+        assert_eq!(obj.len(), 2, "expected exactly 2 keys, got: {obj:?}");
+
+        // Values round-trip correctly.
+        assert_eq!(obj["namespace"], "prod");
+        assert_eq!(obj["network"], "mainnet");
     }
 
     // ---- TrebFileConfigV2 defaults ----
