@@ -17,7 +17,10 @@ pub use artifacts::{ArtifactIndex, ArtifactMatch};
 pub use broadcast::{read_all_broadcasts, read_latest_broadcast, BroadcastData, BroadcastTransaction};
 pub use compiler::{compile_files, compile_project, CompilationOutput};
 pub use console::decode_console_logs;
-pub use script::{build_script_config, execute_script, ExecutionResult, ScriptConfig};
+pub use script::{
+    build_script_config, build_script_config_with_senders, execute_script, ExecutionResult,
+    ScriptConfig,
+};
 pub use sender::{
     default_test_signers, in_memory_signer, resolve_all_senders, resolve_sender, ResolvedSender,
 };

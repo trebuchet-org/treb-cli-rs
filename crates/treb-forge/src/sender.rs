@@ -45,6 +45,23 @@ pub enum ResolvedSender {
     },
 }
 
+impl ResolvedSender {
+    /// Returns the on-chain address for this resolved sender.
+    ///
+    /// For Wallet/InMemory senders, this is the signer's derived address.
+    /// For Safe senders, this is the Safe multisig contract address.
+    /// For Governor senders, this is the Governor contract address.
+    pub fn sender_address(&self) -> Address {
+        match self {
+            Self::Wallet(ws) | Self::InMemory(ws) => ws.address(),
+            Self::Safe { safe_address, .. } => *safe_address,
+            Self::Governor {
+                governor_address, ..
+            } => *governor_address,
+        }
+    }
+}
+
 /// Resolve a single sender by name from its configuration.
 ///
 /// Recursively resolves sub-senders (e.g. a Safe's signer or a Governor's

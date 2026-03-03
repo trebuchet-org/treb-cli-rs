@@ -14,6 +14,8 @@ use foundry_evm::traces::Traces;
 use treb_config::ResolvedConfig;
 use treb_core::error::TrebError;
 
+use crate::sender::ResolvedSender;
+
 /// Structured result from a forge script execution.
 pub struct ExecutionResult {
     /// Whether the script execution succeeded.
@@ -99,6 +101,9 @@ pub struct ScriptConfig {
     non_interactive: bool,
     etherscan_api_key: Option<String>,
     verify: bool,
+    /// Private key hex string to inject into `ScriptArgs.wallets`.
+    /// When set, the forge execution pipeline can sign transactions with this key.
+    private_key_hex: Option<String>,
 }
 
 impl ScriptConfig {
@@ -124,6 +129,7 @@ impl ScriptConfig {
             non_interactive: false,
             etherscan_api_key: None,
             verify: false,
+            private_key_hex: None,
         }
     }
 
@@ -207,6 +213,11 @@ impl ScriptConfig {
         self
     }
 
+    pub fn private_key_hex(&mut self, key: impl Into<String>) -> &mut Self {
+        self.private_key_hex = Some(key.into());
+        self
+    }
+
     /// Convert this `ScriptConfig` into forge `ScriptArgs`.
     ///
     /// Constructs `ScriptArgs` from `Default::default()` and sets all fields
@@ -236,6 +247,11 @@ impl ScriptConfig {
         args.evm.sender = self.sender;
         if let Some(id) = self.chain_id {
             args.evm.env.chain = Some(Chain::from(id));
+        }
+
+        // Wallet args — inject private key for signing
+        if let Some(key) = self.private_key_hex {
+            args.wallets.private_key = Some(key);
         }
 
         Ok(args)
@@ -283,9 +299,78 @@ pub fn build_script_config(
     Ok(config)
 }
 
+/// Build a `ScriptConfig` from a resolved treb configuration with wallet integration.
+///
+/// Extends [`build_script_config`] by wiring resolved senders into the wallet
+/// configuration. For the "deployer" role:
+/// - **Wallet / InMemory** senders: sets both `evm.sender` and injects the private
+///   key into `ScriptArgs.wallets` so forge can sign transactions.
+/// - **Safe / Governor** senders: sets only `evm.sender` to the contract address;
+///   actual signing is deferred to Phase 17.
+pub fn build_script_config_with_senders(
+    resolved: &ResolvedConfig,
+    script_path: &str,
+    resolved_senders: &HashMap<String, ResolvedSender>,
+) -> treb_core::Result<ScriptConfig> {
+    let mut config = build_script_config(resolved, script_path)?;
+
+    // Look up the deployer in resolved senders
+    let deployer = resolved_senders.get("deployer");
+
+    if let Some(sender) = deployer {
+        // Override the sender address with the resolved sender's address
+        config.sender(sender.sender_address());
+
+        // For Wallet/InMemory senders, inject the private key into wallet opts
+        // so forge's execution pipeline can sign transactions.
+        match sender {
+            ResolvedSender::Wallet(_) | ResolvedSender::InMemory(_) => {
+                // Get the private key hex from the original sender config
+                if let Some(pk) = resolved
+                    .senders
+                    .get("deployer")
+                    .and_then(|sc| sc.private_key.as_deref())
+                {
+                    config.private_key_hex(pk);
+                }
+            }
+            // Safe/Governor: only evm.sender is set (signing deferred to Phase 17)
+            ResolvedSender::Safe { .. } | ResolvedSender::Governor { .. } => {}
+        }
+    }
+
+    Ok(config)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    use alloy_primitives::address;
+    use treb_config::{SenderConfig, SenderType};
+
+    use crate::sender;
+
+    /// Anvil account 0 private key (well-known test key).
+    const ANVIL_KEY_0: &str =
+        "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+
+    /// Anvil account 0 address.
+    const ANVIL_ADDR_0: Address = address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
+
+    fn test_resolved_config(senders: HashMap<String, SenderConfig>) -> ResolvedConfig {
+        ResolvedConfig {
+            namespace: "test".to_string(),
+            network: None,
+            profile: "default".to_string(),
+            senders,
+            slow: false,
+            fork_setup: None,
+            config_source: "test".to_string(),
+            project_root: PathBuf::from("/tmp"),
+        }
+    }
 
     #[test]
     fn script_config_new_produces_valid_script_args() {
@@ -303,5 +388,114 @@ mod tests {
         assert!(!args.legacy);
         assert!(args.evm.fork_url.is_none());
         assert!(args.evm.sender.is_none());
+    }
+
+    #[test]
+    fn private_key_hex_injected_into_wallet_opts() {
+        let mut config = ScriptConfig::new("script/Deploy.s.sol");
+        config.private_key_hex(ANVIL_KEY_0);
+        let args = config.into_script_args().unwrap();
+
+        assert_eq!(args.wallets.private_key, Some(ANVIL_KEY_0.to_string()));
+    }
+
+    #[test]
+    fn private_key_sender_sets_sender_and_wallet_opts() {
+        let deployer_config = SenderConfig {
+            type_: Some(SenderType::PrivateKey),
+            private_key: Some(ANVIL_KEY_0.to_string()),
+            ..Default::default()
+        };
+        let senders = HashMap::from([("deployer".to_string(), deployer_config.clone())]);
+        let resolved = test_resolved_config(senders);
+
+        // Resolve the deployer sender
+        let mut resolved_senders = HashMap::new();
+        let mut visited = std::collections::HashSet::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let resolved_sender = rt
+            .block_on(sender::resolve_sender(
+                "deployer",
+                &deployer_config,
+                &resolved.senders,
+                &mut visited,
+            ))
+            .unwrap();
+        resolved_senders.insert("deployer".to_string(), resolved_sender);
+
+        let config =
+            build_script_config_with_senders(&resolved, "script/Deploy.s.sol", &resolved_senders)
+                .unwrap();
+        let args = config.into_script_args().unwrap();
+
+        // evm.sender should be the derived address
+        assert_eq!(args.evm.sender, Some(ANVIL_ADDR_0));
+        // wallet opts should have the private key
+        assert_eq!(args.wallets.private_key, Some(ANVIL_KEY_0.to_string()));
+    }
+
+    #[test]
+    fn safe_sender_sets_sender_without_wallet_opts() {
+        let safe_addr = "0x0000000000000000000000000000000000000042";
+        let deployer_config = SenderConfig {
+            type_: Some(SenderType::PrivateKey),
+            private_key: Some(ANVIL_KEY_0.to_string()),
+            ..Default::default()
+        };
+        let safe_config = SenderConfig {
+            type_: Some(SenderType::Safe),
+            safe: Some(safe_addr.to_string()),
+            signer: Some("signer".to_string()),
+            ..Default::default()
+        };
+
+        let senders = HashMap::from([
+            ("deployer".to_string(), safe_config.clone()),
+            ("signer".to_string(), deployer_config),
+        ]);
+        let resolved = test_resolved_config(senders);
+
+        // Resolve the deployer (which is a Safe sender)
+        let mut resolved_senders = HashMap::new();
+        let mut visited = std::collections::HashSet::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let resolved_sender = rt
+            .block_on(sender::resolve_sender(
+                "deployer",
+                &safe_config,
+                &resolved.senders,
+                &mut visited,
+            ))
+            .unwrap();
+        resolved_senders.insert("deployer".to_string(), resolved_sender);
+
+        let config =
+            build_script_config_with_senders(&resolved, "script/Deploy.s.sol", &resolved_senders)
+                .unwrap();
+        let args = config.into_script_args().unwrap();
+
+        // evm.sender should be the safe address
+        assert_eq!(args.evm.sender, Some(safe_addr.parse::<Address>().unwrap()));
+        // wallet opts should NOT have a private key (signing deferred)
+        assert!(args.wallets.private_key.is_none());
+    }
+
+    #[test]
+    fn existing_build_script_config_preserved() {
+        let deployer_config = SenderConfig {
+            type_: Some(SenderType::PrivateKey),
+            private_key: Some(ANVIL_KEY_0.to_string()),
+            address: Some(ANVIL_ADDR_0.to_string()),
+            ..Default::default()
+        };
+        let senders = HashMap::from([("deployer".to_string(), deployer_config)]);
+        let resolved = test_resolved_config(senders);
+
+        // Original build_script_config should still work (no wallet opts)
+        let config = build_script_config(&resolved, "script/Deploy.s.sol").unwrap();
+        let args = config.into_script_args().unwrap();
+
+        assert_eq!(args.evm.sender, Some(ANVIL_ADDR_0));
+        assert!(args.wallets.private_key.is_none());
     }
 }

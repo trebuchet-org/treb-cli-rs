@@ -1,22 +1,20 @@
 {
   "project": "treb-cli-rs",
-  "branchName": "ralph/phase-05-in-process-forge-integration",
-  "description": "Create the treb-forge workspace crate — the bridge between treb's configuration/registry system and foundry's compilation and script execution pipeline. All forge functionality is accessed through Rust crate APIs with no subprocess calls.",
+  "branchName": "ralph/phase-06-sender-system",
+  "description": "Implement the sender/wallet abstraction layer that bridges treb's configuration system with foundry's foundry-wallets crate, resolving SenderConfig definitions into live WalletSigner instances capable of signing transactions and wiring them into ScriptArgs for in-process forge execution.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "treb-forge Crate Scaffold and Foundry Dependency Wiring",
-      "description": "As a developer, I want a treb-forge workspace crate with all foundry dependencies wired up so that downstream phases have a stable API for compilation and script execution.",
+      "title": "Add foundry-wallets Dependency and Sender Module Scaffold",
+      "description": "As a developer, I want foundry-wallets added to the workspace and a sender.rs module scaffolded in treb-forge with the ResolvedSender enum and resolution function signatures so that downstream stories have a stable API surface to implement against.",
       "acceptanceCriteria": [
-        "crates/treb-forge/ directory exists with Cargo.toml and src/lib.rs",
-        "Crate added to [workspace.members] and [workspace.dependencies] in root Cargo.toml",
-        "forge-script and forge-script-sequence workspace dependencies added (git tag v1.5.1)",
-        "Crate depends on treb-core, treb-config, foundry-config, foundry-common, forge-script, forge-script-sequence, alloy-primitives, serde, serde_json, thiserror, anyhow, tokio, eyre",
-        "Module files exist: lib.rs, compiler.rs, script.rs, artifacts.rs, broadcast.rs, console.rs, version.rs",
-        "lib.rs declares all modules and re-exports key public types",
-        "Any needed [patch.crates-io] entries for foundry transitive deps are added to root Cargo.toml",
-        "cargo check --workspace passes with zero errors",
-        "cargo clippy --workspace passes with zero warnings"
+        "foundry-wallets = { git = '...', tag = 'v1.5.1' } added to workspace [workspace.dependencies] in root Cargo.toml",
+        "foundry-wallets added to treb-forge/Cargo.toml dependencies",
+        "New sender.rs module in crates/treb-forge/src/ with ResolvedSender enum (Wallet, Safe, Governor, InMemory variants)",
+        "resolve_sender() async function signature accepting name, config, all_senders, and visited set",
+        "resolve_all_senders() async function signature accepting HashMap<String, SenderConfig>",
+        "Module re-exported from treb-forge/src/lib.rs",
+        "cargo check --workspace passes with zero errors"
       ],
       "priority": 1,
       "passes": true,
@@ -24,16 +22,17 @@
     },
     {
       "id": "US-002",
-      "title": "In-Process Compilation via ProjectCompiler",
-      "description": "As a developer, I want a safe wrapper around ProjectCompiler that compiles Solidity projects without risking std::process::exit(0) so that treb can compile in-process reliably.",
+      "title": "PrivateKey, Ledger, and Trezor Sender Resolution",
+      "description": "As a developer, I want resolve_sender() to handle PrivateKey, Ledger, and Trezor sender types by mapping them to WalletSigner instances so that signable senders produce real signing keys.",
       "acceptanceCriteria": [
-        "compiler.rs contains CompilationOutput struct with output: ProjectCompileOutput and project_root: PathBuf",
-        "compile_project(config) validates has_input_files() before compiling and returns TrebError::Forge if empty",
-        "compile_files(config, files) validates non-empty files vec and compiles specific files",
-        "CompilationOutput has has_compiler_errors() and artifact_ids() accessor methods",
-        "All eyre::Result errors converted to TrebError::Forge with original message preserved",
-        "Unit test: compile_project with empty project returns TrebError::Forge (not process exit)",
-        "cargo check --workspace and cargo clippy --workspace pass"
+        "PrivateKey resolution parses hex key (with or without 0x prefix) and calls WalletSigner::from_private_key()",
+        "PrivateKey resolution validates derived address matches configured address field when both are provided",
+        "PrivateKey resolution returns TrebError::Config with sender name and 'invalid private key' on bad input",
+        "Ledger resolution parses derivation_path into LedgerHDPath (default LedgerLive(0)) and calls from_ledger_path()",
+        "Trezor resolution parses derivation_path into TrezorHDPath (default TrezorLive(0)) and calls from_trezor_path()",
+        "Hardware wallet connection errors wrapped with user-friendly messages",
+        "Unit tests for PrivateKey resolution (valid key, invalid key, address mismatch)",
+        "cargo test --workspace passes"
       ],
       "priority": 2,
       "passes": true,
@@ -41,16 +40,18 @@
     },
     {
       "id": "US-003",
-      "title": "ScriptArgs Construction from Treb Config",
-      "description": "As a developer, I want to build ScriptArgs programmatically from treb's resolved configuration so that script execution parameters are set without clap argument parsing.",
+      "title": "InMemory Sender and Safe/Governor Stubs",
+      "description": "As a developer, I want InMemory test signers using Anvil's default accounts and Safe/Governor stub variants with recursive sub-sender resolution so that all five sender types are handled.",
       "acceptanceCriteria": [
-        "script.rs contains ScriptConfig builder struct with all specified fields (script_path, sig, args, target_contract, sender, rpc_url, chain_id, fork_url, broadcast, slow, debug, dry_run, gas_estimate_multiplier, legacy, non_interactive, etherscan_api_key, verify)",
-        "ScriptConfig::new(script_path) constructor with sensible defaults exists",
-        "Builder methods for each field return &mut Self or Self",
-        "into_script_args(self) constructs ScriptArgs from Default::default() and sets all fields including evm args",
-        "build_script_config(resolved, script_path) extracts RPC URL, sender, and slow flag from ResolvedConfig",
-        "Unit test: ScriptConfig::new(path).into_script_args() produces valid ScriptArgs with correct path and default sig 'run()'",
-        "cargo check --workspace and cargo clippy --workspace pass"
+        "in_memory_signer(index) derives the same accounts as Anvil's default HD wallet mnemonic",
+        "default_test_signers(count) returns count signers starting from index 0",
+        "Unit test verifying index 0 produces address 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        "Safe sender resolution returns ResolvedSender::Safe with recursively resolved signer from all_senders",
+        "Governor sender resolution returns ResolvedSender::Governor with recursively resolved proposer",
+        "Circular reference detection via visited-set returns error instead of stack overflow",
+        "Unit tests for Safe/Governor stub resolution using PrivateKey as sub-sender",
+        "resolve_all_senders() handles all five sender types correctly",
+        "cargo test --workspace passes"
       ],
       "priority": 3,
       "passes": true,
@@ -58,15 +59,17 @@
     },
     {
       "id": "US-004",
-      "title": "Script Execution Pipeline and Result Extraction",
-      "description": "As a developer, I want to drive the ScriptArgs state machine through full execution and extract structured results including decoded console.log messages so that downstream phases can consume execution output.",
+      "title": "Wire Sender Resolution into ScriptArgs Construction",
+      "description": "As a developer, I want resolved senders wired into ScriptArgs.wallets via ScriptConfig so that forge's execution pipeline has access to signing keys configured through treb.",
       "acceptanceCriteria": [
-        "script.rs contains ExecutionResult struct with success, logs, raw_logs, gas_used, returned, labeled_addresses, transactions, and traces fields",
-        "execute_script(args) chains preprocess → compile → link → prepare_execution → execute and returns ExecutionResult",
-        "Each pipeline stage error is wrapped with context indicating which stage failed",
-        "console.rs contains decode_console_logs(logs) that filters for console.log address and decodes all variants",
-        "Unrecognized console log formats are silently skipped (not errors)",
-        "cargo check --workspace and cargo clippy --workspace pass"
+        "ScriptConfig gains a field for wallet configuration to inject WalletSigner instances",
+        "build_script_config() updated to call resolve_sender() for the deployer role",
+        "For Wallet/InMemory senders: private key or signer set in ScriptArgs.wallets",
+        "For Safe/Governor senders: only evm.sender address set (signing deferred to Phase 17)",
+        "Existing build_script_config() behavior preserved for callers without wallet integration",
+        "Unit test: PrivateKey sender sets both evm.sender and populates wallet opts",
+        "Unit test: Safe sender sets evm.sender to safe address without wallet opts",
+        "cargo check --workspace passes"
       ],
       "priority": 4,
       "passes": true,
@@ -74,55 +77,20 @@
     },
     {
       "id": "US-005",
-      "title": "ContractsByArtifact Wrapper and Artifact Queries",
-      "description": "As a developer, I want an ArtifactIndex wrapper around ContractsByArtifact so that downstream phases can look up contracts by name or bytecode through a stable API.",
+      "title": "Sender Resolution Integration Tests and Error Handling",
+      "description": "As a developer, I want comprehensive integration tests for the full sender resolution pipeline and actionable error messages so that the sender system is validated end-to-end.",
       "acceptanceCriteria": [
-        "artifacts.rs contains ArtifactIndex struct wrapping ContractsByArtifact",
-        "from_compile_output(output) builds the index from CompilationOutput",
-        "find_by_name(name), find_by_creation_code(code), find_by_deployed_code(code) query methods exist",
-        "inner() provides access to underlying ContractsByArtifact for foundry API interop",
-        "ArtifactMatch struct contains artifact_id, name, abi, has_bytecode, has_deployed_bytecode fields",
-        "Unit test: ArtifactMatch construction and field access works correctly",
-        "cargo check --workspace and cargo clippy --workspace pass"
+        "Integration test: PrivateKey sender resolved, ScriptConfig built, ScriptArgs has correct sender and wallet",
+        "Integration test: multi-sender config (deployer=PrivateKey, admin=Safe referencing deployer) both resolve correctly",
+        "Error test: invalid private key returns TrebError::Config with sender name",
+        "Error test: address mismatch mentions both expected and derived addresses",
+        "Error test: Safe referencing non-existent sender produces clear error",
+        "Error test: circular reference (A→B→A) returns error instead of stack overflow",
+        "All tests pass with cargo test --workspace",
+        "cargo clippy --workspace passes with no warnings on new code"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-006",
-      "title": "Broadcast File Reader",
-      "description": "As a developer, I want to read historical broadcast files from foundry's broadcast/ directory so that past deployment data is available as a supplementary data source.",
-      "acceptanceCriteria": [
-        "broadcast.rs contains BroadcastData struct with sequence, chain_id, and timestamp fields",
-        "read_latest_broadcast(config, contract_name, chain_id) resolves broadcast dir and reads latest broadcast",
-        "read_all_broadcasts(config, contract_name, chain_id) returns all broadcasts sorted newest first",
-        "BroadcastTransaction struct with hash, contract_name, contract_address, function, tx_type fields exists",
-        "BroadcastData::transactions() maps sequence transactions to BroadcastTransaction",
-        "Error messages include broadcast directory path and contract name for debugging",
-        "cargo check --workspace and cargo clippy --workspace pass"
-      ],
-      "priority": 6,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-007",
-      "title": "Forge Version Detection and Integration Tests",
-      "description": "As a developer, I want forge version detection from crate metadata and integration tests against a sample Foundry project so that the full compilation pipeline is validated end-to-end.",
-      "acceptanceCriteria": [
-        "version.rs contains ForgeVersion struct with version and commit fields",
-        "detect_forge_version() reads version from foundry-config CARGO_PKG_VERSION",
-        "ForgeVersion::display_string() formats as 'forge v1.5.1' or 'forge v1.5.1 (abc1234)'",
-        "Test fixture exists at crates/treb-forge/tests/fixtures/sample-project/ with foundry.toml, src/Counter.sol, script/Deploy.s.sol",
-        "Integration test: compile_project against fixture succeeds and returns Counter artifact",
-        "Integration test: ArtifactIndex find_by_name('Counter') returns a match from compiled output",
-        "Integration test: detect_forge_version() returns non-empty version string",
-        "cargo test --workspace passes (all existing + new tests)",
-        "cargo clippy --workspace passes"
-      ],
-      "priority": 7,
-      "passes": true,
+      "passes": false,
       "notes": ""
     }
   ]
