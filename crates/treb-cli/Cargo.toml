@@ -8,6 +8,11 @@ license.workspace = true
 
 [dependencies]
 treb-core = { workspace = true }
+treb-config = { workspace = true }
+treb-forge = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+comfy-table = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }

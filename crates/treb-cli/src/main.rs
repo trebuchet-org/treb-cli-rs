@@ -1,3 +1,6 @@
+mod commands;
+mod output;
+
 use clap::{Parser, Subcommand};
 
 /// treb — deployment orchestration for Foundry projects
@@ -30,9 +33,17 @@ enum Commands {
     /// Sync deployment state from on-chain data
     Sync,
     /// Print version information
-    Version,
+    Version {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// List available networks
-    Networks,
+    Networks {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Generate deployment scripts from templates
     GenDeploy,
     /// Compose multi-step deployment pipelines
@@ -63,8 +74,8 @@ async fn main() -> anyhow::Result<()> {
         Commands::Tag => println!("tag: not yet implemented"),
         Commands::Register => println!("register: not yet implemented"),
         Commands::Sync => println!("sync: not yet implemented"),
-        Commands::Version => println!("treb v{}", env!("CARGO_PKG_VERSION")),
-        Commands::Networks => println!("networks: not yet implemented"),
+        Commands::Version { json } => commands::version::run(json).await?,
+        Commands::Networks { json } => commands::networks::run(json).await?,
         Commands::GenDeploy => println!("gen-deploy: not yet implemented"),
         Commands::Compose => println!("compose: not yet implemented"),
         Commands::Prune => println!("prune: not yet implemented"),
