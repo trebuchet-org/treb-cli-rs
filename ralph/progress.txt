@@ -1,198 +1,133 @@
 # Ralph Progress Log
-Started: Tue Mar  3 08:14:07 AM CET 2026
+Started: Tue Mar  3 08:59:04 AM CET 2026
 ---
 
 ## Codebase Patterns
-- ArtifactMatch in artifacts.rs derives Debug (added for ExtractedDeployment compatibility)
-- parse_strategy() is case-insensitive and defaults to DeploymentMethod::Create for unknown values
-- DeploymentMethod enum (treb-core) has FromStr impl expecting uppercase "CREATE"/"CREATE2"/"CREATE3" — sol! events use lowercase "create"/"create2"/"create3"
-- foundry-wallets crate is at `crates/wallets` inside the foundry git repo, pinned to tag v1.5.1
-- WalletSigner::from_private_key() takes &B256 (not a hex string) — parse hex first with `alloy_primitives::hex::FromHex`
-- WalletSigner::from_ledger_path() and from_trezor_path() are async (require hardware wallet connection)
-- WalletSigner::from_mnemonic() takes mnemonic string, optional passphrase, optional derivation path, and index
-- LedgerHDPath and TrezorHDPath are from alloy_signer_ledger and alloy_signer_trezor respectively (re-exported through foundry-wallets signer.rs)
-- Anvil's default mnemonic: "test test test test test test test test test test test junk" — used for in-memory signers
-- treb-forge module pattern: module file + declaration in lib.rs + `pub use` re-exports of key types/functions
-- ScriptArgs.wallets is MultiWalletOpts (CLI arg struct) — inject private keys via `wallets.private_key = Some(hex_string)`
-- ResolvedSender.sender_address() returns the on-chain address for any variant (Wallet/InMemory → signer address, Safe → safe address, Governor → governor address)
-- build_script_config_with_senders() extends build_script_config() with wallet integration — takes &HashMap<String, ResolvedSender>
-- All treb-forge public functions return `treb_core::Result<T>` (TrebError)
-- Config validation errors use TrebError::Config(), forge/wallet API errors use TrebError::Forge()
-- alloy_primitives::hex::FromHex::from_hex() handles both 0x-prefixed and bare hex strings
-- Import `alloy_signer::Signer` trait to call `.address()` on WalletSigner
-- LedgerHDPath = alloy_signer_ledger::HDPath; TrezorHDPath = alloy_signer_trezor::HDPath
-- Recursive async functions in Rust require `Pin<Box<dyn Future>>` return type instead of `async fn` — use `Box::pin(async move { ... })`
-- Safe resolution: uses `config.safe` (or `config.address` fallback) for safe address, `config.signer` for sub-sender name
-- Governor resolution: uses `config.governor` (or `config.address` fallback), optional `config.timelock`, `config.proposer` for sub-sender name
-- alloy sol! macro: use `alloy_sol_types::sol;` — generates typed structs with `SIGNATURE_HASH` (via `SolEvent` trait), `decode_log_data()`, etc.
-- alloy sol! macro: add `#[derive(Debug)]` inside sol! blocks on each struct/event to enable Debug formatting on generated types
-- SolEvent::decode_log_data(&log.data) takes 1 arg (no validate bool) in alloy-sol-types 1.5.x
-- LogData fields: `log.data.topics()` returns `&[B256]`, `log.data.data` is the raw bytes (field, not method)
-- Log::new(address, topics_vec, data_bytes) constructs a Log from parts; returns Option
-- alloy sol! macro overloaded events: disambiguated as `EventName_0`, `EventName_1`, etc. (e.g., `ContractCreation_0` for with-salt variant)
-- alloy sol! macro clippy: don't put doc comments followed by blank lines inside sol! blocks — triggers `empty_line_after_outer_attr` warning
-- Import `alloy_sol_types::SolEvent` trait to access `SIGNATURE_HASH`, `decode_log()`, etc. on sol!-generated types
-- foundry-linking crate is at `crates/linking` in the foundry git repo — same `{ git = "...", tag = "v1.5.1" }` pattern; provides `Linker` for library detection
-- @custom:env natspec format: `{type[:optional]} name description...` — split on `{` to parse multiple params from one string
-- Integration test fixture pattern: use std::sync::Once + JSON files with hex-encoded {address, topics[], data} for alloy Log round-tripping
-- alloy_primitives::hex::encode/decode handles 0x-prefixed hex strings correctly
+- Pipeline module lives at `crates/treb-forge/src/pipeline/` as a submodule directory with `mod.rs` + `types.rs`
+- New modules: create file, register in `lib.rs` with `pub mod`, add re-exports with `pub use`
+- Core domain types live in `treb-core/src/types/` (Deployment, Transaction, SafeTransaction)
+- Registry CRUD via `treb-registry::Registry` — `insert_deployment()`, `get_deployment()`, etc.
+- Alloy primitives (`Address`, `B256`, `Bytes`) are the forge-domain types; core domain uses `String` for addresses/hashes
+- `Address::to_checksum(None)` converts Address to checksummed hex string
+- `format!("{:#x}", b256_value)` gives 0x-prefixed lowercase hex for B256
+- `ExtractedDeployment` (forge domain) → `Deployment` (core domain) is the hydration step
+- `treb-registry` and `treb-config` are both workspace dependencies available to treb-forge
+- `DeploymentMethod` enum is in `treb_core::types::enums` (Create, Create2, Create3)
+- Tests use `#[cfg(test)] mod tests` inline pattern, not separate test files for unit tests
+- `hydrate_deployment()` converts ExtractedDeployment → Deployment; `generate_deployment_id()` builds the ID string
+- B256::ZERO → empty string; non-zero B256 → `format!("{:#x}", value)` for 0x-prefixed hex
+- `Bytes` display gives `0x`-prefixed hex; use `.is_empty()` check for empty-string fallback
+- `foundry_compilers::ArtifactId` requires `profile` field and `foundry_config::semver::Version` (not bare `semver`)
+- ProxyType (forge) → String (core): "Transparent", "UUPS", "Beacon", "Minimal"
+- `chrono` workspace dep needed in treb-forge for `Utc::now()` timestamps
+- `TransactionSimulated` event contains `Vec<SimulatedTransaction>`; each SimulatedTransaction becomes one core `Transaction`
+- `SafeTransactionQueued` event has indexed fields (`safeTxHash`, `safe`, `proposer`) + non-indexed `transactionIds: Vec<B256>`
+- Transaction-to-deployment linking: match `Deployment.transaction_id` (hex string) against SimulatedTransaction.transactionId (B256 → hex)
+- `hydrate_transactions()` and `hydrate_safe_transactions()` live alongside `hydrate_deployment()` in `pipeline/hydration.rs`
+- Duplicate detection: `check_duplicate()` checks by ID first (SameId), then by address+chain_id (SameAddress); `resolve_duplicates()` applies Skip/Error/Update strategy
+- `Registry::list_deployments()` returns `Vec<&Deployment>` sorted by created_at — use for address+chain scans
+- `tempfile` crate is available as dev-dependency in treb-forge for tests needing `Registry::init()`
+- Add `#[derive(Debug)]` to pipeline result types (e.g. `ResolvedDuplicates`, `SkippedDeployment`) if tests need `.unwrap_err()` on `Result<T, _>`
+- `RunPipeline` orchestrator lives in `pipeline/orchestrator.rs`; the flow is: compile → execute → decode → extract → hydrate → deduplicate → record
+- `Config::load_with_root()` returns `Result<Config, ExtractConfigError>`, not `Config` directly — must handle the error
+- sol! event types (TransactionSimulated, SafeTransactionQueued) derive Clone via alloy — safe to `.clone()` when extracting from ParsedEvent
+- `foundry_config::Config` is loaded via `Config::load_with_root(project_root).map(|c| c.sanitized())` pattern
+- All core domain types (Deployment, Transaction, SafeTransaction) derive `Clone` — can clone before registry insert to keep a copy for PipelineResult
 
-## 2026-03-03 - US-001 (Phase 6)
-- Implemented: foundry-wallets dependency addition and sender.rs module scaffold
+## 2026-03-03 - US-001
+- Implemented: Pipeline module scaffold with PipelineConfig, PipelineContext, PipelineResult, RecordedDeployment, RecordedTransaction, SkippedDeployment types, and resolve_git_commit()
 - Files changed:
-  - `Cargo.toml` — added `foundry-wallets` to workspace dependencies
-  - `crates/treb-forge/Cargo.toml` — added `foundry-wallets` dependency
-  - `crates/treb-forge/src/sender.rs` — new module with ResolvedSender enum (Wallet, InMemory, Safe, Governor variants), resolve_sender() and resolve_all_senders() function signatures, and per-type stub functions
-  - `crates/treb-forge/src/lib.rs` — added sender module declaration and re-exports
+  - `crates/treb-forge/Cargo.toml` — added treb-registry dependency
+  - `crates/treb-forge/src/lib.rs` — registered pipeline module, added re-exports
+  - `crates/treb-forge/src/pipeline/mod.rs` — module root with resolve_git_commit() and unit tests
+  - `crates/treb-forge/src/pipeline/types.rs` — all pipeline context, config, and result types
 - **Learnings for future iterations:**
-  - foundry-wallets is part of the foundry git monorepo, same `{ git = "...", tag = "v1.5.1" }` pattern as other foundry crates
-  - ResolvedSender::Safe and ::Governor use Box<ResolvedSender> for recursive sub-sender references
-  - resolve_sender() uses a visited HashSet<String> for circular reference detection — must insert before recursing
-  - Per-type resolution functions are private (not exported) — only resolve_sender/resolve_all_senders are public API
-  - cargo check/clippy/test all pass — the todo!() stubs compile because `!` type coerces to any return type
+  - treb-forge already had treb-core and treb-config as deps; only treb-registry needed to be added
+  - PipelineConfig.script_sig defaults to "run()" matching ScriptConfig pattern
+  - ExtractedCollision from events module is used directly in PipelineResult (no need to re-define)
+  - All 285 workspace tests pass including the 2 new pipeline tests
 ---
 
 ## 2026-03-03 - US-002
-- Implemented: PrivateKey, Ledger, and Trezor sender resolution
+- Implemented: Deployment hydration module with `hydrate_deployment()` and `generate_deployment_id()` functions
+- Converts ExtractedDeployment + optional ProxyRelationship + PipelineContext → core Deployment
+- Handles: checksummed addresses, 0x-prefixed B256 hex (empty for zeros), hex-encoded Bytes, DeploymentStrategy, ArtifactInfo, ProxyInfo, VerificationInfo defaults
 - Files changed:
-  - `Cargo.toml` — added alloy-signer, alloy-signer-ledger, alloy-signer-trezor to workspace dependencies
-  - `crates/treb-forge/Cargo.toml` — added alloy-signer, alloy-signer-ledger, alloy-signer-trezor dependencies
-  - `crates/treb-forge/src/sender.rs` — implemented resolve_private_key(), resolve_ledger(), resolve_trezor() and added 6 unit tests
+  - `crates/treb-forge/Cargo.toml` — added chrono workspace dependency
+  - `crates/treb-forge/src/pipeline/hydration.rs` — new hydration module with functions and 7 unit tests
+  - `crates/treb-forge/src/pipeline/mod.rs` — registered hydration submodule, added re-exports
+  - `crates/treb-forge/src/lib.rs` — added hydrate_deployment and generate_deployment_id to re-exports
 - **Learnings for future iterations:**
-  - `alloy_primitives::hex::FromHex::from_hex()` handles both `0x`-prefixed and bare hex strings automatically
-  - `WalletSigner::from_private_key(&B256)` is synchronous; Ledger/Trezor are async (hardware device I/O)
-  - `alloy_signer::Signer` trait must be imported to call `.address()` on a WalletSigner
-  - LedgerHDPath is `alloy_signer_ledger::HDPath` (re-aliased from DerivationType), TrezorHDPath is `alloy_signer_trezor::HDPath`
-  - LedgerHDPath has `LedgerLive(usize)`, `Legacy(usize)`, `Other(String)` variants; TrezorHDPath has `TrezorLive(usize)`, `Other(String)`
-  - Hardware wallet errors use TrebError::Forge (not Config) since they're runtime connection failures, not config validation
-  - Address parsing from strings: `addr_str.parse::<Address>()` works directly (no hex prefix issues)
+  - `foundry_compilers::ArtifactId` has a `profile` field and needs `foundry_config::semver::Version` (not bare `semver` crate)
+  - `Bytes` Display impl gives `0x`-prefixed hex; check `.is_empty()` first for empty-string fallback
+  - ProxyInfo.proxy_type is a plain String ("Transparent", "UUPS", "Beacon", "Minimal"), not an enum
+  - VerificationInfo defaults: status=Unverified, all fields empty/None, empty verifiers HashMap
+  - All 293 workspace tests pass including the 7 new hydration tests
 ---
 
 ## 2026-03-03 - US-003
-- Implemented: InMemory sender, Safe/Governor resolution with recursive sub-sender, circular reference detection
+- Implemented: Transaction hydration with `hydrate_transactions()` and `hydrate_safe_transactions()` functions
+- `hydrate_transactions()` converts `TransactionSimulated` events into core `Transaction` records with deployment linking by transaction_id match
+- `hydrate_safe_transactions()` converts `SafeTransactionQueued` events into core `SafeTransaction` stubs with Queued status
 - Files changed:
-  - `crates/treb-forge/src/sender.rs` — implemented resolve_safe(), resolve_governor(), in_memory_signer(), default_test_signers(); converted resolve_sender() to Pin<Box<dyn Future>> for async recursion; added 10 new unit tests
-  - `crates/treb-forge/src/lib.rs` — added in_memory_signer and default_test_signers to re-exports
+  - `crates/treb-forge/src/pipeline/hydration.rs` — added hydrate_transactions, hydrate_safe_transactions, and 3 unit tests
+  - `crates/treb-forge/src/pipeline/mod.rs` — added re-exports for new hydration functions
+  - `crates/treb-forge/src/lib.rs` — added hydrate_transactions and hydrate_safe_transactions to re-exports
 - **Learnings for future iterations:**
-  - Recursive async fn in Rust: can't use `async fn` with recursion — must return `Pin<Box<dyn Future<Output = ...> + Send + 'a>>` and wrap body in `Box::pin(async move { ... })`
-  - WalletSigner::from_mnemonic(mnemonic, passphrase, derivation_path, index) — passphrase and derivation_path are both Option, index is u32
-  - Safe config fields: `safe` (or `address`) for safe address, `signer` for sub-sender reference name
-  - Governor config fields: `governor` (or `address`) for governor address, `timelock` (optional) for timelock address, `proposer` for sub-sender reference name
-  - Circular reference detection already existed in resolve_sender (visited set) — Safe/Governor just need to pass visited through to recursive resolve_sender calls
-  - All 220 workspace tests pass; 26 sender tests covering all variants
+  - `TransactionSimulated` is a sol! event containing `Vec<SimulatedTransaction>`, use `flat_map` to iterate all SimulatedTransactions across events
+  - `SafeTransactionQueued` indexed fields (safeTxHash, safe, proposer) are accessed directly as struct fields
+  - Deployment-to-transaction linking is done by comparing hex-formatted B256 transaction IDs against Deployment.transaction_id strings
+  - Simulated transactions have no on-chain hash, block_number, or nonce — all default to empty/zero
+  - All 296 workspace tests pass including the 3 new transaction hydration tests
 ---
 
 ## 2026-03-03 - US-004
-- Implemented: Wired sender resolution into ScriptArgs construction
+- Implemented: Duplicate deployment detection with `check_duplicate()` and `resolve_duplicates()` in `pipeline/duplicates.rs`
+- `check_duplicate()` detects SameId (by deployment ID) and SameAddress (by address + chain_id) conflicts, with SameId taking precedence
+- `resolve_duplicates()` applies one of three strategies: Skip (skipped entries with reason), Error (returns error on first conflict), Update (marks for update)
+- Types: `ConflictType`, `DuplicateConflict`, `DuplicateStrategy`, `ResolvedDuplicates`
 - Files changed:
-  - `crates/treb-forge/src/sender.rs` — added `impl ResolvedSender` with `sender_address()` method
-  - `crates/treb-forge/src/script.rs` — added `private_key_hex` field to ScriptConfig with setter, updated `into_script_args()` to inject private key into `MultiWalletOpts`, added `build_script_config_with_senders()` function, added 4 unit tests
-  - `crates/treb-forge/src/lib.rs` — added `build_script_config_with_senders` to re-exports
+  - `crates/treb-forge/src/pipeline/duplicates.rs` — new module with check_duplicate, resolve_duplicates, and 9 unit tests
+  - `crates/treb-forge/src/pipeline/mod.rs` — registered duplicates submodule, added re-exports
+  - `crates/treb-forge/src/pipeline/types.rs` — added `#[derive(Debug)]` to SkippedDeployment
+  - `crates/treb-forge/src/lib.rs` — added duplicate detection types and functions to re-exports
 - **Learnings for future iterations:**
-  - `ScriptArgs.wallets` is `MultiWalletOpts` (a clap CLI arg struct) — cannot inject `WalletSigner` directly, must set string-based fields like `private_key: Option<String>`
-  - `MultiWalletOpts.private_key` accepts hex strings (with or without 0x prefix); foundry's `utils::create_private_key_signer` handles parsing
-  - `build_script_config_with_senders()` is a non-async extension of `build_script_config()` — it takes pre-resolved senders and doesn't do resolution itself
-  - For PrivateKey senders, the private key hex is extracted from `ResolvedConfig.senders["deployer"].private_key` (the original config), not from the WalletSigner
-  - For Safe/Governor senders, only `evm.sender` is set to the contract address — no wallet opts needed
-  - cargo check/clippy/test all pass; 224 total workspace tests
+  - `Registry::list_deployments()` is sufficient for address+chain duplicate scans (linear scan is fine for expected deployment counts)
+  - LookupIndex `find_by_address()` is case-insensitive but doesn't encode chain_id, so for SameAddress you need to load the full deployment and compare chain_id
+  - `TrebError::Registry(String)` is the correct error variant for duplicate detection failures
+  - `String::eq_ignore_ascii_case()` is needed for address comparison since addresses may have mixed case (checksummed)
+  - All 305 workspace tests pass including the 9 new duplicate detection tests
 ---
 
-## 2026-03-03 - US-001 (Phase 7)
-- Implemented: ABI definitions for ITrebEvents, ICreateX, and ERC-1967 proxy events using alloy sol! macro
+## 2026-03-03 - US-005
+- Implemented: `RunPipeline` orchestrator in `pipeline/orchestrator.rs` that drives the full deployment recording flow
+- `RunPipeline::new(context)` creates the orchestrator; `execute(registry)` runs the full async pipeline
+- Flow: load foundry config → compile project → build artifact index → build/execute script → check success → decode events → extract deployments/collisions/proxies → hydrate deployments/transactions/safe_txs → resolve duplicates → record to registry (or skip if dry-run)
+- Failed script execution returns `TrebError::Forge` with console log output
+- Dry-run mode fully populates PipelineResult but leaves registry unchanged
+- Helper functions `extract_transaction_simulated()` and `extract_safe_transaction_queued()` filter ParsedEvent list
 - Files changed:
-  - `Cargo.toml` — added `alloy-sol-types = "1.5"` to workspace dependencies
-  - `crates/treb-forge/Cargo.toml` — added `alloy-sol-types = { workspace = true }` dependency
-  - `crates/treb-forge/src/events/mod.rs` — new module with re-exports of all ABI types
-  - `crates/treb-forge/src/events/abi.rs` — sol! macro definitions for ITrebEvents (6 events, 3 structs), ICreateX (3 events), and ERC-1967 proxy events (3 events); 15 unit tests
-  - `crates/treb-forge/src/lib.rs` — added `pub mod events;` declaration
+  - `crates/treb-forge/src/pipeline/orchestrator.rs` — new RunPipeline struct with async execute method
+  - `crates/treb-forge/src/pipeline/mod.rs` — registered orchestrator submodule, added RunPipeline re-export
+  - `crates/treb-forge/src/lib.rs` — added RunPipeline to pipeline re-exports
 - **Learnings for future iterations:**
-  - alloy-sol-types v1.5.x is the transitive version from foundry v1.5.1 — matches workspace alloy alignment
-  - sol! macro generates `SIGNATURE_HASH` on each event type via the `SolEvent` trait — must `use alloy_sol_types::SolEvent;` to access it
-  - Overloaded Solidity events (same name, different params) get disambiguated as `_0`, `_1` suffixes (e.g., `ContractCreation_0`, `ContractCreation_1`)
-  - Don't leave blank lines between doc comments and items inside sol! blocks — clippy warns about `empty_line_after_outer_attr`
-  - All 12 event signature hashes are unique (verified in test), confirming correct event definitions
-  - Module pattern for submodules: create `src/events/` directory with `mod.rs` for declarations + `abi.rs` for implementation
+  - `Config::load_with_root()` returns `Result`, not `Config` directly — needs error handling
+  - sol! event types implement Clone (derived by alloy) — safe to clone when extracting from ParsedEvent enum
+  - `compile_project` and `execute_script` both compile internally; foundry caches compilations so the double-compile is effectively free
+  - Core domain types all derive Clone — clone before passing ownership to registry insert
+  - `ScriptConfig` builder pattern: `.sig()`, `.args()`, `.chain_id()` then `.into_script_args()`
+  - All 305 workspace tests pass (no new tests for orchestrator — requires real forge execution; integration tests in US-006)
 ---
 
-## 2026-03-03 - US-002 (Phase 7)
-- Implemented: Event log decoder with TrebEvent, CreateXEvent, ProxyEvent, and ParsedEvent enums
+## 2026-03-03 - US-006
+- Implemented: 10 integration tests in `crates/treb-forge/tests/pipeline_integration.rs` exercising the full hydration → duplicate check → registry write flow with synthetic data
+- Tests cover: single deployment, proxy deployment, transaction linking, duplicate skip, duplicate address detection, dry-run mode, multi-deployment (CREATE + CREATE2 + proxy), collision reporting, safe transaction hydration, and error strategy on duplicate
 - Files changed:
-  - `crates/treb-forge/src/events/decoder.rs` — new module with decode_events() function, 4 enum types, 8 unit tests
-  - `crates/treb-forge/src/events/abi.rs` — added `#[derive(Debug)]` to all sol! struct/event definitions
-  - `crates/treb-forge/src/events/mod.rs` — added decoder module declaration and re-exports
+  - `crates/treb-forge/tests/pipeline_integration.rs` — new integration test file with 10 tests
 - **Learnings for future iterations:**
-  - sol!-generated types do NOT derive Debug by default — must add `#[derive(Debug)]` inside sol! blocks on each item
-  - SolEvent::decode_log_data() takes only 1 arg in alloy-sol-types 1.5.x (no `validate: bool` parameter)
-  - LogData.data is a field (not a method) — use `log.data.data` not `log.data.data()`
-  - LogData.topics() IS a method — use `log.data.topics()` to get `&[B256]`
-  - Log::new(address, topics_vec, data_bytes) returns `Option<Log>` — use `.expect()` or `.unwrap()` in tests
-  - clippy warns about large_enum_variant — use `Box<TrebEvent>` in ParsedEvent::Treb variant to reduce enum size
-  - encode_log_data() on sol! event types produces LogData for round-trip testing (construct event → encode → decode → verify)
-  - All 253 workspace tests pass; 8 new decoder tests covering decode, mixed logs, proxy address capture
----
-
-## 2026-03-03 - US-003 (Phase 7)
-- Implemented: Deployment extraction from decoded events (ExtractedDeployment, ExtractedCollision, extract_deployments, extract_collisions, parse_strategy)
-- Files changed:
-  - `crates/treb-forge/src/events/deployments.rs` — new module with ExtractedDeployment struct (all 12 fields), ExtractedCollision struct, extract_deployments() and extract_collisions() functions, parse_strategy() helper, 7 unit tests
-  - `crates/treb-forge/src/events/mod.rs` — added deployments module declaration and re-exports
-  - `crates/treb-forge/src/artifacts.rs` — added `#[derive(Debug)]` to ArtifactMatch (required for ExtractedDeployment's Debug derive)
-- **Learnings for future iterations:**
-  - ArtifactMatch didn't derive Debug — needed to add it when embedding in other Debug structs
-  - sol! event field names use camelCase (e.g., `createStrategy`, `bytecodeHash`) — must match exactly in Rust access
-  - parse_strategy() uses case-insensitive matching since sol! events emit lowercase ("create2") but DeploymentMethod::FromStr expects uppercase ("CREATE2")
-  - extract_deployments() takes Option<&ArtifactIndex> — gracefully handles None by setting artifact_match to None
-  - ContractDeployed.location is the deployed address; ContractDeployed.deployer is the deploying account
-  - DeploymentCollision.existingContract (indexed) is the address where collision occurred
-  - All 261 workspace tests pass; 7 new deployment extraction tests
----
-
-## 2026-03-03 - US-004 (Phase 7)
-- Implemented: Proxy relationship detection from ERC-1967 events (ProxyType enum, ProxyRelationship struct, detect_proxy_relationships, link_proxy_to_deployment)
-- Files changed:
-  - `crates/treb-forge/src/events/proxy.rs` — new module with ProxyType enum (Transparent, UUPS, Beacon, Minimal), ProxyRelationship struct, detect_proxy_relationships() and link_proxy_to_deployment() functions, 8 unit tests
-  - `crates/treb-forge/src/events/mod.rs` — added proxy module declaration and re-exports
-- **Learnings for future iterations:**
-  - Proxy type inference is event-combination based: Upgraded alone → UUPS, Upgraded + AdminChanged from same address → Transparent, BeaconUpgraded → Beacon
-  - AdminChanged can arrive before or after Upgraded — the detect function handles both orderings correctly by always promoting to Transparent when AdminChanged is seen
-  - link_proxy_to_deployment returns Option<usize> (index into deployments slice) rather than Option<&ExtractedDeployment> to avoid borrow checker issues
-  - Minimal proxy type is defined but reserved for future bytecode-based detection (not event-based)
-  - HashMap<Address, ProxyRelationship> naturally handles multiple proxies in the same execution by keying on proxy address
-  - All 269 workspace tests pass; 8 new proxy relationship tests
----
-
-## 2026-03-03 - US-005 (Phase 7)
-- Implemented: Natspec parameter parser for @custom:env annotations, foundry-linking dependency added and re-exported
-- Files changed:
-  - `Cargo.toml` — added `foundry-linking` to workspace dependencies
-  - `crates/treb-forge/Cargo.toml` — added `foundry-linking = { workspace = true }` dependency
-  - `crates/treb-forge/src/events/params.rs` — new module with ParameterType enum (10 variants), ScriptParameter struct, parse_script_parameters() and parse_custom_env_string() functions, 10 unit tests
-  - `crates/treb-forge/src/events/mod.rs` — added params module declaration and re-exports
-  - `crates/treb-forge/src/lib.rs` — added `pub use foundry_linking;` re-export
-- **Learnings for future iterations:**
-  - foundry-linking crate exists in foundry monorepo at crates/linking — provides Linker for library detection (same git/tag pattern as other foundry crates)
-  - @custom:env annotation format: `{type[:optional]} name description text...` — multiple params concatenated in same string, each starting with `{type}`
-  - parse_custom_env_string splits on `{` and skips the first empty segment — robust approach for multi-parameter strings
-  - Type parsing is case-insensitive (via to_lowercase) to handle any casing in natspec
-  - Unknown type strings are silently skipped (not errors) — graceful degradation for forward compatibility
-  - Missing devdoc, missing run() method, or missing custom:env all return empty Vec (not error) — consistent with pattern of graceful fallback
-  - All 277 workspace tests pass; 10 new params tests covering all parameter types, optionality, multi-param, and edge cases
----
-
-## 2026-03-03 - US-006 (Phase 7)
-- Implemented: Integration tests with captured log fixtures for the full event parsing pipeline
-- Files changed:
-  - `crates/treb-forge/tests/events_integration_test.rs` — new integration test file with 6 tests: simple_deploy_round_trip, create2_deploy_with_salt_decoded, proxy_relationship_transparent_detection, full_pipeline_end_to_end, collision_fixture_round_trip, fixture_files_are_valid_json
-  - `crates/treb-forge/tests/fixtures/events/simple_deploy.json` — fixture for simple CREATE deployment
-  - `crates/treb-forge/tests/fixtures/events/create2_deploy.json` — fixture for CREATE2 deployment with ContractCreation event
-  - `crates/treb-forge/tests/fixtures/events/proxy_deploy.json` — fixture for Transparent proxy (implementation + proxy deploys + Upgraded + AdminChanged)
-  - `crates/treb-forge/tests/fixtures/events/multi_deploy.json` — fixture for multiple deployments + UUPS proxy + unknown log
-  - `crates/treb-forge/tests/fixtures/events/collision.json` — fixture for DeploymentCollision event
-- **Learnings for future iterations:**
-  - Integration tests for alloy event encoding/decoding can use std::sync::Once to generate fixture files lazily on first test run
-  - alloy_primitives::hex::encode/decode handles 0x-prefixed hex — use for fixture serialization
-  - Log::new(address, topics_vec, data_bytes) constructs Log from parts; entry_to_log/log_to_entry helpers provide clean JSON round-tripping
-  - Address Display uses EIP-55 checksummed format; B256 Display uses 0x-prefixed lowercase — both FromStr parsers are case-insensitive
-  - All dependencies listed in [dependencies] of a crate are available in its integration tests (tests/ directory) — no need to add them as [dev-dependencies]
-  - All 283 workspace tests pass; 6 new integration tests covering simple deploy, CREATE2, transparent proxy, full pipeline, collision, and fixture validity
+  - Integration tests for the pipeline module use `treb_forge::events::deployments::ExtractedDeployment` (not a re-export from lib.rs) since it's a forge-internal type
+  - `treb_forge::events::proxy::{ProxyRelationship, ProxyType}` and `treb_forge::events::abi::{TransactionSimulated, SimulatedTransaction, SafeTransactionQueued}` are all accessible for test construction
+  - `tempfile::TempDir` + `Registry::init(dir.path())` pattern works for integration tests too (already a dev-dep)
+  - `treb_forge::pipeline::ConflictType` is re-exported and usable from integration tests for asserting conflict types
+  - All 315 workspace tests pass including the 10 new pipeline integration tests
 ---
