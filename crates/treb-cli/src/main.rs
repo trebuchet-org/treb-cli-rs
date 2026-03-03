@@ -223,7 +223,25 @@ enum Commands {
         json: bool,
     },
     /// Generate deployment scripts from templates
-    GenDeploy,
+    GenDeploy {
+        /// Contract name or artifact identifier (e.g., Counter or src/Counter.sol:Counter)
+        artifact: String,
+        /// Deployment strategy: create, create2, create3
+        #[arg(long)]
+        strategy: Option<String>,
+        /// Proxy pattern: erc1967, uups, transparent, beacon
+        #[arg(long)]
+        proxy: Option<String>,
+        /// Custom proxy contract name (for non-standard proxy implementations)
+        #[arg(long)]
+        proxy_contract: Option<String>,
+        /// Output file path (default: script/Deploy<Name>.s.sol)
+        #[arg(long)]
+        output: Option<String>,
+        /// Output as JSON instead of writing a file
+        #[arg(long)]
+        json: bool,
+    },
     /// Compose multi-step deployment pipelines
     Compose,
     /// Remove stale deployment artifacts
@@ -377,7 +395,17 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Version { json } => commands::version::run(json).await?,
         Commands::Networks { json } => commands::networks::run(json).await?,
-        Commands::GenDeploy => println!("gen-deploy: not yet implemented"),
+        Commands::GenDeploy { artifact, strategy, proxy, proxy_contract, output, json } => {
+            commands::gen_deploy::run(
+                &artifact,
+                strategy.as_deref(),
+                proxy.as_deref(),
+                proxy_contract.as_deref(),
+                output.as_deref(),
+                json,
+            )
+            .await?
+        }
         Commands::Compose => println!("compose: not yet implemented"),
         Commands::Prune => println!("prune: not yet implemented"),
         Commands::Reset => println!("reset: not yet implemented"),

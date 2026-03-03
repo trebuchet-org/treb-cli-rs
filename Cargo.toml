@@ -65,6 +65,7 @@ anyhow = "1"
 eyre = "0.6"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+handlebars = "6"
 
 # Patch: svm-rs-builds >=0.5.22 fixes duplicate SOLC_VERSION_0_8_31 constants
 # (see https://github.com/alloy-rs/svm-rs/pull/179)

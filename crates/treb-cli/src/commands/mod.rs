@@ -1,4 +1,5 @@
 pub mod config;
+pub mod gen_deploy;
 pub mod init;
 pub mod list;
 pub mod networks;
