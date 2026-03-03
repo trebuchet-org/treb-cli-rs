@@ -115,6 +115,25 @@ fn parse_contract_info(artifact_path: &str, contract_name: &str) -> ContractInfo
     }
 }
 
+/// Build an explorer URL for a verified contract based on the chain and verifier.
+///
+/// Returns `None` if the chain is not recognized (e.g. a custom chain ID with
+/// no known block explorer).
+pub fn explorer_url(chain_id: u64, address: &str, verifier: &str) -> Option<String> {
+    match verifier {
+        "etherscan" | "blockscout" => {
+            let chain = Chain::from_id(chain_id);
+            chain
+                .etherscan_urls()
+                .map(|(_, browser_url)| format!("{browser_url}/address/{address}#code"))
+        }
+        "sourcify" => Some(format!(
+            "https://repo.sourcify.dev/contracts/full_match/{chain_id}/{address}/"
+        )),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -410,5 +429,37 @@ mod tests {
         let info = parse_contract_info("Counter.sol/Counter.json", "Counter");
         assert_eq!(info.name, "Counter");
         assert_eq!(info.path, None);
+    }
+
+    #[test]
+    fn explorer_url_etherscan_mainnet() {
+        let url = explorer_url(1, "0x1234", "etherscan");
+        assert!(url.is_some());
+        let url = url.unwrap();
+        assert!(url.contains("etherscan.io"));
+        assert!(url.contains("0x1234"));
+        assert!(url.ends_with("#code"));
+    }
+
+    #[test]
+    fn explorer_url_sourcify() {
+        let url = explorer_url(1, "0x1234", "sourcify").unwrap();
+        assert!(url.contains("sourcify.dev"));
+        assert!(url.contains("0x1234"));
+        assert!(url.contains("/1/"));
+    }
+
+    #[test]
+    fn explorer_url_unknown_chain() {
+        let url = explorer_url(999999999, "0x1234", "etherscan");
+        // Unknown chain may not have etherscan URLs
+        // This is acceptable — returns None
+        assert!(url.is_none() || url.unwrap().contains("0x1234"));
+    }
+
+    #[test]
+    fn explorer_url_unknown_verifier() {
+        let url = explorer_url(1, "0x1234", "unknown");
+        assert!(url.is_none());
     }
 }

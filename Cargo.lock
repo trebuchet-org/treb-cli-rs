@@ -7835,6 +7835,7 @@ dependencies = [
  "treb-core",
  "treb-forge",
  "treb-registry",
+ "treb-verify",
 ]
 
 [[package]]
