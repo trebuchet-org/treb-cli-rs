@@ -10,6 +10,19 @@ Started: Tue Mar  3 04:12:33 AM CET 2026
 - Tests live in `#[cfg(test)] mod tests` blocks within each module
 - Foundry crates (v1.5.1) require solar crate patches — see `[patch.crates-io]` in root Cargo.toml
 - Foundry uses `eyre::Result` internally; convert to `TrebError::Forge` at API boundaries
+- `foundry_compilers::ProjectCompileOutput` does NOT implement `Debug` — cannot use `unwrap_err()` on `Result<CompilationOutput, _>` in tests; use `match` instead
+- `foundry_config::Config::load_with_root(path)` loads config from a directory; `config.project()` returns `Project<MultiCompiler>`
+- `project.paths.has_input_files()` checks for source files; `project.compile()` returns `ProjectCompileOutput`
+- `foundry-compilers` (v0.19.14) is from crates.io, not from the foundry git repo
+- `ScriptArgs::default()` gives Rust defaults (empty sig, 0 gas multiplier, 0 batch_size) — clap `default_value` only applies during CLI parsing; must set sensible values explicitly
+- `forge_script::ScriptArgs` fields can be set via mutation without importing `EvmArgs`/`EnvArgs` types directly
+- `foundry_config::Chain::from(u64)` creates a chain from EIP-155 chain ID
+- `treb_config::ResolvedConfig` is re-exported at crate root; sender addresses are in `senders` HashMap as `Option<String>`
+- Foundry script state machine: `ScriptArgs.preprocess() -> compile() -> link() -> prepare_execution() -> execute()`
+- `foundry_evm::core::decode::decode_console_logs` decodes all console.log variants, silently skips unknown
+- Foundry v1.5.1 uses `alloy-json-abi` v1.5.7 — use `alloy-json-abi = "1.5"` (not workspace v0.8) in treb-forge
+- `ContractsByArtifact` from `foundry_common` implements `From<ProjectCompileOutput>` and `Deref<Target = BTreeMap<ArtifactId, ContractData>>`
+- `ArtifactId.version` is `semver::Version` (no Default) — construct via `foundry_config::semver::Version::new()`
 
 ---
 
@@ -38,4 +51,95 @@ Started: Tue Mar  3 04:12:33 AM CET 2026
   - `forge-script` and `forge-script-sequence` are the correct crate names (not `forge_script`)
   - The forge-script crate pulls in a large dependency tree (foundry-cli, foundry-evm, etc.) — compilation is slow (~90s first build)
   - Foundry uses eyre for error handling; need to convert at boundaries to TrebError::Forge
+---
+
+## 2026-03-03 - US-002
+- What was implemented:
+  - `CompilationOutput` struct wrapping `ProjectCompileOutput` and `project_root: PathBuf`
+  - `compile_project(config: &Config) -> Result<CompilationOutput>` — validates `has_input_files()` before compiling, returns `TrebError::Forge` if empty
+  - `compile_files(config: &Config, files: Vec<PathBuf>) -> Result<CompilationOutput>` — compiles specific files, validates non-empty input
+  - `has_compiler_errors()` and `artifact_ids()` accessor methods on `CompilationOutput`
+  - All eyre/SolcError errors from foundry converted to `TrebError::Forge` with messages preserved
+  - Unit test: `compile_project_empty_returns_forge_error` — verifies empty project returns `TrebError::Forge` (not process exit)
+  - Added `foundry-compilers = "0.19.14"` as workspace dependency
+  - Updated lib.rs re-exports to match new public API (`compile_project`, `compile_files`, `CompilationOutput`)
+- Files changed:
+  - Cargo.toml (added foundry-compilers workspace dependency)
+  - Cargo.lock (updated)
+  - crates/treb-forge/Cargo.toml (added foundry-compilers dep + tempfile dev-dep)
+  - crates/treb-forge/src/compiler.rs (full implementation)
+  - crates/treb-forge/src/lib.rs (updated re-exports)
+- **Learnings for future iterations:**
+  - `ProjectCompileOutput` does not implement `Debug`, so tests cannot use `unwrap_err()` on `Result<CompilationOutput, _>` — use `match` pattern instead
+  - `Config::load_with_root(dir)` + `config.project()?.compile()` is the compilation chain
+  - `foundry-compilers` is a crates.io dependency (v0.19.14), unlike the other foundry crates which are git dependencies
+  - `project.paths.has_input_files()` is on `ProjectPathsConfig`, accessed via `project.paths`
+  - The `ArtifactId` type from `foundry_compilers` has fields: path, name, source, version, build_id, profile
+---
+
+## 2026-03-03 - US-003
+- What was implemented:
+  - `ScriptConfig` builder struct with all fields from AC: script_path, sig, args, target_contract, sender, rpc_url, chain_id, fork_url, broadcast, slow, debug, dry_run, gas_estimate_multiplier, legacy, non_interactive, etherscan_api_key, verify
+  - `ScriptConfig::new(script_path)` with sensible defaults (sig="run()", gas_estimate_multiplier=130)
+  - Builder methods for all fields returning `&mut Self`
+  - `ScriptConfig::into_script_args(self) -> Result<ScriptArgs>` — constructs from `ScriptArgs::default()` and sets all fields including EVM args (fork_url, sender, chain_id)
+  - `build_script_config(resolved: &ResolvedConfig, script_path: &str) -> Result<ScriptConfig>` — extracts slow flag, sender address (prefers "deployer" role), and RPC URL (from network name) from resolved config
+  - Unit test: verifies `ScriptConfig::new("script/Deploy.s.sol").into_script_args()` produces correct path, sig "run()", gas multiplier 130
+  - Updated lib.rs re-exports to include `build_script_config`
+- Files changed:
+  - crates/treb-forge/src/script.rs (full ScriptConfig implementation)
+  - crates/treb-forge/src/lib.rs (updated re-exports)
+- **Learnings for future iterations:**
+  - `ScriptArgs::default()` does NOT use clap `default_value` — sig is "", gas_estimate_multiplier is 0, batch_size is 0; must set these explicitly
+  - No need to import `EvmArgs`/`EnvArgs` types — can access via field mutation on `ScriptArgs` (e.g., `args.evm.fork_url = ...`)
+  - `foundry_config::Chain` implements `From<u64>` for EIP-155 chain IDs
+  - `ResolvedConfig.network` can be used as fork_url since foundry resolves aliases from `[rpc_endpoints]`
+  - Sender addresses in `ResolvedConfig.senders` are `Option<String>` — parse with `Address::from_str()` from `alloy_primitives`
+---
+
+## 2026-03-03 - US-004
+- What was implemented:
+  - `ExecutionResult` struct with all required fields: success, logs, raw_logs, gas_used, returned, labeled_addresses, transactions, traces
+  - `execute_script(args: ScriptArgs) -> Result<ExecutionResult>` — chains preprocess → compile → link → prepare_execution → execute with stage-specific error context
+  - `console.rs` `decode_console_logs(logs: &[Log]) -> Vec<String>` — delegates to `foundry_evm::core::decode::decode_console_logs`, silently skips unrecognized formats
+  - Added `foundry-evm` and `foundry-cheatcodes` as workspace dependencies (git v1.5.1)
+  - Updated lib.rs to re-export `execute_script`
+- Files changed:
+  - Cargo.toml (added foundry-evm, foundry-cheatcodes workspace deps)
+  - crates/treb-forge/Cargo.toml (added foundry-evm, foundry-cheatcodes deps)
+  - crates/treb-forge/src/script.rs (ExecutionResult struct + execute_script pipeline)
+  - crates/treb-forge/src/console.rs (decode_console_logs implementation)
+  - crates/treb-forge/src/lib.rs (added execute_script re-export)
+- **Learnings for future iterations:**
+  - Foundry's `ScriptArgs` state machine follows: `preprocess() -> compile() -> link() -> prepare_execution() -> execute()` — each returns a different state type
+  - `executed.execution_result` contains the `ScriptResult` with all output data (success, logs, gas_used, returned, labeled_addresses, transactions, traces)
+  - `foundry_evm::core::decode::decode_console_logs` handles all console.log variant decoding and silently skips unknown formats
+  - `foundry_cheatcodes::BroadcastableTransactions` is the type for collected broadcast transactions
+  - `foundry_evm::traces::Traces` is the type alias for execution traces
+---
+
+## 2026-03-03 - US-005
+- What was implemented:
+  - `ArtifactIndex` struct wrapping `ContractsByArtifact` from `foundry_common`
+  - `from_compile_output(output)` consumes `CompilationOutput` and builds the index via `ContractsByArtifact::from(ProjectCompileOutput)`
+  - `find_by_name(name)` delegates to `find_by_name_or_identifier`, converts `eyre::Result` to `TrebError::Forge`
+  - `find_by_creation_code(code)` and `find_by_deployed_code(code)` query methods with fuzzy matching
+  - `inner()` provides access to underlying `ContractsByArtifact` for foundry API interop
+  - `ArtifactMatch` struct with `artifact_id`, `name`, `abi`, `has_bytecode`, `has_deployed_bytecode` fields
+  - `into_output()` consuming accessor added to `CompilationOutput` in compiler.rs
+  - Unit test: `ArtifactMatch` construction and field access
+  - Updated lib.rs re-exports to include `ArtifactMatch`
+- Files changed:
+  - Cargo.lock (updated with alloy-json-abi v1.5)
+  - crates/treb-forge/Cargo.toml (added alloy-json-abi dep)
+  - crates/treb-forge/src/artifacts.rs (full implementation)
+  - crates/treb-forge/src/compiler.rs (added into_output method)
+  - crates/treb-forge/src/lib.rs (updated re-exports)
+- **Learnings for future iterations:**
+  - Foundry v1.5.1 uses `alloy-json-abi` v1.5.7 internally, while the workspace has v0.8 — must use `alloy-json-abi = "1.5"` (not workspace) in treb-forge to match foundry's type
+  - `ContractsByArtifact` is from `foundry_common` and implements `From<ProjectCompileOutput>` for easy construction
+  - `find_by_name_or_identifier` returns `eyre::Result` (can error on ambiguous matches); `find_by_creation_code`/`find_by_deployed_code` return `Option`
+  - `ContractData` fields: `name: String`, `abi: JsonAbi`, `bytecode: Option<BytecodeData>`, `deployed_bytecode: Option<BytecodeData>`
+  - `ArtifactId` has `version: semver::Version` — no `Default` impl; construct via `foundry_config::semver::Version::new(major, minor, patch)`
+  - `ContractsByArtifact` implements `Deref<Target = BTreeMap<ArtifactId, ContractData>>` for direct iteration
 ---

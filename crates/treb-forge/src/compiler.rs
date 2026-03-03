@@ -39,6 +39,11 @@ impl CompilationOutput {
     pub fn output(&self) -> &foundry_compilers::ProjectCompileOutput {
         &self.output
     }
+
+    /// Consumes self and returns the underlying `ProjectCompileOutput`.
+    pub fn into_output(self) -> foundry_compilers::ProjectCompileOutput {
+        self.output
+    }
 }
 
 /// Compile an entire Solidity project using the given foundry `Config`.
