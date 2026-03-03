@@ -84,7 +84,7 @@
         "Typecheck passes (`cargo check --workspace`)"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

@@ -1,3 +1,23 @@
+## 2026-03-03 - P20-US-005
+- What was implemented: Shell completions and long-form help text
+  - Added `clap_complete = "4"` to workspace `Cargo.toml` and `treb-cli/Cargo.toml` (both regular dep and build-dep)
+  - Extended `crates/treb-cli/build.rs` with clap builder-API `build_cli()` function that mirrors the full CLI; generates bash/zsh/fish/elvish completions into `$OUT_DIR/completions/` at build time
+  - Added `Completions { shell: String }` variant to `Commands` enum in `main.rs`; handler calls `Cli::command()` via `CommandFactory` + `clap_complete::generate()` to stdout at runtime
+  - Added multi-line `///` doc comments (long_about) to all commands: Run, List, Show, Init, Config, Verify, Tag, Register, Sync, GenDeploy, Compose, Prune, Reset, Migrate, Fork, Completions
+  - Added long-form `///` doc comments to `ForkSubcommand` variants (Enter, Exit, Revert, Restart, Status, History, Diff) in `fork.rs`
+  - Added `#[command(long_about = "...")]` to `PruneArgs` and `ResetArgs` structs
+  - Added long-form `///` doc comments to `MigrateSubcommand` variants (Config, Registry) in `migrate.rs`
+  - Created `crates/treb-cli/tests/cli_completions.rs` with 7 integration tests covering bash/zsh/fish/elvish completions and `treb run --help` content
+- Files changed: Cargo.toml, Cargo.lock, crates/treb-cli/Cargo.toml, crates/treb-cli/build.rs, crates/treb-cli/src/main.rs, crates/treb-cli/src/commands/fork.rs, crates/treb-cli/src/commands/migrate.rs, crates/treb-cli/src/commands/prune.rs, crates/treb-cli/src/commands/reset.rs, crates/treb-cli/tests/cli_completions.rs
+- **Learnings for future iterations:**
+  - `build.rs` cannot import from the binary crate being built; use clap's builder API (not derive) to define the CLI structure independently in build.rs
+  - `clap_complete::generate_to(shell, &mut cmd, "treb", outdir)` writes to `outdir/treb.<ext>`; create the completions subdirectory first with `std::fs::create_dir_all`
+  - `clap_complete::Shell::from_str("bash")` is the idiomatic way to parse a shell name at runtime; returns `Err(String)` (not anyhow) so wrap with `.map_err(...)`
+  - `use clap::CommandFactory;` is needed to call `Cli::command()` from a derive-based Cli struct
+  - For clap derive `Commands` variants, multi-line `///` doc comments make the first line the `about` and remaining lines the `long_about`
+  - `#[command(long_about = "...")]` on `#[derive(Args)]` structs works for Prune/Reset even though they're used as `Commands::Prune(PruneArgs)` tuple variants
+---
+
 ## 2026-03-03 - P20-US-004
 - What was implemented: Colored output audit and NO_COLOR support
   - Added `owo-colors = { version = "4", features = ["supports-colors"] }` to workspace `Cargo.toml` and `treb-cli/Cargo.toml`
@@ -16,6 +36,8 @@
 
 ## Codebase Patterns
 - `registry.list_deployments()` returns `Vec<&Deployment>` (borrows from registry); clone with `.into_iter().cloned().collect()` to get owned `Vec<Deployment>` for passing to selector functions that take `&[Deployment]`.
+- `build.rs` cannot import from the binary crate being built — use clap's builder API (not derive macros) to define the CLI structure independently for completion generation.
+- `clap_complete::Shell::from_str("bash")` parses shell name; `generate(shell, &mut Cli::command(), "treb", &mut io::stdout())` for runtime output; `generate_to` for file output.
 - owo-colors v4: disable colors via `owo_colors::set_override(false)` (not `owo_colors::control::set_should_colorize` — that path doesn't exist). `Style::new().cyan().bold()` etc. are `const fn`.
 - `std::env::set_var`/`remove_var` require `unsafe {}` in Rust edition 2024; always restore env vars in tests (save old value, restore after test).
 - When changing a clap positional argument from `String` to `Option<String>`, existing tests that expect the old "argument required" error must be updated to match the new fuzzy-selector error messages.
