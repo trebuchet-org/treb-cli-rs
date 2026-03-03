@@ -118,6 +118,19 @@
   - Tests that manipulate env vars should save and restore the old value (especially `TERM`) to avoid polluting other tests
 ---
 
+## 2026-03-04 - P1-US-002
+- Renamed `ForkState.active_forks` field to `forks` so JSON serializes with top-level key `"forks"` (matching Go schema) instead of `"activeForks"`
+- Updated all internal field accesses in `ForkStateStore` methods (get/insert/update/remove/list)
+- Added `fork_state_top_level_keys_match_go_schema` test asserting `"forks"` and `"history"` keys present and `"activeForks"` absent
+- Files changed:
+  - crates/treb-core/src/types/fork.rs (field rename + new test)
+  - crates/treb-registry/src/store/fork_state.rs (field accesses updated)
+- **Learnings for future iterations:**
+  - `#[serde(rename_all = "camelCase")]` on ForkState means `forks` serializes as `"forks"` (already camelCase), while `active_forks` was serializing as `"activeForks"`
+  - ForkStateStore method names (list_active_forks, etc.) are the public API — they don't need renaming when only the internal struct field changes
+  - All fork CLI commands use the store methods, not the struct field directly, so they needed no changes
+---
+
 ## 2026-03-04 - P1-US-001
 - Renamed SAFE_TXS_FILE from "safe_txs.json" to "safe-txs.json"
 - Renamed GOVERNOR_PROPOSALS_FILE from "governor_proposals.json" to "governor-txs.json"
