@@ -1,6 +1,7 @@
 //! Registry system for treb — JSON-backed deployment registry with CRUD
 //! operations, lookup index, atomic file I/O, and migration detection.
 
+pub mod io;
 pub mod types;
 
 // Re-export registry types at crate root for convenience.
