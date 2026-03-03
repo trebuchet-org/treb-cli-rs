@@ -90,6 +90,11 @@ impl DeploymentStore {
     pub fn count(&self) -> usize {
         self.data.len()
     }
+
+    /// Return a reference to the underlying data map.
+    pub fn data(&self) -> &HashMap<String, Deployment> {
+        &self.data
+    }
 }
 
 #[cfg(test)]
