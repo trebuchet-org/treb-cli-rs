@@ -11,6 +11,7 @@ use treb_core::error::TrebError;
 use crate::compiler::CompilationOutput;
 
 /// A match result from artifact queries.
+#[derive(Debug)]
 pub struct ArtifactMatch {
     /// The artifact identifier from the compilation output.
     pub artifact_id: ArtifactId,
