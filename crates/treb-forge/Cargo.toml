@@ -13,6 +13,7 @@ treb-config = { workspace = true }
 # Foundry
 foundry-config = { workspace = true }
 foundry-common = { workspace = true }
+foundry-compilers = { workspace = true }
 forge-script = { workspace = true }
 forge-script-sequence = { workspace = true }
 
@@ -28,3 +29,6 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 eyre = { workspace = true }
 tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

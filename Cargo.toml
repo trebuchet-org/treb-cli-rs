@@ -18,6 +18,7 @@ treb-forge = { path = "crates/treb-forge" }
 # Foundry — pinned to tag v1.5.1 (commit b0a9dd9ceda36f63e2326ce530c10e6916f4b8a2)
 foundry-config = { git = "https://github.com/foundry-rs/foundry", tag = "v1.5.1" }
 foundry-common = { git = "https://github.com/foundry-rs/foundry", tag = "v1.5.1" }
+foundry-compilers = "0.19.14"
 forge-script = { git = "https://github.com/foundry-rs/foundry", tag = "v1.5.1" }
 forge-script-sequence = { git = "https://github.com/foundry-rs/foundry", tag = "v1.5.1" }
 
