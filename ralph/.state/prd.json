@@ -1,0 +1,145 @@
+{
+  "project": "treb-cli-rs",
+  "branchName": "ralph/phase-18-fork-mode-and-programmatic-anvil",
+  "description": "Fork-mode workflows using foundry's anvil crate programmatically — in-process Anvil lifecycle, registry snapshot/restore, fork enter/exit commands, CreateX factory pre-deployment, and fork state persistence.",
+  "userStories": [
+    {
+      "id": "P18-US-001",
+      "title": "Add anvil Workspace Dependency and Fork State Types",
+      "description": "As a developer, I want the anvil crate added as a workspace dependency and fork state types defined so that subsequent stories can build on these foundational types.",
+      "acceptanceCriteria": [
+        "anvil = { git = \"https://github.com/foundry-rs/foundry\", tag = \"v1.5.1\" } added to [workspace.dependencies] in root Cargo.toml",
+        "anvil = { workspace = true } added to crates/treb-forge/Cargo.toml dependencies",
+        "TrebError::Fork(String) variant added to crates/treb-core/src/error.rs",
+        "ForkState, ForkEntry, and ForkHistoryEntry types defined with Debug, Clone, Serialize, Deserialize derives",
+        "ForkState implements Default (empty forks, empty history)",
+        "FORK_STATE_FILE constant defined in treb-registry/src/lib.rs",
+        "Unit tests pass: ForkState serde round-trip, ForkEntry serde round-trip, ForkState::default() produces empty maps/vecs, TrebError::Fork displays correctly",
+        "Typecheck passes (cargo check --workspace)"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "P18-US-002",
+      "title": "Fork State Persistence and Registry Snapshot/Restore",
+      "description": "As a developer, I want registry snapshot/restore functions and a ForkStateStore so that fork enter/exit can safely preserve and restore registry state.",
+      "acceptanceCriteria": [
+        "snapshot_registry() copies deployments.json, transactions.json, safe_txs.json, governor_proposals.json, lookup.json from registry_dir to snapshot_dir, skipping missing files",
+        "restore_registry() copies all .json files from snapshot_dir back to registry_dir, errors if snapshot dir doesn't exist",
+        "remove_snapshot() removes the snapshot directory and all contents",
+        "ForkStateStore implements load/save/get_active_fork/insert_active_fork/remove_active_fork/list_active_forks/add_history methods",
+        "ForkStateStore insert_active_fork errors if network already forked; remove_active_fork errors if not active",
+        "add_history prepends to history and caps at 100 entries",
+        "Modules registered in crates/treb-registry/src/lib.rs",
+        "Unit tests pass for all snapshot, restore, remove, and ForkStateStore operations",
+        "Typecheck passes (cargo check --workspace)"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "P18-US-003",
+      "title": "Anvil Spawner — In-Process Anvil Lifecycle",
+      "description": "As a developer, I want an AnvilInstance wrapper and AnvilConfig builder so that I can spawn and manage Anvil instances entirely in-process.",
+      "acceptanceCriteria": [
+        "AnvilInstance struct wraps anvil::NodeHandle with rpc_url, port, chain_id, fork_url, fork_block_number metadata",
+        "AnvilConfig builder supports chain_id, fork_url, fork_block_number, port, accounts, block_time with spawn() async method",
+        "AnvilInstance exposes rpc_url(), port(), chain_id(), snapshot(), revert(), set_code() methods",
+        "spawn() maps errors to TrebError::Fork",
+        "Module registered in crates/treb-forge/src/lib.rs",
+        "Unit tests pass: spawn succeeds with valid RPC URL, chain_id config works, snapshot/revert round-trip, set_code sets code verifiable via eth_getCode, dropping AnvilInstance frees the port",
+        "Typecheck passes (cargo check --workspace)"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P18-US-004",
+      "title": "CreateX Factory Pre-Deployment",
+      "description": "As a developer, I want CreateX factory bytecode deployed at the canonical address on every Anvil instance so that CREATE2/CREATE3 strategies work identically in fork mode.",
+      "acceptanceCriteria": [
+        "CREATEX_ADDRESS constant set to 0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed",
+        "CREATEX_DEPLOYED_BYTECODE embedded via include_bytes! or hex constant",
+        "deploy_createx() calls anvil.set_code() to inject factory bytecode at canonical address",
+        "verify_createx() checks eth_getCode at CREATEX_ADDRESS and returns true if non-empty",
+        "Module registered in crates/treb-forge/src/lib.rs",
+        "Unit tests pass: deploy succeeds on fresh Anvil, verify returns true after deploy, verify returns false before deploy, code at address matches expected bytecode",
+        "Typecheck passes (cargo check --workspace)"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P18-US-005",
+      "title": "treb fork enter and treb fork exit Commands",
+      "description": "As a user, I want treb fork enter/exit commands so that I can snapshot the registry, configure fork state, and cleanly restore on exit.",
+      "acceptanceCriteria": [
+        "ForkSubcommand enum defined with Enter, Exit, Revert, Restart, Status, History, Diff variants using clap Subcommand derive",
+        "run_enter validates .treb/ exists, resolves RPC URL, errors if network already forked, creates snapshot dir, calls snapshot_registry(), writes ForkEntry and history to fork-state.json",
+        "run_exit restores registry from snapshot, removes ForkEntry, adds exit history, removes snapshot dir, restores config.local.json",
+        "Commands::Fork in main.rs updated from bare variant to subcommand dispatch",
+        "pub mod fork registered in commands/mod.rs",
+        "Unit tests pass: clap parsing, fork state written on enter, registry snapshot/restore round-trip, error on duplicate enter, error on non-active exit",
+        "Typecheck passes (cargo check --workspace)"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P18-US-006",
+      "title": "treb dev anvil Commands — Persistent Anvil Server",
+      "description": "As a user, I want treb dev anvil start/stop/restart/status commands so that I can manage a persistent foreground Anvil server for fork-mode development.",
+      "acceptanceCriteria": [
+        "DevSubcommand and AnvilSubcommand enums defined with clap Subcommand derive",
+        "run_anvil_start spawns Anvil (with fork_url from fork state if --network), deploys CreateX, installs signal handlers, blocks as foreground server",
+        "run_anvil_stop cleans up stale fork state entries via port reachability check",
+        "run_anvil_status reads fork state, checks port reachability, displays table with Network/RPC URL/Port/Chain ID/Fork Block/Started At/Status",
+        "Commands::Dev in main.rs updated from bare variant to subcommand dispatch; pub mod dev registered in commands/mod.rs",
+        "Unit tests pass: clap parsing for all subcommands, anvil start updates fork state, status reports correctly, port reachability check works",
+        "Typecheck passes (cargo check --workspace)"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P18-US-007",
+      "title": "treb fork revert, restart, status, history, diff Commands",
+      "description": "As a user, I want fork management subcommands (revert, restart, status, history, diff) so that I can inspect and control active fork sessions.",
+      "acceptanceCriteria": [
+        "run_revert calls evm_revert via Anvil RPC, takes new snapshot, supports --all flag, adds revert history entry",
+        "run_restart sends anvil_reset RPC, updates fork_block_number, re-deploys CreateX, adds restart history entry",
+        "run_status displays active forks table with port reachability check, supports --json flag",
+        "run_history displays fork history table filtered by --network, supports --json flag",
+        "run_diff compares current registry vs snapshot, reports added/removed/modified deployments and transactions, supports --json flag",
+        "Unit tests pass: status with no forks, status with active forks, history filtering, history with empty history, diff detects changes, diff shows clean when matching",
+        "Typecheck passes (cargo check --workspace)"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P18-US-008",
+      "title": "Integration Tests and Signal Handling",
+      "description": "As a developer, I want integration tests for fork workflows and signal handling for graceful Anvil shutdown so that the system is reliable and well-tested.",
+      "acceptanceCriteria": [
+        "Fork CLI integration tests in crates/treb-cli/tests/fork_integration.rs: fork enter creates state and snapshot, fork exit restores registry, fork status with no forks, fork status --json outputs valid JSON, fork history with empty history, fork diff with no changes",
+        "Anvil integration tests in crates/treb-forge/tests/anvil_integration_test.rs: spawn works, deploy_createx succeeds, verify_createx returns true, snapshot/revert round-trip preserves CreateX, dropping instance frees port",
+        "Signal handling in treb dev anvil start: SIGINT and SIGTERM handlers via tokio::signal clean up fork state and drop AnvilInstance",
+        "Signal handling test: spawn anvil start as background task, send SIGTERM, verify fork state updated",
+        "All existing tests continue to pass",
+        "Typecheck passes (cargo check --workspace)"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

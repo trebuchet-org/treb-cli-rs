@@ -4,6 +4,7 @@
 //! compilation and script execution pipeline. All forge functionality is
 //! accessed through Rust crate APIs with no subprocess calls to `forge`.
 
+pub mod anvil;
 pub mod artifacts;
 pub mod broadcast;
 pub mod compiler;
@@ -15,6 +16,7 @@ pub mod sender;
 pub mod version;
 
 // Re-export key public types for convenience.
+pub use anvil::{AnvilConfig, AnvilInstance};
 pub use artifacts::{ArtifactIndex, ArtifactMatch};
 pub use broadcast::{read_all_broadcasts, read_latest_broadcast, BroadcastData, BroadcastTransaction};
 pub use compiler::{compile_files, compile_project, CompilationOutput};
