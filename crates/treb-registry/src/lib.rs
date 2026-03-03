@@ -10,7 +10,10 @@ pub mod types;
 // Re-export registry types at crate root for convenience.
 pub use lookup::LookupStore;
 pub use registry::Registry;
-pub use store::{DeploymentStore, GovernorProposalStore, SafeTransactionStore, TransactionStore};
+pub use store::fork_state::{remove_snapshot, restore_registry, snapshot_registry};
+pub use store::{
+    DeploymentStore, ForkStateStore, GovernorProposalStore, SafeTransactionStore, TransactionStore,
+};
 pub use types::{LookupIndex, RegistryMeta};
 
 // ── File-name constants ────────────────────────────────────────────────────
