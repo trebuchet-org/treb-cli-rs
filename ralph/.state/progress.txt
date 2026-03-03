@@ -39,4 +39,20 @@ Started: Wed Mar  4 12:35:25 AM CET 2026
 - **Learnings for future iterations:**
   - Port rewrite via simple string replacement covers all URL patterns (http://localhost:PORT, localhost:PORT, 127.0.0.1:PORT) without needing regex
   - Each test file that imports framework gets its own compilation — unused items from framework generate warnings per-test-binary (harmless)
+- `assert_cmd::cargo::cargo_bin("treb-cli")` resolves the binary path (crate name, not command name)
+- `--non-interactive` is command-specific (only `run`/`compose`), not a global CLI flag — don't auto-inject it
+---
+
+## 2026-03-04 - P2-US-003
+- Implemented TrebRunner struct wrapping assert_cmd::Command with workdir, 60s timeout, debug output
+- `run()` and `run_with_env()` build Command with project defaults
+- `TREB_TEST_DEBUG=1` prints binary path, args, cwd, and exit code to stderr
+- Created framework_runner.rs with 4 tests: version succeeds, env vars, workdir accessor, invalid subcommand fails
+- Files changed:
+  - crates/treb-cli/tests/framework/runner.rs (implemented from stub)
+  - crates/treb-cli/tests/framework_runner.rs (new)
+- **Learnings for future iterations:**
+  - `--non-interactive` is not a global flag, only on `run` and `compose` commands — TrebRunner doesn't auto-inject it
+  - `assert_cmd::cargo::cargo_bin("treb-cli")` uses the crate/package name, not the binary command name
+  - `cmd.assert()` returns Assert which has `get_output()` for accessing status/stdout/stderr
 ---
