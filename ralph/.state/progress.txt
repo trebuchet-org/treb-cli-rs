@@ -1,0 +1,82 @@
+# Ralph Progress Log
+Started: Tue Mar  3 05:43:07 PM CET 2026
+
+## Codebase Patterns
+- anvil::NodeHandle implements Drop that fires a graceful shutdown signal, but server JoinHandles are NOT aborted on NodeHandle drop — must store AbortHandles and call .abort() explicitly to free ports
+- AbortHandle does NOT call abort on its own drop — explicit abort() is required in a Drop impl
+- AnvilConfig builder pattern: struct fields with builder methods, spawn() async method returning AnvilInstance
+- anvil::try_spawn returns (EthApi, NodeHandle); EthApi has all RPC methods (evm_snapshot, evm_revert, anvil_set_code, get_code, etc.)
+- Alloy crates must be pinned to v1.1.1 via `[patch.crates-io]` to match foundry v1.5.1. Without this, cargo resolves alloy to 1.7.x which breaks alloy-evm 0.24.2 and the anvil crate.
+- All core types use `#[serde(rename_all = "camelCase")]` for JSON serialization
+- Type modules go in `crates/treb-core/src/types/` and are registered in `mod.rs` with pub use re-exports
+- Error variants follow pattern `#[error("category error: {0}")] Category(String)` in TrebError
+- Registry file constants go in `crates/treb-registry/src/lib.rs`
+- Store modules follow pattern: struct with `path: PathBuf` + `data: T`, `new(registry_dir)`, `load()`, `save()` using `crate::io` helpers with `with_file_lock` for atomic writes
+- New store modules go in `crates/treb-registry/src/store/` and are registered in `mod.rs` with re-exports in both `store/mod.rs` and `lib.rs`
+
+---
+
+## 2026-03-03 - P18-US-001
+- What was implemented:
+  - Added `anvil` workspace dependency (foundry v1.5.1 git tag) and wired into treb-forge
+  - Pinned 31 alloy crates to v1.1.1 via [patch.crates-io] to fix version incompatibility
+  - Added `TrebError::Fork(String)` variant to treb-core error types
+  - Defined `ForkState`, `ForkEntry`, `ForkHistoryEntry` types in new `fork.rs` module
+  - Added `FORK_STATE_FILE` constant to treb-registry
+  - Unit tests for serde round-trips, default values, camelCase keys, optional field omission, error display
+- Files changed:
+  - `Cargo.toml` (workspace dep + alloy patches)
+  - `Cargo.lock` (regenerated)
+  - `crates/treb-forge/Cargo.toml` (anvil dep)
+  - `crates/treb-core/src/error.rs` (Fork variant + test)
+  - `crates/treb-core/src/types/mod.rs` (fork module registration)
+  - `crates/treb-core/src/types/fork.rs` (new file)
+  - `crates/treb-registry/src/lib.rs` (FORK_STATE_FILE constant)
+- **Learnings for future iterations:**
+  - The foundry v1.5.1 crates use alloy ^1.1.1, but cargo resolves to 1.7.3 (latest). alloy-evm 0.24.2 from crates.io is incompatible with alloy-rpc-types-eth 1.7.3 (BlockOverrides gained blob_base_fee field). Fix: patch all alloy 1.x crates to v1.1.1 git tag.
+  - All alloy crates are released in lockstep - if one is at 1.7.3, all must be, because they cross-depend on `^1.7.3`. Must patch the entire set.
+  - `cargo update -p X --precise` only works for one package at a time and cascading deps block downgrades. Fresh lockfile regeneration after patching is the way to go.
+---
+
+## 2026-03-03 - P18-US-002
+- What was implemented:
+  - `snapshot_registry()` - copies registry JSON files to snapshot dir, skipping missing
+  - `restore_registry()` - copies all .json files from snapshot dir back, errors if snapshot missing
+  - `remove_snapshot()` - removes snapshot directory and contents
+  - `ForkStateStore` with load, save, get_active_fork, insert_active_fork, remove_active_fork, list_active_forks, add_history methods
+  - insert_active_fork errors on duplicate network; remove_active_fork errors if not active
+  - add_history prepends and caps at 100 entries
+  - 14 unit tests covering all functions
+- Files changed:
+  - `crates/treb-registry/src/store/fork_state.rs` (new file)
+  - `crates/treb-registry/src/store/mod.rs` (module registration + re-export)
+  - `crates/treb-registry/src/lib.rs` (re-exports for ForkStateStore and snapshot functions)
+- **Learnings for future iterations:**
+  - Store modules follow consistent pattern: struct with `path: PathBuf` and `data: T`, with `new(registry_dir)`, `load()`, `save()` methods using `crate::io` helpers
+  - `with_file_lock` + `write_json_file` is the standard atomic write pattern for all stores
+  - Snapshot functions are standalone (not on a struct) since they operate on directory pairs, not a single file
+  - Re-export public items from both `store/mod.rs` and `lib.rs` for ergonomic imports
+---
+
+## 2026-03-03 - P18-US-003
+- What was implemented:
+  - `AnvilConfig` builder with chain_id, fork_url, fork_block_number, port, accounts, block_time fields
+  - `AnvilConfig::spawn()` calls `anvil::try_spawn`, maps errors to `TrebError::Fork`
+  - `AnvilInstance` wraps `EthApi` + `NodeHandle` with metadata (rpc_url, port, chain_id, fork_url, fork_block_number)
+  - `AnvilInstance::snapshot()`, `revert()`, `set_code()`, `get_code()`, `api()` methods
+  - `Drop` impl for `AnvilInstance` that explicitly calls `abort()` on stored `AbortHandle`s
+  - 5 unit tests: spawn_returns_reachable_rpc_url, chain_id_config_works, snapshot_revert_round_trip, set_code_verifiable_via_get_code, dropping_instance_frees_port
+  - Added `tokio = { ..., features = ["net", "time"] }` to workspace for TcpStream and sleep in tests
+- Files changed:
+  - `crates/treb-forge/src/anvil.rs` (new file)
+  - `crates/treb-forge/src/lib.rs` (pub mod anvil + re-exports)
+  - `Cargo.toml` (tokio net+time features)
+  - `ralph/.state/prd.json` (US-001 and US-002 marked passes: true)
+- **Learnings for future iterations:**
+  - `anvil::NodeHandle` implements `Drop` that fires a graceful shutdown signal, but the server `JoinHandle`s in `handle.servers` are NOT aborted when NodeHandle is dropped (just detached) — you must store `AbortHandle`s and call `.abort()` explicitly in a `Drop` impl to free ports immediately
+  - `AbortHandle` does NOT abort on its own drop — must call `.abort()` explicitly
+  - The server task holds `TcpListener` by value inside `axum::serve()` — aborting the task drops the listener and frees the port, but only after the runtime processes the abort (needs at least one `await` yield)
+  - `handle.node_service` and `handle.servers` are PUBLIC fields on `NodeHandle` — can get `AbortHandle`s before moving `handle` into the struct
+  - `NodeConfig::default().silent()` suppresses startup output; `with_port(0)` for OS-assigned ports
+  - Use retry loop (poll every 50ms up to 2s) instead of fixed sleep for port-free test — more robust
+---
