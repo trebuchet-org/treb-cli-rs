@@ -91,3 +91,18 @@ Started: Tue Mar  3 09:39:47 PM CET 2026
   - `serde::Serialize` import in migrate.rs was only for `MigrationReport` — remove it when moving struct to another crate
   - Tests for `run_migrations` belong in `treb-registry/src/migrations.rs`, not in `treb-cli` (canonical source of truth)
 ---
+
+## 2026-03-03 - P19-US-006
+- What was implemented: Integration tests for `treb prune`, `treb reset`, and `treb migrate`
+  - Created `crates/treb-cli/tests/cli_prune_reset_migrate.rs` with 10 end-to-end integration tests
+  - prune tests: dry-run outputs candidates / no file changes, `--yes` removes entry + creates backup, clean registry prints "Nothing to prune."
+  - reset tests: full reset empties stores + creates backup, `--network 1` removes only chain-1 entries, `--namespace default` removes only default-namespace entries
+  - migrate config tests: `--dry-run` prints v2 content without writing, non-dry-run rewrites treb.toml + creates .bak file, already-v2 prints "already v2" message unchanged
+  - migrate registry test: `--dry-run` on current-version registry outputs "up to date"
+- Files changed: crates/treb-cli/tests/cli_prune_reset_migrate.rs (new)
+- **Learnings for future iterations:**
+  - Integration tests can use `treb_registry::Registry::init(tmp.path())` directly (no need to run `treb init` via CLI) — creates `.treb/` structure with all needed files
+  - After `registry.insert_deployment(...)`, CLI subprocess reading `Registry::open(cwd)` sees the written data (inserts are synchronous file writes)
+  - `assert_cmd::cargo::cargo_bin_cmd!("treb-cli")` + `.current_dir(tmp.path())` correctly sets CLI's working directory for all project-root checks
+  - For the prune/reset "nothing to do" path, ensure you put data in the registry that satisfies the "empty" condition (clean refs or empty stores)
+---
