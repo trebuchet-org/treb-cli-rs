@@ -1,3 +1,21 @@
+## 2026-03-04 - P1-US-004
+- What was implemented: Verify Config and Registry Schema Compatibility
+  - Confirmed `config.local.json` field names (`namespace`, `network`) already match Go CLI schema exactly
+  - Documented `registry.json` schema discrepancy: Rust stores `RegistryMeta` (version, createdAt, updatedAt) while Go stores `SolidityRegistry` ({chainId: {namespace: {name: address}}}) — different purposes, no conflict
+  - Added doc comment on `RegistryMeta` struct explaining the discrepancy and resolution
+  - Added doc comment on `REGISTRY_FILE` constant cross-referencing the compatibility analysis
+  - Added doc comment on `LocalConfig` confirming Go field name match
+  - Added `local_config_field_names_match_go_schema` test verifying exactly 2 keys (`namespace`, `network`) with correct values
+- Files changed:
+  - crates/treb-config/src/types.rs (doc comment on LocalConfig + new test)
+  - crates/treb-registry/src/types.rs (doc comment on RegistryMeta)
+  - crates/treb-registry/src/lib.rs (doc comment on REGISTRY_FILE constant)
+- **Learnings for future iterations:**
+  - `LocalConfig` has no `#[serde(rename_all)]` because both fields (`namespace`, `network`) are already single lowercase words — they serialize identically in Rust and Go
+  - Go's `SolidityRegistry` is an on-chain contract registry concept that Rust doesn't implement — the schemas in `registry.json` don't conflict because they serve different purposes
+  - Both CLIs tolerate unknown keys by default (Go via `json.Unmarshal` behavior, Rust via `#[serde(default)]`), so files can coexist if a project switches between CLIs
+---
+
 ## 2026-03-04 - P1-US-003
 - What was implemented: Restructure ForkEntry to Match Go Schema
   - Added `SnapshotEntry` struct with fields: `index`, `snapshot_id`, `command`, `timestamp` (all camelCase via serde)
