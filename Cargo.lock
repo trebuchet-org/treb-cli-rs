@@ -7991,6 +7991,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "treb-safe"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives 1.5.7",
+ "chrono",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "treb-core",
+]
+
+[[package]]
 name = "treb-verify"
 version = "0.1.0"
 dependencies = [
