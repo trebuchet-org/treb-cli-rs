@@ -51,7 +51,7 @@
         "Typecheck passes (cargo check && cargo clippy)"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -68,7 +68,7 @@
         "Typecheck passes (cargo check && cargo clippy)"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -85,7 +85,7 @@
         "Typecheck passes (cargo check && cargo clippy)"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -102,7 +102,7 @@
         "Typecheck passes (cargo check && cargo clippy)"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]

@@ -3,6 +3,9 @@ Started: Tue Mar  3 08:14:07 AM CET 2026
 ---
 
 ## Codebase Patterns
+- ArtifactMatch in artifacts.rs derives Debug (added for ExtractedDeployment compatibility)
+- parse_strategy() is case-insensitive and defaults to DeploymentMethod::Create for unknown values
+- DeploymentMethod enum (treb-core) has FromStr impl expecting uppercase "CREATE"/"CREATE2"/"CREATE3" — sol! events use lowercase "create"/"create2"/"create3"
 - foundry-wallets crate is at `crates/wallets` inside the foundry git repo, pinned to tag v1.5.1
 - WalletSigner::from_private_key() takes &B256 (not a hex string) — parse hex first with `alloy_primitives::hex::FromHex`
 - WalletSigner::from_ledger_path() and from_trezor_path() are async (require hardware wallet connection)
@@ -29,6 +32,10 @@ Started: Tue Mar  3 08:14:07 AM CET 2026
 - alloy sol! macro overloaded events: disambiguated as `EventName_0`, `EventName_1`, etc. (e.g., `ContractCreation_0` for with-salt variant)
 - alloy sol! macro clippy: don't put doc comments followed by blank lines inside sol! blocks — triggers `empty_line_after_outer_attr` warning
 - Import `alloy_sol_types::SolEvent` trait to access `SIGNATURE_HASH`, `decode_log()`, etc. on sol!-generated types
+- foundry-linking crate is at `crates/linking` in the foundry git repo — same `{ git = "...", tag = "v1.5.1" }` pattern; provides `Linker` for library detection
+- @custom:env natspec format: `{type[:optional]} name description...` — split on `{` to parse multiple params from one string
+- Integration test fixture pattern: use std::sync::Once + JSON files with hex-encoded {address, topics[], data} for alloy Log round-tripping
+- alloy_primitives::hex::encode/decode handles 0x-prefixed hex strings correctly
 
 ## 2026-03-03 - US-001 (Phase 6)
 - Implemented: foundry-wallets dependency addition and sender.rs module scaffold
@@ -122,4 +129,70 @@ Started: Tue Mar  3 08:14:07 AM CET 2026
   - clippy warns about large_enum_variant — use `Box<TrebEvent>` in ParsedEvent::Treb variant to reduce enum size
   - encode_log_data() on sol! event types produces LogData for round-trip testing (construct event → encode → decode → verify)
   - All 253 workspace tests pass; 8 new decoder tests covering decode, mixed logs, proxy address capture
+---
+
+## 2026-03-03 - US-003 (Phase 7)
+- Implemented: Deployment extraction from decoded events (ExtractedDeployment, ExtractedCollision, extract_deployments, extract_collisions, parse_strategy)
+- Files changed:
+  - `crates/treb-forge/src/events/deployments.rs` — new module with ExtractedDeployment struct (all 12 fields), ExtractedCollision struct, extract_deployments() and extract_collisions() functions, parse_strategy() helper, 7 unit tests
+  - `crates/treb-forge/src/events/mod.rs` — added deployments module declaration and re-exports
+  - `crates/treb-forge/src/artifacts.rs` — added `#[derive(Debug)]` to ArtifactMatch (required for ExtractedDeployment's Debug derive)
+- **Learnings for future iterations:**
+  - ArtifactMatch didn't derive Debug — needed to add it when embedding in other Debug structs
+  - sol! event field names use camelCase (e.g., `createStrategy`, `bytecodeHash`) — must match exactly in Rust access
+  - parse_strategy() uses case-insensitive matching since sol! events emit lowercase ("create2") but DeploymentMethod::FromStr expects uppercase ("CREATE2")
+  - extract_deployments() takes Option<&ArtifactIndex> — gracefully handles None by setting artifact_match to None
+  - ContractDeployed.location is the deployed address; ContractDeployed.deployer is the deploying account
+  - DeploymentCollision.existingContract (indexed) is the address where collision occurred
+  - All 261 workspace tests pass; 7 new deployment extraction tests
+---
+
+## 2026-03-03 - US-004 (Phase 7)
+- Implemented: Proxy relationship detection from ERC-1967 events (ProxyType enum, ProxyRelationship struct, detect_proxy_relationships, link_proxy_to_deployment)
+- Files changed:
+  - `crates/treb-forge/src/events/proxy.rs` — new module with ProxyType enum (Transparent, UUPS, Beacon, Minimal), ProxyRelationship struct, detect_proxy_relationships() and link_proxy_to_deployment() functions, 8 unit tests
+  - `crates/treb-forge/src/events/mod.rs` — added proxy module declaration and re-exports
+- **Learnings for future iterations:**
+  - Proxy type inference is event-combination based: Upgraded alone → UUPS, Upgraded + AdminChanged from same address → Transparent, BeaconUpgraded → Beacon
+  - AdminChanged can arrive before or after Upgraded — the detect function handles both orderings correctly by always promoting to Transparent when AdminChanged is seen
+  - link_proxy_to_deployment returns Option<usize> (index into deployments slice) rather than Option<&ExtractedDeployment> to avoid borrow checker issues
+  - Minimal proxy type is defined but reserved for future bytecode-based detection (not event-based)
+  - HashMap<Address, ProxyRelationship> naturally handles multiple proxies in the same execution by keying on proxy address
+  - All 269 workspace tests pass; 8 new proxy relationship tests
+---
+
+## 2026-03-03 - US-005 (Phase 7)
+- Implemented: Natspec parameter parser for @custom:env annotations, foundry-linking dependency added and re-exported
+- Files changed:
+  - `Cargo.toml` — added `foundry-linking` to workspace dependencies
+  - `crates/treb-forge/Cargo.toml` — added `foundry-linking = { workspace = true }` dependency
+  - `crates/treb-forge/src/events/params.rs` — new module with ParameterType enum (10 variants), ScriptParameter struct, parse_script_parameters() and parse_custom_env_string() functions, 10 unit tests
+  - `crates/treb-forge/src/events/mod.rs` — added params module declaration and re-exports
+  - `crates/treb-forge/src/lib.rs` — added `pub use foundry_linking;` re-export
+- **Learnings for future iterations:**
+  - foundry-linking crate exists in foundry monorepo at crates/linking — provides Linker for library detection (same git/tag pattern as other foundry crates)
+  - @custom:env annotation format: `{type[:optional]} name description text...` — multiple params concatenated in same string, each starting with `{type}`
+  - parse_custom_env_string splits on `{` and skips the first empty segment — robust approach for multi-parameter strings
+  - Type parsing is case-insensitive (via to_lowercase) to handle any casing in natspec
+  - Unknown type strings are silently skipped (not errors) — graceful degradation for forward compatibility
+  - Missing devdoc, missing run() method, or missing custom:env all return empty Vec (not error) — consistent with pattern of graceful fallback
+  - All 277 workspace tests pass; 10 new params tests covering all parameter types, optionality, multi-param, and edge cases
+---
+
+## 2026-03-03 - US-006 (Phase 7)
+- Implemented: Integration tests with captured log fixtures for the full event parsing pipeline
+- Files changed:
+  - `crates/treb-forge/tests/events_integration_test.rs` — new integration test file with 6 tests: simple_deploy_round_trip, create2_deploy_with_salt_decoded, proxy_relationship_transparent_detection, full_pipeline_end_to_end, collision_fixture_round_trip, fixture_files_are_valid_json
+  - `crates/treb-forge/tests/fixtures/events/simple_deploy.json` — fixture for simple CREATE deployment
+  - `crates/treb-forge/tests/fixtures/events/create2_deploy.json` — fixture for CREATE2 deployment with ContractCreation event
+  - `crates/treb-forge/tests/fixtures/events/proxy_deploy.json` — fixture for Transparent proxy (implementation + proxy deploys + Upgraded + AdminChanged)
+  - `crates/treb-forge/tests/fixtures/events/multi_deploy.json` — fixture for multiple deployments + UUPS proxy + unknown log
+  - `crates/treb-forge/tests/fixtures/events/collision.json` — fixture for DeploymentCollision event
+- **Learnings for future iterations:**
+  - Integration tests for alloy event encoding/decoding can use std::sync::Once to generate fixture files lazily on first test run
+  - alloy_primitives::hex::encode/decode handles 0x-prefixed hex — use for fixture serialization
+  - Log::new(address, topics_vec, data_bytes) constructs Log from parts; entry_to_log/log_to_entry helpers provide clean JSON round-tripping
+  - Address Display uses EIP-55 checksummed format; B256 Display uses 0x-prefixed lowercase — both FromStr parsers are case-insensitive
+  - All dependencies listed in [dependencies] of a crate are available in its integration tests (tests/ directory) — no need to add them as [dev-dependencies]
+  - All 283 workspace tests pass; 6 new integration tests covering simple deploy, CREATE2, transparent proxy, full pipeline, collision, and fixture validity
 ---
