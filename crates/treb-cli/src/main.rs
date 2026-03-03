@@ -195,8 +195,21 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Sync deployment state from on-chain data
-    Sync,
+    /// Sync safe transaction state from the Safe Transaction Service
+    Sync {
+        /// Filter sync to a specific network name or chain ID
+        #[arg(long)]
+        network: Option<String>,
+        /// Remove safe transactions not found on the service
+        #[arg(long)]
+        clean: bool,
+        /// Print raw API responses to stderr
+        #[arg(long)]
+        debug: bool,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Print version information
     Version {
         /// Output as JSON
@@ -359,7 +372,9 @@ async fn main() -> anyhow::Result<()> {
             )
             .await?
         }
-        Commands::Sync => println!("sync: not yet implemented"),
+        Commands::Sync { network, clean, debug, json } => {
+            commands::sync::run(network, clean, debug, json).await?
+        }
         Commands::Version { json } => commands::version::run(json).await?,
         Commands::Networks { json } => commands::networks::run(json).await?,
         Commands::GenDeploy => println!("gen-deploy: not yet implemented"),

@@ -6,6 +6,7 @@ pub mod register;
 pub mod resolve;
 pub mod run;
 pub mod show;
+pub mod sync;
 pub mod tag;
 pub mod verify;
 pub mod version;
