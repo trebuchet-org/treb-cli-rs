@@ -220,15 +220,6 @@ pub async fn run(
     Ok(())
 }
 
-/// Truncate an address to `0xABCD...EFGH` format for display.
-fn truncate_address(address: &str) -> String {
-    if address.len() >= 10 {
-        format!("{}...{}", &address[..6], &address[address.len() - 4..])
-    } else {
-        address.to_string()
-    }
-}
-
 /// Batch verification: verify all unverified (or all with --force) deployments.
 #[allow(clippy::too_many_arguments)]
 async fn run_batch(
@@ -270,7 +261,7 @@ async fn run_batch(
         let address = dep.address.clone();
         let chain_id = dep.chain_id;
 
-        eprintln!("[{}/{}] Verifying {} ({})...", i + 1, total, contract_name, truncate_address(&address));
+        eprintln!("[{}/{}] Verifying {} ({})...", i + 1, total, contract_name, output::truncate_address(&address));
 
         let opts = VerifyOpts {
             verifier: verifier.to_string(),
@@ -389,7 +380,7 @@ async fn run_batch(
             };
             table.add_row(vec![
                 r.contract_name.as_str(),
-                &truncate_address(&r.address),
+                &output::truncate_address(&r.address),
                 r.status.as_str(),
                 detail,
             ]);

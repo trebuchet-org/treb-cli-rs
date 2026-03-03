@@ -87,15 +87,6 @@ pub fn filter_deployments<'a>(
         .collect()
 }
 
-/// Truncate an address to `0xABCD...EFGH` format (first 4 + last 4 hex chars).
-fn truncate_address(address: &str) -> String {
-    if address.len() >= 10 {
-        format!("{}...{}", &address[..6], &address[address.len() - 4..])
-    } else {
-        address.to_string()
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     network: Option<String>,
@@ -163,7 +154,7 @@ pub async fn run(
                 d.namespace.as_str(),
                 &d.chain_id.to_string(),
                 &d.deployment_type.to_string(),
-                &truncate_address(&d.address),
+                &output::truncate_address(&d.address),
                 &d.verification.status.to_string(),
             ]);
         }

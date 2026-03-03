@@ -40,3 +40,12 @@ pub fn print_kv(pairs: &[(&str, &str)]) {
         println!("{:>width$}:  {}", key, value, width = max_key_len);
     }
 }
+
+/// Truncate an address to `0xABCD...EFGH` format (first 4 + last 4 hex chars).
+pub fn truncate_address(address: &str) -> String {
+    if address.len() >= 10 {
+        format!("{}...{}", &address[..6], &address[address.len() - 4..])
+    } else {
+        address.to_string()
+    }
+}
