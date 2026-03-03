@@ -7822,6 +7822,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "chrono",
  "clap",
  "comfy-table",
  "predicates",
@@ -7833,6 +7834,7 @@ dependencies = [
  "treb-config",
  "treb-core",
  "treb-forge",
+ "treb-registry",
 ]
 
 [[package]]
@@ -7904,6 +7906,22 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
+ "treb-core",
+]
+
+[[package]]
+name = "treb-verify"
+version = "0.1.0"
+dependencies = [
+ "alloy-chains",
+ "alloy-primitives 1.5.7",
+ "anyhow",
+ "chrono",
+ "forge-verify",
+ "foundry-cli",
+ "foundry-compilers",
+ "foundry-config",
+ "tempfile",
  "treb-core",
 ]
 

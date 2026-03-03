@@ -1,0 +1,27 @@
+[package]
+name = "treb-verify"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+treb-core = { workspace = true }
+
+# Foundry
+forge-verify = { workspace = true }
+foundry-cli = { workspace = true }
+foundry-compilers = { workspace = true }
+foundry-config = { workspace = true }
+
+# Alloy
+alloy-primitives = { workspace = true }
+alloy-chains = "0.2"
+
+# Error handling
+anyhow = { workspace = true }
+
+[dev-dependencies]
+chrono = { workspace = true }
+tempfile = { workspace = true }
