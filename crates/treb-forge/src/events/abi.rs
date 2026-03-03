@@ -9,6 +9,7 @@ use alloy_sol_types::sol;
 
 sol! {
     /// Details about a deployed contract, passed as a parameter to deployment events.
+    #[derive(Debug)]
     struct DeploymentDetails {
         string artifact;
         string label;
@@ -21,6 +22,7 @@ sol! {
     }
 
     /// A simulated transaction with its metadata.
+    #[derive(Debug)]
     struct SimulatedTransaction {
         bytes32 transactionId;
         string senderId;
@@ -30,6 +32,7 @@ sol! {
     }
 
     /// A transaction's core fields (target, calldata, value).
+    #[derive(Debug)]
     struct Transaction {
         address to;
         bytes data;
@@ -37,11 +40,13 @@ sol! {
     }
 
     /// Emitted when a transaction is simulated during script execution.
+    #[derive(Debug)]
     event TransactionSimulated(
         SimulatedTransaction[] transactions
     );
 
     /// Emitted when a contract is deployed via treb's deployment framework.
+    #[derive(Debug)]
     event ContractDeployed(
         address indexed deployer,
         address indexed location,
@@ -50,6 +55,7 @@ sol! {
     );
 
     /// Emitted when a Safe multisig transaction is queued.
+    #[derive(Debug)]
     event SafeTransactionQueued(
         bytes32 indexed safeTxHash,
         address indexed safe,
@@ -58,6 +64,7 @@ sol! {
     );
 
     /// Emitted when a Safe multisig transaction is executed.
+    #[derive(Debug)]
     event SafeTransactionExecuted(
         bytes32 indexed safeTxHash,
         address indexed safe,
@@ -66,12 +73,14 @@ sol! {
     );
 
     /// Emitted when a deployment would collide with an existing contract.
+    #[derive(Debug)]
     event DeploymentCollision(
         address indexed existingContract,
         DeploymentDetails deployment
     );
 
     /// Emitted when a Governor proposal is created from a deployment script.
+    #[derive(Debug)]
     event GovernorProposalCreated(
         uint256 indexed proposalId,
         address indexed governor,
@@ -82,24 +91,30 @@ sol! {
 
 sol! {
     /// Emitted by CreateX on contract creation with a salt (CREATE2).
+    #[derive(Debug)]
     #[sol(rpc)]
     event ContractCreation(address indexed newContract, bytes32 indexed salt);
     /// Emitted by CreateX on contract creation without a salt.
+    #[derive(Debug)]
     #[sol(rpc)]
     event ContractCreation(address indexed newContract);
     /// Emitted by CreateX on CREATE3 proxy contract creation.
+    #[derive(Debug)]
     #[sol(rpc)]
     event Create3ProxyContractCreation(address indexed newContract, bytes32 indexed salt);
 }
 
 sol! {
     /// Emitted when a proxy's implementation is upgraded.
+    #[derive(Debug)]
     event Upgraded(address indexed implementation);
 
     /// Emitted when a transparent proxy's admin is changed.
+    #[derive(Debug)]
     event AdminChanged(address previousAdmin, address newAdmin);
 
     /// Emitted when a beacon proxy's beacon is upgraded.
+    #[derive(Debug)]
     event BeaconUpgraded(address indexed beacon);
 }
 

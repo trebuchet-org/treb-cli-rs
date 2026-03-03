@@ -5,6 +5,7 @@
 //! event decoding, deployment extraction, proxy detection, and natspec parsing.
 
 pub mod abi;
+pub mod decoder;
 
 // Re-export ABI types for convenience.
 pub use abi::{
@@ -13,3 +14,6 @@ pub use abi::{
     GovernorProposalCreated, SafeTransactionExecuted, SafeTransactionQueued, SimulatedTransaction,
     Transaction, TransactionSimulated, Upgraded,
 };
+
+// Re-export decoder types and functions.
+pub use decoder::{decode_events, CreateXEvent, ParsedEvent, ProxyEvent, TrebEvent};

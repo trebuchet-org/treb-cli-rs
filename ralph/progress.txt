@@ -1,5 +1,5 @@
 # Ralph Progress Log
-Started: Tue Mar  3 07:37:37 AM CET 2026
+Started: Tue Mar  3 08:14:07 AM CET 2026
 ---
 
 ## Codebase Patterns
@@ -21,8 +21,16 @@ Started: Tue Mar  3 07:37:37 AM CET 2026
 - Recursive async functions in Rust require `Pin<Box<dyn Future>>` return type instead of `async fn` — use `Box::pin(async move { ... })`
 - Safe resolution: uses `config.safe` (or `config.address` fallback) for safe address, `config.signer` for sub-sender name
 - Governor resolution: uses `config.governor` (or `config.address` fallback), optional `config.timelock`, `config.proposer` for sub-sender name
+- alloy sol! macro: use `alloy_sol_types::sol;` — generates typed structs with `SIGNATURE_HASH` (via `SolEvent` trait), `decode_log_data()`, etc.
+- alloy sol! macro: add `#[derive(Debug)]` inside sol! blocks on each struct/event to enable Debug formatting on generated types
+- SolEvent::decode_log_data(&log.data) takes 1 arg (no validate bool) in alloy-sol-types 1.5.x
+- LogData fields: `log.data.topics()` returns `&[B256]`, `log.data.data` is the raw bytes (field, not method)
+- Log::new(address, topics_vec, data_bytes) constructs a Log from parts; returns Option
+- alloy sol! macro overloaded events: disambiguated as `EventName_0`, `EventName_1`, etc. (e.g., `ContractCreation_0` for with-salt variant)
+- alloy sol! macro clippy: don't put doc comments followed by blank lines inside sol! blocks — triggers `empty_line_after_outer_attr` warning
+- Import `alloy_sol_types::SolEvent` trait to access `SIGNATURE_HASH`, `decode_log()`, etc. on sol!-generated types
 
-## 2026-03-03 - US-001
+## 2026-03-03 - US-001 (Phase 6)
 - Implemented: foundry-wallets dependency addition and sender.rs module scaffold
 - Files changed:
   - `Cargo.toml` — added `foundry-wallets` to workspace dependencies
@@ -80,4 +88,38 @@ Started: Tue Mar  3 07:37:37 AM CET 2026
   - For PrivateKey senders, the private key hex is extracted from `ResolvedConfig.senders["deployer"].private_key` (the original config), not from the WalletSigner
   - For Safe/Governor senders, only `evm.sender` is set to the contract address — no wallet opts needed
   - cargo check/clippy/test all pass; 224 total workspace tests
+---
+
+## 2026-03-03 - US-001 (Phase 7)
+- Implemented: ABI definitions for ITrebEvents, ICreateX, and ERC-1967 proxy events using alloy sol! macro
+- Files changed:
+  - `Cargo.toml` — added `alloy-sol-types = "1.5"` to workspace dependencies
+  - `crates/treb-forge/Cargo.toml` — added `alloy-sol-types = { workspace = true }` dependency
+  - `crates/treb-forge/src/events/mod.rs` — new module with re-exports of all ABI types
+  - `crates/treb-forge/src/events/abi.rs` — sol! macro definitions for ITrebEvents (6 events, 3 structs), ICreateX (3 events), and ERC-1967 proxy events (3 events); 15 unit tests
+  - `crates/treb-forge/src/lib.rs` — added `pub mod events;` declaration
+- **Learnings for future iterations:**
+  - alloy-sol-types v1.5.x is the transitive version from foundry v1.5.1 — matches workspace alloy alignment
+  - sol! macro generates `SIGNATURE_HASH` on each event type via the `SolEvent` trait — must `use alloy_sol_types::SolEvent;` to access it
+  - Overloaded Solidity events (same name, different params) get disambiguated as `_0`, `_1` suffixes (e.g., `ContractCreation_0`, `ContractCreation_1`)
+  - Don't leave blank lines between doc comments and items inside sol! blocks — clippy warns about `empty_line_after_outer_attr`
+  - All 12 event signature hashes are unique (verified in test), confirming correct event definitions
+  - Module pattern for submodules: create `src/events/` directory with `mod.rs` for declarations + `abi.rs` for implementation
+---
+
+## 2026-03-03 - US-002 (Phase 7)
+- Implemented: Event log decoder with TrebEvent, CreateXEvent, ProxyEvent, and ParsedEvent enums
+- Files changed:
+  - `crates/treb-forge/src/events/decoder.rs` — new module with decode_events() function, 4 enum types, 8 unit tests
+  - `crates/treb-forge/src/events/abi.rs` — added `#[derive(Debug)]` to all sol! struct/event definitions
+  - `crates/treb-forge/src/events/mod.rs` — added decoder module declaration and re-exports
+- **Learnings for future iterations:**
+  - sol!-generated types do NOT derive Debug by default — must add `#[derive(Debug)]` inside sol! blocks on each item
+  - SolEvent::decode_log_data() takes only 1 arg in alloy-sol-types 1.5.x (no `validate: bool` parameter)
+  - LogData.data is a field (not a method) — use `log.data.data` not `log.data.data()`
+  - LogData.topics() IS a method — use `log.data.topics()` to get `&[B256]`
+  - Log::new(address, topics_vec, data_bytes) returns `Option<Log>` — use `.expect()` or `.unwrap()` in tests
+  - clippy warns about large_enum_variant — use `Box<TrebEvent>` in ParsedEvent::Treb variant to reduce enum size
+  - encode_log_data() on sol! event types produces LogData for round-trip testing (construct event → encode → decode → verify)
+  - All 253 workspace tests pass; 8 new decoder tests covering decode, mixed logs, proxy address capture
 ---

@@ -1,20 +1,20 @@
 {
   "project": "treb-cli-rs",
-  "branchName": "ralph/phase-06-sender-system",
-  "description": "Implement the sender/wallet abstraction layer that bridges treb's configuration system with foundry's foundry-wallets crate, resolving SenderConfig definitions into live WalletSigner instances capable of signing transactions and wiring them into ScriptArgs for in-process forge execution.",
+  "branchName": "ralph/phase-07-event-parsing-and-abi-bindings",
+  "description": "Event parsing layer that converts raw EVM logs from forge script execution into structured treb domain events, including ABI bindings, proxy detection, natspec parsing, and library detection support",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Add foundry-wallets Dependency and Sender Module Scaffold",
-      "description": "As a developer, I want foundry-wallets added to the workspace and a sender.rs module scaffolded in treb-forge with the ResolvedSender enum and resolution function signatures so that downstream stories have a stable API surface to implement against.",
+      "title": "ABI Definitions via alloy sol! Macro",
+      "description": "As a developer, I want type-safe ABI definitions for ITrebEvents, ICreateX, and ERC-1967 proxy events using alloy's sol! macro so that event decoding is compile-time verified against the Solidity interface",
       "acceptanceCriteria": [
-        "foundry-wallets = { git = '...', tag = 'v1.5.1' } added to workspace [workspace.dependencies] in root Cargo.toml",
-        "foundry-wallets added to treb-forge/Cargo.toml dependencies",
-        "New sender.rs module in crates/treb-forge/src/ with ResolvedSender enum (Wallet, Safe, Governor, InMemory variants)",
-        "resolve_sender() async function signature accepting name, config, all_senders, and visited set",
-        "resolve_all_senders() async function signature accepting HashMap<String, SenderConfig>",
-        "Module re-exported from treb-forge/src/lib.rs",
-        "cargo check --workspace passes with zero errors"
+        "alloy-sol-types added to workspace deps and treb-forge/Cargo.toml",
+        "sol! macro compiles and generates types for all ITrebEvents events (TransactionSimulated, ContractDeployed, SafeTransactionQueued, SafeTransactionExecuted, DeploymentCollision, GovernorProposalCreated) with DeploymentDetails and SimulatedTransaction structs",
+        "sol! macro compiles and generates types for all ICreateX events (ContractCreation with salt, ContractCreation without salt, Create3ProxyContractCreation)",
+        "sol! macro compiles and generates types for ERC-1967 proxy events (Upgraded, AdminChanged, BeaconUpgraded)",
+        "events module created at crates/treb-forge/src/events/ with mod.rs and abi.rs, registered in lib.rs with re-exports",
+        "Unit test: construct each event type manually and verify field access",
+        "Typecheck passes (cargo check && cargo clippy)"
       ],
       "priority": 1,
       "passes": true,
@@ -22,17 +22,16 @@
     },
     {
       "id": "US-002",
-      "title": "PrivateKey, Ledger, and Trezor Sender Resolution",
-      "description": "As a developer, I want resolve_sender() to handle PrivateKey, Ledger, and Trezor sender types by mapping them to WalletSigner instances so that signable senders produce real signing keys.",
+      "title": "Event Log Decoder",
+      "description": "As a developer, I want a decoder that takes raw EVM Log entries and decodes them against known event signatures into typed Rust enums so that downstream consumers get structured event data",
       "acceptanceCriteria": [
-        "PrivateKey resolution parses hex key (with or without 0x prefix) and calls WalletSigner::from_private_key()",
-        "PrivateKey resolution validates derived address matches configured address field when both are provided",
-        "PrivateKey resolution returns TrebError::Config with sender name and 'invalid private key' on bad input",
-        "Ledger resolution parses derivation_path into LedgerHDPath (default LedgerLive(0)) and calls from_ledger_path()",
-        "Trezor resolution parses derivation_path into TrezorHDPath (default TrezorLive(0)) and calls from_trezor_path()",
-        "Hardware wallet connection errors wrapped with user-friendly messages",
-        "Unit tests for PrivateKey resolution (valid key, invalid key, address mismatch)",
-        "cargo test --workspace passes"
+        "TrebEvent, CreateXEvent, ProxyEvent, and ParsedEvent enums defined with all variants matching the PRD specification in crates/treb-forge/src/events/decoder.rs",
+        "decode_events correctly decodes all ITrebEvents, ICreateX, and ERC-1967 proxy event types from raw logs using topic[0] signature matching",
+        "Unrecognized logs produce ParsedEvent::Unknown (not errors); malformed known events are logged as warnings and skipped",
+        "Proxy events include the emitting log address as proxy_address",
+        "Unit test: synthetic ContractDeployed logs decode with all fields matching known values",
+        "Unit test: mixed logs (treb + proxy + unknown) decode in emission order",
+        "Typecheck passes (cargo check && cargo clippy)"
       ],
       "priority": 2,
       "passes": true,
@@ -40,56 +39,69 @@
     },
     {
       "id": "US-003",
-      "title": "InMemory Sender and Safe/Governor Stubs",
-      "description": "As a developer, I want InMemory test signers using Anvil's default accounts and Safe/Governor stub variants with recursive sub-sender resolution so that all five sender types are handled.",
+      "title": "Deployment Extraction from Events",
+      "description": "As a developer, I want to extract deployment information (address, deployer, strategy, salt, label) from decoded events so that downstream phases can create registry entries",
       "acceptanceCriteria": [
-        "in_memory_signer(index) derives the same accounts as Anvil's default HD wallet mnemonic",
-        "default_test_signers(count) returns count signers starting from index 0",
-        "Unit test verifying index 0 produces address 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-        "Safe sender resolution returns ResolvedSender::Safe with recursively resolved signer from all_senders",
-        "Governor sender resolution returns ResolvedSender::Governor with recursively resolved proposer",
-        "Circular reference detection via visited-set returns error instead of stack overflow",
-        "Unit tests for Safe/Governor stub resolution using PrivateKey as sub-sender",
-        "resolve_all_senders() handles all five sender types correctly",
-        "cargo test --workspace passes"
+        "ExtractedDeployment struct defined with all fields: address, deployer, transaction_id, contract_name, label, strategy, salt, bytecode_hash, init_code_hash, constructor_args, entropy, artifact_match",
+        "extract_deployments maps ContractDeployed events to ExtractedDeployment with all DeploymentDetails fields correctly populated",
+        "Strategy string parsing: 'create' -> Create, 'create2' -> Create2, 'create3' -> Create3, unknown defaults to Create",
+        "extract_collisions returns DeploymentCollision data from DeploymentCollision events",
+        "When ArtifactIndex is None, artifact_match is None without panicking",
+        "Unit tests: extract deployment with all fields verified, extract collision, unknown strategy defaults to Create",
+        "Typecheck passes (cargo check && cargo clippy)"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-004",
-      "title": "Wire Sender Resolution into ScriptArgs Construction",
-      "description": "As a developer, I want resolved senders wired into ScriptArgs.wallets via ScriptConfig so that forge's execution pipeline has access to signing keys configured through treb.",
+      "title": "Proxy Relationship Linking",
+      "description": "As a developer, I want to detect proxy relationships from ERC-1967 events so that proxy-implementation pairs are correctly linked for deployment recording",
       "acceptanceCriteria": [
-        "ScriptConfig gains a field for wallet configuration to inject WalletSigner instances",
-        "build_script_config() updated to call resolve_sender() for the deployer role",
-        "For Wallet/InMemory senders: private key or signer set in ScriptArgs.wallets",
-        "For Safe/Governor senders: only evm.sender address set (signing deferred to Phase 17)",
-        "Existing build_script_config() behavior preserved for callers without wallet integration",
-        "Unit test: PrivateKey sender sets both evm.sender and populates wallet opts",
-        "Unit test: Safe sender sets evm.sender to safe address without wallet opts",
-        "cargo check --workspace passes"
+        "ProxyType enum (Transparent, UUPS, Beacon, Minimal) and ProxyRelationship struct defined in crates/treb-forge/src/events/proxy.rs",
+        "Upgraded event alone results in UUPS proxy type; Upgraded + AdminChanged from same address results in Transparent",
+        "BeaconUpgraded event results in Beacon proxy type",
+        "Multiple proxies in the same execution are tracked independently by address in HashMap<Address, ProxyRelationship>",
+        "link_proxy_to_deployment matches proxy address to the corresponding ExtractedDeployment",
+        "Unit tests: single UUPS, TransparentUpgradeableProxy, Beacon proxy, multiple proxies in same execution",
+        "Typecheck passes (cargo check && cargo clippy)"
       ],
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-005",
-      "title": "Sender Resolution Integration Tests and Error Handling",
-      "description": "As a developer, I want comprehensive integration tests for the full sender resolution pipeline and actionable error messages so that the sender system is validated end-to-end.",
+      "title": "Script Parameter / Natspec Parser",
+      "description": "As a developer, I want to parse @custom:env natspec annotations from compiled script artifacts so that treb can discover what parameters a deployment script expects",
       "acceptanceCriteria": [
-        "Integration test: PrivateKey sender resolved, ScriptConfig built, ScriptArgs has correct sender and wallet",
-        "Integration test: multi-sender config (deployer=PrivateKey, admin=Safe referencing deployer) both resolve correctly",
-        "Error test: invalid private key returns TrebError::Config with sender name",
-        "Error test: address mismatch mentions both expected and derived addresses",
-        "Error test: Safe referencing non-existent sender produces clear error",
-        "Error test: circular reference (A→B→A) returns error instead of stack overflow",
-        "All tests pass with cargo test --workspace",
-        "cargo clippy --workspace passes with no warnings on new code"
+        "foundry-linking added to workspace deps and treb-forge/Cargo.toml, re-exported from lib.rs",
+        "ParameterType enum with all 10 types (String, Address, Uint256, Int256, Bytes32, Bytes, Bool, Sender, Deployment, Artifact) and ScriptParameter struct defined in crates/treb-forge/src/events/params.rs",
+        "parse_script_parameters extracts parameters from devdoc JSON at methods.run().custom:env path",
+        ":optional suffix on type is parsed correctly to set optional=true",
+        "Missing devdoc or missing run() method returns empty vec (not error)",
+        "Unit tests: single param, optional param, multi-param string, empty devdoc",
+        "Typecheck passes (cargo check && cargo clippy)"
       ],
       "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Integration Tests with Captured Log Fixtures",
+      "description": "As a developer, I want integration tests that validate the full event parsing pipeline against realistic log fixtures so that the end-to-end flow from raw logs to structured deployment data is verified",
+      "acceptanceCriteria": [
+        "At least 5 JSON fixture files created in crates/treb-forge/tests/fixtures/events/ (simple_deploy, create2_deploy, proxy_deploy, multi_deploy, collision) with hex-encoded log data matching alloy Log serialization",
+        "Integration test: simple deploy round-trip (raw logs -> decode -> extract deployment) succeeds with correct address and label",
+        "Integration test: CREATE2 deploy with salt correctly decoded with ContractCreation event",
+        "Integration test: proxy relationship detection identifies Transparent type with correct implementation and admin addresses",
+        "Integration test: full pipeline (decode -> extract deployments -> extract proxies -> link relationships) works end-to-end",
+        "All existing tests continue to pass (cargo test --workspace)",
+        "Typecheck passes (cargo check && cargo clippy)"
+      ],
+      "priority": 6,
       "passes": false,
       "notes": ""
     }
