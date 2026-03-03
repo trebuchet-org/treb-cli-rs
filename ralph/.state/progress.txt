@@ -118,7 +118,27 @@
   - Tests that manipulate env vars should save and restore the old value (especially `TERM`) to avoid polluting other tests
 ---
 
+## 2026-03-04 - P1-US-001
+- Renamed SAFE_TXS_FILE from "safe_txs.json" to "safe-txs.json"
+- Renamed GOVERNOR_PROPOSALS_FILE from "governor_proposals.json" to "governor-txs.json"
+- Renamed FORK_STATE_FILE from "fork-state.json" to "fork.json"
+- Updated all doc comments/strings referencing old filenames across 7 files
+- Files changed:
+  - crates/treb-registry/src/lib.rs (constant values)
+  - crates/treb-registry/src/store/governor_proposals.rs (doc comments)
+  - crates/treb-registry/src/store/safe_transactions.rs (doc comments)
+  - crates/treb-registry/src/store/fork_state.rs (doc comments)
+  - crates/treb-core/src/types/fork.rs (doc comment)
+  - crates/treb-cli/src/commands/fork.rs (doc comments)
+  - crates/treb-cli/tests/fork_integration.rs (doc comments + assertion messages)
+- **Learnings for future iterations:**
+  - All code uses constants (not string literals), so changing the constant value propagates everywhere
+  - Only doc comments/strings needed manual updating — grep for old filename patterns to find them all
+  - cargo test --workspace --lib runs all 421 unit tests across all crates
+---
+
 ## Codebase Patterns
+- File constants defined in `crates/treb-registry/src/lib.rs` — all stores reference these constants, changing values there propagates automatically
 - `registry.list_deployments()` returns `Vec<&Deployment>` (borrows from registry); clone with `.into_iter().cloned().collect()` to get owned `Vec<Deployment>` for passing to selector functions that take `&[Deployment]`.
 - `build.rs` cannot import from the binary crate being built — use clap's builder API (not derive macros) to define the CLI structure independently for completion generation.
 - `clap_complete::Shell::from_str("bash")` parses shell name; `generate(shell, &mut Cli::command(), "treb", &mut io::stdout())` for runtime output; `generate_to` for file output.

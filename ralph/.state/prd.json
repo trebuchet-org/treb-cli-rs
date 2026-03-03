@@ -1,162 +1,87 @@
 {
   "project": "treb-cli-rs",
-  "branchName": "ralph/phase-20-tui-polish-release-packaging-and-parasitic-ci",
-  "description": "TUI polish (fuzzy selectors, color, completions), cross-compilation release packaging with a trebup installer, and a parasitic CI workflow that tracks foundry upstream releases automatically.",
+  "branchName": "ralph/phase-01-file-registry-compatibility-fixes",
+  "description": "Fix all on-disk file format differences that prevent the Rust CLI from reading files written by the Go CLI and vice versa. Rename file constants, restructure ForkState/ForkEntry types to match Go's schema, and add a migration that transparently renames old files.",
   "userStories": [
     {
-      "id": "P20-US-001",
-      "title": "Interactive Fuzzy Deployment Selector Infrastructure",
-      "description": "As a developer, I want a reusable fuzzy-search selector for deployments and a shared confirmation prompt abstraction so that commands can fall back to interactive selection when no argument is provided.",
+      "id": "P1-US-001",
+      "title": "Rename Registry File Constants",
+      "description": "As a developer, I want the Rust CLI to use the same registry filenames as the Go CLI so that both tools can read each other's files without conflicts.",
       "acceptanceCriteria": [
-        "`nucleo-matcher`, `dialoguer`, and `console` crates added to workspace `Cargo.toml`",
-        "`crates/treb-cli/src/ui/mod.rs` created with `pub mod selector;` and `pub mod prompt;`, registered in `lib.rs`",
-        "`fuzzy_select_deployment` returns `Ok(None)` for an empty deployment list",
-        "`fuzzy_select_deployment` returns `Err(TrebError::Cli(...))` in non-TTY mode when no query is supplied",
-        "`ui::prompt::confirm(message, default)` returns `default` in non-TTY environments",
-        "Typecheck passes (`cargo check --workspace`)"
+        "SAFE_TXS_FILE constant equals \"safe-txs.json\"",
+        "GOVERNOR_PROPOSALS_FILE constant equals \"governor-txs.json\"",
+        "FORK_STATE_FILE constant equals \"fork.json\"",
+        "grep -r for old filenames (safe_txs.json, governor_proposals.json, fork-state.json) returns zero matches in crates/ (excluding migration code)",
+        "All test fixtures and golden files reference the new filenames",
+        "cargo check --workspace passes with no errors"
       ],
       "priority": 1,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "P20-US-002",
-      "title": "Wire Deployment Selector into Commands",
-      "description": "As a developer, I want `show`, `verify`, and `tag` commands to accept an optional deployment argument and fall back to the fuzzy selector when omitted, so that I can run these commands without remembering deployment IDs.",
+      "id": "P1-US-002",
+      "title": "Restructure ForkState Top-Level Schema",
+      "description": "As a developer, I want ForkState to serialize with a top-level 'forks' key instead of 'activeForks' so that it matches Go's ForkState schema.",
       "acceptanceCriteria": [
-        "`ShowArgs.deployment` changed to `Option<String>`; `fuzzy_select_deployment_id` called when `None`",
-        "`VerifyArgs.deployment` changed to `Option<String>`; selector called when `None` and `--all` is not set",
-        "`TagArgs.deployment` changed to `Option<String>`; selector called when `None`",
-        "`prune.rs` and `reset.rs` use `ui::prompt::confirm()` in place of any ad-hoc confirmation code",
-        "`treb show` with no argument in a non-TTY environment exits with a clear error message, not a panic",
-        "Explicit deployment ID arguments bypass the selector entirely",
-        "Typecheck passes (`cargo check --workspace`)"
+        "ForkState serializes with top-level keys 'forks' and 'history'",
+        "Existing serde round-trip tests pass with the new field name",
+        "All ForkStateStore methods compile and function correctly",
+        "Fork CLI commands (enter, exit, status, revert, restart, history, diff) compile without errors",
+        "cargo check --workspace passes with no errors"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P20-US-003",
-      "title": "Interactive Network Selector and Batch Multiselect",
-      "description": "As a developer, I want a fuzzy network selector for `treb run` and a multiselect for `treb verify --all` so that I can pick networks and deployments interactively without typing exact names.",
+      "id": "P1-US-003",
+      "title": "Restructure ForkEntry to Match Go Schema",
+      "description": "As a developer, I want ForkEntry to include all Go-compatible fields and replace the single evmSnapshotId with a snapshots array so that fork.json is structurally compatible with Go's schema.",
       "acceptanceCriteria": [
-        "`fuzzy_select_network(networks)` added to `ui/selector.rs`; returns `Ok(None)` for empty list and `Err` in non-TTY",
-        "`multiselect_deployments(deployments, prompt)` added to `ui/selector.rs`; returns `Err` in non-TTY",
-        "`run.rs` calls `fuzzy_select_network()` when `--network` is not provided and a TTY is detected",
-        "`verify --all` uses `multiselect_deployments` for interactive subset selection in TTY mode; verifies all in non-TTY",
-        "`fuzzy_select_network` with an empty list returns `Ok(None)` (unit test)",
-        "Typecheck passes (`cargo check --workspace`)"
+        "ForkEntry includes Go-compatible fields: envVarName, originalRpc, anvilPid, pidFile, logFile, enteredAt, snapshots",
+        "SnapshotEntry struct exists with fields: index, snapshotId, command, timestamp",
+        "evm_snapshot_id field is removed from ForkEntry",
+        "Fork enter/exit/revert/restart commands populate and use the new fields correctly",
+        "Serde round-trip test proves ForkEntry serializes with Go-compatible JSON keys",
+        "cargo check --workspace passes with no errors"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P20-US-004",
-      "title": "Colored Output Audit and NO_COLOR Support",
-      "description": "As a developer, I want all color output to respect the `NO_COLOR` environment variable and `--no-color` flag so that the tool works cleanly in CI and colorblind-friendly environments.",
+      "id": "P1-US-004",
+      "title": "Verify Config and Registry Schema Compatibility",
+      "description": "As a developer, I want config.local.json and registry.json schemas verified against Go's schemas so that any discrepancies are documented or fixed.",
       "acceptanceCriteria": [
-        "`owo-colors = { version = \"4\", features = [\"supports-colors\"] }` added to workspace `Cargo.toml`",
-        "`crates/treb-cli/src/ui/color.rs` created with `should_use_color()`, `color_enabled()`, and palette constants (`STAGE`, `SUCCESS`, `WARNING`, `ERROR`, `MUTED`)",
-        "`--no-color` global flag added to `Cli` struct in `main.rs`; calls `owo_colors::control::set_should_colorize(false)` when set",
-        "`should_use_color()` returns `false` when `NO_COLOR` env var is set to any value (unit test)",
-        "`should_use_color()` returns `false` when `TERM=dumb` (unit test)",
-        "Color palette constants compile as `Send + Sync` (compile-time check)",
-        "Typecheck passes (`cargo check --workspace`)"
+        "config.local.json field names confirmed matching Go (or fixed if not)",
+        "registry.json schema discrepancy documented in code comment with chosen resolution",
+        "If resolution requires code changes, those changes are implemented and tested",
+        "cargo check --workspace passes with no errors"
       ],
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P20-US-005",
-      "title": "Shell Completions and Long-Form Help Text",
-      "description": "As a developer, I want `treb completions <shell>` to generate shell completion scripts and all commands to have long-form `--help` descriptions so that the tool is discoverable and self-documenting.",
+      "id": "P1-US-005",
+      "title": "Add File Rename Migration",
+      "description": "As an existing Rust CLI user, I want old-format files to be automatically renamed to the new format on first load so that I experience a seamless upgrade.",
       "acceptanceCriteria": [
-        "`clap_complete = \"4\"` added as a build-dependency in `crates/treb-cli/Cargo.toml`",
-        "`crates/treb-cli/build.rs` emits completion scripts for bash, zsh, fish, and elvish into `$OUT_DIR/completions/`",
-        "`treb completions <shell>` subcommand added; generates completions to stdout at runtime",
-        "Long-form `#[command(long_about)]` or `///` doc comments added for all commands listed in the PRD (run, show, list, verify, tag, register, sync, fork subcommands, prune, reset, migrate, init, config, gen deploy, compose)",
-        "`treb completions bash` exits 0 and stdout contains `treb` (integration test)",
-        "`treb completions fish` exits 0 and stdout contains `complete -c treb` (integration test)",
-        "`treb run --help` stdout contains the substring `\"dry-run\"` (integration test)",
-        "Typecheck passes (`cargo check --workspace`)"
+        "REGISTRY_VERSION equals 2",
+        "MIGRATIONS array contains entry for v1 to v2",
+        "Migration renames safe_txs.json to safe-txs.json when old file exists",
+        "Migration renames governor_proposals.json to governor-txs.json when old file exists",
+        "Migration renames fork-state.json to fork.json when old file exists",
+        "Migration skips rename if new file already exists (no clobber)",
+        "Migration handles fork snapshot directories",
+        "Timestamped backup is created before migration runs",
+        "Unit test verifies migration renames files correctly",
+        "cargo test --workspace passes with all existing and new tests green"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "P20-US-006",
-      "title": "Cross-Compilation CI Matrix",
-      "description": "As a maintainer, I want a GitHub Actions workflow that builds static release binaries for linux-x86_64, linux-aarch64, macos-x86_64, and macos-aarch64 on every version tag so that distributable artifacts are produced automatically.",
-      "acceptanceCriteria": [
-        "`.github/workflows/release-build.yml` created with a 4-target matrix (x86_64-unknown-linux-musl, aarch64-unknown-linux-musl, x86_64-apple-darwin, aarch64-apple-darwin)",
-        "Linux targets use `cross` (Docker-based); macOS targets use `rustup target add` without Docker",
-        "Each target produces a `.tar.gz` archive and a `.sha256` checksum file",
-        "Both files uploaded as workflow artifacts via `actions/upload-artifact@v4`",
-        "`.github/workflows/ci.yml` created with check, test, clippy (`-D warnings`), and fmt jobs using `Swatinem/rust-cache@v2`",
-        "Release build workflow triggers only on `v*.*.*` tags, not on every push",
-        "Typecheck passes (`cargo check --workspace`)"
-      ],
-      "priority": 6,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "P20-US-007",
-      "title": "Release Packaging and `trebup` Installer Script",
-      "description": "As a user, I want to install treb with a single `curl | sh` command so that I can get the correct static binary for my platform without manually downloading from GitHub Releases.",
-      "acceptanceCriteria": [
-        "`.github/workflows/release.yml` created; triggers on `v*.*.*` tags after `release-build.yml` completes; creates a GitHub Release with all 4 `.tar.gz` and `.sha256` files attached",
-        "`scripts/trebup` POSIX shell script created and committed with executable bit",
-        "Script maps `uname -s` / `uname -m` to the correct target for all 4 supported platforms; exits with `\"Unsupported platform\"` for unknown platforms",
-        "Script verifies SHA-256 checksum before writing the binary to disk; exits non-zero on mismatch without installing",
-        "`TREB_INSTALL_DIR` env override respected for custom install path",
-        "`TREB_VERSION` env override respected for installing a specific version",
-        "Typecheck passes (`cargo check --workspace`)"
-      ],
-      "priority": 7,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "P20-US-008",
-      "title": "Parasitic CI for Foundry Version Tracking",
-      "description": "As a maintainer, I want a scheduled GitHub Actions workflow that detects new foundry releases and either auto-merges a clean version bump or opens a GitHub Issue with build errors so that upstream breaking changes are surfaced automatically.",
-      "acceptanceCriteria": [
-        "`.github/workflows/foundry-track.yml` created with `cron: '0 6 * * *'` and `workflow_dispatch` triggers",
-        "Workflow reads `.foundry-pin` at repo root and compares to latest foundry release tag; skips if already up to date",
-        "Bump branch named `foundry-bump/<tag>` is created and pushed on version change",
-        "`cargo check --workspace` and `cargo test --workspace` run on the bump branch with `continue-on-error: true`",
-        "On failure: GitHub Issue opened with build output; duplicate detection via `gh issue list --search` skips creation if matching open issue exists",
-        "On success: PR opened with auto-merge enabled using `gh pr merge --auto --squash`",
-        "`.foundry-pin` file created at repo root containing the current pinned foundry commit SHA",
-        "Workflow `permissions:` block declares `contents: write`, `pull-requests: write`, `issues: write`",
-        "Typecheck passes (`cargo check --workspace`)"
-      ],
-      "priority": 8,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "P20-US-009",
-      "title": "Final End-to-End Integration Test Suite",
-      "description": "As a maintainer, I want a comprehensive end-to-end integration test suite that exercises full multi-command workflows using in-process Anvil so that all phases are confirmed to compose correctly.",
-      "acceptanceCriteria": [
-        "`crates/treb-cli/tests/e2e_workflow.rs` created with `setup_project` helper that copies the counter fixture, spawns Anvil on port 0, and runs `treb init`",
-        "init → run → list workflow test: exit 0, `treb list --json` returns one deployment entry with a non-zero address",
-        "run → show workflow test: `treb show <id> --json` output contains `address`, `contract_name`, `chain_id`",
-        "run → tag → list-with-tag-filter test: `treb list --tag v1.0.0 --json` returns exactly one result",
-        "run → prune --dry-run on clean registry test: exit 0, stdout contains `\"Nothing to prune\"`",
-        "run → reset → list test: `treb list --json` returns empty array after reset",
-        "`treb list --no-color` stdout contains no `\\x1b[` ANSI escape sequences",
-        "All existing tests continue to pass (`cargo test --workspace`)",
-        "Typecheck passes (`cargo check --workspace`)"
-      ],
-      "priority": 9,
-      "passes": true,
+      "passes": false,
       "notes": ""
     }
   ]
