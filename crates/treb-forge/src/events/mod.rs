@@ -7,6 +7,7 @@
 pub mod abi;
 pub mod decoder;
 pub mod deployments;
+pub mod params;
 pub mod proxy;
 
 // Re-export ABI types for convenience.
@@ -29,3 +30,6 @@ pub use deployments::{
 pub use proxy::{
     detect_proxy_relationships, link_proxy_to_deployment, ProxyRelationship, ProxyType,
 };
+
+// Re-export natspec parameter types and functions.
+pub use params::{parse_custom_env_string, parse_script_parameters, ParameterType, ScriptParameter};

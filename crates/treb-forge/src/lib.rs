@@ -26,3 +26,6 @@ pub use sender::{
     default_test_signers, in_memory_signer, resolve_all_senders, resolve_sender, ResolvedSender,
 };
 pub use version::{detect_forge_version, ForgeVersion};
+
+// Re-export foundry-linking for downstream use (Phase 8 deployment recording pipeline).
+pub use foundry_linking;
