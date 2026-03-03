@@ -4,8 +4,10 @@
 //! decoding, deployment hydration, duplicate detection, and registry recording.
 //! All pipeline types and the [`RunPipeline`] orchestrator live here.
 
+mod hydration;
 mod types;
 
+pub use hydration::{generate_deployment_id, hydrate_deployment};
 pub use types::{
     PipelineConfig, PipelineContext, PipelineResult, RecordedDeployment, RecordedTransaction,
     SkippedDeployment,

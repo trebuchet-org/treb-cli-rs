@@ -28,8 +28,8 @@ pub use sender::{
 };
 pub use version::{detect_forge_version, ForgeVersion};
 pub use pipeline::{
-    resolve_git_commit, PipelineConfig, PipelineContext, PipelineResult, RecordedDeployment,
-    RecordedTransaction, SkippedDeployment,
+    generate_deployment_id, hydrate_deployment, resolve_git_commit, PipelineConfig,
+    PipelineContext, PipelineResult, RecordedDeployment, RecordedTransaction, SkippedDeployment,
 };
 
 // Re-export foundry-linking for downstream use (Phase 8 deployment recording pipeline).

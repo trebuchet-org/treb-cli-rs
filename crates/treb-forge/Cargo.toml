@@ -31,6 +31,9 @@ alloy-sol-types = { workspace = true }
 # Use v1.x to match foundry-common's alloy version (workspace has v0.8 for other crates)
 alloy-json-abi = "1.5"
 
+# Datetime
+chrono = { workspace = true }
+
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
