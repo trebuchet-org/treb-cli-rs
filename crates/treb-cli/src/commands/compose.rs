@@ -3,11 +3,13 @@
 //! YAML-based multi-step deployment orchestration that executes multiple
 //! Forge scripts in dependency order.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::Path;
 
 use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
+
+use crate::output;
 
 // ── Compose file schema ──────────────────────────────────────────────────
 
@@ -107,6 +109,130 @@ pub fn validate_compose_file(compose: &ComposeFile) -> anyhow::Result<()> {
     Ok(())
 }
 
+// ── Dependency graph and execution order ─────────────────────────────────
+
+/// Build a valid execution order via topological sort (Kahn's algorithm).
+///
+/// Returns component names in an order where all dependencies of a component
+/// appear before it. Independent components are ordered alphabetically for
+/// determinism. Returns an error if a dependency cycle is detected.
+pub fn build_execution_order(compose: &ComposeFile) -> anyhow::Result<Vec<String>> {
+    // Build in-degree map and adjacency list.
+    let mut in_degree: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut dependents: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+
+    for name in compose.components.keys() {
+        in_degree.entry(name.as_str()).or_insert(0);
+        dependents.entry(name.as_str()).or_default();
+    }
+
+    for (name, component) in &compose.components {
+        if let Some(deps) = &component.deps {
+            *in_degree.entry(name.as_str()).or_insert(0) += deps.len();
+            for dep in deps {
+                dependents
+                    .entry(dep.as_str())
+                    .or_default()
+                    .push(name.as_str());
+            }
+        }
+    }
+
+    // Seed queue with zero-degree nodes (alphabetically sorted via BTreeMap).
+    let mut queue: VecDeque<&str> = in_degree
+        .iter()
+        .filter(|&(_, deg)| *deg == 0)
+        .map(|(&name, _)| name)
+        .collect();
+
+    let mut order: Vec<String> = Vec::with_capacity(compose.components.len());
+
+    while let Some(current) = queue.pop_front() {
+        order.push(current.to_string());
+
+        // Collect and sort dependents for deterministic ordering.
+        let mut next: Vec<&str> = dependents
+            .get(current)
+            .map(|v| v.as_slice())
+            .unwrap_or_default()
+            .to_vec();
+        next.sort();
+
+        for dep in next {
+            let deg = in_degree.get_mut(dep).unwrap();
+            *deg -= 1;
+            if *deg == 0 {
+                queue.push_back(dep);
+            }
+        }
+    }
+
+    if order.len() != compose.components.len() {
+        // Find components still in the cycle (non-zero in-degree).
+        let cycle_members: Vec<&str> = in_degree
+            .iter()
+            .filter(|&(_, deg)| *deg > 0)
+            .map(|(&name, _)| name)
+            .collect();
+        bail!(
+            "dependency cycle detected involving: {}",
+            cycle_members.join(", ")
+        );
+    }
+
+    Ok(order)
+}
+
+/// An entry in the dry-run execution plan.
+#[derive(Debug, Serialize)]
+pub struct PlanEntry {
+    pub step: usize,
+    pub component: String,
+    pub script: String,
+    pub deps: Vec<String>,
+}
+
+/// Build the execution plan for display.
+fn build_plan(compose: &ComposeFile, order: &[String]) -> Vec<PlanEntry> {
+    order
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let component = &compose.components[name];
+            PlanEntry {
+                step: i + 1,
+                component: name.clone(),
+                script: component.script.clone(),
+                deps: component
+                    .deps
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_default(),
+            }
+        })
+        .collect()
+}
+
+/// Display the dry-run plan in human-readable format.
+fn print_dry_run_plan(compose: &ComposeFile, plan: &[PlanEntry]) {
+    eprintln!("Compose dry-run: {}", compose.group);
+    eprintln!("Execution plan ({} components):\n", plan.len());
+    for entry in plan {
+        let deps_str = if entry.deps.is_empty() {
+            String::from("(no dependencies)")
+        } else {
+            format!("deps: {}", entry.deps.join(", "))
+        };
+        eprintln!(
+            "  {step}. {name} — {script}  [{deps}]",
+            step = entry.step,
+            name = entry.component,
+            script = entry.script,
+            deps = deps_str,
+        );
+    }
+}
+
 // ── Command entry point ──────────────────────────────────────────────────
 
 /// Execute a compose deployment pipeline.
@@ -118,13 +244,13 @@ pub async fn run(
     _namespace: Option<String>,
     _profile: Option<String>,
     _broadcast: bool,
-    _dry_run: bool,
+    dry_run: bool,
     _resume: bool,
     _verify: bool,
     _slow: bool,
     _legacy: bool,
     _verbose: bool,
-    _json: bool,
+    json: bool,
     _env_vars: Vec<String>,
     _non_interactive: bool,
 ) -> anyhow::Result<()> {
@@ -132,8 +258,22 @@ pub async fn run(
     let compose = load_compose_file(&file)?;
     validate_compose_file(&compose)?;
 
+    // Build execution order (topological sort).
+    let order = build_execution_order(&compose)?;
+
+    // Dry-run: show execution plan and exit.
+    if dry_run {
+        let plan = build_plan(&compose, &order);
+        if json {
+            output::print_json(&plan)?;
+        } else {
+            print_dry_run_plan(&compose, &plan);
+        }
+        return Ok(());
+    }
+
     // Remaining orchestration implemented in subsequent user stories.
-    let _ = compose;
+    let _ = &order;
     Ok(())
 }
 
@@ -420,5 +560,195 @@ components:
         let compose = load_compose_file(path.to_str().unwrap()).unwrap();
         assert_eq!(compose.group, "test");
         assert_eq!(compose.components.len(), 1);
+    }
+
+    // ── Topological sort tests ─────────────────────────────────────────
+
+    fn make_component(script: &str, deps: Option<Vec<&str>>) -> Component {
+        Component {
+            script: script.to_string(),
+            deps: deps.map(|d| d.into_iter().map(String::from).collect()),
+            env: None,
+            sig: None,
+            args: None,
+            verify: None,
+        }
+    }
+
+    fn make_compose(components: Vec<(&str, Component)>) -> ComposeFile {
+        ComposeFile {
+            group: "test".to_string(),
+            components: components
+                .into_iter()
+                .map(|(name, comp)| (name.to_string(), comp))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn topo_single_component() {
+        let compose = make_compose(vec![
+            ("token", make_component("script/Token.s.sol", None)),
+        ]);
+        let order = build_execution_order(&compose).unwrap();
+        assert_eq!(order, vec!["token"]);
+    }
+
+    #[test]
+    fn topo_independent_components_alphabetical() {
+        let compose = make_compose(vec![
+            ("charlie", make_component("script/C.s.sol", None)),
+            ("alpha", make_component("script/A.s.sol", None)),
+            ("bravo", make_component("script/B.s.sol", None)),
+        ]);
+        let order = build_execution_order(&compose).unwrap();
+        assert_eq!(order, vec!["alpha", "bravo", "charlie"]);
+    }
+
+    #[test]
+    fn topo_linear_chain() {
+        let compose = make_compose(vec![
+            ("a", make_component("script/A.s.sol", None)),
+            ("b", make_component("script/B.s.sol", Some(vec!["a"]))),
+            ("c", make_component("script/C.s.sol", Some(vec!["b"]))),
+        ]);
+        let order = build_execution_order(&compose).unwrap();
+        assert_eq!(order, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn topo_diamond_dependency() {
+        // a -> b, a -> c, b -> d, c -> d
+        let compose = make_compose(vec![
+            ("a", make_component("script/A.s.sol", None)),
+            ("b", make_component("script/B.s.sol", Some(vec!["a"]))),
+            ("c", make_component("script/C.s.sol", Some(vec!["a"]))),
+            ("d", make_component("script/D.s.sol", Some(vec!["b", "c"]))),
+        ]);
+        let order = build_execution_order(&compose).unwrap();
+
+        // 'a' must be first, 'd' must be last, b and c in between (alphabetically: b, c)
+        assert_eq!(order[0], "a");
+        assert_eq!(order[3], "d");
+
+        let b_pos = order.iter().position(|x| x == "b").unwrap();
+        let c_pos = order.iter().position(|x| x == "c").unwrap();
+        assert!(b_pos < order.iter().position(|x| x == "d").unwrap());
+        assert!(c_pos < order.iter().position(|x| x == "d").unwrap());
+    }
+
+    #[test]
+    fn topo_deps_before_dependents() {
+        let compose = make_compose(vec![
+            ("libs", make_component("script/Libs.s.sol", None)),
+            ("core", make_component("script/Core.s.sol", Some(vec!["libs"]))),
+            ("periphery", make_component("script/Periphery.s.sol", Some(vec!["libs", "core"]))),
+        ]);
+        let order = build_execution_order(&compose).unwrap();
+
+        let libs_pos = order.iter().position(|x| x == "libs").unwrap();
+        let core_pos = order.iter().position(|x| x == "core").unwrap();
+        let periphery_pos = order.iter().position(|x| x == "periphery").unwrap();
+
+        assert!(libs_pos < core_pos);
+        assert!(libs_pos < periphery_pos);
+        assert!(core_pos < periphery_pos);
+    }
+
+    #[test]
+    fn topo_direct_cycle_detected() {
+        let compose = make_compose(vec![
+            ("a", make_component("script/A.s.sol", Some(vec!["b"]))),
+            ("b", make_component("script/B.s.sol", Some(vec!["a"]))),
+        ]);
+        let err = build_execution_order(&compose).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("dependency cycle detected"),
+            "expected cycle error, got: {}",
+            msg
+        );
+        // Should name at least one component
+        assert!(
+            msg.contains("a") || msg.contains("b"),
+            "cycle error should name involved components, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn topo_indirect_cycle_detected() {
+        let compose = make_compose(vec![
+            ("a", make_component("script/A.s.sol", Some(vec!["c"]))),
+            ("b", make_component("script/B.s.sol", Some(vec!["a"]))),
+            ("c", make_component("script/C.s.sol", Some(vec!["b"]))),
+        ]);
+        let err = build_execution_order(&compose).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("dependency cycle detected"),
+            "expected cycle error, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn topo_cycle_with_some_independent_nodes() {
+        // 'x' is independent, 'a' <-> 'b' forms a cycle
+        let compose = make_compose(vec![
+            ("a", make_component("script/A.s.sol", Some(vec!["b"]))),
+            ("b", make_component("script/B.s.sol", Some(vec!["a"]))),
+            ("x", make_component("script/X.s.sol", None)),
+        ]);
+        let err = build_execution_order(&compose).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("dependency cycle detected"));
+        // Should mention the cycling components, not 'x'
+        assert!(msg.contains("a") && msg.contains("b"));
+    }
+
+    // ── Plan builder tests ─────────────────────────────────────────────
+
+    #[test]
+    fn build_plan_creates_correct_entries() {
+        let compose = make_compose(vec![
+            ("libs", make_component("script/Libs.s.sol", None)),
+            ("core", make_component("script/Core.s.sol", Some(vec!["libs"]))),
+        ]);
+        let order = build_execution_order(&compose).unwrap();
+        let plan = build_plan(&compose, &order);
+
+        assert_eq!(plan.len(), 2);
+
+        assert_eq!(plan[0].step, 1);
+        assert_eq!(plan[0].component, "libs");
+        assert_eq!(plan[0].script, "script/Libs.s.sol");
+        assert!(plan[0].deps.is_empty());
+
+        assert_eq!(plan[1].step, 2);
+        assert_eq!(plan[1].component, "core");
+        assert_eq!(plan[1].script, "script/Core.s.sol");
+        assert_eq!(plan[1].deps, vec!["libs"]);
+    }
+
+    #[test]
+    fn plan_json_serialization() {
+        let compose = make_compose(vec![
+            ("a", make_component("script/A.s.sol", None)),
+            ("b", make_component("script/B.s.sol", Some(vec!["a"]))),
+        ]);
+        let order = build_execution_order(&compose).unwrap();
+        let plan = build_plan(&compose, &order);
+
+        let json = serde_json::to_string_pretty(&plan).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert!(parsed.is_array());
+        let arr = parsed.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["step"], 1);
+        assert_eq!(arr[0]["component"], "a");
+        assert_eq!(arr[1]["step"], 2);
+        assert_eq!(arr[1]["deps"][0], "a");
     }
 }
