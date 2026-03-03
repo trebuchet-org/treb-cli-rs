@@ -103,7 +103,7 @@
         "cargo check --workspace and cargo clippy --workspace pass"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -122,7 +122,7 @@
         "cargo clippy --workspace passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]
