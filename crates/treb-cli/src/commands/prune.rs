@@ -492,4 +492,91 @@ mod tests {
         assert_eq!(candidates_with_pending.len(), 1);
         assert_eq!(candidates_with_pending[0].kind, PruneCandidateKind::OrphanedPendingEntry);
     }
+
+    #[test]
+    fn destructive_prune_removes_candidates_and_leaves_clean_registry() {
+        let dir = TempDir::new().unwrap();
+        let mut registry = Registry::init(dir.path()).unwrap();
+
+        // dep-1 points to tx-MISSING (broken transaction ref)
+        registry
+            .insert_deployment(make_deployment("dep-1", "tx-MISSING", 1))
+            .unwrap();
+        // tx-1 references dep-MISSING (broken deployment ref)
+        registry
+            .insert_transaction(make_transaction(
+                "tx-1",
+                vec!["dep-MISSING".to_string()],
+                1,
+                TransactionStatus::Executed,
+            ))
+            .unwrap();
+
+        let candidates = find_prune_candidates(&registry, None, false);
+        assert_eq!(candidates.len(), 2, "should have 2 prune candidates");
+
+        // Simulate destructive prune: remove each candidate.
+        for c in candidates {
+            match c.kind {
+                PruneCandidateKind::BrokenTransactionRef | PruneCandidateKind::DestroyedOnChain => {
+                    registry.remove_deployment(&c.id).unwrap();
+                }
+                PruneCandidateKind::BrokenDeploymentRef
+                | PruneCandidateKind::OrphanedPendingEntry => {
+                    registry.remove_transaction(&c.id).unwrap();
+                }
+            }
+        }
+
+        // After pruning, no candidates should remain.
+        let after_candidates = find_prune_candidates(&registry, None, false);
+        assert!(
+            after_candidates.is_empty(),
+            "registry should be clean after destructive prune"
+        );
+    }
+
+    #[test]
+    fn backup_registry_creates_backup_dir() {
+        let dir = TempDir::new().unwrap();
+        // Create a foundry.toml and .treb dir so backup_registry can run.
+        std::fs::write(dir.path().join("foundry.toml"), "").unwrap();
+        let mut registry = Registry::init(dir.path()).unwrap();
+        // Insert something so registry files exist.
+        registry
+            .insert_deployment(make_deployment("dep-1", "tx-1", 1))
+            .unwrap();
+
+        let backup_path = backup_registry(dir.path()).unwrap();
+        assert!(
+            backup_path.exists(),
+            "backup directory should be created: {}",
+            backup_path.display()
+        );
+        // Backup dir should be inside .treb/backups/
+        assert!(
+            backup_path.starts_with(dir.path().join(".treb/backups")),
+            "backup should be inside .treb/backups/"
+        );
+    }
+
+    #[test]
+    fn dry_run_does_not_modify_registry() {
+        let dir = TempDir::new().unwrap();
+        let mut registry = Registry::init(dir.path()).unwrap();
+
+        registry
+            .insert_deployment(make_deployment("dep-1", "tx-MISSING", 1))
+            .unwrap();
+
+        // dry-run: just find candidates, do not remove
+        let candidates = find_prune_candidates(&registry, None, false);
+        assert_eq!(candidates.len(), 1);
+
+        // Registry should still have dep-1.
+        assert!(
+            registry.get_deployment("dep-1").is_some(),
+            "dep-1 should still exist after dry-run (no removal performed)"
+        );
+    }
 }
