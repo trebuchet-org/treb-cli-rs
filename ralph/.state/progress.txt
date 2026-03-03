@@ -26,3 +26,17 @@ Started: Tue Mar  3 09:39:47 PM CET 2026
   - serde rename_all = "camelCase" on enums converts variant names to camelCase — avoid if PascalCase output is desired
   - The v1→v2 config conversion is already implemented via convert_v1_to_resolved() in treb-config, but that returns ResolvedSenders (not TrebFileConfigV2), so a new convert_v1_to_v2() function was written in migrate.rs
 ---
+
+## 2026-03-03 - P19-US-002
+- What was implemented: `treb prune` destructive pruning with backup
+  - The core implementation (backup_registry, confirmation prompt, remove logic, output) was already present from P19-US-001
+  - Added 3 new unit tests to prune.rs:
+    - `destructive_prune_removes_candidates_and_leaves_clean_registry`: verifies after removing all candidates, find_prune_candidates returns empty vec
+    - `backup_registry_creates_backup_dir`: verifies backup dir is created under .treb/backups/
+    - `dry_run_does_not_modify_registry`: verifies dry-run leaves registry unchanged
+- Files changed: crates/treb-cli/src/commands/prune.rs (tests added)
+- **Learnings for future iterations:**
+  - P19-US-001 already implemented the full destructive prune logic; P19-US-002 was primarily about test coverage
+  - `snapshot_registry` copies only specific SNAPSHOT_FILES by name, so having backup_dir inside registry_dir is safe (no recursive loop)
+  - When acceptance criteria say "after X, Y returns empty" — that's a test requirement, not just implementation
+---
