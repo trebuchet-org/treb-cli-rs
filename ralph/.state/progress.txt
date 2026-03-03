@@ -1,4 +1,7 @@
 ## Codebase Patterns
+- `registry.list_deployments()` returns `Vec<&Deployment>` (borrows from registry); clone with `.into_iter().cloned().collect()` to get owned `Vec<Deployment>` for passing to selector functions that take `&[Deployment]`.
+- When changing a clap positional argument from `String` to `Option<String>`, existing tests that expect the old "argument required" error must be updated to match the new fuzzy-selector error messages.
+- `prune.rs` and `reset.rs` use struct-based args (`PruneArgs`, `ResetArgs`) passed to `run(args)` — no separate `run` signature; import `crate::ui::prompt::confirm` via full path since the crate is `treb-cli` (binary, not library in module scope).
 - `treb-cli` is a binary crate; `lib.rs` was created for the `ui` module to be testable. `main.rs` keeps `mod commands; mod output; mod ui;`.
 - `TrebError::Cli(String)` variant added to `treb-core/src/error.rs` for CLI/interaction errors.
 - `dialoguer` requires `features = ["fuzzy-select"]` for `FuzzySelect`; declared in workspace Cargo.toml.
@@ -11,6 +14,21 @@
 # Ralph Progress Log
 Started: Tue Mar  3 10:18:41 PM CET 2026
 ---
+
+## 2026-03-03 - P20-US-002
+- What was implemented: Wired deployment fuzzy selector into commands
+  - Added `fuzzy_select_deployment_id` convenience wrapper to `ui/selector.rs`
+  - `show.rs` and `tag.rs`: deployment arg changed from `&str` to `Option<String>`; fuzzy selector called when `None`
+  - `verify.rs`: removed early bail on missing deployment; fuzzy selector now used when `deployment` is `None` and `!all`
+  - `prune.rs` and `reset.rs`: replaced manual `io::stdin().read_line` confirmation with `crate::ui::prompt::confirm()`; removed unused `io::{self, Write}` imports
+  - Updated `main.rs`: `Show.deployment` and `Tag.deployment` changed from `String` to `Option<String>`
+  - Fixed pre-existing test compilation error in selector.rs (temporary value borrow issue)
+  - Updated `cli_verify.rs` test to expect new error messages ("no deployment selected" / "no TTY")
+- Files changed: ui/selector.rs, commands/show.rs, commands/tag.rs, commands/verify.rs, commands/prune.rs, commands/reset.rs, main.rs, tests/cli_verify.rs
+- **Learnings for future iterations:**
+  - `registry.list_deployments()` returns `Vec<&Deployment>`; must clone with `.into_iter().cloned().collect::<Vec<_>>()` before passing to selectors expecting `&[Deployment]`
+  - `cargo check` passes even with temporary-value borrow errors that only surface during test compilation (`cargo test`); always run `cargo test` not just `cargo check`
+  - Changing positional clap args from required to optional changes UX: old "argument required" error messages become selector/TTY errors
 
 ## 2026-03-03 - P20-US-001
 - What was implemented: Fuzzy deployment selector infrastructure
