@@ -1,19 +1,20 @@
 {
   "project": "treb-cli-rs",
-  "branchName": "ralph/phase-02-core-domain-types-and-serialization",
-  "description": "Core domain types and serialization for treb-core: deployments, transactions, safe transactions, governor proposals, contracts, and networks with byte-identical JSON compatibility to the Go version",
+  "branchName": "ralph/phase-03-configuration-system",
+  "description": "Phase 3 — Configuration System: Build the layered configuration system (treb-config crate) that every downstream phase depends on. Supports treb.toml v1/v2, .treb/config.local.json, .env loading, foundry-config integration, namespace resolution, and config validation.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Foundation Types — Enums, Newtypes, and Module Structure",
-      "description": "As a developer, I want shared enums (DeploymentType, DeploymentMethod, TransactionStatus, VerificationStatus, ProposalStatus), domain newtypes (DeploymentId), and a types module hierarchy in treb-core so that all subsequent domain models have a common vocabulary.",
+      "title": "treb-config Crate Scaffold and Config Types",
+      "description": "As a developer, I want a treb-config workspace crate with all configuration data types (SenderType, SenderConfig, AccountConfig, NamespaceRoles, ForkConfig, TrebFileConfigV2, TrebFileConfigV1, LocalConfig, ResolvedConfig) so that downstream phases have a single source of truth for config structures.",
       "acceptanceCriteria": [
-        "serde, serde_json, chrono (with serde feature), and alloy-json-abi are added to [workspace.dependencies] and wired into treb-core/Cargo.toml",
-        "crates/treb-core/src/types/mod.rs exists with pub mod declarations and is declared as pub mod types in lib.rs",
-        "All five enums (DeploymentType, DeploymentMethod, TransactionStatus, VerificationStatus, ProposalStatus) defined with correct string representations matching Go constants and deriving Clone, Debug, PartialEq, Eq, Hash with Display and FromStr implementations",
-        "DeploymentId newtype wrapping String with Serialize/Deserialize, and primitives module extended with ChainId and TxHash type aliases",
-        "Unit tests for each enum covering serialize/deserialize round-trip, Display formatting, and FromStr parsing",
-        "cargo check, cargo test, and cargo clippy pass with no warnings"
+        "crates/treb-config/ created with Cargo.toml and src/lib.rs; crate added to workspace members and workspace dependencies",
+        "Dependencies added: treb-core, serde, serde_json, toml (0.8), dotenvy (0.15) in workspace deps",
+        "SenderType enum with variants PrivateKey, Ledger, Trezor, Safe, OZGovernor and serde string representations (private_key, ledger, trezor, safe, oz_governor); derives Clone, Debug, PartialEq, Eq, Hash; implements Display and FromStr",
+        "SenderConfig struct with type_ (renamed to 'type' in serde), address, private_key, safe, signer, derivation_path, governor, timelock, proposer — all Optional except type_",
+        "AccountConfig, NamespaceRoles (profile + senders HashMap), ForkConfig (setup), TrebFileConfigV2 (accounts/namespace/fork with serde defaults), TrebFileConfigV1 (slow + ns HashMap), NamespaceConfigV1, LocalConfig (namespace/network with Default), ResolvedConfig structs all defined",
+        "Unit tests for SenderType serde round-trip and Display/FromStr",
+        "cargo check, cargo test, and cargo clippy pass"
       ],
       "priority": 1,
       "passes": true,
@@ -21,79 +22,89 @@
     },
     {
       "id": "US-002",
-      "title": "Deployment Model",
-      "description": "As a developer, I want the Deployment struct and all its nested types (DeploymentStrategy, ProxyInfo, ProxyUpgrade, ArtifactInfo, VerificationInfo, VerifierStatus) defined with exact camelCase JSON field names matching the Go version so that deployment data round-trips identically.",
+      "title": "Local Config Store (.treb/config.local.json)",
+      "description": "As a developer, I want read/write support for .treb/config.local.json so that user defaults (namespace, network) can be persisted and loaded, producing identical JSON to the Go version.",
       "acceptanceCriteria": [
-        "Deployment struct defined in crates/treb-core/src/types/deployment.rs with all required fields (id, namespace, chainId, contractName, label, address, type, transactionId, deploymentStrategy, proxyInfo, artifact, verification, tags, createdAt, updatedAt) using exact camelCase JSON names",
-        "All nested structs (DeploymentStrategy, ProxyInfo, ProxyUpgrade, ArtifactInfo, VerificationInfo, VerifierStatus) defined with correct fields and omitempty semantics via skip_serializing_if",
-        "tags field serializes as null (not []) when None, matching Go's nil slice behavior; all structs derive Clone, Debug, PartialEq, Serialize, Deserialize",
-        "Unit test: construct a Deployment, serialize to JSON, verify camelCase field names and omitempty behavior",
-        "cargo check and cargo test pass"
+        "local.rs module with load_local_config(project_root: &Path) -> Result<LocalConfig> that reads .treb/config.local.json, returns defaults if missing, returns TrebError::Config on invalid JSON",
+        "save_local_config(project_root: &Path, config: &LocalConfig) -> Result<()> that creates .treb/ dir if needed and writes 2-space indented JSON with trailing newline matching Go format",
+        "Round-trip test: save then load asserts equality",
+        "Tests for nonexistent file returning defaults, invalid JSON returning descriptive error, and save creating .treb/ directory; all use tempdir",
+        "cargo check, cargo test, and cargo clippy pass"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-003",
-      "title": "Transaction Model",
-      "description": "As a developer, I want the Transaction struct and its nested types (Operation, SafeContext) defined with exact camelCase JSON field names matching the Go version so that transaction data round-trips identically.",
+      "title": "treb.toml V2 Parser",
+      "description": "As a developer, I want to parse the treb.toml v2 format (accounts, namespace, fork sections) with environment variable expansion so that the primary treb config file can be loaded and used.",
       "acceptanceCriteria": [
-        "Transaction struct defined in crates/treb-core/src/types/transaction.rs with all required fields (id, chainId, hash, status, blockNumber, sender, nonce, deployments, operations, safeContext, environment, createdAt) using exact camelCase JSON names",
-        "Operation struct with fields type, target, method, result (HashMap<String, serde_json::Value>) and SafeContext struct with fields safeAddress, safeTxHash, batchIndex, proposerAddress",
-        "blockNumber omitted when 0 (matching Go omitempty on uint64); deployments and operations serialize as [] when empty (never null)",
-        "All structs derive Clone, Debug, PartialEq, Serialize, Deserialize",
-        "Unit test: construct a Transaction, serialize to JSON, verify field names and omitempty behavior",
-        "cargo check and cargo test pass"
+        "trebfile.rs module with load_treb_config_v2(path: &Path) -> Result<TrebFileConfigV2> using toml crate serde deserialization; returns TrebError::Config with file path on parse error or missing file",
+        "detect_treb_config_format(project_root: &Path) -> TrebConfigFormat enum (None, V1, V2) that inspects treb.toml content for [accounts]/[namespace]/[fork] vs [ns.] sections",
+        "expand_env_vars(s: &str) -> String utility replacing ${VAR_NAME} with env var values (unset vars become empty string); applied to all string fields in AccountConfig/SenderConfig after parsing",
+        "Test fixture treb_v2.toml with accounts, namespaces, and fork config; tests for parsing, env var expansion, format detection, and invalid TOML error messages",
+        "cargo check, cargo test, and cargo clippy pass"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-004",
-      "title": "Safe Transaction and Governor Proposal Models",
-      "description": "As a developer, I want the SafeTransaction struct (with SafeTxData and Confirmation sub-types) and the GovernorProposal struct defined with exact camelCase JSON field names matching the Go version so that safe transaction and proposal data round-trips identically.",
+      "title": "treb.toml V1 Parser (Legacy Read-Only)",
+      "description": "As a developer, I want to parse the legacy treb.toml v1 format with [ns.*] sections so that existing projects using the old format continue to work during migration.",
       "acceptanceCriteria": [
-        "SafeTransaction struct defined in crates/treb-core/src/types/safe_transaction.rs with all required fields including transactions (Vec<SafeTxData>), confirmations (Vec<Confirmation>), and optional executedAt/executionTxHash/description",
-        "SafeTxData struct (to, value, data, operation) and Confirmation struct (signer, signature, confirmedAt) defined; GovernorProposal struct defined in governor_proposal.rs with all required fields",
-        "Vec fields (transactions, transactionIds, confirmations) serialize as [] when empty; executionTxHash omitted when empty string matching Go omitempty",
-        "All structs derive Clone, Debug, PartialEq, Serialize, Deserialize",
-        "Unit tests for both SafeTransaction and GovernorProposal serialization",
-        "cargo check and cargo test pass"
+        "trebfile_v1.rs module with load_treb_config_v1(path: &Path) -> Result<TrebFileConfigV1> with serde deserialization and env var expansion on sender string fields",
+        "convert_v1_to_resolved(v1: &TrebFileConfigV1, namespace: &str) -> ResolvedSenders that merges ns.default with ns.<namespace> (namespace overrides default), extracts profile and slow flag",
+        "Test fixture treb_v1.toml with [ns.default] and [ns.live] sections; tests for parsing, merge/override semantics, and slow flag resolution",
+        "cargo check, cargo test, and cargo clippy pass"
       ],
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-005",
-      "title": "Contract and Network Models",
-      "description": "As a developer, I want the Contract struct and its nested artifact types (Artifact, BytecodeObject, ArtifactMetadata) plus the Network type defined so that compiled Solidity artifact data can be represented and serialized.",
+      "title": ".env Loading and Foundry Config Integration",
+      "description": "As a developer, I want .env/.env.local file loading via dotenvy and foundry-config integration so that environment variables and foundry.toml treb-specific senders are available as config sources.",
       "acceptanceCriteria": [
-        "Contract struct defined in crates/treb-core/src/types/contract.rs with fields name, path, artifactPath (omitempty), version (omitempty), artifact (Option<Artifact>, omitempty)",
-        "Artifact struct with abi (serde_json::Value), bytecode/deployedBytecode (BytecodeObject), methodIdentifiers (HashMap), rawMetadata, metadata (ArtifactMetadata) and all nested sub-types defined",
-        "Network type alias (pub type Network = String) defined; all structs derive Clone, Debug, PartialEq, Serialize, Deserialize",
-        "Unit test: construct a Contract with minimal Artifact, serialize, verify JSON structure",
-        "cargo check and cargo test pass"
+        "env.rs module with load_dotenv(project_root: &Path) loading .env then .env.local (local overrides); silently skips missing files; uses dotenvy::from_path_override or equivalent",
+        "foundry.rs module with load_foundry_config wrapping foundry_config::Config::load() and extract_treb_senders_from_foundry parsing [profile.*.treb.senders.*] sections, plus rpc_endpoints extraction",
+        "Tests: .env loading, .env.local overriding .env, missing .env not erroring, load_foundry_config with valid fixture, extract treb senders from foundry.toml",
+        "cargo check, cargo test, and cargo clippy pass"
       ],
       "priority": 5,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Golden File Fixtures and Serde Round-Trip Tests",
-      "description": "As a developer, I want comprehensive serde round-trip tests using real Go-generated JSON fixtures so that I can verify byte-level JSON compatibility between the Rust and Go implementations.",
+      "title": "Namespace Resolution and Layered Config Merger",
+      "description": "As a developer, I want namespace resolution (v2 hierarchical dot-walk) and a layered config merger so that all config sources combine into a single ResolvedConfig with deterministic precedence.",
       "acceptanceCriteria": [
-        "Test fixture directory at crates/treb-core/tests/fixtures/ with golden JSON files extracted from real Go-generated data: deployment.json, deployment_with_proxy.json, transaction.json, safe_transaction.json, deployments_map.json, transactions_map.json, safe_txs_map.json",
-        "Integration test file at crates/treb-core/tests/serde_golden.rs with round-trip tests: deserialize JSON to Rust type, re-serialize, parse both as serde_json::Value, assert equality",
-        "Tests cover HashMap<String, Deployment>, HashMap<String, Transaction>, and HashMap<String, SafeTransaction> deserialization matching actual registry file format",
-        "All fixture files are real data from Go version (from /home/sol/projects/treb-state/.treb/), scrubbed of sensitive data if needed",
-        "All tests pass with cargo test and cargo clippy passes with no warnings"
+        "resolver.rs module with resolve_namespace_v2 that walks dot-separated hierarchy (default -> production -> production.ntt), accumulating profile/sender overrides at each level, mapping role names to AccountConfig",
+        "resolve_config(opts: ResolveOpts) -> Result<ResolvedConfig> that loads dotenv first, then LocalConfig, detects treb.toml format, loads appropriate version, falls back to foundry.toml senders, applies CLI overrides with highest precedence",
+        "Tests: 3-level deep namespace resolution, sender role-to-account mapping with overrides, full resolution with treb.toml v2 + local config + env, fallback to foundry.toml, CLI overrides precedence, missing namespace error listing available namespaces",
+        "cargo check, cargo test, and cargo clippy pass"
       ],
       "priority": 6,
-      "passes": true,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Config Validation and Error Reporting",
+      "description": "As a developer, I want config validation that checks sender cross-references and field requirements so that users get actionable error messages telling them exactly what to fix.",
+      "acceptanceCriteria": [
+        "validation.rs module with validate_config(config: &ResolvedConfig) -> Result<Vec<ConfigWarning>> and validate_sender(name, sender) -> Result<Vec<ConfigWarning>>",
+        "Sender validation: private_key requires private_key field; ledger/trezor warn without address/derivation_path; safe requires safe field and signer referencing existing sender; oz_governor requires governor field and proposer referencing existing sender",
+        "ConfigWarning struct with message and location fields; error messages include source file, section/key, and actionable fix instructions",
+        "Tests: valid config passes, safe with missing signer errors, oz_governor with missing proposer errors, private_key without key errors, ledger without address warns, error messages contain fix instructions",
+        "cargo check, cargo test, and cargo clippy pass"
+      ],
+      "priority": 7,
+      "passes": false,
       "notes": ""
     }
   ]
