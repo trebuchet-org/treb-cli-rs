@@ -1,12 +1,16 @@
 //! `treb gen-deploy` command implementation.
 //!
 //! Compiles the project, resolves a named contract artifact, extracts
-//! constructor parameters from its ABI, and builds a `TemplateContext`
-//! for Solidity deployment script generation.
+//! constructor parameters from its ABI, and generates a Solidity
+//! deployment script using Handlebars templates.
 
 use std::env;
+use std::fs;
+use std::path::{Component, Path, PathBuf};
 
 use anyhow::{bail, Context};
+use handlebars::Handlebars;
+use serde::Serialize;
 
 use treb_forge::{compile_project, ArtifactIndex};
 
@@ -26,8 +30,7 @@ pub struct ConstructorParam {
     pub solidity_type: String,
 }
 
-/// Context built from artifact introspection, used to render deployment
-/// script templates in later stories.
+/// Context built from artifact introspection.
 #[derive(Debug)]
 pub struct TemplateContext {
     /// Contract name from the resolved artifact.
@@ -46,6 +49,130 @@ pub struct TemplateContext {
     pub constructor_params: Vec<ConstructorParam>,
 }
 
+// ── Render types (Handlebars + JSON) ─────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+struct RenderParam {
+    name: String,
+    solidity_type: String,
+    placeholder: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RenderContext {
+    contract_name: String,
+    import_path: String,
+    is_library: bool,
+    has_constructor_params: bool,
+    constructor_params: Vec<RenderParam>,
+    constructor_args: String,
+}
+
+#[derive(Debug, Serialize)]
+struct GenDeployOutput {
+    contract_name: String,
+    strategy: String,
+    proxy: Option<String>,
+    output_path: String,
+    code: String,
+}
+
+// ── CREATE template ──────────────────────────────────────────────────────
+
+const CREATE_TEMPLATE: &str = "\
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.13;
+
+import {Script, console} from \"forge-std/Script.sol\";
+import { {{contract_name}} } from \"{{import_path}}\";
+
+contract Deploy{{contract_name}} is Script {
+    function run() public {
+        vm.startBroadcast();
+{{#if is_library}}
+
+        // Library deployment — deploy raw bytecode
+        bytes memory bytecode = type({{contract_name}}).creationCode;
+        address deployed;
+        assembly {
+            deployed := create(0, add(bytecode, 0x20), mload(bytecode))
+        }
+        require(deployed != address(0), \"{{contract_name}} deployment failed\");
+
+        console.log(\"{{contract_name}} deployed at:\", deployed);
+{{else}}
+{{#if has_constructor_params}}
+
+        // TODO: Set constructor arguments
+{{#each constructor_params}}
+        {{solidity_type}} {{name}} = {{placeholder}}; // TODO: replace placeholder
+{{/each}}
+
+        {{@root.contract_name}} deployed = new {{@root.contract_name}}({{@root.constructor_args}});
+{{else}}
+
+        {{contract_name}} deployed = new {{contract_name}}();
+{{/if}}
+
+        console.log(\"{{contract_name}} deployed at:\", address(deployed));
+{{/if}}
+
+        vm.stopBroadcast();
+    }
+}
+";
+
+// ── Helpers ──────────────────────────────────────────────────────────────
+
+/// Return a Solidity placeholder literal for the given type.
+fn placeholder_for_type(solidity_type: &str) -> String {
+    match solidity_type {
+        t if t.starts_with("uint") || t.starts_with("int") => "0".to_string(),
+        "address" => "address(0)".to_string(),
+        "bool" => "false".to_string(),
+        "string" => "\"\"".to_string(),
+        "bytes" => "\"\"".to_string(),
+        t if t.starts_with("bytes") => format!("{t}(0)"),
+        _ => "/* TODO */".to_string(),
+    }
+}
+
+/// Compute a Solidity-compatible relative import path from one file to another.
+///
+/// Both paths must be relative to the project root.
+fn relative_import_path(from_file: &Path, to_file: &Path) -> String {
+    let from_dir = from_file.parent().unwrap_or(Path::new(""));
+    let from_components: Vec<_> = from_dir.components().collect();
+    let to_components: Vec<_> = to_file.components().collect();
+
+    let common_len = from_components
+        .iter()
+        .zip(to_components.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    let mut parts: Vec<&str> = Vec::new();
+
+    // Go up from the source directory.
+    for _ in 0..(from_components.len() - common_len) {
+        parts.push("..");
+    }
+
+    // Then descend to the target.
+    for comp in &to_components[common_len..] {
+        if let Component::Normal(s) = comp {
+            parts.push(s.to_str().unwrap());
+        }
+    }
+
+    let joined = parts.join("/");
+    if joined.starts_with("..") {
+        joined
+    } else {
+        format!("./{joined}")
+    }
+}
+
 // ── Command entry point ──────────────────────────────────────────────────
 
 pub async fn run(
@@ -53,8 +180,8 @@ pub async fn run(
     strategy: Option<&str>,
     proxy: Option<&str>,
     proxy_contract: Option<&str>,
-    _output: Option<&str>,
-    _json: bool,
+    output: Option<&str>,
+    json: bool,
 ) -> anyhow::Result<()> {
     // ── Validate strategy flag ───────────────────────────────────────────
     let strategy_str = strategy.unwrap_or("create");
@@ -146,7 +273,7 @@ pub async fn run(
         .to_string_lossy()
         .to_string();
 
-    let _context = TemplateContext {
+    let context = TemplateContext {
         contract_name: artifact_match.name.clone(),
         artifact_path,
         is_library,
@@ -156,11 +283,81 @@ pub async fn run(
         constructor_params,
     };
 
-    // ── Diagnostic output ────────────────────────────────────────────────
-    eprintln!(
-        "Generating deploy script for {} (strategy: {}, proxy: {:?})",
-        _context.contract_name, _context.strategy, _context.proxy,
-    );
+    // ── Determine output path ────────────────────────────────────────────
+    let output_path = output
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(format!("script/Deploy{}.s.sol", context.contract_name))
+        });
+
+    // ── Build render context ─────────────────────────────────────────────
+    let import_path =
+        relative_import_path(&output_path, Path::new(&context.artifact_path));
+
+    let has_constructor_params = !context.constructor_params.is_empty();
+    let constructor_args = context
+        .constructor_params
+        .iter()
+        .map(|p| p.name.clone())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let render_params: Vec<RenderParam> = context
+        .constructor_params
+        .iter()
+        .map(|p| RenderParam {
+            name: p.name.clone(),
+            solidity_type: p.solidity_type.clone(),
+            placeholder: placeholder_for_type(&p.solidity_type),
+        })
+        .collect();
+
+    let render_ctx = RenderContext {
+        contract_name: context.contract_name.clone(),
+        import_path,
+        is_library: context.is_library,
+        has_constructor_params,
+        constructor_params: render_params,
+        constructor_args,
+    };
+
+    // ── Render template ──────────────────────────────────────────────────
+    let mut hbs = Handlebars::new();
+    hbs.register_escape_fn(handlebars::no_escape);
+    hbs.set_strict_mode(true);
+    hbs.register_template_string("create", CREATE_TEMPLATE)
+        .context("failed to register CREATE template")?;
+
+    let code = hbs
+        .render("create", &render_ctx)
+        .context("failed to render deployment script")?;
+
+    // ── Output ───────────────────────────────────────────────────────────
+    if json {
+        let json_output = GenDeployOutput {
+            contract_name: context.contract_name,
+            strategy: context.strategy,
+            proxy: context.proxy,
+            output_path: output_path.to_string_lossy().to_string(),
+            code,
+        };
+        crate::output::print_json(&json_output)?;
+    } else {
+        if let Some(parent) = output_path.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent).with_context(|| {
+                    format!("failed to create directory: {}", parent.display())
+                })?;
+            }
+        }
+        fs::write(&output_path, &code).with_context(|| {
+            format!("failed to write deploy script: {}", output_path.display())
+        })?;
+        eprintln!(
+            "Generated deploy script: {}",
+            output_path.display()
+        );
+    }
 
     Ok(())
 }
@@ -261,5 +458,214 @@ mod tests {
 
         assert_eq!(ctx.strategy, "create2");
         assert!(ctx.proxy.is_none());
+    }
+
+    // ── placeholder_for_type ─────────────────────────────────────────────
+
+    #[test]
+    fn placeholder_uint256() {
+        assert_eq!(placeholder_for_type("uint256"), "0");
+    }
+
+    #[test]
+    fn placeholder_int128() {
+        assert_eq!(placeholder_for_type("int128"), "0");
+    }
+
+    #[test]
+    fn placeholder_address() {
+        assert_eq!(placeholder_for_type("address"), "address(0)");
+    }
+
+    #[test]
+    fn placeholder_bool() {
+        assert_eq!(placeholder_for_type("bool"), "false");
+    }
+
+    #[test]
+    fn placeholder_string() {
+        assert_eq!(placeholder_for_type("string"), "\"\"");
+    }
+
+    #[test]
+    fn placeholder_bytes() {
+        assert_eq!(placeholder_for_type("bytes"), "\"\"");
+    }
+
+    #[test]
+    fn placeholder_bytes32() {
+        assert_eq!(placeholder_for_type("bytes32"), "bytes32(0)");
+    }
+
+    #[test]
+    fn placeholder_unknown_type() {
+        assert_eq!(placeholder_for_type("tuple"), "/* TODO */");
+    }
+
+    // ── relative_import_path ─────────────────────────────────────────────
+
+    #[test]
+    fn import_path_script_to_src() {
+        let from = Path::new("script/DeployCounter.s.sol");
+        let to = Path::new("src/Counter.sol");
+        assert_eq!(relative_import_path(from, to), "../src/Counter.sol");
+    }
+
+    #[test]
+    fn import_path_root_to_src() {
+        let from = Path::new("Deploy.s.sol");
+        let to = Path::new("src/Counter.sol");
+        assert_eq!(relative_import_path(from, to), "./src/Counter.sol");
+    }
+
+    #[test]
+    fn import_path_nested_to_src() {
+        let from = Path::new("script/nested/Deploy.s.sol");
+        let to = Path::new("src/Counter.sol");
+        assert_eq!(relative_import_path(from, to), "../../src/Counter.sol");
+    }
+
+    #[test]
+    fn import_path_same_dir() {
+        let from = Path::new("src/Deploy.s.sol");
+        let to = Path::new("src/Counter.sol");
+        assert_eq!(relative_import_path(from, to), "./Counter.sol");
+    }
+
+    // ── Template rendering ───────────────────────────────────────────────
+
+    fn render_create(ctx: &RenderContext) -> String {
+        let mut hbs = Handlebars::new();
+        hbs.register_escape_fn(handlebars::no_escape);
+        hbs.set_strict_mode(true);
+        hbs.register_template_string("create", CREATE_TEMPLATE).unwrap();
+        hbs.render("create", ctx).unwrap()
+    }
+
+    #[test]
+    fn render_contract_with_constructor() {
+        let ctx = RenderContext {
+            contract_name: "Counter".to_string(),
+            import_path: "../src/Counter.sol".to_string(),
+            is_library: false,
+            has_constructor_params: true,
+            constructor_params: vec![
+                RenderParam {
+                    name: "initialCount".to_string(),
+                    solidity_type: "uint256".to_string(),
+                    placeholder: "0".to_string(),
+                },
+                RenderParam {
+                    name: "owner".to_string(),
+                    solidity_type: "address".to_string(),
+                    placeholder: "address(0)".to_string(),
+                },
+            ],
+            constructor_args: "initialCount, owner".to_string(),
+        };
+
+        let code = render_create(&ctx);
+        assert!(code.contains("// SPDX-License-Identifier: UNLICENSED"));
+        assert!(code.contains("pragma solidity ^0.8.13;"));
+        assert!(code.contains("import {Script, console} from \"forge-std/Script.sol\";"));
+        assert!(code.contains("import { Counter } from \"../src/Counter.sol\";"));
+        assert!(code.contains("contract DeployCounter is Script"));
+        assert!(code.contains("uint256 initialCount = 0;"));
+        assert!(code.contains("address owner = address(0);"));
+        assert!(code.contains("Counter deployed = new Counter(initialCount, owner);"));
+        assert!(code.contains("console.log(\"Counter deployed at:\", address(deployed));"));
+    }
+
+    #[test]
+    fn render_contract_no_constructor() {
+        let ctx = RenderContext {
+            contract_name: "SimpleContract".to_string(),
+            import_path: "../src/SimpleContract.sol".to_string(),
+            is_library: false,
+            has_constructor_params: false,
+            constructor_params: vec![],
+            constructor_args: String::new(),
+        };
+
+        let code = render_create(&ctx);
+        assert!(code.contains("SimpleContract deployed = new SimpleContract();"));
+        assert!(!code.contains("TODO: Set constructor"));
+    }
+
+    #[test]
+    fn render_library() {
+        let ctx = RenderContext {
+            contract_name: "MathLib".to_string(),
+            import_path: "../src/MathLib.sol".to_string(),
+            is_library: true,
+            has_constructor_params: false,
+            constructor_params: vec![],
+            constructor_args: String::new(),
+        };
+
+        let code = render_create(&ctx);
+        assert!(code.contains("type(MathLib).creationCode"));
+        assert!(code.contains("deployed := create(0,"));
+        assert!(code.contains("console.log(\"MathLib deployed at:\", deployed);"));
+        assert!(!code.contains("new MathLib"));
+    }
+
+    #[test]
+    fn render_has_spdx_pragma_imports() {
+        let ctx = RenderContext {
+            contract_name: "Token".to_string(),
+            import_path: "../src/Token.sol".to_string(),
+            is_library: false,
+            has_constructor_params: false,
+            constructor_params: vec![],
+            constructor_args: String::new(),
+        };
+
+        let code = render_create(&ctx);
+        // First line should be SPDX
+        assert!(code.starts_with("// SPDX-License-Identifier: UNLICENSED\n"));
+        // Should have pragma
+        assert!(code.contains("pragma solidity ^0.8.13;"));
+        // Should have forge-std import
+        assert!(code.contains("import {Script, console} from \"forge-std/Script.sol\";"));
+        // Should inherit from Script
+        assert!(code.contains("is Script"));
+        // Should have vm.startBroadcast/stopBroadcast
+        assert!(code.contains("vm.startBroadcast();"));
+        assert!(code.contains("vm.stopBroadcast();"));
+    }
+
+    // ── GenDeployOutput serialization ────────────────────────────────────
+
+    #[test]
+    fn gen_deploy_output_serializes_to_json() {
+        let output = GenDeployOutput {
+            contract_name: "Counter".to_string(),
+            strategy: "create".to_string(),
+            proxy: None,
+            output_path: "script/DeployCounter.s.sol".to_string(),
+            code: "// generated code".to_string(),
+        };
+
+        let json = serde_json::to_value(&output).unwrap();
+        assert_eq!(json["contract_name"], "Counter");
+        assert_eq!(json["strategy"], "create");
+        assert!(json["proxy"].is_null());
+        assert_eq!(json["output_path"], "script/DeployCounter.s.sol");
+        assert_eq!(json["code"], "// generated code");
+    }
+
+    #[test]
+    fn gen_deploy_output_with_proxy() {
+        let output = GenDeployOutput {
+            contract_name: "Token".to_string(),
+            strategy: "create2".to_string(),
+            proxy: Some("uups".to_string()),
+            output_path: "script/DeployToken.s.sol".to_string(),
+            code: "// code".to_string(),
+        };
+
+        let json = serde_json::to_value(&output).unwrap();
+        assert_eq!(json["proxy"], "uups");
     }
 }
