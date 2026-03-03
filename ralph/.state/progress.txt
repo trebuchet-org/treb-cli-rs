@@ -1,3 +1,26 @@
+## 2026-03-03 - P20-US-006
+- What was implemented: Cross-Compilation CI Matrix
+  - Created `.github/workflows/release-build.yml` with a 4-target build matrix:
+    - x86_64-unknown-linux-musl (ubuntu-latest + cross)
+    - aarch64-unknown-linux-musl (ubuntu-latest + cross)
+    - x86_64-apple-darwin (macos-latest + rustup target add)
+    - aarch64-apple-darwin (macos-latest + rustup target add)
+  - Linux targets install `cross` via `cargo install cross --locked` and build with `cross build --release`
+  - macOS targets use `rustup target add <target>` and `cargo build --release`
+  - Each target packages binary into `treb-<tag>-<target>.tar.gz` with sha256 checksum
+  - SHA256 computed portably: `sha256sum` on Linux, `shasum -a 256` on macOS (command -v check)
+  - Both `.tar.gz` and `.sha256` uploaded as named workflow artifacts via `actions/upload-artifact@v4`
+  - Workflow triggers only on `v*.*.*` tags (`on.push.tags: ['v*.*.*']`)
+  - Updated `ci.yml` fmt job to include `Swatinem/rust-cache@v2` (was previously missing)
+- Files changed: .github/workflows/release-build.yml (new), .github/workflows/ci.yml (updated)
+- **Learnings for future iterations:**
+  - GitHub Actions `if: matrix.use_cross` works for boolean matrix fields; use `if: matrix.use_cross == false` for the inverse
+  - `shell: bash` on matrix steps is needed for macOS runners (default shell is zsh on macOS GitHub Actions)
+  - `echo "VAR=val" >> "$GITHUB_ENV"` passes env vars between steps; available in subsequent steps as `${{ env.VAR }}`
+  - `cross` must be installed with `cargo install cross --locked`; `Swatinem/rust-cache@v2` with `key: ${{ matrix.target }}` ensures separate caches per target
+  - sha256 command is not portable: use `command -v sha256sum` check to fall back to `shasum -a 256` on macOS
+---
+
 ## 2026-03-03 - P20-US-005
 - What was implemented: Shell completions and long-form help text
   - Added `clap_complete = "4"` to workspace `Cargo.toml` and `treb-cli/Cargo.toml` (both regular dep and build-dep)
