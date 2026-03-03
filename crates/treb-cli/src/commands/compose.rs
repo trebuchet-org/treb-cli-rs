@@ -3,8 +3,9 @@
 //! YAML-based multi-step deployment orchestration that executes multiple
 //! Forge scripts in dependency order.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::env;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
@@ -116,6 +117,57 @@ pub fn validate_compose_file(compose: &ComposeFile) -> anyhow::Result<()> {
     Ok(())
 }
 
+// ── Resume state tracking ────────────────────────────────────────────────
+
+/// State file for tracking compose execution progress.
+const COMPOSE_STATE_FILE: &str = ".treb/compose-state.json";
+
+/// Persistent state for resume support.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ComposeState {
+    /// Hash of the compose file contents at the start of the run.
+    pub compose_hash: String,
+    /// Names of components that completed successfully.
+    pub completed: Vec<String>,
+}
+
+/// Compute a hash of file contents for change detection.
+fn compute_file_hash(contents: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    contents.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+/// Load the compose state file, returning `None` if it doesn't exist.
+pub fn load_compose_state() -> anyhow::Result<Option<ComposeState>> {
+    let path = Path::new(COMPOSE_STATE_FILE);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let contents = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read compose state file: {}", path.display()))?;
+    let state: ComposeState = serde_json::from_str(&contents)
+        .with_context(|| format!("failed to parse compose state file: {}", path.display()))?;
+    Ok(Some(state))
+}
+
+/// Save the compose state file.
+fn save_compose_state(state: &ComposeState) -> anyhow::Result<()> {
+    let path = Path::new(COMPOSE_STATE_FILE);
+    let contents = serde_json::to_string_pretty(state)?;
+    std::fs::write(path, contents)
+        .with_context(|| format!("failed to write compose state file: {}", path.display()))?;
+    Ok(())
+}
+
+/// Delete the compose state file if it exists.
+fn delete_compose_state() {
+    let path = Path::new(COMPOSE_STATE_FILE);
+    if path.exists() {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 // ── Dependency graph and execution order ─────────────────────────────────
 
 /// Build a valid execution order via topological sort (Kahn's algorithm).
@@ -197,10 +249,16 @@ pub struct PlanEntry {
     pub component: String,
     pub script: String,
     pub deps: Vec<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub skipped: bool,
 }
 
 /// Build the execution plan for display.
-fn build_plan(compose: &ComposeFile, order: &[String]) -> Vec<PlanEntry> {
+fn build_plan(
+    compose: &ComposeFile,
+    order: &[String],
+    skip_set: &HashSet<String>,
+) -> Vec<PlanEntry> {
     order
         .iter()
         .enumerate()
@@ -215,6 +273,7 @@ fn build_plan(compose: &ComposeFile, order: &[String]) -> Vec<PlanEntry> {
                     .as_ref()
                     .cloned()
                     .unwrap_or_default(),
+                skipped: skip_set.contains(name),
             }
         })
         .collect()
@@ -230,12 +289,18 @@ fn print_dry_run_plan(compose: &ComposeFile, plan: &[PlanEntry]) {
         } else {
             format!("deps: {}", entry.deps.join(", "))
         };
+        let skip_str = if entry.skipped {
+            "  (skipped — already completed)"
+        } else {
+            ""
+        };
         eprintln!(
-            "  {step}. {name} — {script}  [{deps}]",
+            "  {step}. {name} — {script}  [{deps}]{skip}",
             step = entry.step,
             name = entry.component,
             script = entry.script,
             deps = deps_str,
+            skip = skip_str,
         );
     }
 }
@@ -252,7 +317,7 @@ pub async fn run(
     profile: Option<String>,
     broadcast: bool,
     dry_run: bool,
-    _resume: bool,
+    resume: bool,
     verify: bool,
     slow: bool,
     legacy: bool,
@@ -268,9 +333,32 @@ pub async fn run(
     // Build execution order (topological sort).
     let order = build_execution_order(&compose)?;
 
+    // ── Resume state handling ─────────────────────────────────────────
+    let compose_contents = std::fs::read_to_string(&file)
+        .with_context(|| format!("failed to read compose file: {}", file))?;
+    let compose_hash = compute_file_hash(&compose_contents);
+
+    let skip_set: HashSet<String> = if resume {
+        if let Some(state) = load_compose_state()? {
+            // Warn if compose file changed since the state was saved.
+            if state.compose_hash != compose_hash {
+                eprintln!(
+                    "Warning: compose file has changed since the last run; resuming anyway"
+                );
+            }
+            state.completed.into_iter().collect()
+        } else {
+            HashSet::new()
+        }
+    } else {
+        // Fresh start: clear any existing state file.
+        delete_compose_state();
+        HashSet::new()
+    };
+
     // Dry-run: show execution plan and exit.
     if dry_run {
-        let plan = build_plan(&compose, &order);
+        let plan = build_plan(&compose, &order, &skip_set);
         if json {
             output::print_json(&plan)?;
         } else {
@@ -287,9 +375,10 @@ pub async fn run(
     if broadcast && !non_interactive {
         let is_tty = io::stdin().is_terminal();
         if is_tty {
+            let executing_count = order.iter().filter(|n| !skip_set.contains(*n)).count();
             eprintln!(
                 "About to broadcast {} component(s) to the network.",
-                order.len()
+                executing_count
             );
             eprintln!("  Compose: {}", compose.group);
             if let Some(ref ns) = namespace {
@@ -314,15 +403,34 @@ pub async fn run(
     // ── Open registry ─────────────────────────────────────────────────
     let mut registry = Registry::open(&cwd).context("failed to open registry")?;
 
+    // ── Initialize state tracking ─────────────────────────────────────
+    let mut state = ComposeState {
+        compose_hash: compose_hash.clone(),
+        completed: skip_set.iter().cloned().collect(),
+    };
+
     // ── Execute components in topological order ───────────────────────
     let total = order.len();
-    let mut completed = 0;
+    let mut completed = skip_set.len();
 
     if !json {
         eprintln!("Compose: {} ({} components)", compose.group, total);
     }
 
     for (i, name) in order.iter().enumerate() {
+        // Skip already-completed components (resume mode).
+        if skip_set.contains(name) {
+            if !json {
+                eprintln!(
+                    "[{}/{}] Component '{}' (skipped — already completed)",
+                    i + 1,
+                    total,
+                    name
+                );
+            }
+            continue;
+        }
+
         let component = &compose.components[name];
 
         if !json {
@@ -419,6 +527,10 @@ pub async fn run(
                 if !json {
                     eprintln!("[{}/{}] Component '{}' completed", i + 1, total, name);
                 }
+
+                // Update state file after each successful component.
+                state.completed.push(name.clone());
+                save_compose_state(&state)?;
             }
             Err(e) => {
                 eprintln!(
@@ -434,6 +546,9 @@ pub async fn run(
             }
         }
     }
+
+    // Full successful completion: delete the state file.
+    delete_compose_state();
 
     if !json {
         eprintln!(
@@ -885,7 +1000,7 @@ components:
             ("core", make_component("script/Core.s.sol", Some(vec!["libs"]))),
         ]);
         let order = build_execution_order(&compose).unwrap();
-        let plan = build_plan(&compose, &order);
+        let plan = build_plan(&compose, &order, &HashSet::new());
 
         assert_eq!(plan.len(), 2);
 
@@ -893,11 +1008,13 @@ components:
         assert_eq!(plan[0].component, "libs");
         assert_eq!(plan[0].script, "script/Libs.s.sol");
         assert!(plan[0].deps.is_empty());
+        assert!(!plan[0].skipped);
 
         assert_eq!(plan[1].step, 2);
         assert_eq!(plan[1].component, "core");
         assert_eq!(plan[1].script, "script/Core.s.sol");
         assert_eq!(plan[1].deps, vec!["libs"]);
+        assert!(!plan[1].skipped);
     }
 
     #[test]
@@ -907,7 +1024,7 @@ components:
             ("b", make_component("script/B.s.sol", Some(vec!["a"]))),
         ]);
         let order = build_execution_order(&compose).unwrap();
-        let plan = build_plan(&compose, &order);
+        let plan = build_plan(&compose, &order, &HashSet::new());
 
         let json = serde_json::to_string_pretty(&plan).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -996,5 +1113,106 @@ components:
         let (key, value) = run_cmd::parse_env_var("MY_KEY=my_value").unwrap();
         assert_eq!(key, "MY_KEY");
         assert_eq!(value, "my_value");
+    }
+
+    // ── Resume state tests ───────────────────────────────────────────
+
+    #[test]
+    fn compute_file_hash_deterministic() {
+        let content = "group: test\ncomponents:\n  a:\n    script: A.s.sol\n";
+        let hash1 = compute_file_hash(content);
+        let hash2 = compute_file_hash(content);
+        assert_eq!(hash1, hash2);
+        assert_eq!(hash1.len(), 16); // 16 hex chars
+    }
+
+    #[test]
+    fn compute_file_hash_changes_on_different_content() {
+        let hash1 = compute_file_hash("content A");
+        let hash2 = compute_file_hash("content B");
+        assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn compose_state_serialization_roundtrip() {
+        let state = ComposeState {
+            compose_hash: "abc123".to_string(),
+            completed: vec!["libs".to_string(), "core".to_string()],
+        };
+        let json = serde_json::to_string_pretty(&state).unwrap();
+        let parsed: ComposeState = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.compose_hash, "abc123");
+        assert_eq!(parsed.completed, vec!["libs", "core"]);
+    }
+
+    #[test]
+    fn compose_state_save_and_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_path = dir.path().join(".treb");
+        std::fs::create_dir_all(&state_path).unwrap();
+        let state_file = state_path.join("compose-state.json");
+
+        let state = ComposeState {
+            compose_hash: "test_hash".to_string(),
+            completed: vec!["alpha".to_string(), "bravo".to_string()],
+        };
+
+        // Write state
+        let contents = serde_json::to_string_pretty(&state).unwrap();
+        std::fs::write(&state_file, &contents).unwrap();
+
+        // Read state back
+        let loaded: ComposeState =
+            serde_json::from_str(&std::fs::read_to_string(&state_file).unwrap()).unwrap();
+        assert_eq!(loaded.compose_hash, "test_hash");
+        assert_eq!(loaded.completed, vec!["alpha", "bravo"]);
+    }
+
+    #[test]
+    fn plan_with_skip_set_marks_skipped() {
+        let compose = make_compose(vec![
+            ("a", make_component("script/A.s.sol", None)),
+            ("b", make_component("script/B.s.sol", Some(vec!["a"]))),
+            ("c", make_component("script/C.s.sol", Some(vec!["a"]))),
+        ]);
+        let order = build_execution_order(&compose).unwrap();
+
+        let mut skip_set = HashSet::new();
+        skip_set.insert("a".to_string());
+
+        let plan = build_plan(&compose, &order, &skip_set);
+
+        assert_eq!(plan.len(), 3);
+        assert!(plan[0].skipped, "'a' should be skipped");
+        assert!(!plan[1].skipped, "'b' should not be skipped");
+        assert!(!plan[2].skipped, "'c' should not be skipped");
+    }
+
+    #[test]
+    fn plan_json_skipped_field_only_when_true() {
+        let compose = make_compose(vec![
+            ("a", make_component("script/A.s.sol", None)),
+            ("b", make_component("script/B.s.sol", Some(vec!["a"]))),
+        ]);
+        let order = build_execution_order(&compose).unwrap();
+
+        let mut skip_set = HashSet::new();
+        skip_set.insert("a".to_string());
+
+        let plan = build_plan(&compose, &order, &skip_set);
+        let json = serde_json::to_string_pretty(&plan).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        let arr = parsed.as_array().unwrap();
+        // 'a' should have skipped: true
+        assert_eq!(arr[0]["skipped"], true);
+        // 'b' should not have skipped field (skip_serializing_if)
+        assert!(arr[1].get("skipped").is_none());
+    }
+
+    #[test]
+    fn delete_compose_state_no_error_when_missing() {
+        // Should not panic or error when file doesn't exist
+        delete_compose_state();
     }
 }
