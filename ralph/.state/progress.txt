@@ -1,5 +1,23 @@
+## 2026-03-03 - P20-US-004
+- What was implemented: Colored output audit and NO_COLOR support
+  - Added `owo-colors = { version = "4", features = ["supports-colors"] }` to workspace `Cargo.toml` and `treb-cli/Cargo.toml`
+  - Created `crates/treb-cli/src/ui/color.rs` with `should_use_color()`, `color_enabled()`, and `const` palette constants (`STAGE`, `SUCCESS`, `WARNING`, `ERROR`, `MUTED`) of type `owo_colors::Style`
+  - Added `--no-color` global flag to `Cli` struct in `main.rs`; calls `ui::color::color_enabled(cli.no_color)` early in `main()` which calls `owo_colors::set_override(false)` when disabled
+  - Registered `pub mod color;` in `ui/mod.rs`
+  - Added unit tests for `should_use_color()` with `NO_COLOR` env var and `TERM=dumb`
+  - Compile-time `Send + Sync` check via const closure in `color.rs`
+- Files changed: Cargo.toml, Cargo.lock, crates/treb-cli/Cargo.toml, crates/treb-cli/src/ui/mod.rs, crates/treb-cli/src/ui/color.rs, crates/treb-cli/src/main.rs
+- **Learnings for future iterations:**
+  - owo-colors v4 API: use `owo_colors::set_override(false)` to disable colors globally — NOT `owo_colors::control::set_should_colorize(false)` (that `control` module doesn't exist in v4)
+  - `owo_colors::Style::new().cyan().bold()` etc. are all `const fn` in v4, so palette constants can be `const` values
+  - `std::env::set_var` / `remove_var` are `unsafe` in Rust edition 2024 — require `unsafe {}` blocks in tests
+  - Tests that manipulate env vars should save and restore the old value (especially `TERM`) to avoid polluting other tests
+---
+
 ## Codebase Patterns
 - `registry.list_deployments()` returns `Vec<&Deployment>` (borrows from registry); clone with `.into_iter().cloned().collect()` to get owned `Vec<Deployment>` for passing to selector functions that take `&[Deployment]`.
+- owo-colors v4: disable colors via `owo_colors::set_override(false)` (not `owo_colors::control::set_should_colorize` — that path doesn't exist). `Style::new().cyan().bold()` etc. are `const fn`.
+- `std::env::set_var`/`remove_var` require `unsafe {}` in Rust edition 2024; always restore env vars in tests (save old value, restore after test).
 - When changing a clap positional argument from `String` to `Option<String>`, existing tests that expect the old "argument required" error must be updated to match the new fuzzy-selector error messages.
 - `prune.rs` and `reset.rs` use struct-based args (`PruneArgs`, `ResetArgs`) passed to `run(args)` — no separate `run` signature; import `crate::ui::prompt::confirm` via full path since the crate is `treb-cli` (binary, not library in module scope).
 - `treb-cli` is a binary crate; `lib.rs` was created for the `ui` module to be testable. `main.rs` keeps `mod commands; mod output; mod ui;`.
