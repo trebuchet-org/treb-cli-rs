@@ -13,6 +13,9 @@ Started: Tue Mar  3 05:43:07 PM CET 2026
 - Registry file constants go in `crates/treb-registry/src/lib.rs`
 - Store modules follow pattern: struct with `path: PathBuf` + `data: T`, `new(registry_dir)`, `load()`, `save()` using `crate::io` helpers with `with_file_lock` for atomic writes
 - New store modules go in `crates/treb-registry/src/store/` and are registered in `mod.rs` with re-exports in both `store/mod.rs` and `lib.rs`
+- Signal handling: use `tokio::select!` on `ctrl_c()` + SIGTERM wrapped in `#[cfg(unix)]`; requires `signal` feature in tokio workspace dep
+- In Rust 2024 edition, avoid `ref` in `if let (Some(ref x), ...)` patterns when matching `&Option<T>` — the compiler implicitly borrows; use `if let (Some(x), ...)` instead
+- Port reachability: `is_port_reachable(port: u16) -> bool` using `TcpStream::connect` with port=0 guard is the idiomatic pattern for checking if an Anvil instance is alive
 
 ---
 
@@ -101,6 +104,37 @@ Started: Tue Mar  3 05:43:07 PM CET 2026
   - Stubs for subcommands use `ForkSubcommand::Variant { .. }` with `..` to discard all fields cleanly
   - Test the clap parsing by building a minimal inner TestCli that mirrors the real CLI structure
   - config.local.json restoration on exit was deferred (not yet implemented) — the acceptance criteria mention it but tests don't verify it
+---
+
+## 2026-03-03 - P18-US-006
+- What was implemented:
+  - `DevSubcommand` enum with `Anvil { subcommand: AnvilSubcommand }` variant (clap Subcommand derive)
+  - `AnvilSubcommand` enum with Start, Stop, Restart, Status variants
+  - `run_anvil_start`: spawns Anvil with fork_url from fork state (if --network), deploys CreateX, installs SIGINT/SIGTERM handlers, blocks as foreground server, adds history on exit
+  - `run_anvil_stop`: checks port reachability, removes stale fork state entries for specific or all networks
+  - `run_anvil_status`: reads fork state, checks reachability, displays table with Network/RPC URL/Port/Chain ID/Fork Block/Started At/Status; supports --json
+  - `update_fork_state_with_anvil` helper: updates rpc_url/port/chain_id on fork entry after spawn
+  - `is_port_reachable(port)` helper: returns false for port 0, checks 127.0.0.1:port via TcpStream
+  - `wait_for_shutdown_signal`: tokio::select! on ctrl_c + SIGTERM (Unix) / ctrl_c only (non-Unix)
+  - Added `update_active_fork` method to ForkStateStore (needed to fill in rpc_url/port after spawn)
+  - Added `signal` feature to workspace tokio dependency
+  - `Commands::Dev` in main.rs changed from bare variant to `Dev { subcommand: DevSubcommand }`
+  - `pub mod dev` registered in commands/mod.rs
+  - 12 unit tests: 7 clap parsing + anvil_start_updates_fork_state + status_reports_correctly + port_zero_is_not_reachable + running_anvil_port_is_reachable + dropped_anvil_port_is_not_reachable
+- Files changed:
+  - `crates/treb-registry/src/store/fork_state.rs` (added update_active_fork)
+  - `Cargo.toml` (signal feature for tokio)
+  - `crates/treb-cli/src/commands/dev.rs` (new file)
+  - `crates/treb-cli/src/commands/mod.rs` (pub mod dev added)
+  - `crates/treb-cli/src/main.rs` (Dev variant changed to subcommand dispatch)
+  - `ralph/.state/prd.json` (P18-US-006 marked passes: true)
+- **Learnings for future iterations:**
+  - ForkStateStore needed a new `update_active_fork` method (in-place update of existing entry) to fill in rpc_url/port after Anvil spawns — the `insert_active_fork` method errors on duplicates so it can't be used for updates
+  - Signal handling: use `tokio::select!` with `ctrl_c()` + Unix SIGTERM; wrap Unix-specific code in `#[cfg(unix)]` blocks for portability; tokio `signal` feature must be added to workspace tokio dep
+  - The `is_port_reachable(port: u16)` helper with port=0 guard is a clean, reusable pattern for checking if an Anvil node is still alive without storing PIDs
+  - run_anvil_start blocks the process until signal — tests can't call it end-to-end; test the internal helpers (update_fork_state_with_anvil, is_port_reachable) separately
+  - In Rust 2024 edition, `if let (Some(ref net), ...)` triggers "explicit ref binding in implicitly-borrowing context" error — use `if let (Some(net), ...)` instead when matching on `&Option<T>`
+
 ---
 
 ## 2026-03-03 - P18-US-004
