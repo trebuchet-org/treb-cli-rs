@@ -19,6 +19,9 @@ foundry-common = { git = "https://github.com/foundry-rs/foundry", tag = "v1.5.1"
 # Alloy — version aligned with foundry v1.5.1
 alloy-primitives = "1.4.1"
 
+# CLI
+clap = { version = "4", features = ["derive"] }
+
 # Error handling & async
 thiserror = "2"
 anyhow = "1"
