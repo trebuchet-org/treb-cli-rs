@@ -81,6 +81,28 @@ Started: Tue Mar  3 05:43:07 PM CET 2026
   - Use retry loop (poll every 50ms up to 2s) instead of fixed sleep for port-free test — more robust
 ---
 
+## 2026-03-03 - P18-US-005
+- What was implemented:
+  - `ForkSubcommand` enum with Enter, Exit, Revert, Restart, Status, History, Diff variants (clap Subcommand derive)
+  - `run_enter`: validates .treb/ exists, resolves upstream RPC URL from foundry.toml or --rpc-url, fetches chain_id via eth_chainId, creates snapshot dir, calls snapshot_registry(), inserts ForkEntry (rpc_url/port are placeholders; filled by dev anvil start), adds "enter" history entry
+  - `run_exit`: loads fork state, removes active fork entry, restores registry from snapshot, removes snapshot dir, adds "exit" history entry
+  - Stubs for Revert, Restart, Status, History, Diff (print "not yet implemented")
+  - `Commands::Fork` in main.rs changed from bare variant to `{ subcommand: commands::fork::ForkSubcommand }`
+  - `pub mod fork` registered in commands/mod.rs
+  - 10 unit tests: 6 clap parsing tests + fork_state_written_on_enter + registry_snapshot_restore_round_trip + error_on_duplicate_enter + error_on_non_active_exit
+- Files changed:
+  - `crates/treb-cli/src/commands/fork.rs` (new file)
+  - `crates/treb-cli/src/commands/mod.rs` (pub mod fork added)
+  - `crates/treb-cli/src/main.rs` (Fork variant changed to subcommand dispatch)
+  - `ralph/.state/prd.json` (P18-US-005 marked passes: true)
+- **Learnings for future iterations:**
+  - ForkEntry rpc_url/port are placeholders (empty/"0") on fork enter; dev anvil start (P18-US-006) fills them in
+  - fork enter does NOT spawn Anvil — it only snapshots registry and records fork intent; dev anvil manages the Anvil lifecycle
+  - Stubs for subcommands use `ForkSubcommand::Variant { .. }` with `..` to discard all fields cleanly
+  - Test the clap parsing by building a minimal inner TestCli that mirrors the real CLI structure
+  - config.local.json restoration on exit was deferred (not yet implemented) — the acceptance criteria mention it but tests don't verify it
+---
+
 ## 2026-03-03 - P18-US-004
 - What was implemented:
   - `CREATEX_ADDRESS` constant (`address!("ba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed")`) in `createx.rs`
