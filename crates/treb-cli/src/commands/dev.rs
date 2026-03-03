@@ -139,6 +139,19 @@ pub async fn run_anvil_start(
     if let (Some(net), Some(snapshot)) = (&network, fork_entry_snapshot) {
         update_fork_state_with_anvil(&treb_dir, snapshot, &rpc_url, actual_port, chain_id)
             .context("failed to update fork state with Anvil details")?;
+
+        // Take an initial EVM snapshot so `fork revert` can restore to this state.
+        let snapshot_id = take_evm_snapshot_http(&rpc_url).await;
+        match snapshot_id {
+            Ok(id) => {
+                store_fork_state_snapshot_id(&treb_dir, net, id);
+            }
+            Err(e) => {
+                // Non-fatal: revert will just skip the EVM revert step.
+                println!("Warning: could not take initial EVM snapshot: {e}");
+            }
+        }
+
         println!("Fork state updated for network '{net}' (port {actual_port}).");
     }
 
@@ -326,6 +339,42 @@ pub(crate) async fn is_port_reachable(port: u16) -> bool {
     TcpStream::connect(&addr).await.is_ok()
 }
 
+/// Take an EVM snapshot via HTTP JSON-RPC and return the snapshot ID hex string.
+pub(crate) async fn take_evm_snapshot_http(rpc_url: &str) -> anyhow::Result<String> {
+    use std::time::Duration;
+    let client =
+        reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "evm_snapshot",
+        "params": [],
+        "id": 1
+    });
+    let resp = client
+        .post(rpc_url)
+        .json(&body)
+        .send()
+        .await
+        .with_context(|| format!("failed to connect to {rpc_url}"))?;
+    let json: serde_json::Value =
+        resp.json().await.context("failed to parse evm_snapshot response")?;
+    json.get("result")
+        .and_then(|r| r.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| anyhow::anyhow!("unexpected evm_snapshot result: {json}"))
+}
+
+/// Store an EVM snapshot ID in the fork state for the given network (best-effort).
+pub(crate) fn store_fork_state_snapshot_id(treb_dir: &Path, network: &str, snapshot_id: String) {
+    let mut store = ForkStateStore::new(treb_dir);
+    if store.load().is_ok() {
+        if let Some(mut entry) = store.get_active_fork(network).cloned() {
+            entry.evm_snapshot_id = Some(snapshot_id);
+            store.update_active_fork(entry).ok();
+        }
+    }
+}
+
 /// Wait for SIGINT (Ctrl+C) or SIGTERM.
 async fn wait_for_shutdown_signal() {
     #[cfg(unix)]
@@ -490,6 +539,7 @@ mod tests {
                 .to_string_lossy()
                 .into_owned(),
             started_at: Utc::now(),
+            evm_snapshot_id: None,
         }
     }
 

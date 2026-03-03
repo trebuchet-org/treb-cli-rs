@@ -33,6 +33,9 @@ pub struct ForkEntry {
     pub snapshot_dir: String,
     /// When the fork was started.
     pub started_at: DateTime<Utc>,
+    /// EVM state snapshot ID taken after initial setup (used by `fork revert`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evm_snapshot_id: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +96,7 @@ mod tests {
             fork_block_number: Some(19_000_000),
             snapshot_dir: ".treb/snapshots/mainnet".into(),
             started_at: Utc.with_ymd_and_hms(2026, 3, 3, 12, 0, 0).unwrap(),
+            evm_snapshot_id: None,
         }
     }
 

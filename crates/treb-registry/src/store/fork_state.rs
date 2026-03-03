@@ -180,6 +180,7 @@ mod tests {
             fork_block_number: Some(19_000_000),
             snapshot_dir: format!(".treb/snapshots/{network}"),
             started_at: Utc.with_ymd_and_hms(2026, 3, 3, 12, 0, 0).unwrap(),
+            evm_snapshot_id: None,
         }
     }
 
