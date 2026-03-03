@@ -33,6 +33,9 @@ clap = { version = "4", features = ["derive"] }
 # Environment
 dotenvy = "0.15"
 
+# Testing
+tempfile = "3"
+
 # Error handling & async
 thiserror = "2"
 anyhow = "1"

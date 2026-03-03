@@ -5,6 +5,7 @@
 //! crates depend on `treb-config` for resolved configuration and never
 //! parse config files directly.
 
+pub mod local;
 pub mod types;
 
 // Re-export all config types at the crate root for convenience.
@@ -13,3 +14,6 @@ pub use types::{
     ResolvedConfig, ResolvedSenders, SenderConfig, SenderType, TrebConfigFormat,
     TrebFileConfigV1, TrebFileConfigV2,
 };
+
+// Re-export local config functions.
+pub use local::{load_local_config, save_local_config};
