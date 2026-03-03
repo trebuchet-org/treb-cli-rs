@@ -1,0 +1,54 @@
+# Ralph Progress Log
+Started: Tue Mar  3 02:36:34 AM CET 2026
+
+## Codebase Patterns
+- Use `serde(rename = "...")` on enum variants for exact Go-matching JSON strings
+- ProposalStatus uses lowercase Go constants ("pending", "active"), all other enums use UPPERCASE
+- Newtypes for IDs use `#[serde(transparent)]` for seamless JSON serialization
+- Workspace dependencies are centralized in root Cargo.toml; crates use `{ workspace = true }`
+- The primitives module in lib.rs re-exports alloy types and defines type aliases (ChainId, TxHash)
+- Always run `cargo fmt` after writing code — rustfmt.toml merges imports into crate-level groups
+- Use `#[serde(rename_all = "camelCase")]` on structs for Go-compatible JSON; override with `#[serde(rename = "...")]` for fields like `type` and `chainId` that conflict with Rust keywords or camelCase rules
+- Go `omitempty` on strings → `#[serde(default, skip_serializing_if = "String::is_empty")]`; on `*T` → `Option<T>` with `skip_serializing_if = "Option::is_none"`; on maps → `HashMap` with `skip_serializing_if = "HashMap::is_empty"`
+- Go nil slices serialize as `null`, not `[]` — use `Option<Vec<T>>` in Rust for nullable slices; use bare `Vec<T>` for slices that should always be `[]` when empty
+- Go `omitempty` on `uint64` skips zero — use `#[serde(default, skip_serializing_if = "is_zero_u64")]` with a helper fn
+- Go `map[string]any` → `HashMap<String, serde_json::Value>` in Rust
+
+---
+
+## 2026-03-03 - US-001
+- Implemented foundation types: 5 enums (DeploymentType, DeploymentMethod, TransactionStatus, VerificationStatus, ProposalStatus), DeploymentId newtype, ChainId/TxHash type aliases
+- Added workspace dependencies: serde, serde_json, chrono (with serde), alloy-json-abi
+- Created types module hierarchy: types/mod.rs, types/enums.rs, types/ids.rs
+- Files changed: Cargo.toml, Cargo.lock, crates/treb-core/Cargo.toml, crates/treb-core/src/lib.rs, crates/treb-core/src/types/{mod,enums,ids}.rs
+- **Learnings for future iterations:**
+  - Go enum string values were found at `/home/sol/projects/treb-cli/internal/domain/models/`
+  - ProposalStatus is the only enum with lowercase string values
+  - DeploymentId is a plain string newtype in Go (no dedicated type alias exists)
+  - The branch must be based on phase-01 branch, not main (main only has the initial commit)
+---
+
+## 2026-03-03 - US-002
+- Implemented Deployment struct and all nested types: DeploymentStrategy, ProxyInfo, ProxyUpgrade, ArtifactInfo, VerificationInfo, VerifierStatus
+- All fields use exact camelCase JSON names matching Go; omitempty semantics via skip_serializing_if
+- tags serializes as null when None (Option<Vec<String>>), proxyInfo serializes as null when None
+- Files changed: crates/treb-core/src/types/deployment.rs (new), crates/treb-core/src/types/mod.rs
+- **Learnings for future iterations:**
+  - `#[serde(rename_all = "camelCase")]` handles most fields, but `type` and `chainId` need explicit `#[serde(rename = "...")]`
+  - Go struct field reference: `/home/sol/projects/treb-cli/internal/domain/models/deployment.go`
+  - Fields named `type` in Go → rename Rust field to e.g. `deployment_type` / `proxy_type` with `#[serde(rename = "type")]`
+  - chrono DateTime<Utc> with serde feature serializes to RFC 3339 by default, compatible with Go's time.Time
+---
+
+## 2026-03-03 - US-003
+- Implemented Transaction struct with all required fields (id, chainId, hash, status, blockNumber, sender, nonce, deployments, operations, safeContext, environment, createdAt) using exact camelCase JSON names
+- Implemented Operation struct (type, target, method, result as HashMap<String, serde_json::Value>) and SafeContext struct (safeAddress, safeTxHash, batchIndex, proposerAddress)
+- blockNumber omitted when 0 via custom `is_zero_u64` helper; deployments and operations always serialize as [] (bare Vec); safeContext omitted when None
+- 10 unit tests covering: camelCase field names, blockNumber omit/present, empty arrays, safeContext omit/present, Operation type rename, and two round-trip tests
+- Files changed: crates/treb-core/src/types/transaction.rs (new), crates/treb-core/src/types/mod.rs
+- **Learnings for future iterations:**
+  - Go `omitempty` on `uint64` skips zero values — use `#[serde(default, skip_serializing_if = "is_zero_u64")]` with a small helper fn
+  - Go `int` for batchIndex maps to `i64` in Rust
+  - Go `map[string]any` maps to `HashMap<String, serde_json::Value>` in Rust
+  - Operation struct does NOT use `rename_all = "camelCase"` since all its Go fields are already lowercase single words; only `type` needs explicit rename
+---
