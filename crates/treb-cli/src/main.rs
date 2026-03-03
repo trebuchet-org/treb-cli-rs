@@ -148,8 +148,20 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Tag a deployment snapshot
-    Tag,
+    /// Manage tags on a deployment
+    Tag {
+        /// Deployment identifier (full ID, name, address, name:label, or namespace/name)
+        deployment: String,
+        /// Add a tag to the deployment
+        #[arg(long, conflicts_with = "remove")]
+        add: Option<String>,
+        /// Remove a tag from the deployment
+        #[arg(long, conflicts_with = "add")]
+        remove: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Register a contract in the registry
     Register,
     /// Sync deployment state from on-chain data
@@ -287,7 +299,9 @@ async fn main() -> anyhow::Result<()> {
             )
             .await?
         }
-        Commands::Tag => println!("tag: not yet implemented"),
+        Commands::Tag { deployment, add, remove, json } => {
+            commands::tag::run(&deployment, add, remove, json).await?
+        }
         Commands::Register => println!("register: not yet implemented"),
         Commands::Sync => println!("sync: not yet implemented"),
         Commands::Version { json } => commands::version::run(json).await?,
