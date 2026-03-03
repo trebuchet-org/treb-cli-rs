@@ -7,7 +7,9 @@
 mod hydration;
 mod types;
 
-pub use hydration::{generate_deployment_id, hydrate_deployment};
+pub use hydration::{
+    generate_deployment_id, hydrate_deployment, hydrate_safe_transactions, hydrate_transactions,
+};
 pub use types::{
     PipelineConfig, PipelineContext, PipelineResult, RecordedDeployment, RecordedTransaction,
     SkippedDeployment,

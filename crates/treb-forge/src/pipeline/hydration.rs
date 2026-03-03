@@ -12,8 +12,11 @@ use chrono::Utc;
 use treb_core::types::deployment::{
     ArtifactInfo, Deployment, DeploymentStrategy, ProxyInfo, VerificationInfo,
 };
-use treb_core::types::enums::{DeploymentType, VerificationStatus};
+use treb_core::types::enums::{DeploymentType, TransactionStatus, VerificationStatus};
+use treb_core::types::safe_transaction::SafeTransaction;
+use treb_core::types::transaction::Transaction;
 
+use crate::events::abi::{SafeTransactionQueued, TransactionSimulated};
 use crate::events::deployments::ExtractedDeployment;
 use crate::events::proxy::{ProxyRelationship, ProxyType};
 
@@ -138,6 +141,86 @@ pub fn hydrate_deployment(
         created_at: now,
         updated_at: now,
     }
+}
+
+/// Convert [`TransactionSimulated`] events into core-domain [`Transaction`] records.
+///
+/// Each `SimulatedTransaction` within the event produces one `Transaction`.
+/// The `deployments` field is populated by matching `transaction_id` against
+/// the already-hydrated `Deployment` list.
+pub fn hydrate_transactions(
+    events: &[TransactionSimulated],
+    hydrated_deployments: &[Deployment],
+    context: &PipelineContext,
+) -> Vec<Transaction> {
+    let now = Utc::now();
+
+    events
+        .iter()
+        .flat_map(|event| &event.transactions)
+        .map(|sim_tx| {
+            let tx_id_hex = format!("{:#x}", sim_tx.transactionId);
+
+            // Find deployment IDs that belong to this transaction.
+            let linked_deployment_ids: Vec<String> = hydrated_deployments
+                .iter()
+                .filter(|d| d.transaction_id == tx_id_hex)
+                .map(|d| d.id.clone())
+                .collect();
+
+            Transaction {
+                id: tx_id_hex,
+                chain_id: context.config.chain_id,
+                hash: String::new(),
+                status: TransactionStatus::Simulated,
+                block_number: 0,
+                sender: sim_tx.sender.to_checksum(None),
+                nonce: 0,
+                deployments: linked_deployment_ids,
+                operations: Vec::new(),
+                safe_context: None,
+                environment: context.config.namespace.clone(),
+                created_at: now,
+            }
+        })
+        .collect()
+}
+
+/// Convert [`SafeTransactionQueued`] events into core-domain [`SafeTransaction`] stubs.
+///
+/// Each event produces a `SafeTransaction` with `Queued` status. The
+/// `transaction_ids` field contains the hex strings of all linked transaction IDs.
+pub fn hydrate_safe_transactions(
+    events: &[SafeTransactionQueued],
+    context: &PipelineContext,
+) -> Vec<SafeTransaction> {
+    let now = Utc::now();
+
+    events
+        .iter()
+        .map(|event| {
+            let tx_ids: Vec<String> = event
+                .transactionIds
+                .iter()
+                .map(|id| format!("{:#x}", id))
+                .collect();
+
+            SafeTransaction {
+                safe_tx_hash: format!("{:#x}", event.safeTxHash),
+                safe_address: event.safe.to_checksum(None),
+                chain_id: context.config.chain_id,
+                status: TransactionStatus::Queued,
+                nonce: 0,
+                transactions: Vec::new(),
+                transaction_ids: tx_ids,
+                proposed_by: event.proposer.to_checksum(None),
+                proposed_at: now,
+                confirmations: Vec::new(),
+                executed_at: None,
+                execution_tx_hash: String::new(),
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -394,5 +477,161 @@ mod tests {
             hex,
             "0x0000000000000000000000000000000000000000000000000000000000000001"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Transaction hydration tests
+    // -----------------------------------------------------------------------
+
+    use crate::events::abi::SimulatedTransaction;
+    use alloy_primitives::U256;
+
+    /// Helper: build a hydrated Deployment with specific id and transaction_id.
+    fn mock_deployment(id: &str, transaction_id: &str) -> Deployment {
+        Deployment {
+            id: id.to_string(),
+            namespace: "production".to_string(),
+            chain_id: 1,
+            contract_name: "Counter".to_string(),
+            label: "v1".to_string(),
+            address: "0x5FbDB2315678afecb367f032d93F642f64180aa3".to_string(),
+            deployment_type: DeploymentType::Singleton,
+            transaction_id: transaction_id.to_string(),
+            deployment_strategy: DeploymentStrategy {
+                method: DeploymentMethod::Create,
+                salt: String::new(),
+                init_code_hash: String::new(),
+                factory: String::new(),
+                constructor_args: String::new(),
+                entropy: String::new(),
+            },
+            proxy_info: None,
+            artifact: ArtifactInfo {
+                path: String::new(),
+                compiler_version: String::new(),
+                bytecode_hash: String::new(),
+                script_path: String::new(),
+                git_commit: String::new(),
+            },
+            verification: VerificationInfo {
+                status: VerificationStatus::Unverified,
+                etherscan_url: String::new(),
+                verified_at: None,
+                reason: String::new(),
+                verifiers: HashMap::new(),
+            },
+            tags: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn hydrate_single_transaction_with_two_deployments() {
+        let ctx = test_context();
+        let tx_id = b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let tx_id_hex = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+        let events = vec![TransactionSimulated {
+            transactions: vec![SimulatedTransaction {
+                transactionId: tx_id,
+                senderId: "deployer".to_string(),
+                sender: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+                returnData: Bytes::new(),
+                transaction: crate::events::abi::Transaction {
+                    to: address!("5FbDB2315678afecb367f032d93F642f64180aa3"),
+                    data: Bytes::new(),
+                    value: U256::ZERO,
+                },
+            }],
+        }];
+
+        let deployments = vec![
+            mock_deployment("production/1/Counter:v1", tx_id_hex),
+            mock_deployment("production/1/Token:v1", tx_id_hex),
+        ];
+
+        let transactions = hydrate_transactions(&events, &deployments, &ctx);
+        assert_eq!(transactions.len(), 1);
+
+        let tx = &transactions[0];
+        assert_eq!(tx.id, tx_id_hex);
+        assert_eq!(tx.chain_id, 1);
+        assert_eq!(tx.status, TransactionStatus::Simulated);
+        assert_eq!(tx.sender, "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
+        assert_eq!(tx.environment, "production");
+        assert!(tx.hash.is_empty());
+        assert_eq!(tx.block_number, 0);
+        assert_eq!(tx.nonce, 0);
+        assert!(tx.safe_context.is_none());
+
+        // Both deployments should be linked
+        assert_eq!(tx.deployments.len(), 2);
+        assert!(tx.deployments.contains(&"production/1/Counter:v1".to_string()));
+        assert!(tx.deployments.contains(&"production/1/Token:v1".to_string()));
+    }
+
+    #[test]
+    fn hydrate_safe_transaction_queued() {
+        let ctx = test_context();
+        let safe_tx_hash =
+            b256!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        let tx_id_1 =
+            b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let tx_id_2 =
+            b256!("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+
+        let events = vec![SafeTransactionQueued {
+            safeTxHash: safe_tx_hash,
+            safe: address!("5FbDB2315678afecb367f032d93F642f64180aa3"),
+            proposer: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+            transactionIds: vec![tx_id_1, tx_id_2],
+        }];
+
+        let safe_txs = hydrate_safe_transactions(&events, &ctx);
+        assert_eq!(safe_txs.len(), 1);
+
+        let stx = &safe_txs[0];
+        assert_eq!(
+            stx.safe_tx_hash,
+            "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        );
+        assert_eq!(
+            stx.safe_address,
+            "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+        );
+        assert_eq!(stx.chain_id, 1);
+        assert_eq!(stx.status, TransactionStatus::Queued);
+        assert_eq!(stx.nonce, 0);
+        assert!(stx.transactions.is_empty());
+        assert_eq!(
+            stx.proposed_by,
+            "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+        );
+        assert!(stx.confirmations.is_empty());
+        assert!(stx.executed_at.is_none());
+        assert!(stx.execution_tx_hash.is_empty());
+
+        // Transaction IDs should be hex strings
+        assert_eq!(stx.transaction_ids.len(), 2);
+        assert_eq!(
+            stx.transaction_ids[0],
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+        assert_eq!(
+            stx.transaction_ids[1],
+            "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        );
+    }
+
+    #[test]
+    fn hydrate_empty_events_produce_empty_results() {
+        let ctx = test_context();
+
+        let transactions = hydrate_transactions(&[], &[], &ctx);
+        assert!(transactions.is_empty());
+
+        let safe_txs = hydrate_safe_transactions(&[], &ctx);
+        assert!(safe_txs.is_empty());
     }
 }
