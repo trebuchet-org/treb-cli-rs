@@ -18,6 +18,41 @@ use crate::output;
 const FOUNDRY_TOML: &str = "foundry.toml";
 const TREB_DIR: &str = ".treb";
 
+/// Parse a `KEY=VALUE` environment variable string.
+///
+/// Returns `(key, value)` where value may be empty. The split is on the
+/// first `=` only, so `KEY=value=with=equals` parses correctly.
+fn parse_env_var(s: &str) -> anyhow::Result<(&str, &str)> {
+    let Some(eq_pos) = s.find('=') else {
+        bail!(
+            "invalid --env value '{}': expected KEY=VALUE format (missing '=')",
+            s
+        );
+    };
+    let key = &s[..eq_pos];
+    let value = &s[eq_pos + 1..];
+    if key.is_empty() {
+        bail!(
+            "invalid --env value '{}': key cannot be empty",
+            s
+        );
+    }
+    Ok((key, value))
+}
+
+/// Inject `--env KEY=VALUE` pairs into the process environment.
+///
+/// Must be called before config resolution so that env vars are available
+/// for `${VAR}` expansion in config files.
+fn inject_env_vars(env_vars: &[String]) -> anyhow::Result<()> {
+    for pair in env_vars {
+        let (key, value) = parse_env_var(pair)?;
+        // SAFETY: this is single-threaded CLI code; no concurrent env access.
+        unsafe { env::set_var(key, value) };
+    }
+    Ok(())
+}
+
 /// Ensure the project is initialized (foundry.toml + .treb/ exist).
 fn ensure_initialized(cwd: &std::path::Path) -> anyhow::Result<()> {
     if !cwd.join(FOUNDRY_TOML).exists() {
@@ -54,12 +89,15 @@ pub async fn run(
     verbose: bool,
     debug: bool,
     json: bool,
-    _env_vars: Vec<String>,
+    env_vars: Vec<String>,
     target_contract: Option<String>,
     non_interactive: bool,
 ) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     ensure_initialized(&cwd)?;
+
+    // ── Inject environment variables (before config resolution) ──────────
+    inject_env_vars(&env_vars)?;
 
     // ── Config resolution ────────────────────────────────────────────────
     let resolved = resolve_config(ResolveOpts {
@@ -328,5 +366,71 @@ fn display_result_human(result: &PipelineResult) {
             ));
         }
         println!("{}", parts.join(", "));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_env_var_valid_pair() {
+        let (key, value) = parse_env_var("FOO=bar").unwrap();
+        assert_eq!(key, "FOO");
+        assert_eq!(value, "bar");
+    }
+
+    #[test]
+    fn parse_env_var_empty_value() {
+        let (key, value) = parse_env_var("KEY=").unwrap();
+        assert_eq!(key, "KEY");
+        assert_eq!(value, "");
+    }
+
+    #[test]
+    fn parse_env_var_value_with_equals() {
+        let (key, value) = parse_env_var("KEY=value=with=equals").unwrap();
+        assert_eq!(key, "KEY");
+        assert_eq!(value, "value=with=equals");
+    }
+
+    #[test]
+    fn parse_env_var_missing_equals_fails() {
+        let err = parse_env_var("INVALID").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("INVALID"), "should mention the value: {msg}");
+        assert!(msg.contains("missing '='"), "should mention missing '=': {msg}");
+    }
+
+    #[test]
+    fn parse_env_var_empty_key_fails() {
+        let err = parse_env_var("=value").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("key cannot be empty"), "should mention empty key: {msg}");
+    }
+
+    #[test]
+    fn inject_env_vars_sets_vars() {
+        let vars = vec![
+            "TREB_TEST_ENV_A=hello".to_string(),
+            "TREB_TEST_ENV_B=world".to_string(),
+        ];
+        inject_env_vars(&vars).unwrap();
+
+        assert_eq!(env::var("TREB_TEST_ENV_A").unwrap(), "hello");
+        assert_eq!(env::var("TREB_TEST_ENV_B").unwrap(), "world");
+
+        // Cleanup
+        unsafe {
+            env::remove_var("TREB_TEST_ENV_A");
+            env::remove_var("TREB_TEST_ENV_B");
+        }
+    }
+
+    #[test]
+    fn inject_env_vars_fails_on_bad_pair() {
+        let vars = vec!["GOOD=value".to_string(), "BAD".to_string()];
+        let err = inject_env_vars(&vars).unwrap_err();
+        assert!(err.to_string().contains("BAD"));
     }
 }
