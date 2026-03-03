@@ -102,6 +102,26 @@ impl ResolvedSender {
             _ => None,
         }
     }
+
+    /// Returns the Governor contract address if this is a Governor sender.
+    pub fn governor_address(&self) -> Option<Address> {
+        match self {
+            Self::Governor {
+                governor_address, ..
+            } => Some(*governor_address),
+            _ => None,
+        }
+    }
+
+    /// Returns the timelock address if this is a Governor sender with a timelock.
+    pub fn timelock_address(&self) -> Option<Address> {
+        match self {
+            Self::Governor {
+                timelock_address, ..
+            } => *timelock_address,
+            _ => None,
+        }
+    }
 }
 
 /// Resolve a single sender by name from its configuration.
@@ -880,5 +900,49 @@ mod tests {
     fn safe_address_returns_none_for_wallet() {
         let wallet = ResolvedSender::Wallet(in_memory_signer(0).unwrap());
         assert!(wallet.safe_address().is_none());
+    }
+
+    #[test]
+    fn governor_address_returns_some_for_governor_sender() {
+        let addr = address!("0000000000000000000000000000000000000099");
+        let gov = ResolvedSender::Governor {
+            governor_address: addr,
+            timelock_address: None,
+            proposer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
+        };
+        assert_eq!(gov.governor_address(), Some(addr));
+    }
+
+    #[test]
+    fn governor_address_returns_none_for_wallet() {
+        let wallet = ResolvedSender::Wallet(in_memory_signer(0).unwrap());
+        assert!(wallet.governor_address().is_none());
+    }
+
+    #[test]
+    fn timelock_address_returns_some_when_present() {
+        let tl = address!("0000000000000000000000000000000000000088");
+        let gov = ResolvedSender::Governor {
+            governor_address: address!("0000000000000000000000000000000000000099"),
+            timelock_address: Some(tl),
+            proposer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
+        };
+        assert_eq!(gov.timelock_address(), Some(tl));
+    }
+
+    #[test]
+    fn timelock_address_returns_none_when_absent() {
+        let gov = ResolvedSender::Governor {
+            governor_address: address!("0000000000000000000000000000000000000099"),
+            timelock_address: None,
+            proposer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
+        };
+        assert!(gov.timelock_address().is_none());
+    }
+
+    #[test]
+    fn timelock_address_returns_none_for_wallet() {
+        let wallet = ResolvedSender::Wallet(in_memory_signer(0).unwrap());
+        assert!(wallet.timelock_address().is_none());
     }
 }

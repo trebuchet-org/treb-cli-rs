@@ -20,14 +20,15 @@ use crate::compiler::compile_project;
 use crate::events::abi::SimulatedTransaction;
 use crate::events::decoder::{ParsedEvent, TrebEvent};
 use crate::events::{
-    SafeTransactionQueued, TransactionSimulated, decode_events, detect_proxy_relationships,
-    extract_collisions, extract_deployments,
+    GovernorProposalCreated, SafeTransactionQueued, TransactionSimulated, decode_events,
+    detect_proxy_relationships, extract_collisions, extract_deployments,
 };
 use crate::script::{ScriptConfig, execute_script};
 
 use super::duplicates::{DuplicateStrategy, resolve_duplicates};
 use super::hydration::{
-    hydrate_deployment, hydrate_safe_transactions, hydrate_transactions, populate_safe_context,
+    hydrate_deployment, hydrate_governor_proposals, hydrate_safe_transactions,
+    hydrate_transactions, populate_safe_context,
 };
 use super::types::{PipelineResult, RecordedDeployment, RecordedTransaction};
 use super::PipelineContext;
@@ -74,8 +75,9 @@ impl RunPipeline {
     /// 4. Extract deployments, collisions, and proxy relationships
     /// 5. Hydrate forge-domain types into core-domain types
     /// 6. For Safe sender: populate safe_context and propose to Safe Service
-    /// 7. Run duplicate detection against the registry
-    /// 8. Record deployments and transactions (skipped in dry-run mode)
+    /// 7. For Governor sender: hydrate governor proposals and insert into registry
+    /// 8. Run duplicate detection against the registry
+    /// 9. Record deployments and transactions (skipped in dry-run mode)
     ///
     /// # Errors
     ///
@@ -132,11 +134,13 @@ impl RunPipeline {
         // 7. Extract event types for transaction hydration
         let tx_events = extract_transaction_simulated(&parsed_events);
         let safe_tx_events = extract_safe_transaction_queued(&parsed_events);
+        let governor_events = extract_governor_proposal_created(&parsed_events);
 
         // 8. Hydrate transactions
         let mut transactions =
             hydrate_transactions(&tx_events, &hydrated_deployments, &self.context);
         let safe_transactions = hydrate_safe_transactions(&safe_tx_events, &self.context);
+        let governor_proposals = hydrate_governor_proposals(&governor_events, &self.context);
 
         // 9. Safe sender: populate safe_context and propose to Safe Service
         let is_safe_sender = self
@@ -144,6 +148,12 @@ impl RunPipeline {
             .deployer_sender
             .as_ref()
             .map_or(false, |s| s.is_safe());
+
+        let is_governor_sender = self
+            .context
+            .deployer_sender
+            .as_ref()
+            .map_or(false, |s| s.is_governor());
 
         if is_safe_sender {
             // Populate safe_context on Transaction records linked to Safe batches
@@ -198,6 +208,13 @@ impl RunPipeline {
             for safe_tx in safe_transactions {
                 registry.insert_safe_transaction(safe_tx)?;
             }
+
+            // Insert governor proposals (skip broadcast for Governor sender)
+            if is_governor_sender {
+                for proposal in governor_proposals {
+                    registry.insert_governor_proposal(proposal)?;
+                }
+            }
         } else {
             // Dry-run: populate result without writing to registry
             for dep in resolved.to_insert.into_iter().chain(resolved.to_update) {
@@ -251,6 +268,20 @@ fn extract_safe_transaction_queued(events: &[ParsedEvent]) -> Vec<SafeTransactio
         .filter_map(|e| match e {
             ParsedEvent::Treb(treb) => match treb.as_ref() {
                 TrebEvent::SafeTransactionQueued(stq) => Some(stq.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+/// Extract `GovernorProposalCreated` events from parsed event list.
+fn extract_governor_proposal_created(events: &[ParsedEvent]) -> Vec<GovernorProposalCreated> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            ParsedEvent::Treb(treb) => match treb.as_ref() {
+                TrebEvent::GovernorProposalCreated(gpc) => Some(gpc.clone()),
                 _ => None,
             },
             _ => None,
@@ -537,5 +568,54 @@ mod tests {
     fn build_sim_tx_index_empty_events() {
         let index = build_sim_tx_index(&[]);
         assert!(index.is_empty());
+    }
+
+    // ── extract_governor_proposal_created ──────────────────────────────
+
+    #[test]
+    fn extract_governor_proposal_created_filters_correctly() {
+        use crate::events::decoder::{ParsedEvent, TrebEvent};
+
+        let governor = address!("0000000000000000000000000000000000000099");
+        let proposer = address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
+        let tx_id = b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+
+        let events = vec![
+            // A TransactionSimulated event (should be skipped)
+            ParsedEvent::Treb(Box::new(TrebEvent::TransactionSimulated(
+                TransactionSimulated {
+                    transactions: vec![sample_sim_tx(
+                        Address::ZERO,
+                        U256::ZERO,
+                        &[],
+                        B256::ZERO,
+                    )],
+                },
+            ))),
+            // A GovernorProposalCreated event (should be extracted)
+            ParsedEvent::Treb(Box::new(TrebEvent::GovernorProposalCreated(
+                GovernorProposalCreated {
+                    proposalId: U256::from(42u64),
+                    governor,
+                    proposer,
+                    transactionIds: vec![tx_id],
+                },
+            ))),
+        ];
+
+        let extracted = extract_governor_proposal_created(&events);
+        assert_eq!(extracted.len(), 1);
+        assert_eq!(extracted[0].proposalId, U256::from(42u64));
+        assert_eq!(extracted[0].governor, governor);
+        assert_eq!(extracted[0].proposer, proposer);
+        assert_eq!(extracted[0].transactionIds.len(), 1);
+        assert_eq!(extracted[0].transactionIds[0], tx_id);
+    }
+
+    #[test]
+    fn extract_governor_proposal_created_empty() {
+        let events: Vec<ParsedEvent> = vec![];
+        let extracted = extract_governor_proposal_created(&events);
+        assert!(extracted.is_empty());
     }
 }

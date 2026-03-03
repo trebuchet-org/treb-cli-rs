@@ -12,11 +12,12 @@ use chrono::Utc;
 use treb_core::types::deployment::{
     ArtifactInfo, Deployment, DeploymentStrategy, ProxyInfo, VerificationInfo,
 };
-use treb_core::types::enums::{DeploymentType, TransactionStatus, VerificationStatus};
+use treb_core::types::enums::{DeploymentType, ProposalStatus, TransactionStatus, VerificationStatus};
+use treb_core::types::governor_proposal::GovernorProposal;
 use treb_core::types::safe_transaction::SafeTransaction;
 use treb_core::types::transaction::Transaction;
 
-use crate::events::abi::{SafeTransactionQueued, TransactionSimulated};
+use crate::events::abi::{GovernorProposalCreated, SafeTransactionQueued, TransactionSimulated};
 use crate::events::deployments::ExtractedDeployment;
 use crate::events::proxy::{ProxyRelationship, ProxyType};
 
@@ -244,6 +245,54 @@ pub fn populate_safe_context(
             }
         }
     }
+}
+
+/// Convert [`GovernorProposalCreated`] events into core-domain [`GovernorProposal`] records.
+///
+/// Each event produces a `GovernorProposal` with `Pending` status. The
+/// `proposal_id` is the hex representation of the event's `proposalId`,
+/// `governor_address` and `proposed_by` come from the event's indexed fields,
+/// and `transaction_ids` contains the hex strings of all linked transaction IDs.
+///
+/// The `timelock_address` is populated from the deployer sender if available.
+pub fn hydrate_governor_proposals(
+    events: &[GovernorProposalCreated],
+    context: &PipelineContext,
+) -> Vec<GovernorProposal> {
+    let now = Utc::now();
+
+    // Extract timelock address from the deployer sender if it is a Governor.
+    let timelock_str = context
+        .deployer_sender
+        .as_ref()
+        .and_then(|s| s.timelock_address())
+        .map(|addr| addr.to_checksum(None))
+        .unwrap_or_default();
+
+    events
+        .iter()
+        .map(|event| {
+            let tx_ids: Vec<String> = event
+                .transactionIds
+                .iter()
+                .map(|id| format!("{:#x}", id))
+                .collect();
+
+            GovernorProposal {
+                proposal_id: format!("{}", event.proposalId),
+                governor_address: event.governor.to_checksum(None),
+                timelock_address: timelock_str.clone(),
+                chain_id: context.config.chain_id,
+                status: ProposalStatus::Pending,
+                transaction_ids: tx_ids,
+                proposed_by: event.proposer.to_checksum(None),
+                proposed_at: now,
+                description: String::new(),
+                executed_at: None,
+                execution_tx_hash: String::new(),
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -806,5 +855,122 @@ mod tests {
 
         // No safe_context should be populated
         assert!(transactions[0].safe_context.is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // hydrate_governor_proposals tests
+    // -----------------------------------------------------------------------
+
+    use crate::sender::{ResolvedSender, in_memory_signer};
+
+    #[test]
+    fn hydrate_governor_proposal_maps_fields_correctly() {
+        let ctx = test_context();
+        let proposal_id = U256::from(12345u64);
+        let governor = address!("0000000000000000000000000000000000000099");
+        let proposer = address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
+        let tx_id_1 = b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let tx_id_2 = b256!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+
+        let events = vec![GovernorProposalCreated {
+            proposalId: proposal_id,
+            governor,
+            proposer,
+            transactionIds: vec![tx_id_1, tx_id_2],
+        }];
+
+        let proposals = hydrate_governor_proposals(&events, &ctx);
+        assert_eq!(proposals.len(), 1);
+
+        let p = &proposals[0];
+        assert_eq!(p.proposal_id, format!("{}", proposal_id));
+        assert_eq!(p.governor_address, governor.to_checksum(None));
+        assert_eq!(p.chain_id, 1);
+        assert_eq!(p.status, ProposalStatus::Pending);
+        assert_eq!(p.proposed_by, proposer.to_checksum(None));
+        assert!(p.description.is_empty());
+        assert!(p.executed_at.is_none());
+        assert!(p.execution_tx_hash.is_empty());
+
+        // Transaction IDs should be hex strings
+        assert_eq!(p.transaction_ids.len(), 2);
+        assert_eq!(
+            p.transaction_ids[0],
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+        assert_eq!(
+            p.transaction_ids[1],
+            "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        );
+    }
+
+    #[test]
+    fn hydrate_governor_proposal_with_timelock_from_sender() {
+        let timelock_addr = address!("0000000000000000000000000000000000000088");
+        let mut ctx = test_context();
+        ctx.deployer_sender = Some(ResolvedSender::Governor {
+            governor_address: address!("0000000000000000000000000000000000000099"),
+            timelock_address: Some(timelock_addr),
+            proposer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
+        });
+
+        let events = vec![GovernorProposalCreated {
+            proposalId: U256::from(1u64),
+            governor: address!("0000000000000000000000000000000000000099"),
+            proposer: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+            transactionIds: vec![b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")],
+        }];
+
+        let proposals = hydrate_governor_proposals(&events, &ctx);
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].timelock_address, timelock_addr.to_checksum(None));
+    }
+
+    #[test]
+    fn hydrate_governor_proposal_without_timelock() {
+        let ctx = test_context();
+
+        let events = vec![GovernorProposalCreated {
+            proposalId: U256::from(1u64),
+            governor: address!("0000000000000000000000000000000000000099"),
+            proposer: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+            transactionIds: vec![],
+        }];
+
+        let proposals = hydrate_governor_proposals(&events, &ctx);
+        assert_eq!(proposals.len(), 1);
+        assert!(proposals[0].timelock_address.is_empty());
+    }
+
+    #[test]
+    fn hydrate_governor_proposals_empty_events() {
+        let ctx = test_context();
+        let proposals = hydrate_governor_proposals(&[], &ctx);
+        assert!(proposals.is_empty());
+    }
+
+    #[test]
+    fn hydrate_multiple_governor_proposals() {
+        let ctx = test_context();
+
+        let events = vec![
+            GovernorProposalCreated {
+                proposalId: U256::from(100u64),
+                governor: address!("0000000000000000000000000000000000000099"),
+                proposer: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+                transactionIds: vec![b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")],
+            },
+            GovernorProposalCreated {
+                proposalId: U256::from(200u64),
+                governor: address!("0000000000000000000000000000000000000099"),
+                proposer: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+                transactionIds: vec![b256!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")],
+            },
+        ];
+
+        let proposals = hydrate_governor_proposals(&events, &ctx);
+        assert_eq!(proposals.len(), 2);
+        assert_eq!(proposals[0].proposal_id, format!("{}", U256::from(100u64)));
+        assert_eq!(proposals[1].proposal_id, format!("{}", U256::from(200u64)));
     }
 }
