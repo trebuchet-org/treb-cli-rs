@@ -305,6 +305,148 @@ fn print_dry_run_plan(compose: &ComposeFile, plan: &[PlanEntry]) {
     }
 }
 
+// ── Result aggregation ───────────────────────────────────────────────────
+
+/// Status of a component in compose results.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ComponentStatus {
+    Success,
+    Skipped,
+    Failed,
+    NotExecuted,
+}
+
+impl std::fmt::Display for ComponentStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ComponentStatus::Success => write!(f, "success"),
+            ComponentStatus::Skipped => write!(f, "skipped"),
+            ComponentStatus::Failed => write!(f, "failed"),
+            ComponentStatus::NotExecuted => write!(f, "not executed"),
+        }
+    }
+}
+
+/// Per-component result summary.
+#[derive(Debug, Serialize)]
+pub struct ComponentResultEntry {
+    pub component: String,
+    pub status: ComponentStatus,
+    pub deployments: usize,
+    pub transactions: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Aggregate totals across all components.
+#[derive(Debug, Serialize)]
+pub struct ComposeTotals {
+    pub deployments: usize,
+    pub transactions: usize,
+    pub succeeded: usize,
+    pub skipped: usize,
+    pub failed: usize,
+    pub not_executed: usize,
+}
+
+/// Full compose result for JSON output.
+#[derive(Debug, Serialize)]
+struct ComposeOutputJson {
+    group: String,
+    success: bool,
+    components: Vec<ComponentResultEntry>,
+    totals: ComposeTotals,
+}
+
+/// Compute aggregate totals from component results.
+fn compute_totals(results: &[ComponentResultEntry]) -> ComposeTotals {
+    let mut totals = ComposeTotals {
+        deployments: 0,
+        transactions: 0,
+        succeeded: 0,
+        skipped: 0,
+        failed: 0,
+        not_executed: 0,
+    };
+    for r in results {
+        totals.deployments += r.deployments;
+        totals.transactions += r.transactions;
+        match r.status {
+            ComponentStatus::Success => totals.succeeded += 1,
+            ComponentStatus::Skipped => totals.skipped += 1,
+            ComponentStatus::Failed => totals.failed += 1,
+            ComponentStatus::NotExecuted => totals.not_executed += 1,
+        }
+    }
+    totals
+}
+
+/// Display compose results in human-readable format.
+fn display_compose_human(group: &str, results: &[ComponentResultEntry], totals: &ComposeTotals) {
+    println!();
+    println!("Compose results: {}", group);
+    println!();
+
+    for r in results {
+        match r.status {
+            ComponentStatus::Success => {
+                println!(
+                    "  {} — {} deployment{}, {} transaction{}",
+                    r.component,
+                    r.deployments,
+                    if r.deployments == 1 { "" } else { "s" },
+                    r.transactions,
+                    if r.transactions == 1 { "" } else { "s" },
+                );
+            }
+            ComponentStatus::Skipped => {
+                println!("  {} (skipped)", r.component);
+            }
+            ComponentStatus::Failed => {
+                println!(
+                    "  {} (failed): {}",
+                    r.component,
+                    r.error.as_deref().unwrap_or("unknown error")
+                );
+            }
+            ComponentStatus::NotExecuted => {
+                println!("  {} (not executed)", r.component);
+            }
+        }
+    }
+
+    println!();
+    println!(
+        "Totals: {} deployment{}, {} transaction{} | {} succeeded, {} skipped, {} failed, {} not executed",
+        totals.deployments,
+        if totals.deployments == 1 { "" } else { "s" },
+        totals.transactions,
+        if totals.transactions == 1 { "" } else { "s" },
+        totals.succeeded,
+        totals.skipped,
+        totals.failed,
+        totals.not_executed,
+    );
+}
+
+/// Display compose results as JSON.
+fn display_compose_json(
+    group: &str,
+    results: Vec<ComponentResultEntry>,
+    totals: ComposeTotals,
+    success: bool,
+) -> anyhow::Result<()> {
+    let output = ComposeOutputJson {
+        group: group.to_string(),
+        success,
+        components: results,
+        totals,
+    };
+    output::print_json(&output)?;
+    Ok(())
+}
+
 // ── Command entry point ──────────────────────────────────────────────────
 
 /// Execute a compose deployment pipeline.
@@ -412,6 +554,8 @@ pub async fn run(
     // ── Execute components in topological order ───────────────────────
     let total = order.len();
     let mut completed = skip_set.len();
+    let mut component_results: Vec<ComponentResultEntry> = Vec::with_capacity(total);
+    let mut failed_component: Option<String> = None;
 
     if !json {
         eprintln!("Compose: {} ({} components)", compose.group, total);
@@ -428,6 +572,25 @@ pub async fn run(
                     name
                 );
             }
+            component_results.push(ComponentResultEntry {
+                component: name.clone(),
+                status: ComponentStatus::Skipped,
+                deployments: 0,
+                transactions: 0,
+                error: None,
+            });
+            continue;
+        }
+
+        // Mark remaining components as not-executed if a previous component failed.
+        if failed_component.is_some() {
+            component_results.push(ComponentResultEntry {
+                component: name.clone(),
+                status: ComponentStatus::NotExecuted,
+                deployments: 0,
+                transactions: 0,
+                error: None,
+            });
             continue;
         }
 
@@ -522,38 +685,65 @@ pub async fn run(
         let pipeline = RunPipeline::new(pipeline_context).with_script_config(script_config);
 
         match pipeline.execute(&mut registry).await {
-            Ok(_result) => {
+            Ok(result) => {
                 completed += 1;
                 if !json {
                     eprintln!("[{}/{}] Component '{}' completed", i + 1, total, name);
                 }
+
+                component_results.push(ComponentResultEntry {
+                    component: name.clone(),
+                    status: ComponentStatus::Success,
+                    deployments: result.deployments.len(),
+                    transactions: result.transactions.len(),
+                    error: None,
+                });
 
                 // Update state file after each successful component.
                 state.completed.push(name.clone());
                 save_compose_state(&state)?;
             }
             Err(e) => {
+                let error_msg = format!("{}", e);
                 eprintln!(
                     "Component '{}' failed ({}/{} completed): {}",
-                    name, completed, total, e
+                    name, completed, total, error_msg
                 );
-                bail!(
-                    "compose failed: component '{}' failed ({}/{} completed)",
-                    name,
-                    completed,
-                    total
-                );
+
+                component_results.push(ComponentResultEntry {
+                    component: name.clone(),
+                    status: ComponentStatus::Failed,
+                    deployments: 0,
+                    transactions: 0,
+                    error: Some(error_msg),
+                });
+
+                failed_component = Some(name.clone());
             }
         }
     }
 
-    // Full successful completion: delete the state file.
-    delete_compose_state();
+    // ── Display results ──────────────────────────────────────────────
+    let totals = compute_totals(&component_results);
+    let success = failed_component.is_none();
 
-    if !json {
-        eprintln!(
-            "Compose complete: {}/{} components succeeded",
-            completed, total
+    if json {
+        display_compose_json(&compose.group, component_results, totals, success)?;
+    } else {
+        display_compose_human(&compose.group, &component_results, &totals);
+    }
+
+    // Full successful completion: delete the state file.
+    if success {
+        delete_compose_state();
+    }
+
+    if let Some(ref failed) = failed_component {
+        bail!(
+            "compose failed: component '{}' failed ({}/{} completed)",
+            failed,
+            completed,
+            total
         );
     }
 
@@ -1214,5 +1404,260 @@ components:
     fn delete_compose_state_no_error_when_missing() {
         // Should not panic or error when file doesn't exist
         delete_compose_state();
+    }
+
+    // ── Result aggregation tests ─────────────────────────────────────
+
+    #[test]
+    fn compute_totals_all_success() {
+        let results = vec![
+            ComponentResultEntry {
+                component: "a".to_string(),
+                status: ComponentStatus::Success,
+                deployments: 2,
+                transactions: 3,
+                error: None,
+            },
+            ComponentResultEntry {
+                component: "b".to_string(),
+                status: ComponentStatus::Success,
+                deployments: 1,
+                transactions: 1,
+                error: None,
+            },
+        ];
+        let totals = compute_totals(&results);
+        assert_eq!(totals.deployments, 3);
+        assert_eq!(totals.transactions, 4);
+        assert_eq!(totals.succeeded, 2);
+        assert_eq!(totals.skipped, 0);
+        assert_eq!(totals.failed, 0);
+        assert_eq!(totals.not_executed, 0);
+    }
+
+    #[test]
+    fn compute_totals_mixed_statuses() {
+        let results = vec![
+            ComponentResultEntry {
+                component: "a".to_string(),
+                status: ComponentStatus::Skipped,
+                deployments: 0,
+                transactions: 0,
+                error: None,
+            },
+            ComponentResultEntry {
+                component: "b".to_string(),
+                status: ComponentStatus::Success,
+                deployments: 3,
+                transactions: 2,
+                error: None,
+            },
+            ComponentResultEntry {
+                component: "c".to_string(),
+                status: ComponentStatus::Failed,
+                deployments: 0,
+                transactions: 0,
+                error: Some("script reverted".to_string()),
+            },
+            ComponentResultEntry {
+                component: "d".to_string(),
+                status: ComponentStatus::NotExecuted,
+                deployments: 0,
+                transactions: 0,
+                error: None,
+            },
+        ];
+        let totals = compute_totals(&results);
+        assert_eq!(totals.deployments, 3);
+        assert_eq!(totals.transactions, 2);
+        assert_eq!(totals.succeeded, 1);
+        assert_eq!(totals.skipped, 1);
+        assert_eq!(totals.failed, 1);
+        assert_eq!(totals.not_executed, 1);
+    }
+
+    #[test]
+    fn compute_totals_empty_results() {
+        let results: Vec<ComponentResultEntry> = vec![];
+        let totals = compute_totals(&results);
+        assert_eq!(totals.deployments, 0);
+        assert_eq!(totals.transactions, 0);
+        assert_eq!(totals.succeeded, 0);
+        assert_eq!(totals.skipped, 0);
+        assert_eq!(totals.failed, 0);
+        assert_eq!(totals.not_executed, 0);
+    }
+
+    #[test]
+    fn compose_json_output_all_success() {
+        let results = vec![
+            ComponentResultEntry {
+                component: "libs".to_string(),
+                status: ComponentStatus::Success,
+                deployments: 2,
+                transactions: 1,
+                error: None,
+            },
+            ComponentResultEntry {
+                component: "core".to_string(),
+                status: ComponentStatus::Success,
+                deployments: 1,
+                transactions: 2,
+                error: None,
+            },
+        ];
+        let totals = compute_totals(&results);
+        let output = ComposeOutputJson {
+            group: "my-deploy".to_string(),
+            success: true,
+            components: results,
+            totals,
+        };
+        let json_str = serde_json::to_string_pretty(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(parsed["group"], "my-deploy");
+        assert_eq!(parsed["success"], true);
+
+        let components = parsed["components"].as_array().unwrap();
+        assert_eq!(components.len(), 2);
+        assert_eq!(components[0]["component"], "libs");
+        assert_eq!(components[0]["status"], "success");
+        assert_eq!(components[0]["deployments"], 2);
+        assert_eq!(components[0]["transactions"], 1);
+        assert!(components[0].get("error").is_none());
+
+        assert_eq!(components[1]["component"], "core");
+        assert_eq!(components[1]["status"], "success");
+        assert_eq!(components[1]["deployments"], 1);
+        assert_eq!(components[1]["transactions"], 2);
+
+        assert_eq!(parsed["totals"]["deployments"], 3);
+        assert_eq!(parsed["totals"]["transactions"], 3);
+        assert_eq!(parsed["totals"]["succeeded"], 2);
+        assert_eq!(parsed["totals"]["skipped"], 0);
+        assert_eq!(parsed["totals"]["failed"], 0);
+        assert_eq!(parsed["totals"]["not_executed"], 0);
+    }
+
+    #[test]
+    fn compose_json_output_with_failure() {
+        let results = vec![
+            ComponentResultEntry {
+                component: "a".to_string(),
+                status: ComponentStatus::Success,
+                deployments: 1,
+                transactions: 1,
+                error: None,
+            },
+            ComponentResultEntry {
+                component: "b".to_string(),
+                status: ComponentStatus::Failed,
+                deployments: 0,
+                transactions: 0,
+                error: Some("script reverted".to_string()),
+            },
+            ComponentResultEntry {
+                component: "c".to_string(),
+                status: ComponentStatus::NotExecuted,
+                deployments: 0,
+                transactions: 0,
+                error: None,
+            },
+        ];
+        let totals = compute_totals(&results);
+        let output = ComposeOutputJson {
+            group: "test-deploy".to_string(),
+            success: false,
+            components: results,
+            totals,
+        };
+        let json_str = serde_json::to_string_pretty(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(parsed["success"], false);
+
+        let components = parsed["components"].as_array().unwrap();
+        assert_eq!(components[1]["status"], "failed");
+        assert_eq!(components[1]["error"], "script reverted");
+        assert_eq!(components[2]["status"], "not_executed");
+        assert!(components[2].get("error").is_none());
+
+        assert_eq!(parsed["totals"]["succeeded"], 1);
+        assert_eq!(parsed["totals"]["failed"], 1);
+        assert_eq!(parsed["totals"]["not_executed"], 1);
+    }
+
+    #[test]
+    fn compose_json_output_with_skipped() {
+        let results = vec![
+            ComponentResultEntry {
+                component: "a".to_string(),
+                status: ComponentStatus::Skipped,
+                deployments: 0,
+                transactions: 0,
+                error: None,
+            },
+            ComponentResultEntry {
+                component: "b".to_string(),
+                status: ComponentStatus::Success,
+                deployments: 5,
+                transactions: 3,
+                error: None,
+            },
+        ];
+        let totals = compute_totals(&results);
+        let output = ComposeOutputJson {
+            group: "resume-deploy".to_string(),
+            success: true,
+            components: results,
+            totals,
+        };
+        let json_str = serde_json::to_string_pretty(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        let components = parsed["components"].as_array().unwrap();
+        assert_eq!(components[0]["status"], "skipped");
+        assert_eq!(components[0]["deployments"], 0);
+
+        assert_eq!(parsed["totals"]["skipped"], 1);
+        assert_eq!(parsed["totals"]["succeeded"], 1);
+        assert_eq!(parsed["totals"]["deployments"], 5);
+        assert_eq!(parsed["totals"]["transactions"], 3);
+    }
+
+    #[test]
+    fn component_status_display_strings() {
+        assert_eq!(ComponentStatus::Success.to_string(), "success");
+        assert_eq!(ComponentStatus::Skipped.to_string(), "skipped");
+        assert_eq!(ComponentStatus::Failed.to_string(), "failed");
+        assert_eq!(ComponentStatus::NotExecuted.to_string(), "not executed");
+    }
+
+    #[test]
+    fn compose_json_is_valid_json() {
+        // Verify the full output is valid JSON parseable by serde
+        let results = vec![
+            ComponentResultEntry {
+                component: "libs".to_string(),
+                status: ComponentStatus::Success,
+                deployments: 2,
+                transactions: 1,
+                error: None,
+            },
+        ];
+        let totals = compute_totals(&results);
+        let output = ComposeOutputJson {
+            group: "test".to_string(),
+            success: true,
+            components: results,
+            totals,
+        };
+        let json_str = serde_json::to_string_pretty(&output).unwrap();
+        // Re-parse to verify it's valid JSON
+        let reparsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        assert!(reparsed.is_object());
+        assert!(reparsed["components"].is_array());
+        assert!(reparsed["totals"].is_object());
     }
 }
