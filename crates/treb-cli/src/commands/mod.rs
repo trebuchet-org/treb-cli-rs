@@ -2,6 +2,7 @@ pub mod config;
 pub mod init;
 pub mod list;
 pub mod networks;
+pub mod register;
 pub mod resolve;
 pub mod run;
 pub mod show;

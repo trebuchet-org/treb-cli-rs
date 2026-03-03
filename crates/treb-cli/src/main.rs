@@ -162,8 +162,39 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Register a contract in the registry
-    Register,
+    /// Register deployments from a historical transaction
+    Register {
+        /// Transaction hash to trace for contract creations
+        #[arg(long)]
+        tx_hash: String,
+        /// Network name or chain ID
+        #[arg(long)]
+        network: Option<String>,
+        /// Explicit RPC URL (overrides network)
+        #[arg(long)]
+        rpc_url: Option<String>,
+        /// Filter to a specific deployed address
+        #[arg(long)]
+        address: Option<String>,
+        /// Contract artifact name to match
+        #[arg(long)]
+        contract: Option<String>,
+        /// Contract name to narrow artifact matching
+        #[arg(long)]
+        contract_name: Option<String>,
+        /// Label for registered deployments
+        #[arg(long)]
+        label: Option<String>,
+        /// Deployment namespace
+        #[arg(long)]
+        namespace: Option<String>,
+        /// Skip post-registration verification
+        #[arg(long)]
+        skip_verify: bool,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Sync deployment state from on-chain data
     Sync,
     /// Print version information
@@ -302,7 +333,32 @@ async fn main() -> anyhow::Result<()> {
         Commands::Tag { deployment, add, remove, json } => {
             commands::tag::run(&deployment, add, remove, json).await?
         }
-        Commands::Register => println!("register: not yet implemented"),
+        Commands::Register {
+            tx_hash,
+            network,
+            rpc_url,
+            address,
+            contract,
+            contract_name,
+            label,
+            namespace,
+            skip_verify,
+            json,
+        } => {
+            commands::register::run(
+                &tx_hash,
+                network,
+                rpc_url,
+                address,
+                contract,
+                contract_name,
+                label,
+                namespace,
+                skip_verify,
+                json,
+            )
+            .await?
+        }
         Commands::Sync => println!("sync: not yet implemented"),
         Commands::Version { json } => commands::version::run(json).await?,
         Commands::Networks { json } => commands::networks::run(json).await?,
