@@ -1,3 +1,24 @@
+## 2026-03-03 - P20-US-008
+- What was implemented: Parasitic CI for Foundry Version Tracking
+  - Created `.foundry-pin` at repo root containing the current pinned foundry tag (`v1.5.1`)
+  - Created `.github/workflows/foundry-track.yml` with:
+    - `schedule: cron: '0 6 * * *'` and `workflow_dispatch` triggers
+    - `permissions: contents: write, pull-requests: write, issues: write`
+    - Reads `.foundry-pin` and fetches latest foundry release tag via `gh release view --repo foundry-rs/foundry`
+    - Skips if already up to date (pinned == latest)
+    - Creates `foundry-bump/<tag>` branch: uses `sed` to replace old tag in Cargo.toml and updates `.foundry-pin`, then pushes
+    - Runs `cargo check --workspace` and `cargo test --workspace` with `continue-on-error: true`; captures output with `tee` + `set -o pipefail`
+    - On failure: `gh issue create` with truncated build logs; duplicate detection via `gh issue list --search "$TITLE in:title" --state open`
+    - On success: `gh pr create` then `gh pr merge --auto --squash`
+- Files changed: .foundry-pin (new), .github/workflows/foundry-track.yml (new)
+- **Learnings for future iterations:**
+  - `gh release view --repo owner/repo --json tagName -q .tagName` fetches the latest release tag without needing a checkout of that repo
+  - `set -o pipefail` in bash steps is required when piping cargo output through `tee`; without it, `tee` exit code masks cargo failures and `continue-on-error` outcome reads `success` even on build failure
+  - `gh issue list --search "title text in:title" --state open --json number -q '.[0].number'` is the correct syntax for duplicate issue detection
+  - Store the tag (not commit SHA) in `.foundry-pin` for practical comparison against `gh release` output; tag-to-tag comparison is simpler and unambiguous
+  - `head -c 8000 /tmp/log 2>/dev/null || echo "(no output)"` safely truncates captured logs for GitHub issue bodies (65 KB limit)
+---
+
 ## 2026-03-03 - P20-US-007
 - What was implemented: Release Packaging and trebup Installer Script
   - Created `.github/workflows/release.yml` triggered via `workflow_run` on "Release Build" completion for tags starting with `v`
