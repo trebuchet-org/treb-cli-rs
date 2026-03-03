@@ -121,6 +121,20 @@ impl ForkStateStore {
         self.save()
     }
 
+    /// Update an existing active fork entry in place.
+    ///
+    /// Returns an error if the network is not actively forked.
+    pub fn update_active_fork(&mut self, entry: ForkEntry) -> Result<(), TrebError> {
+        if !self.data.active_forks.contains_key(&entry.network) {
+            return Err(TrebError::Fork(format!(
+                "network is not actively forked: {}",
+                entry.network
+            )));
+        }
+        self.data.active_forks.insert(entry.network.clone(), entry);
+        self.save()
+    }
+
     /// Remove an active fork entry by network name. Returns an error if the
     /// network is not actively forked.
     pub fn remove_active_fork(&mut self, network: &str) -> Result<ForkEntry, TrebError> {

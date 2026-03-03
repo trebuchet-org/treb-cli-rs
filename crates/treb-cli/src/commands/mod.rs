@@ -1,5 +1,6 @@
 pub mod compose;
 pub mod config;
+pub mod dev;
 pub mod fork;
 pub mod gen_deploy;
 pub mod init;

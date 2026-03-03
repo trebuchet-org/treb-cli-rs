@@ -301,7 +301,10 @@ enum Commands {
         subcommand: commands::fork::ForkSubcommand,
     },
     /// Start a local development environment
-    Dev,
+    Dev {
+        #[command(subcommand)]
+        subcommand: commands::dev::DevSubcommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -494,7 +497,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Reset => println!("reset: not yet implemented"),
         Commands::Migrate => println!("migrate: not yet implemented"),
         Commands::Fork { subcommand } => commands::fork::run(subcommand).await?,
-        Commands::Dev => println!("dev: not yet implemented"),
+        Commands::Dev { subcommand } => commands::dev::run(subcommand).await?,
     }
 
     Ok(())
