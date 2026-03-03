@@ -16,5 +16,5 @@ pub use artifacts::ArtifactIndex;
 pub use broadcast::BroadcastReader;
 pub use compiler::{compile_files, compile_project, CompilationOutput};
 pub use console::decode_console_logs;
-pub use script::{build_script_config, ExecutionResult, ScriptConfig};
+pub use script::{build_script_config, execute_script, ExecutionResult, ScriptConfig};
 pub use version::ForgeVersion;

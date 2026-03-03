@@ -16,6 +16,8 @@ foundry-common = { workspace = true }
 foundry-compilers = { workspace = true }
 forge-script = { workspace = true }
 forge-script-sequence = { workspace = true }
+foundry-evm = { workspace = true }
+foundry-cheatcodes = { workspace = true }
 
 # Alloy
 alloy-primitives = { workspace = true }

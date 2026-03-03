@@ -21,6 +21,8 @@ foundry-common = { git = "https://github.com/foundry-rs/foundry", tag = "v1.5.1"
 foundry-compilers = "0.19.14"
 forge-script = { git = "https://github.com/foundry-rs/foundry", tag = "v1.5.1" }
 forge-script-sequence = { git = "https://github.com/foundry-rs/foundry", tag = "v1.5.1" }
+foundry-evm = { git = "https://github.com/foundry-rs/foundry", tag = "v1.5.1" }
+foundry-cheatcodes = { git = "https://github.com/foundry-rs/foundry", tag = "v1.5.1" }
 
 # Alloy — version aligned with foundry v1.5.1
 alloy-primitives = "1.4.1"

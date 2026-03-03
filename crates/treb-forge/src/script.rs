@@ -3,20 +3,81 @@
 //! Builds `ScriptArgs` programmatically from treb's resolved configuration
 //! and drives the execution state machine through the full pipeline.
 
+use std::collections::HashMap;
 use std::str::FromStr;
 
-use alloy_primitives::Address;
+use alloy_primitives::{Address, Bytes, Log};
 use forge_script::ScriptArgs;
+use foundry_cheatcodes::BroadcastableTransactions;
 use foundry_config::Chain;
+use foundry_evm::traces::Traces;
 use treb_config::ResolvedConfig;
 use treb_core::error::TrebError;
 
-// TODO: Implement ExecutionResult struct (US-004)
-// TODO: Implement execute_script(args) -> Result<ExecutionResult> (US-004)
-
 /// Structured result from a forge script execution.
 pub struct ExecutionResult {
-    // TODO: Add fields (success, logs, gas_used, etc.)
+    /// Whether the script execution succeeded.
+    pub success: bool,
+    /// Decoded console.log messages.
+    pub logs: Vec<String>,
+    /// Raw EVM logs emitted during execution.
+    pub raw_logs: Vec<Log>,
+    /// Total gas used by the script execution.
+    pub gas_used: u64,
+    /// Return data from the script entry point.
+    pub returned: Bytes,
+    /// Map of addresses to human-readable labels discovered during execution.
+    pub labeled_addresses: HashMap<Address, String>,
+    /// Broadcast-ready transactions collected during script execution.
+    pub transactions: Option<BroadcastableTransactions>,
+    /// Execution traces from the script run.
+    pub traces: Traces,
+}
+
+/// Execute a forge script through the full pipeline.
+///
+/// Chains the state machine stages: preprocess → compile → link →
+/// prepare_execution → execute, then extracts the `ScriptResult` and
+/// decodes console.log messages.
+pub async fn execute_script(args: ScriptArgs) -> treb_core::Result<ExecutionResult> {
+    let preprocessed = args
+        .preprocess()
+        .await
+        .map_err(|e| TrebError::Forge(format!("forge preprocessing failed: {e}")))?;
+
+    let compiled = preprocessed
+        .compile()
+        .map_err(|e| TrebError::Forge(format!("forge compilation failed: {e}")))?;
+
+    let linked = compiled
+        .link()
+        .await
+        .map_err(|e| TrebError::Forge(format!("forge linking failed: {e}")))?;
+
+    let prepared = linked
+        .prepare_execution()
+        .await
+        .map_err(|e| TrebError::Forge(format!("forge execution preparation failed: {e}")))?;
+
+    let executed = prepared
+        .execute()
+        .await
+        .map_err(|e| TrebError::Forge(format!("forge execution failed: {e}")))?;
+
+    let result = executed.execution_result;
+    let decoded_logs = crate::console::decode_console_logs(&result.logs);
+    let labeled = result.labeled_addresses.into_iter().collect();
+
+    Ok(ExecutionResult {
+        success: result.success,
+        logs: decoded_logs,
+        raw_logs: result.logs,
+        gas_used: result.gas_used,
+        returned: result.returned,
+        labeled_addresses: labeled,
+        transactions: result.transactions,
+        traces: result.traces,
+    })
 }
 
 /// Builder for constructing forge `ScriptArgs` from treb configuration.

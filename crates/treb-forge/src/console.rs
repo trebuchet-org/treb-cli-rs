@@ -1,13 +1,16 @@
 //! Console log decoding for forge script output.
 //!
 //! Filters and decodes `console.log` messages from EVM execution logs.
+//! Unrecognized log formats are silently skipped.
 
-// TODO: Implement decode_console_logs(logs: &[Log]) -> Vec<String>
-// TODO: Filter for console.log address and decode all variants
-// TODO: Silently skip unrecognized formats
+use alloy_primitives::Log;
+use foundry_evm::core::decode::decode_console_logs as foundry_decode_console_logs;
 
 /// Decode console.log messages from raw EVM logs.
-pub fn decode_console_logs() -> Vec<String> {
-    // TODO: Accept &[Log] parameter and implement decoding
-    Vec::new()
+///
+/// Filters for the console.log precompile address and decodes all
+/// recognized `console.log` variants. Unrecognized formats are silently
+/// skipped (not errors).
+pub fn decode_console_logs(logs: &[Log]) -> Vec<String> {
+    foundry_decode_console_logs(logs)
 }
