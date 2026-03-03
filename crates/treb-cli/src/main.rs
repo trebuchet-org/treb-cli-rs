@@ -289,12 +289,15 @@ enum Commands {
         #[arg(long)]
         non_interactive: bool,
     },
-    /// Remove stale deployment artifacts
-    Prune,
-    /// Reset deployment state
-    Reset,
-    /// Run database migrations
-    Migrate,
+    /// Remove stale or broken registry entries
+    Prune(commands::prune::PruneArgs),
+    /// Reset registry state (with optional scope filters)
+    Reset(commands::reset::ResetArgs),
+    /// Migrate config or registry to a newer format
+    Migrate {
+        #[command(subcommand)]
+        subcommand: commands::migrate::MigrateSubcommand,
+    },
     /// Fork a network for local testing
     Fork {
         #[command(subcommand)]
@@ -493,9 +496,9 @@ async fn main() -> anyhow::Result<()> {
             )
             .await?
         }
-        Commands::Prune => println!("prune: not yet implemented"),
-        Commands::Reset => println!("reset: not yet implemented"),
-        Commands::Migrate => println!("migrate: not yet implemented"),
+        Commands::Prune(args) => commands::prune::run(args).await?,
+        Commands::Reset(args) => commands::reset::run(args).await?,
+        Commands::Migrate { subcommand } => commands::migrate::run(subcommand).await?,
         Commands::Fork { subcommand } => commands::fork::run(subcommand).await?,
         Commands::Dev { subcommand } => commands::dev::run(subcommand).await?,
     }
