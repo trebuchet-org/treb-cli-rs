@@ -7,6 +7,7 @@
 pub mod abi;
 pub mod decoder;
 pub mod deployments;
+pub mod proxy;
 
 // Re-export ABI types for convenience.
 pub use abi::{
@@ -22,4 +23,9 @@ pub use decoder::{decode_events, CreateXEvent, ParsedEvent, ProxyEvent, TrebEven
 // Re-export deployment extraction types and functions.
 pub use deployments::{
     extract_collisions, extract_deployments, ExtractedCollision, ExtractedDeployment,
+};
+
+// Re-export proxy relationship types and functions.
+pub use proxy::{
+    detect_proxy_relationships, link_proxy_to_deployment, ProxyRelationship, ProxyType,
 };
