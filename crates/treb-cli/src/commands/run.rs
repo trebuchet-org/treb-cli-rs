@@ -14,7 +14,10 @@ use treb_forge::script::build_script_config_with_senders;
 use treb_forge::sender::resolve_all_senders;
 use treb_registry::Registry;
 
+use console::Term;
+
 use crate::output;
+use crate::ui::selector::fuzzy_select_network;
 
 const FOUNDRY_TOML: &str = "foundry.toml";
 const TREB_DIR: &str = ".treb";
@@ -99,6 +102,20 @@ pub async fn run(
 
     // ── Inject environment variables (before config resolution) ──────────
     inject_env_vars(&env_vars)?;
+
+    // ── Interactive network selection when --network is omitted ───────────
+    let network = if network.is_none() && !non_interactive && Term::stdout().is_term() {
+        let foundry_cfg = treb_config::load_foundry_config(&cwd)
+            .map_err(|e| anyhow::anyhow!("failed to load foundry config: {e}"))?;
+        let endpoints = treb_config::rpc_endpoints(&foundry_cfg);
+        let mut names: Vec<String> = endpoints.keys().cloned().collect();
+        names.sort();
+        fuzzy_select_network(&names)
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .map(|s| s.to_string())
+    } else {
+        network
+    };
 
     // ── Config resolution ────────────────────────────────────────────────
     let resolved = resolve_config(ResolveOpts {

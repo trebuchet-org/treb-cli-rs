@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Context};
 use chrono::Utc;
+use console::Term;
 use serde::Serialize;
 use treb_core::types::{VerificationStatus, VerifierStatus};
 use treb_registry::Registry;
@@ -12,7 +13,7 @@ use treb_verify::VerifyOpts;
 
 use crate::commands::resolve::resolve_deployment;
 use crate::output;
-use crate::ui::selector::fuzzy_select_deployment_id;
+use crate::ui::selector::{fuzzy_select_deployment_id, multiselect_deployments};
 
 /// JSON output for a single verification result.
 #[derive(Serialize)]
@@ -238,19 +239,39 @@ async fn run_batch(
 ) -> anyhow::Result<()> {
     let mut registry = Registry::open(cwd).context("failed to open registry")?;
 
-    // Collect candidate deployment IDs up front to avoid borrow conflicts.
-    let candidate_ids: Vec<String> = registry
+    // Collect candidate deployments as owned values to avoid borrow conflicts.
+    let candidate_deployments: Vec<_> = registry
         .list_deployments()
-        .iter()
+        .into_iter()
         .filter(|d| force || d.verification.status != VerificationStatus::Verified)
-        .map(|d| d.id.clone())
+        .cloned()
         .collect();
+
+    if candidate_deployments.is_empty() {
+        if json {
+            output::print_json(&Vec::<VerifyOutputJson>::new())?;
+        } else {
+            eprintln!("No unverified deployments found.");
+        }
+        return Ok(());
+    }
+
+    // In TTY mode, let the user select a subset interactively; non-TTY verifies all.
+    let candidate_ids: Vec<String> = if Term::stdout().is_term() {
+        multiselect_deployments(&candidate_deployments, "Select deployments to verify")
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .into_iter()
+            .map(|d| d.id.clone())
+            .collect()
+    } else {
+        candidate_deployments.iter().map(|d| d.id.clone()).collect()
+    };
 
     if candidate_ids.is_empty() {
         if json {
             output::print_json(&Vec::<VerifyOutputJson>::new())?;
         } else {
-            eprintln!("No unverified deployments found.");
+            eprintln!("No deployments selected.");
         }
         return Ok(());
     }
