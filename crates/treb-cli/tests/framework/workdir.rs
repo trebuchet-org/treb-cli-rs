@@ -113,6 +113,31 @@ impl TestWorkdir {
     }
 }
 
+/// Rewrite localhost RPC ports in the workdir's `foundry.toml`.
+///
+/// Each entry in `rewrites` is `(old_port, new_port)`.  All occurrences of
+/// `localhost:{old}` and `127.0.0.1:{old}` are replaced with the new port.
+/// This naturally covers `http://localhost:{old}` URLs as well.
+pub fn port_rewrite_foundry_toml(workdir: &Path, rewrites: &[(u16, u16)]) -> std::io::Result<()> {
+    let toml_path = workdir.join("foundry.toml");
+    let mut content = fs::read_to_string(&toml_path)?;
+
+    for &(old_port, new_port) in rewrites {
+        let old = old_port.to_string();
+        let new = new_port.to_string();
+        content = content
+            .replace(&format!("localhost:{old}"), &format!("localhost:{new}"))
+            .replace(&format!("127.0.0.1:{old}"), &format!("127.0.0.1:{new}"));
+    }
+
+    fs::write(&toml_path, content)
+}
+
+/// Convenience: rewrite all common default ports (8545, 9545) to `new_port`.
+pub fn port_rewrite_foundry_toml_single(workdir: &Path, new_port: u16) -> std::io::Result<()> {
+    port_rewrite_foundry_toml(workdir, &[(8545, new_port), (9545, new_port)])
+}
+
 /// Recursively copy a directory tree.
 fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     fs::create_dir_all(dst)?;
