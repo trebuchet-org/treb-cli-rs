@@ -124,8 +124,8 @@ pub async fn run(
         if let Some(ref url) = effective_rpc_url {
             eprintln!("RPC: {}", url);
         }
-        if let Some(sender) = resolved_senders.get("deployer") {
-            eprintln!("Sender: {:?}", sender.sender_address());
+        for (role, sender) in &resolved_senders {
+            eprintln!("Sender [{}]: {:?}", role, sender.sender_address());
         }
     }
 
@@ -176,11 +176,32 @@ pub async fn run(
     // ── Open registry and execute pipeline ───────────────────────────────
     let mut registry = Registry::open(&cwd).context("failed to open registry")?;
 
+    if !json {
+        eprintln!("Compiling and executing {}...", script);
+    }
+
     let pipeline = RunPipeline::new(pipeline_context).with_script_config(script_config);
     let result = pipeline
         .execute(&mut registry)
         .await
         .context("pipeline execution failed")?;
+
+    if !json {
+        eprintln!("Execution complete.");
+    }
+
+    // ── Verbose post-execution output ────────────────────────────────────
+    if verbose && !json {
+        if !result.console_logs.is_empty() {
+            eprintln!("Console output: {} line(s)", result.console_logs.len());
+        }
+        eprintln!(
+            "Result: {} deployment(s), {} transaction(s), {} skipped",
+            result.deployments.len(),
+            result.transactions.len(),
+            result.skipped.len()
+        );
+    }
 
     // ── Display results ──────────────────────────────────────────────────
     display_result(&result, json)?;
