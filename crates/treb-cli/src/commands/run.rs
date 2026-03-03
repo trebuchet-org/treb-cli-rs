@@ -23,7 +23,7 @@ const TREB_DIR: &str = ".treb";
 ///
 /// Returns `(key, value)` where value may be empty. The split is on the
 /// first `=` only, so `KEY=value=with=equals` parses correctly.
-fn parse_env_var(s: &str) -> anyhow::Result<(&str, &str)> {
+pub fn parse_env_var(s: &str) -> anyhow::Result<(&str, &str)> {
     let Some(eq_pos) = s.find('=') else {
         bail!(
             "invalid --env value '{}': expected KEY=VALUE format (missing '=')",
@@ -45,7 +45,7 @@ fn parse_env_var(s: &str) -> anyhow::Result<(&str, &str)> {
 ///
 /// Must be called before config resolution so that env vars are available
 /// for `${VAR}` expansion in config files.
-fn inject_env_vars(env_vars: &[String]) -> anyhow::Result<()> {
+pub fn inject_env_vars(env_vars: &[String]) -> anyhow::Result<()> {
     for pair in env_vars {
         let (key, value) = parse_env_var(pair)?;
         // SAFETY: this is single-threaded CLI code; no concurrent env access.
@@ -55,7 +55,7 @@ fn inject_env_vars(env_vars: &[String]) -> anyhow::Result<()> {
 }
 
 /// Ensure the project is initialized (foundry.toml + .treb/ exist).
-fn ensure_initialized(cwd: &std::path::Path) -> anyhow::Result<()> {
+pub fn ensure_initialized(cwd: &std::path::Path) -> anyhow::Result<()> {
     if !cwd.join(FOUNDRY_TOML).exists() {
         bail!(
             "no foundry.toml found in {}\n\n\

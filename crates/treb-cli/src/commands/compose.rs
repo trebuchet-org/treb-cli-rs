@@ -4,10 +4,17 @@
 //! Forge scripts in dependency order.
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::path::Path;
+use std::env;
+use std::io::{self, BufRead, IsTerminal, Write};
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
+use treb_config::{resolve_config, ResolveOpts};
+use treb_forge::pipeline::{resolve_git_commit, PipelineConfig, PipelineContext, RunPipeline};
+use treb_forge::script::build_script_config_with_senders;
+use treb_forge::sender::resolve_all_senders;
+use treb_registry::Registry;
 
 use crate::output;
 
@@ -239,20 +246,20 @@ fn print_dry_run_plan(compose: &ComposeFile, plan: &[PlanEntry]) {
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     file: String,
-    _network: Option<String>,
-    _rpc_url: Option<String>,
-    _namespace: Option<String>,
-    _profile: Option<String>,
-    _broadcast: bool,
+    network: Option<String>,
+    rpc_url: Option<String>,
+    namespace: Option<String>,
+    profile: Option<String>,
+    broadcast: bool,
     dry_run: bool,
     _resume: bool,
-    _verify: bool,
-    _slow: bool,
-    _legacy: bool,
-    _verbose: bool,
+    verify: bool,
+    slow: bool,
+    legacy: bool,
+    verbose: bool,
     json: bool,
-    _env_vars: Vec<String>,
-    _non_interactive: bool,
+    env_vars: Vec<String>,
+    non_interactive: bool,
 ) -> anyhow::Result<()> {
     // Parse and validate the compose file.
     let compose = load_compose_file(&file)?;
@@ -272,8 +279,169 @@ pub async fn run(
         return Ok(());
     }
 
-    // Remaining orchestration implemented in subsequent user stories.
-    let _ = &order;
+    // ── Project initialization check ──────────────────────────────────
+    let cwd = env::current_dir().context("failed to determine current directory")?;
+    super::run::ensure_initialized(&cwd)?;
+
+    // ── Broadcast confirmation (once before first component) ──────────
+    if broadcast && !non_interactive {
+        let is_tty = io::stdin().is_terminal();
+        if is_tty {
+            eprintln!(
+                "About to broadcast {} component(s) to the network.",
+                order.len()
+            );
+            eprintln!("  Compose: {}", compose.group);
+            if let Some(ref ns) = namespace {
+                eprintln!("  Namespace: {}", ns);
+            }
+            if let Some(ref net) = network {
+                eprintln!("  Network: {}", net);
+            }
+            eprint!("Proceed? [y/N] ");
+            io::stderr().flush().ok();
+
+            let mut input = String::new();
+            io::stdin().lock().read_line(&mut input).ok();
+            let answer = input.trim().to_lowercase();
+
+            if answer != "y" && answer != "yes" {
+                bail!("broadcast cancelled by user");
+            }
+        }
+    }
+
+    // ── Open registry ─────────────────────────────────────────────────
+    let mut registry = Registry::open(&cwd).context("failed to open registry")?;
+
+    // ── Execute components in topological order ───────────────────────
+    let total = order.len();
+    let mut completed = 0;
+
+    if !json {
+        eprintln!("Compose: {} ({} components)", compose.group, total);
+    }
+
+    for (i, name) in order.iter().enumerate() {
+        let component = &compose.components[name];
+
+        if !json {
+            eprintln!("[{}/{}] Executing component: {}", i + 1, total, name);
+        }
+
+        // Re-inject global env vars (reset any previous component overrides).
+        super::run::inject_env_vars(&env_vars)?;
+
+        // Inject per-component env vars (override global for same keys).
+        if let Some(env_map) = &component.env {
+            for (key, value) in env_map {
+                // SAFETY: single-threaded CLI code; no concurrent env access.
+                unsafe { env::set_var(key, value) };
+            }
+        }
+
+        // Config resolution with global flags.
+        let resolved = resolve_config(ResolveOpts {
+            project_root: cwd.clone(),
+            namespace: namespace.clone(),
+            network: network.clone(),
+            profile: profile.clone(),
+            sender_overrides: HashMap::new(),
+        })
+        .with_context(|| format!("failed to resolve config for component '{}'", name))?;
+
+        let effective_rpc_url = rpc_url.clone().or_else(|| resolved.network.clone());
+
+        // Sender resolution.
+        let resolved_senders = resolve_all_senders(&resolved.senders)
+            .await
+            .with_context(|| format!("failed to resolve senders for component '{}'", name))?;
+
+        // Build ScriptConfig.
+        let mut script_config =
+            build_script_config_with_senders(&resolved, &component.script, &resolved_senders)
+                .with_context(|| {
+                    format!("failed to build script config for component '{}'", name)
+                })?;
+
+        let sig = component.sig.as_deref().unwrap_or("run()");
+        let args = component.args.clone().unwrap_or_default();
+        let effective_verify = component.verify.unwrap_or(verify);
+
+        script_config
+            .sig(sig)
+            .args(args)
+            .broadcast(broadcast)
+            .dry_run(false)
+            .slow(slow || resolved.slow)
+            .legacy(legacy)
+            .verify(effective_verify)
+            .non_interactive(true); // Already prompted above
+
+        if let Some(ref url) = effective_rpc_url {
+            script_config.rpc_url(url);
+        }
+
+        // Verbose per-component context.
+        if verbose && !json {
+            eprintln!("  Script: {}", component.script);
+            eprintln!("  Namespace: {}", resolved.namespace);
+            if let Some(ref url) = effective_rpc_url {
+                eprintln!("  RPC: {}", url);
+            }
+        }
+
+        // Build pipeline context.
+        let pipeline_config = PipelineConfig {
+            script_path: component.script.clone(),
+            dry_run: false,
+            namespace: resolved.namespace.clone(),
+            script_sig: sig.to_string(),
+            script_args: Vec::new(),
+            ..Default::default()
+        };
+
+        let git_commit = resolve_git_commit();
+
+        let pipeline_context = PipelineContext {
+            config: pipeline_config,
+            script_path: PathBuf::from(&component.script),
+            git_commit,
+            project_root: cwd.clone(),
+        };
+
+        // Execute pipeline.
+        let pipeline = RunPipeline::new(pipeline_context).with_script_config(script_config);
+
+        match pipeline.execute(&mut registry).await {
+            Ok(_result) => {
+                completed += 1;
+                if !json {
+                    eprintln!("[{}/{}] Component '{}' completed", i + 1, total, name);
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "Component '{}' failed ({}/{} completed): {}",
+                    name, completed, total, e
+                );
+                bail!(
+                    "compose failed: component '{}' failed ({}/{} completed)",
+                    name,
+                    completed,
+                    total
+                );
+            }
+        }
+    }
+
+    if !json {
+        eprintln!(
+            "Compose complete: {}/{} components succeeded",
+            completed, total
+        );
+    }
+
     Ok(())
 }
 
@@ -282,6 +450,7 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::run as run_cmd;
 
     #[test]
     fn deserialize_minimal_compose_file() {
@@ -750,5 +919,82 @@ components:
         assert_eq!(arr[0]["component"], "a");
         assert_eq!(arr[1]["step"], 2);
         assert_eq!(arr[1]["deps"][0], "a");
+    }
+
+    // ── Env var and verify override tests ─────────────────────────────
+
+    #[test]
+    fn component_env_overrides_global_env() {
+        // Inject global env var
+        let global = vec!["TREB_COMPOSE_TEST_KEY=global_value".to_string()];
+        run_cmd::inject_env_vars(&global).unwrap();
+        assert_eq!(
+            env::var("TREB_COMPOSE_TEST_KEY").unwrap(),
+            "global_value"
+        );
+
+        // Component env overrides it
+        let mut comp_env = HashMap::new();
+        comp_env.insert(
+            "TREB_COMPOSE_TEST_KEY".to_string(),
+            "component_value".to_string(),
+        );
+        for (key, value) in &comp_env {
+            unsafe { env::set_var(key, value) };
+        }
+        assert_eq!(
+            env::var("TREB_COMPOSE_TEST_KEY").unwrap(),
+            "component_value"
+        );
+
+        // Re-injecting global restores original value
+        run_cmd::inject_env_vars(&global).unwrap();
+        assert_eq!(
+            env::var("TREB_COMPOSE_TEST_KEY").unwrap(),
+            "global_value"
+        );
+
+        // Cleanup
+        unsafe { env::remove_var("TREB_COMPOSE_TEST_KEY") };
+    }
+
+    #[test]
+    fn component_verify_overrides_global() {
+        let global_verify = true;
+
+        // Component with explicit verify=false overrides global
+        let component = Component {
+            script: "script/A.s.sol".to_string(),
+            deps: None,
+            env: None,
+            sig: None,
+            args: None,
+            verify: Some(false),
+        };
+        assert_eq!(component.verify.unwrap_or(global_verify), false);
+    }
+
+    #[test]
+    fn global_verify_used_when_component_none() {
+        let global_verify = true;
+
+        // Component without verify uses global
+        let component = Component {
+            script: "script/A.s.sol".to_string(),
+            deps: None,
+            env: None,
+            sig: None,
+            args: None,
+            verify: None,
+        };
+        assert_eq!(component.verify.unwrap_or(global_verify), true);
+    }
+
+    #[test]
+    fn parse_env_var_reusable_from_compose() {
+        // Verify that parse_env_var is accessible from compose module
+        let (key, value) = run_cmd::parse_env_var("MY_KEY=my_value").unwrap();
+        assert_eq!(key, "MY_KEY");
+        assert_eq!(value, "my_value");
     }
 }
