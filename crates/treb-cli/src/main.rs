@@ -296,7 +296,10 @@ enum Commands {
     /// Run database migrations
     Migrate,
     /// Fork a network for local testing
-    Fork,
+    Fork {
+        #[command(subcommand)]
+        subcommand: commands::fork::ForkSubcommand,
+    },
     /// Start a local development environment
     Dev,
 }
@@ -490,7 +493,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Prune => println!("prune: not yet implemented"),
         Commands::Reset => println!("reset: not yet implemented"),
         Commands::Migrate => println!("migrate: not yet implemented"),
-        Commands::Fork => println!("fork: not yet implemented"),
+        Commands::Fork { subcommand } => commands::fork::run(subcommand).await?,
         Commands::Dev => println!("dev: not yet implemented"),
     }
 
