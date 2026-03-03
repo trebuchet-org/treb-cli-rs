@@ -66,7 +66,7 @@ pub struct ForkHistoryEntry {
 #[serde(rename_all = "camelCase")]
 pub struct ForkState {
     /// Active forks keyed by network name.
-    pub active_forks: HashMap<String, ForkEntry>,
+    pub forks: HashMap<String, ForkEntry>,
     /// History of fork actions (most recent first).
     pub history: Vec<ForkHistoryEntry>,
 }
@@ -74,7 +74,7 @@ pub struct ForkState {
 impl Default for ForkState {
     fn default() -> Self {
         Self {
-            active_forks: HashMap::new(),
+            forks: HashMap::new(),
             history: Vec::new(),
         }
     }
@@ -178,7 +178,7 @@ mod tests {
     fn fork_state_serde_round_trip() {
         let mut state = ForkState::default();
         state
-            .active_forks
+            .forks
             .insert("mainnet".into(), sample_fork_entry());
         state.history.push(sample_history_entry());
 
@@ -188,9 +188,26 @@ mod tests {
     }
 
     #[test]
+    fn fork_state_top_level_keys_match_go_schema() {
+        let mut state = ForkState::default();
+        state
+            .forks
+            .insert("mainnet".into(), sample_fork_entry());
+        state.history.push(sample_history_entry());
+
+        let json = serde_json::to_value(&state).unwrap();
+        let obj = json.as_object().unwrap();
+
+        // Go CLI uses "forks" and "history" as top-level keys
+        assert!(obj.contains_key("forks"), "expected 'forks' key");
+        assert!(obj.contains_key("history"), "expected 'history' key");
+        assert!(!obj.contains_key("activeForks"), "should not have 'activeForks' key");
+    }
+
+    #[test]
     fn fork_state_default_produces_empty_collections() {
         let state = ForkState::default();
-        assert!(state.active_forks.is_empty());
+        assert!(state.forks.is_empty());
         assert!(state.history.is_empty());
     }
 }

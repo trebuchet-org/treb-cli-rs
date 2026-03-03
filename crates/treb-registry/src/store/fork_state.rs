@@ -103,20 +103,20 @@ impl ForkStateStore {
 
     /// Get an active fork entry by network name.
     pub fn get_active_fork(&self, network: &str) -> Option<&ForkEntry> {
-        self.data.active_forks.get(network)
+        self.data.forks.get(network)
     }
 
     /// Insert a new active fork entry. Returns an error if the network is
     /// already forked.
     pub fn insert_active_fork(&mut self, entry: ForkEntry) -> Result<(), TrebError> {
-        if self.data.active_forks.contains_key(&entry.network) {
+        if self.data.forks.contains_key(&entry.network) {
             return Err(TrebError::Fork(format!(
                 "network already forked: {}",
                 entry.network
             )));
         }
         self.data
-            .active_forks
+            .forks
             .insert(entry.network.clone(), entry);
         self.save()
     }
@@ -125,20 +125,20 @@ impl ForkStateStore {
     ///
     /// Returns an error if the network is not actively forked.
     pub fn update_active_fork(&mut self, entry: ForkEntry) -> Result<(), TrebError> {
-        if !self.data.active_forks.contains_key(&entry.network) {
+        if !self.data.forks.contains_key(&entry.network) {
             return Err(TrebError::Fork(format!(
                 "network is not actively forked: {}",
                 entry.network
             )));
         }
-        self.data.active_forks.insert(entry.network.clone(), entry);
+        self.data.forks.insert(entry.network.clone(), entry);
         self.save()
     }
 
     /// Remove an active fork entry by network name. Returns an error if the
     /// network is not actively forked.
     pub fn remove_active_fork(&mut self, network: &str) -> Result<ForkEntry, TrebError> {
-        let entry = self.data.active_forks.remove(network).ok_or_else(|| {
+        let entry = self.data.forks.remove(network).ok_or_else(|| {
             TrebError::Fork(format!("network is not actively forked: {network}"))
         })?;
         self.save()?;
@@ -147,7 +147,7 @@ impl ForkStateStore {
 
     /// List all active fork entries.
     pub fn list_active_forks(&self) -> Vec<&ForkEntry> {
-        self.data.active_forks.values().collect()
+        self.data.forks.values().collect()
     }
 
     /// Prepend a history entry. Caps history at [`MAX_HISTORY`] entries.
