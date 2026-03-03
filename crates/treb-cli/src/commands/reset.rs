@@ -186,14 +186,13 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::HashMap;
 
     use chrono::Utc;
     use tempfile::TempDir;
     use treb_core::types::{
-        ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, TransactionStatus,
-        VerificationInfo, VerificationStatus,
+        ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, VerificationInfo,
+        VerificationStatus,
     };
     use treb_registry::Registry;
 
@@ -234,27 +233,6 @@ mod tests {
             tags: None,
             created_at: ts,
             updated_at: ts,
-        }
-    }
-
-    fn make_transaction(
-        id: &str,
-        chain_id: u64,
-    ) -> treb_core::types::Transaction {
-        let ts = Utc::now();
-        treb_core::types::Transaction {
-            id: id.to_string(),
-            chain_id,
-            hash: format!("0x{:064x}", 0u64),
-            status: TransactionStatus::Executed,
-            block_number: 1000,
-            sender: "0x56fD3F2bEE130e9867942D0F463a16fBE49B8d81".to_string(),
-            nonce: 0,
-            deployments: vec![],
-            operations: vec![],
-            safe_context: None,
-            environment: "testnet".to_string(),
-            created_at: ts,
         }
     }
 
@@ -313,5 +291,43 @@ mod tests {
             + registry.safe_transaction_count()
             + registry.governor_proposal_count();
         assert_eq!(total, 0);
+    }
+
+    #[test]
+    fn full_reset_empties_lookup_index() {
+        let dir = TempDir::new().unwrap();
+        let mut registry = Registry::init(dir.path()).unwrap();
+
+        registry
+            .insert_deployment(make_deployment("dep-1", 1, "default"))
+            .unwrap();
+        registry
+            .insert_deployment(make_deployment("dep-2", 1, "staging"))
+            .unwrap();
+
+        // Verify lookup index is non-empty before reset.
+        let index_before = registry.load_lookup_index().unwrap();
+        assert!(!index_before.by_name.is_empty(), "lookup should be populated");
+
+        // Simulate a full reset: remove all deployments.
+        let ids: Vec<String> = registry
+            .list_deployments()
+            .iter()
+            .map(|d| d.id.clone())
+            .collect();
+        for id in ids {
+            registry.remove_deployment(&id).unwrap();
+        }
+
+        // Lookup index should now be empty.
+        let index_after = registry.load_lookup_index().unwrap();
+        assert!(
+            index_after.by_name.is_empty(),
+            "lookup.by_name should be empty after full reset"
+        );
+        assert!(
+            index_after.by_address.is_empty(),
+            "lookup.by_address should be empty after full reset"
+        );
     }
 }
