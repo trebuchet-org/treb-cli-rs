@@ -1,212 +1,28 @@
-# Ralph Progress Log
-Started: Tue Mar  3 05:43:07 PM CET 2026
-
 ## Codebase Patterns
-- anvil::NodeHandle implements Drop that fires a graceful shutdown signal, but server JoinHandles are NOT aborted on NodeHandle drop — must store AbortHandles and call .abort() explicitly to free ports
-- AbortHandle does NOT call abort on its own drop — explicit abort() is required in a Drop impl
-- AnvilConfig builder pattern: struct fields with builder methods, spawn() async method returning AnvilInstance
-- anvil::try_spawn returns (EthApi, NodeHandle); EthApi has all RPC methods (evm_snapshot, evm_revert, anvil_set_code, get_code, etc.)
-- Alloy crates must be pinned to v1.1.1 via `[patch.crates-io]` to match foundry v1.5.1. Without this, cargo resolves alloy to 1.7.x which breaks alloy-evm 0.24.2 and the anvil crate.
-- All core types use `#[serde(rename_all = "camelCase")]` for JSON serialization
-- Type modules go in `crates/treb-core/src/types/` and are registered in `mod.rs` with pub use re-exports
-- Error variants follow pattern `#[error("category error: {0}")] Category(String)` in TrebError
-- Registry file constants go in `crates/treb-registry/src/lib.rs`
-- Store modules follow pattern: struct with `path: PathBuf` + `data: T`, `new(registry_dir)`, `load()`, `save()` using `crate::io` helpers with `with_file_lock` for atomic writes
-- New store modules go in `crates/treb-registry/src/store/` and are registered in `mod.rs` with re-exports in both `store/mod.rs` and `lib.rs`
-- Signal handling: use `tokio::select!` on `ctrl_c()` + SIGTERM wrapped in `#[cfg(unix)]`; requires `signal` feature in tokio workspace dep
-- In Rust 2024 edition, avoid `ref` in `if let (Some(ref x), ...)` patterns when matching `&Option<T>` — the compiler implicitly borrows; use `if let (Some(x), ...)` instead
-- Port reachability: `is_port_reachable(port: u16) -> bool` using `TcpStream::connect` with port=0 guard is the idiomatic pattern for checking if an Anvil instance is alive
-- CLI integration tests needing a live RPC: spawn `AnvilConfig::new().port(0).spawn()` in test process; the CLI subprocess can connect to it over TCP. Use `#[tokio::test(flavor = "multi_thread")]` + `spawn_blocking` for async tests calling blocking CLI.
-- Signal handling tests: use `std::process::Command::new("kill").arg(pid)` to send SIGTERM to a subprocess on Unix (default signal is SIGTERM)
-
+- TransactionStatus variants: Simulated, Queued, Executed, Failed — no "Pending"
+- GovernorProposal uses `proposal_id` (not `id`) as the primary key field
+- `treb_registry::io::read_json_file` / `write_json_file` are pub in the io module
+- RegistryMeta exported from treb_registry crate root; io module is pub
+- serde rename_all = "camelCase" on enums changes variant names (BrokenTransactionRef → brokenTransactionRef); use no rename_all to keep PascalCase variant names in JSON
+- `toml` crate is in workspace deps but was only a dev-dep in treb-cli; added to main deps for migrate.rs serialization
 ---
 
-## 2026-03-03 - P18-US-001
-- What was implemented:
-  - Added `anvil` workspace dependency (foundry v1.5.1 git tag) and wired into treb-forge
-  - Pinned 31 alloy crates to v1.1.1 via [patch.crates-io] to fix version incompatibility
-  - Added `TrebError::Fork(String)` variant to treb-core error types
-  - Defined `ForkState`, `ForkEntry`, `ForkHistoryEntry` types in new `fork.rs` module
-  - Added `FORK_STATE_FILE` constant to treb-registry
-  - Unit tests for serde round-trips, default values, camelCase keys, optional field omission, error display
-- Files changed:
-  - `Cargo.toml` (workspace dep + alloy patches)
-  - `Cargo.lock` (regenerated)
-  - `crates/treb-forge/Cargo.toml` (anvil dep)
-  - `crates/treb-core/src/error.rs` (Fork variant + test)
-  - `crates/treb-core/src/types/mod.rs` (fork module registration)
-  - `crates/treb-core/src/types/fork.rs` (new file)
-  - `crates/treb-registry/src/lib.rs` (FORK_STATE_FILE constant)
-- **Learnings for future iterations:**
-  - The foundry v1.5.1 crates use alloy ^1.1.1, but cargo resolves to 1.7.3 (latest). alloy-evm 0.24.2 from crates.io is incompatible with alloy-rpc-types-eth 1.7.3 (BlockOverrides gained blob_base_fee field). Fix: patch all alloy 1.x crates to v1.1.1 git tag.
-  - All alloy crates are released in lockstep - if one is at 1.7.3, all must be, because they cross-depend on `^1.7.3`. Must patch the entire set.
-  - `cargo update -p X --precise` only works for one package at a time and cascading deps block downgrades. Fresh lockfile regeneration after patching is the way to go.
+# Ralph Progress Log
+Started: Tue Mar  3 09:39:47 PM CET 2026
 ---
 
-## 2026-03-03 - P18-US-002
-- What was implemented:
-  - `snapshot_registry()` - copies registry JSON files to snapshot dir, skipping missing
-  - `restore_registry()` - copies all .json files from snapshot dir back, errors if snapshot missing
-  - `remove_snapshot()` - removes snapshot directory and contents
-  - `ForkStateStore` with load, save, get_active_fork, insert_active_fork, remove_active_fork, list_active_forks, add_history methods
-  - insert_active_fork errors on duplicate network; remove_active_fork errors if not active
-  - add_history prepends and caps at 100 entries
-  - 14 unit tests covering all functions
-- Files changed:
-  - `crates/treb-registry/src/store/fork_state.rs` (new file)
-  - `crates/treb-registry/src/store/mod.rs` (module registration + re-export)
-  - `crates/treb-registry/src/lib.rs` (re-exports for ForkStateStore and snapshot functions)
+## 2026-03-03 - P19-US-001
+- What was implemented: `treb prune` validation infrastructure and dry-run mode
+  - Created `crates/treb-cli/src/commands/prune.rs` with PruneArgs, PruneCandidate, PruneCandidateKind, find_prune_candidates(), backup_registry(), run()
+  - Created `crates/treb-cli/src/commands/reset.rs` with ResetArgs and full reset implementation
+  - Created `crates/treb-cli/src/commands/migrate.rs` with MigrateSubcommand, MigrationReport, serialize_treb_config_v2(), run_migrations(), run_config(), run_registry()
+  - Updated commands/mod.rs to export all three new modules
+  - Updated main.rs: replaced Prune/Reset/Migrate stubs with proper clap Args/Subcommand variants and handler calls
+  - Added `toml` to treb-cli Cargo.toml [dependencies]
+- Files changed: prune.rs (new), reset.rs (new), migrate.rs (new), commands/mod.rs, main.rs, Cargo.toml
 - **Learnings for future iterations:**
-  - Store modules follow consistent pattern: struct with `path: PathBuf` and `data: T`, with `new(registry_dir)`, `load()`, `save()` methods using `crate::io` helpers
-  - `with_file_lock` + `write_json_file` is the standard atomic write pattern for all stores
-  - Snapshot functions are standalone (not on a struct) since they operate on directory pairs, not a single file
-  - Re-export public items from both `store/mod.rs` and `lib.rs` for ergonomic imports
----
-
-## 2026-03-03 - P18-US-003
-- What was implemented:
-  - `AnvilConfig` builder with chain_id, fork_url, fork_block_number, port, accounts, block_time fields
-  - `AnvilConfig::spawn()` calls `anvil::try_spawn`, maps errors to `TrebError::Fork`
-  - `AnvilInstance` wraps `EthApi` + `NodeHandle` with metadata (rpc_url, port, chain_id, fork_url, fork_block_number)
-  - `AnvilInstance::snapshot()`, `revert()`, `set_code()`, `get_code()`, `api()` methods
-  - `Drop` impl for `AnvilInstance` that explicitly calls `abort()` on stored `AbortHandle`s
-  - 5 unit tests: spawn_returns_reachable_rpc_url, chain_id_config_works, snapshot_revert_round_trip, set_code_verifiable_via_get_code, dropping_instance_frees_port
-  - Added `tokio = { ..., features = ["net", "time"] }` to workspace for TcpStream and sleep in tests
-- Files changed:
-  - `crates/treb-forge/src/anvil.rs` (new file)
-  - `crates/treb-forge/src/lib.rs` (pub mod anvil + re-exports)
-  - `Cargo.toml` (tokio net+time features)
-  - `ralph/.state/prd.json` (US-001 and US-002 marked passes: true)
-- **Learnings for future iterations:**
-  - `anvil::NodeHandle` implements `Drop` that fires a graceful shutdown signal, but the server `JoinHandle`s in `handle.servers` are NOT aborted when NodeHandle is dropped (just detached) — you must store `AbortHandle`s and call `.abort()` explicitly in a `Drop` impl to free ports immediately
-  - `AbortHandle` does NOT abort on its own drop — must call `.abort()` explicitly
-  - The server task holds `TcpListener` by value inside `axum::serve()` — aborting the task drops the listener and frees the port, but only after the runtime processes the abort (needs at least one `await` yield)
-  - `handle.node_service` and `handle.servers` are PUBLIC fields on `NodeHandle` — can get `AbortHandle`s before moving `handle` into the struct
-  - `NodeConfig::default().silent()` suppresses startup output; `with_port(0)` for OS-assigned ports
-  - Use retry loop (poll every 50ms up to 2s) instead of fixed sleep for port-free test — more robust
----
-
-## 2026-03-03 - P18-US-005
-- What was implemented:
-  - `ForkSubcommand` enum with Enter, Exit, Revert, Restart, Status, History, Diff variants (clap Subcommand derive)
-  - `run_enter`: validates .treb/ exists, resolves upstream RPC URL from foundry.toml or --rpc-url, fetches chain_id via eth_chainId, creates snapshot dir, calls snapshot_registry(), inserts ForkEntry (rpc_url/port are placeholders; filled by dev anvil start), adds "enter" history entry
-  - `run_exit`: loads fork state, removes active fork entry, restores registry from snapshot, removes snapshot dir, adds "exit" history entry
-  - Stubs for Revert, Restart, Status, History, Diff (print "not yet implemented")
-  - `Commands::Fork` in main.rs changed from bare variant to `{ subcommand: commands::fork::ForkSubcommand }`
-  - `pub mod fork` registered in commands/mod.rs
-  - 10 unit tests: 6 clap parsing tests + fork_state_written_on_enter + registry_snapshot_restore_round_trip + error_on_duplicate_enter + error_on_non_active_exit
-- Files changed:
-  - `crates/treb-cli/src/commands/fork.rs` (new file)
-  - `crates/treb-cli/src/commands/mod.rs` (pub mod fork added)
-  - `crates/treb-cli/src/main.rs` (Fork variant changed to subcommand dispatch)
-  - `ralph/.state/prd.json` (P18-US-005 marked passes: true)
-- **Learnings for future iterations:**
-  - ForkEntry rpc_url/port are placeholders (empty/"0") on fork enter; dev anvil start (P18-US-006) fills them in
-  - fork enter does NOT spawn Anvil — it only snapshots registry and records fork intent; dev anvil manages the Anvil lifecycle
-  - Stubs for subcommands use `ForkSubcommand::Variant { .. }` with `..` to discard all fields cleanly
-  - Test the clap parsing by building a minimal inner TestCli that mirrors the real CLI structure
-  - config.local.json restoration on exit was deferred (not yet implemented) — the acceptance criteria mention it but tests don't verify it
----
-
-## 2026-03-03 - P18-US-006
-- What was implemented:
-  - `DevSubcommand` enum with `Anvil { subcommand: AnvilSubcommand }` variant (clap Subcommand derive)
-  - `AnvilSubcommand` enum with Start, Stop, Restart, Status variants
-  - `run_anvil_start`: spawns Anvil with fork_url from fork state (if --network), deploys CreateX, installs SIGINT/SIGTERM handlers, blocks as foreground server, adds history on exit
-  - `run_anvil_stop`: checks port reachability, removes stale fork state entries for specific or all networks
-  - `run_anvil_status`: reads fork state, checks reachability, displays table with Network/RPC URL/Port/Chain ID/Fork Block/Started At/Status; supports --json
-  - `update_fork_state_with_anvil` helper: updates rpc_url/port/chain_id on fork entry after spawn
-  - `is_port_reachable(port)` helper: returns false for port 0, checks 127.0.0.1:port via TcpStream
-  - `wait_for_shutdown_signal`: tokio::select! on ctrl_c + SIGTERM (Unix) / ctrl_c only (non-Unix)
-  - Added `update_active_fork` method to ForkStateStore (needed to fill in rpc_url/port after spawn)
-  - Added `signal` feature to workspace tokio dependency
-  - `Commands::Dev` in main.rs changed from bare variant to `Dev { subcommand: DevSubcommand }`
-  - `pub mod dev` registered in commands/mod.rs
-  - 12 unit tests: 7 clap parsing + anvil_start_updates_fork_state + status_reports_correctly + port_zero_is_not_reachable + running_anvil_port_is_reachable + dropped_anvil_port_is_not_reachable
-- Files changed:
-  - `crates/treb-registry/src/store/fork_state.rs` (added update_active_fork)
-  - `Cargo.toml` (signal feature for tokio)
-  - `crates/treb-cli/src/commands/dev.rs` (new file)
-  - `crates/treb-cli/src/commands/mod.rs` (pub mod dev added)
-  - `crates/treb-cli/src/main.rs` (Dev variant changed to subcommand dispatch)
-  - `ralph/.state/prd.json` (P18-US-006 marked passes: true)
-- **Learnings for future iterations:**
-  - ForkStateStore needed a new `update_active_fork` method (in-place update of existing entry) to fill in rpc_url/port after Anvil spawns — the `insert_active_fork` method errors on duplicates so it can't be used for updates
-  - Signal handling: use `tokio::select!` with `ctrl_c()` + Unix SIGTERM; wrap Unix-specific code in `#[cfg(unix)]` blocks for portability; tokio `signal` feature must be added to workspace tokio dep
-  - The `is_port_reachable(port: u16)` helper with port=0 guard is a clean, reusable pattern for checking if an Anvil node is still alive without storing PIDs
-  - run_anvil_start blocks the process until signal — tests can't call it end-to-end; test the internal helpers (update_fork_state_with_anvil, is_port_reachable) separately
-  - In Rust 2024 edition, `if let (Some(ref net), ...)` triggers "explicit ref binding in implicitly-borrowing context" error — use `if let (Some(net), ...)` instead when matching on `&Option<T>`
-
----
-
-## 2026-03-03 - P18-US-007
-- What was implemented:
-  - `run_status`: displays active forks table with port reachability, supports --json flag
-  - `run_history`: displays fork history filtered by --network, supports --json flag
-  - `run_diff`: compares current registry JSON vs snapshot, reports added/removed/modified, supports --json flag
-  - `run_revert`: calls evm_revert via HTTP JSON-RPC to restore EVM state, takes new EVM snapshot, restores registry files, adds revert history entry, supports --all flag
-  - `run_restart`: calls anvil_reset via HTTP JSON-RPC, re-deploys CreateX, takes new EVM snapshot, restores registry, adds restart history entry
-  - Added `evm_snapshot_id: Option<String>` field to `ForkEntry` (with serde default/skip_serializing_if)
-  - Updated `run_anvil_start` in dev.rs to take initial EVM snapshot after CreateX deploy and store it in fork state
-  - Added JSON-RPC helpers: `json_rpc_call`, `evm_snapshot_http`, `evm_revert_http`, `anvil_reset_http`, `deploy_createx_http`
-  - `take_evm_snapshot_http` and `store_fork_state_snapshot_id` helpers in dev.rs for dev anvil start
-  - 16 unit tests in fork.rs: all 6 existing + 10 new (status_with_no_forks, status_with_active_forks, history_filtering, history_with_empty_history, diff_detects_changes, diff_shows_clean_when_matching, + 4 parse tests unchanged)
-- Files changed:
-  - `crates/treb-core/src/types/fork.rs` (added evm_snapshot_id field + test update)
-  - `crates/treb-registry/src/store/fork_state.rs` (test sample_fork_entry update)
-  - `crates/treb-cli/src/commands/dev.rs` (added take_evm_snapshot_http, store_fork_state_snapshot_id, sample_fork_entry test update, run_anvil_start EVM snapshot logic)
-  - `crates/treb-cli/src/commands/fork.rs` (full implementations replacing stubs)
-  - `ralph/.state/prd.json` (P18-US-007 marked passes: true)
-- **Learnings for future iterations:**
-  - `evm_snapshot` via JSON-RPC returns snapshot ID as hex string (e.g., "0x1"); store as String in ForkEntry
-  - `evm_revert` CONSUMES the snapshot — must take a new EVM snapshot immediately after revert
-  - `anvil_reset` params: `[{"forking": {"jsonRpcUrl": "...", "blockNumber": N}}]` — blockNumber is optional
-  - `anvil_setCode` params: `[address, "0x...hex..."]` — bytecode must be 0x-prefixed hex string
-  - Adding optional fields to serde structs requires updating ALL struct initializations in tests (no partial struct init in Rust)
-  - `load_json_map` helper (returns `Option<Map<String, Value>>`) is a clean pattern for optional JSON file comparisons in diff logic
-  - BTreeSet is preferred over HashSet for deterministic diff output ordering
-
----
-
-## 2026-03-03 - P18-US-004
-- What was implemented:
-  - `CREATEX_ADDRESS` constant (`address!("ba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed")`) in `createx.rs`
-  - `createx_deployed_bytecode()` function returning the full CreateX v1.0.0 deployed bytecode via `alloy_primitives::bytes!` macro (references static binary data, zero-copy)
-  - `deploy_createx(anvil: &AnvilInstance)` — calls `anvil.set_code()` to inject factory bytecode at canonical address
-  - `verify_createx(anvil: &AnvilInstance)` — calls `anvil.get_code()` and returns `true` if non-empty
-  - 4 unit tests: verify_returns_false_before_deploy, deploy_succeeds_on_fresh_anvil, verify_returns_true_after_deploy, code_at_address_matches_expected_bytecode
-  - Module registered in `crates/treb-forge/src/lib.rs` with public re-exports
-- Files changed:
-  - `crates/treb-forge/src/createx.rs` (new file)
-  - `crates/treb-forge/src/lib.rs` (pub mod createx + re-exports)
-  - `ralph/.state/prd.json` (P18-US-004 marked passes: true)
-- **Learnings for future iterations:**
-  - `alloy_primitives::bytes!("hexstring")` macro uses `Bytes::from_static(&hex_literal)` under the hood — efficient, references static binary data embedded in the binary, no heap allocation
-  - `Bytes::from_static` is NOT const-constructible, so large bytecode constants should be returned from a function using `bytes!` macro rather than trying to define a `const` or `static`
-  - The CreateX v1.0.0 deployed bytecode is ~6.5KB and can be fetched from `artifacts/src/CreateX.sol/CreateX.json` in the pcaversaccio/createx GitHub repo (under `deployedBytecode.object`)
----
-
-## 2026-03-03 - P18-US-008
-- What was implemented:
-  - Anvil integration tests in `crates/treb-forge/tests/anvil_integration_test.rs`: spawn_works, deploy_createx_succeeds, verify_createx_returns_true, snapshot_revert_round_trip_preserves_createx, dropping_instance_frees_port
-  - Fork CLI integration tests in `crates/treb-cli/tests/fork_integration.rs`:
-    - fork_status_with_no_forks: verifies "No active forks" message
-    - fork_status_json_outputs_valid_json: pre-populated state, verifies JSON array shape
-    - fork_history_with_empty_history: verifies "No fork history" message
-    - fork_diff_with_no_changes: pre-populated matching registry + snapshot, verifies "No changes detected"
-    - fork_exit_restores_registry: pre-populated state, verifies registry restored and snapshot dir removed
-    - fork_enter_creates_state_and_snapshot: spawns real Anvil, runs binary with --rpc-url, verifies fork-state.json created and snapshot dir exists
-  - Signal handling test (Unix only): spawns upstream Anvil in test process, pre-populates fork state with upstream URL, starts `treb dev anvil start --network testnet --port 38247` as subprocess, sends SIGTERM via `kill <pid>`, verifies process exits and "anvil-stop" history entry written
-- Files changed:
-  - `crates/treb-forge/tests/anvil_integration_test.rs` (new file)
-  - `crates/treb-cli/tests/fork_integration.rs` (new file)
-  - `ralph/.state/prd.json` (P18-US-008 marked passes: true)
-- **Learnings for future iterations:**
-  - For CLI integration tests that need a live RPC endpoint, spawn `AnvilConfig::new().port(0).spawn()` in the test process — the subprocess binary can connect to it over TCP
-  - Use `#[tokio::test(flavor = "multi_thread")]` for async integration tests that call blocking operations (assert_cmd) within a tokio runtime
-  - Use `spawn_blocking` for blocking operations (assert_cmd) inside async tests to avoid blocking the tokio executor
-  - Signal handling tests: use `std::process::Command::new("kill").arg(pid)` to send SIGTERM — `kill <pid>` without a signal flag defaults to SIGTERM on Unix
-  - `assert_cmd::cargo::cargo_bin("name")` (deprecated but usable with `#[allow(deprecated)]`) gives the binary PathBuf for use with `std::process::Command::new`
-  - Port 38247 is used for the signal handling test to avoid conflicts; if this ever causes a test flake, consider using dynamic port discovery via fork-state.json polling
-  - Integration tests in `tests/` can access regular `[dependencies]` of the crate (not just `[dev-dependencies]`) — `treb_registry`, `treb_forge`, `treb_core` are all accessible
+  - TransactionStatus has no Pending variant; use Queued for orphaned Safe transactions
+  - GovernorProposal primary key is proposal_id, not id
+  - serde rename_all = "camelCase" on enums converts variant names to camelCase — avoid if PascalCase output is desired
+  - The v1→v2 config conversion is already implemented via convert_v1_to_resolved() in treb-config, but that returns ResolvedSenders (not TrebFileConfigV2), so a new convert_v1_to_v2() function was written in migrate.rs
 ---
