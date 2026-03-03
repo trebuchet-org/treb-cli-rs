@@ -1,0 +1,42 @@
+{
+  "id": "testnet-v2-rc5/11142220/TransparentUpgradeableProxy:ReserveLiquidityStrategy",
+  "namespace": "testnet-v2-rc5",
+  "chainId": 11142220,
+  "contractName": "TransparentUpgradeableProxy",
+  "label": "ReserveLiquidityStrategy",
+  "address": "0x734bb3251Ec3f1A83f8f2A8609bcEF649D54EbF8",
+  "type": "PROXY",
+  "transactionId": "tx-0xb350c89bdfe61c1945d0c63e35efea79b773f93f52eaab99490d86467fa3312a",
+  "deploymentStrategy": {
+    "method": "CREATE3",
+    "salt": "0x2738f38fde510743e0c589415e0598c4cee6eaa700334922350dcc86aa38d33d",
+    "initCodeHash": "0x9e398a6842499bd7cac5c07add29b390e6c9f43c16b3d05d61cf3815e45f8dcf",
+    "factory": "0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed",
+    "constructorArgs": "0x00000000000000000000000077b2d6d2220cb0ea20ea9d9eb7a75dd11343e4120000000000000000000000002738f38fde510743e0c589415e0598c4cee6eaa700000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000044485cc9550000000000000000000000002738f38fde510743e0c589415e0598c4cee6eaa7000000000000000000000000bcdc1d0b92dfceeaa0fcd0a0d53355f4bf1db8a700000000000000000000000000000000000000000000000000000000",
+    "entropy": "testnet-v2-rc5/lib/openzeppelin-contracts/contracts/proxy/transparent/TransparentUpgradeableProxy.sol:TransparentUpgradeableProxy:ReserveLiquidityStrategy"
+  },
+  "proxyInfo": {
+    "type": "UUPS",
+    "implementation": "0x625BD9cc583B5F9a88a38B0657ce816a3F02D367",
+    "history": [
+      {
+        "implementationId": "testnet-v2-rc5/11142220/ReserveLiquidityStrategy:v3.0.0",
+        "upgradedAt": "2026-03-01T18:59:51.430468Z",
+        "upgradeTxId": ""
+      }
+    ]
+  },
+  "artifact": {
+    "path": "lib/openzeppelin-contracts/contracts/proxy/transparent/TransparentUpgradeableProxy.sol",
+    "compilerVersion": "0.8.30+commit.73712a01",
+    "bytecodeHash": "0xfc9e51b2968276066852e1a70d3552d1a35ce04b876c63f422288ed9eb3e16f2",
+    "scriptPath": "script/deploy/v3/DeployV3PreStage.s.sol",
+    "gitCommit": "d70877a26d1247c633939922a5bb0b201153f2a7"
+  },
+  "verification": {
+    "status": "UNVERIFIED"
+  },
+  "tags": null,
+  "createdAt": "2026-02-27T10:04:01.355601Z",
+  "updatedAt": "2026-03-01T18:59:51.439266Z"
+}

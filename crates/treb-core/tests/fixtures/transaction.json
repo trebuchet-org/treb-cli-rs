@@ -1,0 +1,13 @@
+{
+  "id": "tx-0x0005541a90d17d4f7f495f89f6d1601e6e21a0d5fec0566baca532d314e03017",
+  "chainId": 11142220,
+  "hash": "0x0005541a90d17d4f7f495f89f6d1601e6e21a0d5fec0566baca532d314e03017",
+  "status": "EXECUTED",
+  "blockNumber": 3608001,
+  "sender": "0x56fD3F2bEE130e9867942D0F463a16fBE49B8d81",
+  "nonce": 0,
+  "deployments": [],
+  "operations": [],
+  "environment": "testnet-v2-rc0",
+  "createdAt": "2025-09-03T09:33:10.981776Z"
+}

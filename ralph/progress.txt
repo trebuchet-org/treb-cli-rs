@@ -13,6 +13,8 @@ Started: Tue Mar  3 02:36:34 AM CET 2026
 - Go nil slices serialize as `null`, not `[]` — use `Option<Vec<T>>` in Rust for nullable slices; use bare `Vec<T>` for slices that should always be `[]` when empty
 - Go `omitempty` on `uint64` skips zero — use `#[serde(default, skip_serializing_if = "is_zero_u64")]` with a helper fn
 - Go `map[string]any` → `HashMap<String, serde_json::Value>` in Rust
+- Golden file fixtures live at `crates/treb-core/tests/fixtures/`; timestamps are normalized to UTC (Z suffix) for round-trip compatibility with chrono's DateTime<Utc>
+- Go-generated registry data lives at `/home/sol/projects/treb-state/.treb/` (deployments.json, transactions.json, safe-txs.json)
 
 ---
 
@@ -51,4 +53,48 @@ Started: Tue Mar  3 02:36:34 AM CET 2026
   - Go `int` for batchIndex maps to `i64` in Rust
   - Go `map[string]any` maps to `HashMap<String, serde_json::Value>` in Rust
   - Operation struct does NOT use `rename_all = "camelCase"` since all its Go fields are already lowercase single words; only `type` needs explicit rename
+---
+
+## 2026-03-03 - US-004
+- Implemented SafeTransaction struct with fields: safeTxHash, safeAddress, chainId, status, nonce, transactions, transactionIds, proposedBy, proposedAt, confirmations, executedAt, executionTxHash
+- Implemented SafeTxData struct (to, value, data, operation) and Confirmation struct (signer, signature, confirmedAt)
+- Implemented GovernorProposal struct with fields: proposalId, governorAddress, timelockAddress, chainId, status, transactionIds, proposedBy, proposedAt, description, executedAt, executionTxHash
+- Vec fields (transactions, transactionIds, confirmations) always serialize as [] when empty; executedAt omitted when None; executionTxHash/timelockAddress/description omitted when empty
+- 17 unit tests covering: camelCase fields, omitempty behavior, empty arrays, round-trips for both types
+- Files changed: crates/treb-core/src/types/safe_transaction.rs (new), crates/treb-core/src/types/governor_proposal.rs (new), crates/treb-core/src/types/mod.rs
+- **Learnings for future iterations:**
+  - Go `safe_transaction.go` and `governor_proposal.go` are at `/home/sol/projects/treb-cli/internal/domain/models/`
+  - TransactionStatus enum has no `Pending` variant — only Simulated, Queued, Executed, Failed; use `Queued` for test samples of pending-like states
+  - SafeTxData fields are all lowercase single words in Go — no `rename_all` needed; `operation` is `uint8` (maps to `u8`)
+  - Go `SafeExecutionInfo` struct exists but is NOT part of the persisted model — skip it
+---
+
+## 2026-03-03 - US-005
+- Implemented Contract struct with fields: name, path, artifactPath (omitempty), version (omitempty), artifact (Option<Artifact> omitempty)
+- Implemented Artifact struct with: abi (serde_json::Value), bytecode/deployedBytecode (BytecodeObject), methodIdentifiers (HashMap<String, String>), rawMetadata, metadata (ArtifactMetadata)
+- Implemented BytecodeObject struct with: object, sourceMap, linkReferences (HashMap<String, serde_json::Value>)
+- Implemented ArtifactMetadata with sub-structs: ArtifactCompiler, ArtifactOutput, ArtifactSettings
+- Defined Network type alias: `pub type Network = String`
+- 9 unit tests covering: camelCase fields, omitempty behavior, artifact JSON structure, bytecode object structure, metadata structure, round-trips with and without artifact
+- Files changed: crates/treb-core/src/types/contract.rs (new), crates/treb-core/src/types/mod.rs
+- **Learnings for future iterations:**
+  - Go `contract.go` uses inline anonymous structs for ArtifactMetadata sub-types (Compiler, Output, Settings) — Rust needs named structs (ArtifactCompiler, ArtifactOutput, ArtifactSettings)
+  - Go `json.RawMessage` for ABI fields → `serde_json::Value` in Rust
+  - Go `map[string]any` for linkReferences → `HashMap<String, serde_json::Value>` (consistent with Operation.result pattern)
+  - ArtifactMetadata fields (compiler, language, output, settings) are already lowercase in Go, so no `rename_all` needed on the struct itself; only ArtifactSettings needs `rename_all = "camelCase"` for compilationTarget
+---
+
+## 2026-03-03 - US-006
+- Created test fixture directory at crates/treb-core/tests/fixtures/ with 7 golden JSON files extracted from real Go-generated data at /home/sol/projects/treb-state/.treb/
+- Fixtures: deployment.json, deployment_with_proxy.json, transaction.json, safe_transaction.json, deployments_map.json, transactions_map.json, safe_txs_map.json
+- Created integration test file at crates/treb-core/tests/serde_golden.rs with a generic `assert_round_trip<T>` helper and 7 tests
+- Tests cover individual types (Deployment, Transaction, SafeTransaction) and HashMap-based registry format (HashMap<String, T>)
+- All 7 golden tests pass; all 64 total tests pass; clippy clean; fmt clean
+- Files changed: crates/treb-core/tests/serde_golden.rs (new), crates/treb-core/tests/fixtures/*.json (7 new fixture files)
+- **Learnings for future iterations:**
+  - Go timestamps use local timezone offsets (e.g., +01:00); Rust's DateTime<Utc> always serializes with Z suffix — fixture timestamps must be normalized to UTC for round-trip equality
+  - Go nanosecond precision (9 fractional digits) is preserved by chrono; chrono's AutoSi format uses 0/3/6/9 digits matching the precision needed
+  - Python's datetime only supports microseconds (6 digits); use regex-based timestamp normalization to preserve Go's nanosecond fractional digits
+  - The `include_str!` macro is ideal for embedding fixture files in integration tests
+  - HashMap<String, T> round-trips work because serde_json::Value comparison is order-independent for objects
 ---

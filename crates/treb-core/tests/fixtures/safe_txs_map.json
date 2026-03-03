@@ -1,0 +1,48 @@
+{
+  "0x000a6c9e8755d5364609f8720939b3c9869146e6ca3c3d8f06163f83a9d380ba": {
+    "safeTxHash": "0x000a6c9e8755d5364609f8720939b3c9869146e6ca3c3d8f06163f83a9d380ba",
+    "safeAddress": "0x32CB58b145d3f7e28c45cE4B2Cc31fa94248b23F",
+    "chainId": 42220,
+    "status": "EXECUTED",
+    "nonce": 0,
+    "transactions": [],
+    "transactionIds": [
+      "tx-0xa6adfc44a469bd1c3a8fb42f892f2e9041b19560566635adb81a13145a23adfd",
+      "tx-0xa6adfc44a469bd1c3a8fb42f892f2e9041b19560566635adb81a13145a23adfd"
+    ],
+    "proposedBy": "0x56fD3F2bEE130e9867942D0F463a16fBE49B8d81",
+    "proposedAt": "2025-09-02T13:28:47.976186Z",
+    "confirmations": [],
+    "executionTxHash": "0xa6adfc44a469bd1c3a8fb42f892f2e9041b19560566635adb81a13145a23adfd"
+  },
+  "0x01777563f5ba4c38c0ec228b3f2b8ddd456e04c5092325ca1960bbf1f46a6a7d": {
+    "safeTxHash": "0x01777563f5ba4c38c0ec228b3f2b8ddd456e04c5092325ca1960bbf1f46a6a7d",
+    "safeAddress": "0x32CB58b145d3f7e28c45cE4B2Cc31fa94248b23F",
+    "chainId": 8453,
+    "status": "EXECUTED",
+    "nonce": 0,
+    "transactions": [],
+    "transactionIds": [
+      "tx-0x2d7e9b57f9e3c3b0ab73b9c3ecbda88243cbfaee004c18f1de464d2e757674ff"
+    ],
+    "proposedBy": "0x56fD3F2bEE130e9867942D0F463a16fBE49B8d81",
+    "proposedAt": "2025-09-01T14:49:27.791677Z",
+    "confirmations": [],
+    "executionTxHash": "0x2d7e9b57f9e3c3b0ab73b9c3ecbda88243cbfaee004c18f1de464d2e757674ff"
+  },
+  "0x023becf69b8ebdff485fc01fd2e01361e54748bf38aaa775237526e4e0a2b7fd": {
+    "safeTxHash": "0x023becf69b8ebdff485fc01fd2e01361e54748bf38aaa775237526e4e0a2b7fd",
+    "safeAddress": "0x32CB58b145d3f7e28c45cE4B2Cc31fa94248b23F",
+    "chainId": 42220,
+    "status": "EXECUTED",
+    "nonce": 0,
+    "transactions": [],
+    "transactionIds": [
+      "tx-0x617b649ecbfa7b25391f4ced79153dbd2c31fe1d2376aec818f45e97e20e1917"
+    ],
+    "proposedBy": "0x56fD3F2bEE130e9867942D0F463a16fBE49B8d81",
+    "proposedAt": "2025-09-02T13:22:33.370789Z",
+    "confirmations": [],
+    "executionTxHash": "0x617b649ecbfa7b25391f4ced79153dbd2c31fe1d2376aec818f45e97e20e1917"
+  }
+}

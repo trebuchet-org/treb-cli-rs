@@ -1,0 +1,16 @@
+{
+  "safeTxHash": "0x000a6c9e8755d5364609f8720939b3c9869146e6ca3c3d8f06163f83a9d380ba",
+  "safeAddress": "0x32CB58b145d3f7e28c45cE4B2Cc31fa94248b23F",
+  "chainId": 42220,
+  "status": "EXECUTED",
+  "nonce": 0,
+  "transactions": [],
+  "transactionIds": [
+    "tx-0xa6adfc44a469bd1c3a8fb42f892f2e9041b19560566635adb81a13145a23adfd",
+    "tx-0xa6adfc44a469bd1c3a8fb42f892f2e9041b19560566635adb81a13145a23adfd"
+  ],
+  "proposedBy": "0x56fD3F2bEE130e9867942D0F463a16fBE49B8d81",
+  "proposedAt": "2025-09-02T13:28:47.976186Z",
+  "confirmations": [],
+  "executionTxHash": "0xa6adfc44a469bd1c3a8fb42f892f2e9041b19560566635adb81a13145a23adfd"
+}

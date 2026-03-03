@@ -1,0 +1,58 @@
+{
+  "tx-0x0005541a90d17d4f7f495f89f6d1601e6e21a0d5fec0566baca532d314e03017": {
+    "id": "tx-0x0005541a90d17d4f7f495f89f6d1601e6e21a0d5fec0566baca532d314e03017",
+    "chainId": 11142220,
+    "hash": "0x0005541a90d17d4f7f495f89f6d1601e6e21a0d5fec0566baca532d314e03017",
+    "status": "EXECUTED",
+    "blockNumber": 3608001,
+    "sender": "0x56fD3F2bEE130e9867942D0F463a16fBE49B8d81",
+    "nonce": 0,
+    "deployments": [],
+    "operations": [],
+    "environment": "testnet-v2-rc0",
+    "createdAt": "2025-09-03T09:33:10.981776Z"
+  },
+  "tx-0x0933c3671c858ffd79344098876b7c16930dc39397617fe7d49a74168ea463c8": {
+    "id": "tx-0x0933c3671c858ffd79344098876b7c16930dc39397617fe7d49a74168ea463c8",
+    "chainId": 42220,
+    "hash": "0x0933c3671c858ffd79344098876b7c16930dc39397617fe7d49a74168ea463c8",
+    "status": "EXECUTED",
+    "blockNumber": 44918338,
+    "sender": "0x32CB58b145d3f7e28c45cE4B2Cc31fa94248b23F",
+    "nonce": 0,
+    "deployments": [],
+    "operations": [],
+    "safeContext": {
+      "safeAddress": "0x32CB58b145d3f7e28c45cE4B2Cc31fa94248b23F",
+      "safeTxHash": "0xb68f7b7e58df07284a7146fd867bb7c709b1704906f641f328e908d3a07ab369",
+      "batchIndex": 5,
+      "proposerAddress": "0x56fD3F2bEE130e9867942D0F463a16fBE49B8d81"
+    },
+    "environment": "virtual",
+    "createdAt": "2025-09-02T13:29:06.207015Z"
+  },
+  "tx-0x6d2704e94640fee89e0fb0d06ec94c19cb86c5ad558151d880512daea3984f37": {
+    "id": "tx-0x6d2704e94640fee89e0fb0d06ec94c19cb86c5ad558151d880512daea3984f37",
+    "chainId": 11142220,
+    "hash": "0x6d2704e94640fee89e0fb0d06ec94c19cb86c5ad558151d880512daea3984f37",
+    "status": "EXECUTED",
+    "blockNumber": 18059898,
+    "sender": "0x2738f38fde510743e0c589415e0598c4cee6eaa7",
+    "nonce": 60,
+    "deployments": [
+      "testnet-v2-rc5/11142220/StableTokenV3:v3.0.0"
+    ],
+    "operations": [
+      {
+        "type": "DEPLOY",
+        "target": "0xdbd4ea7ce0b15c9d57dc3fa47713477e4ef4fdcb",
+        "method": "CREATE",
+        "result": {
+          "address": "0xdbd4ea7ce0b15c9d57dc3fa47713477e4ef4fdcb"
+        }
+      }
+    ],
+    "environment": "testnet-v2-rc5",
+    "createdAt": "2026-02-26T20:36:43.873109Z"
+  }
+}

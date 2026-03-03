@@ -63,7 +63,7 @@
         "cargo check and cargo test pass"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -78,7 +78,7 @@
         "cargo check and cargo test pass"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -93,7 +93,7 @@
         "All tests pass with cargo test and cargo clippy passes with no warnings"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]
