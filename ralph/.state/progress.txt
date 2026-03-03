@@ -56,3 +56,17 @@ Started: Wed Mar  4 12:35:25 AM CET 2026
   - `assert_cmd::cargo::cargo_bin("treb-cli")` uses the crate/package name, not the binary command name
   - `cmd.assert()` returns Assert which has `get_output()` for accessing status/stdout/stderr
 ---
+
+## 2026-03-04 - P2-US-004
+- Implemented AnvilNode struct wrapping treb_forge::AnvilConfig/AnvilInstance
+- `spawn()` creates node on OS-assigned port, `spawn_with_config()` accepts custom AnvilConfig
+- Accessors: `port()`, `chain_id()`, `rpc_url()`, `instance()` (for advanced API access)
+- Created framework_anvil_node.rs with 5 async tests: spawn, custom chain_id, port reachability, drop frees port, instance accessor
+- Files changed:
+  - crates/treb-cli/tests/framework/anvil_node.rs (implemented from stub)
+  - crates/treb-cli/tests/framework_anvil_node.rs (new)
+- **Learnings for future iterations:**
+  - Anvil `evm_snapshot` returns U256::ZERO for the first snapshot (not 1) — don't assert non-zero
+  - `alloy_primitives` is not a direct dep of treb-cli — use `treb_forge` re-exports or avoid in test assertions
+  - AnvilNode is a thin wrapper; Drop cleanup is handled by AnvilInstance's existing Drop impl
+---
