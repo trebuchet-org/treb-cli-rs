@@ -6,6 +6,8 @@
 //! for in-process forge execution.
 
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
+use std::pin::Pin;
 
 use alloy_primitives::{Address, B256, hex};
 use alloy_signer::Signer;
@@ -48,31 +50,35 @@ pub enum ResolvedSender {
 /// Recursively resolves sub-senders (e.g. a Safe's signer or a Governor's
 /// proposer) using `all_senders`. The `visited` set detects circular
 /// references to prevent infinite recursion.
-pub async fn resolve_sender(
-    name: &str,
-    config: &SenderConfig,
-    all_senders: &HashMap<String, SenderConfig>,
-    visited: &mut HashSet<String>,
-) -> treb_core::Result<ResolvedSender> {
-    if !visited.insert(name.to_string()) {
-        return Err(TrebError::Config(format!(
-            "circular sender reference detected: '{name}' was already visited"
-        )));
-    }
-
-    let sender_type = config.type_.as_ref().ok_or_else(|| {
-        TrebError::Config(format!("sender '{name}' is missing required 'type' field"))
-    })?;
-
-    match sender_type {
-        treb_config::SenderType::PrivateKey => resolve_private_key(name, config).await,
-        treb_config::SenderType::Ledger => resolve_ledger(name, config).await,
-        treb_config::SenderType::Trezor => resolve_trezor(name, config).await,
-        treb_config::SenderType::Safe => resolve_safe(name, config, all_senders, visited).await,
-        treb_config::SenderType::OZGovernor => {
-            resolve_governor(name, config, all_senders, visited).await
+pub fn resolve_sender<'a>(
+    name: &'a str,
+    config: &'a SenderConfig,
+    all_senders: &'a HashMap<String, SenderConfig>,
+    visited: &'a mut HashSet<String>,
+) -> Pin<Box<dyn Future<Output = treb_core::Result<ResolvedSender>> + Send + 'a>> {
+    Box::pin(async move {
+        if !visited.insert(name.to_string()) {
+            return Err(TrebError::Config(format!(
+                "circular sender reference detected: '{name}' was already visited"
+            )));
         }
-    }
+
+        let sender_type = config.type_.as_ref().ok_or_else(|| {
+            TrebError::Config(format!("sender '{name}' is missing required 'type' field"))
+        })?;
+
+        match sender_type {
+            treb_config::SenderType::PrivateKey => resolve_private_key(name, config).await,
+            treb_config::SenderType::Ledger => resolve_ledger(name, config).await,
+            treb_config::SenderType::Trezor => resolve_trezor(name, config).await,
+            treb_config::SenderType::Safe => {
+                resolve_safe(name, config, all_senders, visited).await
+            }
+            treb_config::SenderType::OZGovernor => {
+                resolve_governor(name, config, all_senders, visited).await
+            }
+        }
+    })
 }
 
 /// Resolve all senders from a configuration map.
@@ -179,21 +185,116 @@ async fn resolve_trezor(
 }
 
 async fn resolve_safe(
-    _name: &str,
-    _config: &SenderConfig,
-    _all_senders: &HashMap<String, SenderConfig>,
-    _visited: &mut HashSet<String>,
+    name: &str,
+    config: &SenderConfig,
+    all_senders: &HashMap<String, SenderConfig>,
+    visited: &mut HashSet<String>,
 ) -> treb_core::Result<ResolvedSender> {
-    todo!("US-003: Safe sender resolution")
+    let safe_address: Address = config
+        .safe
+        .as_deref()
+        .or(config.address.as_deref())
+        .ok_or_else(|| {
+            TrebError::Config(format!(
+                "sender '{name}' of type Safe is missing required 'safe' or 'address' field"
+            ))
+        })?
+        .parse()
+        .map_err(|e| {
+            TrebError::Config(format!("sender '{name}': invalid safe address: {e}"))
+        })?;
+
+    let signer_name = config.signer.as_deref().ok_or_else(|| {
+        TrebError::Config(format!(
+            "sender '{name}' of type Safe is missing required 'signer' field"
+        ))
+    })?;
+
+    let signer_config = all_senders.get(signer_name).ok_or_else(|| {
+        TrebError::Config(format!(
+            "sender '{name}': signer '{signer_name}' not found in sender configuration"
+        ))
+    })?;
+
+    let signer = resolve_sender(signer_name, signer_config, all_senders, visited).await?;
+
+    Ok(ResolvedSender::Safe {
+        safe_address,
+        signer: Box::new(signer),
+    })
 }
 
 async fn resolve_governor(
-    _name: &str,
-    _config: &SenderConfig,
-    _all_senders: &HashMap<String, SenderConfig>,
-    _visited: &mut HashSet<String>,
+    name: &str,
+    config: &SenderConfig,
+    all_senders: &HashMap<String, SenderConfig>,
+    visited: &mut HashSet<String>,
 ) -> treb_core::Result<ResolvedSender> {
-    todo!("US-003: Governor sender resolution")
+    let governor_address: Address = config
+        .governor
+        .as_deref()
+        .or(config.address.as_deref())
+        .ok_or_else(|| {
+            TrebError::Config(format!(
+                "sender '{name}' of type OZGovernor is missing required 'governor' or 'address' field"
+            ))
+        })?
+        .parse()
+        .map_err(|e| {
+            TrebError::Config(format!("sender '{name}': invalid governor address: {e}"))
+        })?;
+
+    let timelock_address: Option<Address> = config
+        .timelock
+        .as_deref()
+        .map(|addr| {
+            addr.parse().map_err(|e| {
+                TrebError::Config(format!("sender '{name}': invalid timelock address: {e}"))
+            })
+        })
+        .transpose()?;
+
+    let proposer_name = config.proposer.as_deref().ok_or_else(|| {
+        TrebError::Config(format!(
+            "sender '{name}' of type OZGovernor is missing required 'proposer' field"
+        ))
+    })?;
+
+    let proposer_config = all_senders.get(proposer_name).ok_or_else(|| {
+        TrebError::Config(format!(
+            "sender '{name}': proposer '{proposer_name}' not found in sender configuration"
+        ))
+    })?;
+
+    let proposer = resolve_sender(proposer_name, proposer_config, all_senders, visited).await?;
+
+    Ok(ResolvedSender::Governor {
+        governor_address,
+        timelock_address,
+        proposer: Box::new(proposer),
+    })
+}
+
+/// Anvil's default HD wallet mnemonic.
+const ANVIL_MNEMONIC: &str =
+    "test test test test test test test test test test test junk";
+
+/// Create an in-memory test signer derived from Anvil's default HD wallet.
+///
+/// The returned signer produces the same addresses as Anvil's default accounts
+/// using derivation path `m/44'/60'/0'/0/{index}`.
+pub fn in_memory_signer(index: u32) -> treb_core::Result<WalletSigner> {
+    WalletSigner::from_mnemonic(ANVIL_MNEMONIC, None, None, index).map_err(|e| {
+        TrebError::Forge(format!("failed to create in-memory signer at index {index}: {e}"))
+    })
+}
+
+/// Create multiple in-memory test signers starting from index 0.
+///
+/// Returns `count` signers derived from Anvil's default HD wallet mnemonic,
+/// matching the accounts available in a default Anvil instance.
+pub fn default_test_signers(count: u32) -> treb_core::Result<Vec<WalletSigner>> {
+    (0..count).map(in_memory_signer).collect()
 }
 
 #[cfg(test)]
@@ -317,5 +418,306 @@ mod tests {
             }
             other => panic!("expected Config error, got {other:?}"),
         }
+    }
+
+    // ---- InMemory signer tests ----
+
+    #[test]
+    fn in_memory_signer_index_0_produces_anvil_addr_0() {
+        let signer = in_memory_signer(0).unwrap();
+        assert_eq!(
+            signer.address(),
+            ANVIL_ADDR_0,
+            "index 0 should produce Anvil's default account 0"
+        );
+    }
+
+    #[test]
+    fn in_memory_signer_different_indices_produce_different_addresses() {
+        let s0 = in_memory_signer(0).unwrap();
+        let s1 = in_memory_signer(1).unwrap();
+        assert_ne!(
+            s0.address(),
+            s1.address(),
+            "different indices should produce different addresses"
+        );
+    }
+
+    #[test]
+    fn default_test_signers_returns_requested_count() {
+        let signers = default_test_signers(5).unwrap();
+        assert_eq!(signers.len(), 5);
+        // First signer should be Anvil account 0
+        assert_eq!(signers[0].address(), ANVIL_ADDR_0);
+    }
+
+    #[test]
+    fn default_test_signers_zero_returns_empty() {
+        let signers = default_test_signers(0).unwrap();
+        assert!(signers.is_empty());
+    }
+
+    // ---- Safe sender resolution tests ----
+
+    fn safe_config(safe_addr: &str, signer_name: &str) -> SenderConfig {
+        SenderConfig {
+            type_: Some(SenderType::Safe),
+            safe: Some(safe_addr.to_string()),
+            signer: Some(signer_name.to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn safe_resolves_with_pk_signer() {
+        let safe_addr = "0x0000000000000000000000000000000000000042";
+        let mut senders = HashMap::new();
+        senders.insert("my-safe".to_string(), safe_config(safe_addr, "deployer"));
+        senders.insert("deployer".to_string(), pk_config(ANVIL_KEY_0, None));
+
+        let mut visited = HashSet::new();
+        let result = resolve_sender(
+            "my-safe",
+            senders.get("my-safe").unwrap(),
+            &senders,
+            &mut visited,
+        )
+        .await
+        .unwrap();
+
+        match result {
+            ResolvedSender::Safe {
+                safe_address,
+                signer,
+            } => {
+                assert_eq!(safe_address, safe_addr.parse::<Address>().unwrap());
+                match *signer {
+                    ResolvedSender::Wallet(ref ws) => {
+                        assert_eq!(ws.address(), ANVIL_ADDR_0);
+                    }
+                    ref other => panic!("expected Wallet sub-signer, got {other:?}"),
+                }
+            }
+            other => panic!("expected Safe variant, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn safe_missing_signer_field() {
+        let config = SenderConfig {
+            type_: Some(SenderType::Safe),
+            safe: Some("0x0000000000000000000000000000000000000042".to_string()),
+            ..Default::default()
+        };
+        let senders = HashMap::from([("my-safe".to_string(), config.clone())]);
+        let mut visited = HashSet::new();
+        let err = resolve_sender("my-safe", &config, &senders, &mut visited)
+            .await
+            .unwrap_err();
+
+        match err {
+            TrebError::Config(msg) => {
+                assert!(
+                    msg.contains("missing required 'signer' field"),
+                    "should mention missing signer: {msg}"
+                );
+            }
+            other => panic!("expected Config error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn safe_signer_not_found() {
+        let config = safe_config("0x0000000000000000000000000000000000000042", "nonexistent");
+        let senders = HashMap::from([("my-safe".to_string(), config.clone())]);
+        let mut visited = HashSet::new();
+        let err = resolve_sender("my-safe", &config, &senders, &mut visited)
+            .await
+            .unwrap_err();
+
+        match err {
+            TrebError::Config(msg) => {
+                assert!(
+                    msg.contains("nonexistent"),
+                    "should mention missing sender name: {msg}"
+                );
+                assert!(
+                    msg.contains("not found"),
+                    "should say not found: {msg}"
+                );
+            }
+            other => panic!("expected Config error, got {other:?}"),
+        }
+    }
+
+    // ---- Governor sender resolution tests ----
+
+    fn governor_config(
+        governor_addr: &str,
+        timelock_addr: Option<&str>,
+        proposer_name: &str,
+    ) -> SenderConfig {
+        SenderConfig {
+            type_: Some(SenderType::OZGovernor),
+            governor: Some(governor_addr.to_string()),
+            timelock: timelock_addr.map(|a| a.to_string()),
+            proposer: Some(proposer_name.to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn governor_resolves_with_pk_proposer() {
+        let gov_addr = "0x0000000000000000000000000000000000000099";
+        let tl_addr = "0x0000000000000000000000000000000000000088";
+        let mut senders = HashMap::new();
+        senders.insert(
+            "my-gov".to_string(),
+            governor_config(gov_addr, Some(tl_addr), "deployer"),
+        );
+        senders.insert("deployer".to_string(), pk_config(ANVIL_KEY_0, None));
+
+        let mut visited = HashSet::new();
+        let result = resolve_sender(
+            "my-gov",
+            senders.get("my-gov").unwrap(),
+            &senders,
+            &mut visited,
+        )
+        .await
+        .unwrap();
+
+        match result {
+            ResolvedSender::Governor {
+                governor_address,
+                timelock_address,
+                proposer,
+            } => {
+                assert_eq!(governor_address, gov_addr.parse::<Address>().unwrap());
+                assert_eq!(
+                    timelock_address,
+                    Some(tl_addr.parse::<Address>().unwrap())
+                );
+                match *proposer {
+                    ResolvedSender::Wallet(ref ws) => {
+                        assert_eq!(ws.address(), ANVIL_ADDR_0);
+                    }
+                    ref other => panic!("expected Wallet proposer, got {other:?}"),
+                }
+            }
+            other => panic!("expected Governor variant, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn governor_without_timelock() {
+        let gov_addr = "0x0000000000000000000000000000000000000099";
+        let mut senders = HashMap::new();
+        senders.insert(
+            "my-gov".to_string(),
+            governor_config(gov_addr, None, "deployer"),
+        );
+        senders.insert("deployer".to_string(), pk_config(ANVIL_KEY_0, None));
+
+        let mut visited = HashSet::new();
+        let result = resolve_sender(
+            "my-gov",
+            senders.get("my-gov").unwrap(),
+            &senders,
+            &mut visited,
+        )
+        .await
+        .unwrap();
+
+        match result {
+            ResolvedSender::Governor {
+                timelock_address, ..
+            } => {
+                assert_eq!(timelock_address, None);
+            }
+            other => panic!("expected Governor variant, got {other:?}"),
+        }
+    }
+
+    // ---- Circular reference detection tests ----
+
+    #[tokio::test]
+    async fn circular_reference_detected() {
+        // A -> B -> A creates a cycle
+        let mut senders = HashMap::new();
+        senders.insert(
+            "a".to_string(),
+            safe_config("0x0000000000000000000000000000000000000001", "b"),
+        );
+        senders.insert(
+            "b".to_string(),
+            safe_config("0x0000000000000000000000000000000000000002", "a"),
+        );
+
+        let mut visited = HashSet::new();
+        let err = resolve_sender("a", senders.get("a").unwrap(), &senders, &mut visited)
+            .await
+            .unwrap_err();
+
+        match err {
+            TrebError::Config(msg) => {
+                assert!(
+                    msg.contains("circular"),
+                    "should mention circular reference: {msg}"
+                );
+            }
+            other => panic!("expected Config error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn self_referencing_sender_detected() {
+        let mut senders = HashMap::new();
+        senders.insert(
+            "self-ref".to_string(),
+            safe_config("0x0000000000000000000000000000000000000001", "self-ref"),
+        );
+
+        let mut visited = HashSet::new();
+        let err = resolve_sender(
+            "self-ref",
+            senders.get("self-ref").unwrap(),
+            &senders,
+            &mut visited,
+        )
+        .await
+        .unwrap_err();
+
+        match err {
+            TrebError::Config(msg) => {
+                assert!(msg.contains("circular"), "should detect self-ref: {msg}");
+            }
+            other => panic!("expected Config error, got {other:?}"),
+        }
+    }
+
+    // ---- resolve_all_senders tests ----
+
+    #[tokio::test]
+    async fn resolve_all_senders_handles_all_types() {
+        let safe_addr = "0x0000000000000000000000000000000000000042";
+        let gov_addr = "0x0000000000000000000000000000000000000099";
+
+        let mut senders = HashMap::new();
+        senders.insert("deployer".to_string(), pk_config(ANVIL_KEY_0, None));
+        senders.insert(
+            "my-safe".to_string(),
+            safe_config(safe_addr, "deployer"),
+        );
+        senders.insert(
+            "my-gov".to_string(),
+            governor_config(gov_addr, None, "deployer"),
+        );
+
+        let resolved = resolve_all_senders(&senders).await.unwrap();
+        assert_eq!(resolved.len(), 3);
+        assert!(matches!(resolved.get("deployer"), Some(ResolvedSender::Wallet(_))));
+        assert!(matches!(resolved.get("my-safe"), Some(ResolvedSender::Safe { .. })));
+        assert!(matches!(resolved.get("my-gov"), Some(ResolvedSender::Governor { .. })));
     }
 }
