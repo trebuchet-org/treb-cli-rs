@@ -243,7 +243,52 @@ enum Commands {
         json: bool,
     },
     /// Compose multi-step deployment pipelines
-    Compose,
+    Compose {
+        /// Path to the compose YAML file
+        file: String,
+        /// Network name or chain ID
+        #[arg(long)]
+        network: Option<String>,
+        /// Explicit RPC URL (overrides network)
+        #[arg(long)]
+        rpc_url: Option<String>,
+        /// Deployment namespace
+        #[arg(long)]
+        namespace: Option<String>,
+        /// Foundry profile override
+        #[arg(long)]
+        profile: Option<String>,
+        /// Broadcast transactions to the network
+        #[arg(long)]
+        broadcast: bool,
+        /// Print execution plan without running
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip already-completed components
+        #[arg(long)]
+        resume: bool,
+        /// Verify contracts after deployment
+        #[arg(long)]
+        verify: bool,
+        /// Send transactions one at a time
+        #[arg(long)]
+        slow: bool,
+        /// Use legacy (pre-EIP-1559) transactions
+        #[arg(long)]
+        legacy: bool,
+        /// Show verbose output
+        #[arg(long, short)]
+        verbose: bool,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Set environment variables (KEY=VALUE, repeatable)
+        #[arg(long, num_args = 1)]
+        env: Vec<String>,
+        /// Skip interactive confirmation prompts
+        #[arg(long)]
+        non_interactive: bool,
+    },
     /// Remove stale deployment artifacts
     Prune,
     /// Reset deployment state
@@ -406,7 +451,42 @@ async fn main() -> anyhow::Result<()> {
             )
             .await?
         }
-        Commands::Compose => println!("compose: not yet implemented"),
+        Commands::Compose {
+            file,
+            network,
+            rpc_url,
+            namespace,
+            profile,
+            broadcast,
+            dry_run,
+            resume,
+            verify,
+            slow,
+            legacy,
+            verbose,
+            json,
+            env,
+            non_interactive,
+        } => {
+            commands::compose::run(
+                file,
+                network,
+                rpc_url,
+                namespace,
+                profile,
+                broadcast,
+                dry_run,
+                resume,
+                verify,
+                slow,
+                legacy,
+                verbose,
+                json,
+                env,
+                non_interactive,
+            )
+            .await?
+        }
         Commands::Prune => println!("prune: not yet implemented"),
         Commands::Reset => println!("reset: not yet implemented"),
         Commands::Migrate => println!("migrate: not yet implemented"),

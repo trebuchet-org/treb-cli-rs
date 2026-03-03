@@ -1,3 +1,4 @@
+pub mod compose;
 pub mod config;
 pub mod gen_deploy;
 pub mod init;
