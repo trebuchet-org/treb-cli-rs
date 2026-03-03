@@ -17,7 +17,7 @@ foundry-config = { workspace = true }
 
 # Alloy
 alloy-primitives = { workspace = true }
-alloy-chains = "0.2"
+alloy-chains = { workspace = true }
 
 # Error handling
 anyhow = { workspace = true }

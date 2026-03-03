@@ -30,6 +30,7 @@ foundry-cli = { git = "https://github.com/foundry-rs/foundry", tag = "v1.5.1" }
 forge-verify = { git = "https://github.com/foundry-rs/foundry", tag = "v1.5.1" }
 
 # Alloy — version aligned with foundry v1.5.1
+alloy-chains = "0.2"
 alloy-primitives = "1.4.1"
 alloy-json-abi = "0.8"
 alloy-signer = "1.7.3"

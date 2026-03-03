@@ -7820,6 +7820,7 @@ dependencies = [
 name = "treb-cli"
 version = "0.1.0"
 dependencies = [
+ "alloy-chains",
  "anyhow",
  "assert_cmd",
  "chrono",
