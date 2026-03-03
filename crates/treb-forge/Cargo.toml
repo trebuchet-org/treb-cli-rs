@@ -1,0 +1,30 @@
+[package]
+name = "treb-forge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+treb-core = { workspace = true }
+treb-config = { workspace = true }
+
+# Foundry
+foundry-config = { workspace = true }
+foundry-common = { workspace = true }
+forge-script = { workspace = true }
+forge-script-sequence = { workspace = true }
+
+# Alloy
+alloy-primitives = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling & async
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+eyre = { workspace = true }
+tokio = { workspace = true }

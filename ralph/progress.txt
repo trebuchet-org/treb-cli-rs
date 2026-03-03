@@ -1,91 +1,41 @@
 # Ralph Progress Log
-Started: Tue Mar  3 03:45:34 AM CET 2026
+Started: Tue Mar  3 04:12:33 AM CET 2026
 
 ## Codebase Patterns
-- Use `{ workspace = true }` for all dependency declarations in crate Cargo.toml files
-- Use `#[derive(Default)]` instead of manual `Default` impl when all fields have default values (clippy enforces this)
-- All JSON-facing structs use `#[serde(rename_all = "camelCase")]` for Go compatibility
-- Constants for file names go in `lib.rs`, types in `types.rs`, re-exports at crate root
-- Run `cargo clippy -p <crate> -- -D warnings` — treats all warnings as errors
-- Use `FileExt::unlock(&file)` (fully-qualified) instead of `file.unlock()` to avoid MSRV 1.85 vs std 1.89 conflict
-- For atomic JSON writes: `io::write_json_file` handles parent dirs, temp file, persist, trailing newline
-- For file locking: `io::with_file_lock(path, || { ... })` — pass data file path, lock file is auto-managed
-- Store pattern: `new(registry_dir)` → `load()` → CRUD ops; each mutation calls `save()` internally with locking
-- Golden file tests: load fixture via `serde_json::from_str`, insert each entry, re-read from disk, compare via `serde_json::Value` equality
-- Fixtures live in `crates/treb-core/tests/fixtures/` — reference via `env!("CARGO_MANIFEST_DIR")` relative paths
-- LookupStore is stateless (no in-memory data) — `rebuild(&deployments)` builds, saves, and returns the index
-- Query methods on LookupIndex: `find_by_name`/`find_by_address` are case-insensitive, `find_by_tag` is exact match
+- All crate Cargo.toml files use `workspace = true` for package metadata (version, edition, rust-version, authors, license)
+- All external dependencies are declared in root `[workspace.dependencies]` and referenced with `{ workspace = true }`
+- lib.rs uses `//!` doc comments, `pub mod` declarations, and `pub use` re-exports of key types
+- Errors use `TrebError` enum from `treb-core::error` with `thiserror` derive — variants: Config, Registry, Forge, Io
+- `treb-core::Result<T>` is the standard result alias
+- Tests live in `#[cfg(test)] mod tests` blocks within each module
+- Foundry crates (v1.5.1) require solar crate patches — see `[patch.crates-io]` in root Cargo.toml
+- Foundry uses `eyre::Result` internally; convert to `TrebError::Forge` at API boundaries
 
 ---
 
 ## 2026-03-03 - US-001
-- Implemented treb-registry crate scaffold with RegistryMeta and LookupIndex types
+- What was implemented:
+  - Created `crates/treb-forge/` with Cargo.toml and complete module structure
+  - Added treb-forge to workspace members and workspace dependencies
+  - Added forge-script and forge-script-sequence as workspace-level foundry deps (git, tag v1.5.1)
+  - Added eyre as workspace dependency (needed for foundry interop)
+  - Created stub modules: lib.rs, compiler.rs, script.rs, artifacts.rs, broadcast.rs, console.rs, version.rs
+  - lib.rs declares all modules and re-exports key public types
+  - Added solar crate patches to [patch.crates-io] (solar-compiler, solar-interface, solar-ast, solar-sema pinned to rev 1f28069)
 - Files changed:
-  - `Cargo.toml` (workspace root) — added treb-registry to members and workspace deps
-  - `Cargo.lock` — auto-updated
-  - `crates/treb-registry/Cargo.toml` — new crate manifest
-  - `crates/treb-registry/src/lib.rs` — module declarations, re-exports, constants
-  - `crates/treb-registry/src/types.rs` — RegistryMeta, LookupIndex with serde and tests
+  - Cargo.toml (workspace members, deps, patch entries)
+  - Cargo.lock (updated with new dependencies)
+  - crates/treb-forge/Cargo.toml (new)
+  - crates/treb-forge/src/lib.rs (new)
+  - crates/treb-forge/src/compiler.rs (new)
+  - crates/treb-forge/src/script.rs (new)
+  - crates/treb-forge/src/artifacts.rs (new)
+  - crates/treb-forge/src/broadcast.rs (new)
+  - crates/treb-forge/src/console.rs (new)
+  - crates/treb-forge/src/version.rs (new)
 - **Learnings for future iterations:**
-  - Clippy enforces `#[derive(Default)]` over manual impl when fields are all default — use derive
-  - The existing TrebError::Registry variant in treb-core is ready for use — no need to add it
-  - Workspace pattern: version.workspace, edition.workspace, etc. for all standard fields
-  - Golden file fixtures exist in `crates/treb-core/tests/fixtures/` — can reuse for registry tests
----
-
-## 2026-03-03 - US-002
-- Implemented atomic file I/O primitives and advisory file locking in `io.rs`
-- Files changed:
-  - `Cargo.toml` (workspace root) — added `fs2 = "0.4"` to workspace dependencies
-  - `Cargo.lock` — auto-updated
-  - `crates/treb-registry/Cargo.toml` — added `fs2` and moved `tempfile` to regular deps (needed at runtime for NamedTempFile)
-  - `crates/treb-registry/src/lib.rs` — added `pub mod io;`
-  - `crates/treb-registry/src/io.rs` — new module with read_json_file, read_json_file_or_default, write_json_file, with_file_lock, and 6 tests
-- **Learnings for future iterations:**
-  - `fs2::FileExt::unlock()` must be called via fully-qualified syntax (`FileExt::unlock(&self.file)`) because std `File::unlock` stabilised in Rust 1.89 (above MSRV 1.85) and clippy `incompatible_msrv` fires if you use method syntax
-  - `tempfile` crate is needed as a regular dep (not just dev-dep) for atomic writes via `NamedTempFile::new_in() + persist()`
-  - The `with_file_lock` pattern creates a `.lock` sibling file — downstream stores should pass the data file path and the lock is automatic
-  - `serde_json::to_string_pretty` uses 2-space indentation by default — no custom formatter needed
----
-
-## 2026-03-03 - US-003
-- Implemented DeploymentStore with full CRUD operations in `store/deployments.rs`
-- Files changed:
-  - `crates/treb-registry/src/lib.rs` — added `pub mod store;` and `pub use store::DeploymentStore;`
-  - `crates/treb-registry/src/store/mod.rs` — new module organizing store sub-modules
-  - `crates/treb-registry/src/store/deployments.rs` — DeploymentStore with new, load, save, get, insert, update, remove, list, count + 8 tests including golden file
-- **Learnings for future iterations:**
-  - Store struct holds `path: PathBuf` and `data: HashMap<String, T>` — same pattern works for transactions and safe transactions
-  - `insert` checks for duplicates before inserting; `update` checks existence and sets `updated_at = Utc::now()`
-  - `list()` sorts by `created_at` ascending — for transactions this is `created_at`, for safe txs it's `proposed_at`
-  - Golden file test uses `serde_json::Value` equality which is order-independent for objects — perfect for HashMap round-trips
-  - The `make_deployment` test helper creates minimal deployments with configurable ID and timestamp offset — can be adapted for transactions
----
-
-## 2026-03-03 - US-004
-- Implemented TransactionStore and SafeTransactionStore with full CRUD operations
-- Files changed:
-  - `crates/treb-registry/src/store/transactions.rs` — TransactionStore keyed by `id`, list sorted by `created_at`, 8 tests including golden file
-  - `crates/treb-registry/src/store/safe_transactions.rs` — SafeTransactionStore keyed by `safe_tx_hash`, list sorted by `proposed_at`, 8 tests including golden file
-  - `crates/treb-registry/src/store/mod.rs` — added module declarations and re-exports for both new stores
-  - `crates/treb-registry/src/lib.rs` — updated pub use to include TransactionStore and SafeTransactionStore
-- **Learnings for future iterations:**
-  - Transaction has no `updated_at` field — don't import `chrono::Utc` in the store (only needed in test helpers)
-  - SafeTransaction is keyed by `safe_tx_hash` (not `id`) and sorted by `proposed_at` (not `created_at`)
-  - All three stores follow the identical pattern: `new(registry_dir)` → `load()` → CRUD with file locking
-  - Golden file fixtures: `transactions_map.json` has 3 entries, `safe_txs_map.json` has 3 entries — both round-trip cleanly
----
-
-## 2026-03-03 - US-005
-- Implemented lookup index build, query, and LookupStore in `lookup.rs`
-- Files changed:
-  - `crates/treb-registry/src/lookup.rs` — new module with `build_lookup_index`, `LookupStore` (new/load/save/rebuild), query methods (`find_by_name`, `find_by_address`, `find_by_tag`) on `LookupIndex`, and 9 tests
-  - `crates/treb-registry/src/lib.rs` — added `pub mod lookup;` and `pub use lookup::LookupStore;`
-  - `ralph/prd.json` — marked US-005 as passing
-- **Learnings for future iterations:**
-  - Query methods are implemented as `impl LookupIndex` in `lookup.rs` (not in `types.rs`) to keep build logic and query logic co-located
-  - `build_lookup_index` takes `&HashMap<String, Deployment>` — same type the stores use internally, so the Registry facade can pass store data directly
-  - `LookupStore` doesn't hold data in memory (unlike the other stores) — it's stateless; `rebuild()` builds, saves, and returns the index
-  - Tags use exact match for `find_by_tag` but name/address use case-insensitive matching (lowercase on both build and query)
-  - The fixture `deployments_map.json` has no tags (`tags: null`), so tag tests use synthetic deployments
+  - Foundry v1.5.1 depends on solar crates at a specific git rev (1f28069), not from crates.io — must add `[patch.crates-io]` entries for solar-compiler, solar-interface, solar-ast, and solar-sema
+  - `forge-script` and `forge-script-sequence` are the correct crate names (not `forge_script`)
+  - The forge-script crate pulls in a large dependency tree (foundry-cli, foundry-evm, etc.) — compilation is slow (~90s first build)
+  - Foundry uses eyre for error handling; need to convert at boundaries to TrebError::Forge
 ---

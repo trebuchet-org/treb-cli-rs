@@ -1,20 +1,22 @@
 {
   "project": "treb-cli-rs",
-  "branchName": "ralph/phase-04-registry-system-read-write",
-  "description": "Phase 4 — Registry System (Read/Write): Build the JSON-backed deployment registry (treb-registry crate) — treb's persistent storage layer for deployments, transactions, and Safe transactions. Provides CRUD operations, lookup index, atomic file I/O with locking, and migration detection. Exact Go compatibility is mandatory.",
+  "branchName": "ralph/phase-05-in-process-forge-integration",
+  "description": "Phase 5 — In-Process Forge Integration: Create the treb-forge workspace crate that bridges treb's configuration/registry system and foundry's compilation and script execution pipeline. All forge functionality is accessed through Rust crate APIs with no subprocess calls to forge.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "treb-registry Crate Scaffold and Registry Types",
-      "description": "As a developer, I want a treb-registry workspace crate with RegistryMeta and LookupIndex types so that downstream registry modules have a foundation to build on.",
+      "title": "treb-forge Crate Scaffold and Foundry Dependency Wiring",
+      "description": "As a developer, I want the treb-forge workspace crate scaffolded with its Cargo.toml, module structure, and foundry crate dependencies wired up so that downstream stories can implement functionality in each module.",
       "acceptanceCriteria": [
-        "crates/treb-registry/ created with Cargo.toml and src/lib.rs; crate added to workspace members and workspace dependencies",
-        "Dependencies added: treb-core, serde, serde_json, chrono, thiserror (workspace); dev-dep: tempfile (workspace)",
-        "RegistryMeta struct with version (u32), created_at and updated_at (DateTime<Utc>) using camelCase serde renames; new() sets version=1 and timestamps to Utc::now()",
-        "LookupIndex struct with by_name (HashMap<String, Vec<String>>), by_address (HashMap<String, String>), by_tag (HashMap<String, Vec<String>>) using camelCase serde renames; Default returns empty maps",
-        "Constants: DEPLOYMENTS_FILE, TRANSACTIONS_FILE, SAFE_TXS_FILE, LOOKUP_FILE, REGISTRY_FILE, REGISTRY_DIR, REGISTRY_VERSION",
-        "Module structure: lib.rs with re-exports, types.rs for registry types; unit tests for RegistryMeta and LookupIndex serde round-trip",
-        "cargo check, cargo test, and cargo clippy pass"
+        "crates/treb-forge/ directory created with Cargo.toml and src/lib.rs",
+        "Crate added to [workspace.members] and [workspace.dependencies] in root Cargo.toml",
+        "Workspace-level foundry dependencies added: forge-script and forge-script-sequence (git, tag v1.5.1)",
+        "Crate depends on treb-core, treb-config, foundry-config, foundry-common, forge-script, forge-script-sequence, alloy-primitives, serde, serde_json, thiserror, anyhow, tokio, eyre",
+        "Module structure created: lib.rs, compiler.rs, script.rs, artifacts.rs, broadcast.rs, console.rs, version.rs (stub modules with TODO comments)",
+        "lib.rs declares all modules and re-exports key public types",
+        "Any needed [patch.crates-io] entries added for foundry transitive dependencies",
+        "cargo check --workspace passes with zero errors",
+        "cargo clippy --workspace passes with zero warnings"
       ],
       "priority": 1,
       "passes": true,
@@ -22,80 +24,104 @@
     },
     {
       "id": "US-002",
-      "title": "Atomic File I/O with Locking",
-      "description": "As a developer, I want atomic file read/write primitives and advisory file locking so that all registry operations are safe against partial writes and concurrent access.",
+      "title": "In-Process Compilation via ProjectCompiler",
+      "description": "As a developer, I want to compile Solidity projects in-process via a safe ProjectCompiler wrapper so that compilation never triggers std::process::exit(0) and errors are returned as TrebError::Forge.",
       "acceptanceCriteria": [
-        "io.rs module with read_json_file<T>(path) returning deserialized T or TrebError::Registry/Io on failure",
-        "read_json_file_or_default<T: Default>(path) returns T::default() if file missing, otherwise same as read_json_file",
-        "write_json_file<T: Serialize>(path, value) creates parent dirs, writes via NamedTempFile + persist(), 2-space indented JSON with trailing newline",
-        "with_file_lock<F, T>(path, f) acquires exclusive advisory lock on <path>.lock, executes f, releases on drop via RAII; uses fs2 crate",
-        "Tests: atomic write creates correct JSON with trailing newline, creates parent dirs, read nonexistent returns default, invalid JSON returns descriptive error, write-then-read round-trips, concurrent lock blocks",
-        "cargo check, cargo test, and cargo clippy pass"
+        "compiler.rs contains CompilationOutput struct with output (ProjectCompileOutput) and project_root (PathBuf) fields",
+        "compile_project(config: &Config) -> Result<CompilationOutput> validates has_input_files() before compiling and returns TrebError::Forge if empty",
+        "compile_files(config: &Config, files: Vec<PathBuf>) -> Result<CompilationOutput> compiles specific files and validates non-empty input",
+        "CompilationOutput provides has_compiler_errors() and artifact_ids() accessor methods",
+        "All eyre::Result errors from foundry are converted to TrebError::Forge with messages preserved",
+        "Unit test: compile_project with empty project returns TrebError::Forge (not process exit)",
+        "cargo check --workspace and cargo clippy --workspace pass"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-003",
-      "title": "Deployment Store (CRUD)",
-      "description": "As a developer, I want a DeploymentStore with create, read, update, delete, and list operations over deployments.json so that deployments can be persisted and retrieved.",
+      "title": "ScriptArgs Construction from Treb Config",
+      "description": "As a developer, I want to build forge-script ScriptArgs programmatically from treb's resolved configuration so that script execution parameters are set without clap argument parsing.",
       "acceptanceCriteria": [
-        "store/deployments.rs with DeploymentStore struct: new(registry_dir), load, save, get, insert, update, remove, list (sorted by created_at), count",
-        "insert returns TrebError::Registry if ID already exists; update returns error if ID not found and sets updated_at to Utc::now()",
-        "All mutating operations use with_file_lock and atomic writes from US-002",
-        "Tests: insert-then-get, duplicate insert error, update success + updated_at change, update nonexistent error, remove returns deployment, list sorted by created_at, empty store operations",
-        "Golden file test: load deployments_map.json fixture, save through store, re-read and verify via serde_json::Value equality",
-        "cargo check, cargo test, and cargo clippy pass"
+        "script.rs contains ScriptConfig builder struct with fields: script_path, sig, args, target_contract, sender, rpc_url, chain_id, fork_url, broadcast, slow, debug, dry_run, gas_estimate_multiplier, legacy, non_interactive, etherscan_api_key, verify",
+        "ScriptConfig::new(script_path) constructor sets sensible defaults (sig='run()', gas_estimate_multiplier=130)",
+        "Builder methods provided for each field returning &mut Self or Self",
+        "ScriptConfig::into_script_args(self) -> Result<ScriptArgs> constructs ScriptArgs from Default::default() and sets all fields including EVM args",
+        "build_script_config(resolved: &ResolvedConfig, script_path: &str) -> Result<ScriptConfig> extracts RPC URL, sender address, and slow flag from resolved config",
+        "Unit test: ScriptConfig::new('script/Deploy.s.sol').into_script_args() produces valid ScriptArgs with correct path and default sig 'run()'",
+        "cargo check --workspace and cargo clippy --workspace pass"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-004",
-      "title": "Transaction and Safe Transaction Stores",
-      "description": "As a developer, I want TransactionStore and SafeTransactionStore with CRUD operations so that transactions and Safe transactions can be persisted and retrieved.",
+      "title": "Script Execution Pipeline and Console Log Decoding",
+      "description": "As a developer, I want to drive the ScriptArgs state machine through the full execution pipeline and decode console.log messages so that script results are available as structured ExecutionResult data.",
       "acceptanceCriteria": [
-        "store/transactions.rs with TransactionStore: same API as DeploymentStore, keyed by transaction.id, list sorted by created_at",
-        "store/safe_transactions.rs with SafeTransactionStore: same API, keyed by safe_transaction.safe_tx_hash, list sorted by proposed_at",
-        "store/mod.rs organizes store modules with re-exports; all mutating operations use file locking and atomic writes",
-        "Tests: transaction and safe transaction insert/get/update/remove round-trips, list ordering correct for both stores",
-        "Golden file tests: transactions_map.json and safe_txs_map.json fixtures round-trip through stores with serde_json::Value equality",
-        "cargo check, cargo test, and cargo clippy pass"
+        "script.rs contains ExecutionResult struct with fields: success, logs (Vec<String>), raw_logs (Vec<Log>), gas_used, returned (Bytes), labeled_addresses (HashMap<Address, String>), transactions, traces",
+        "execute_script(args: ScriptArgs) -> Result<ExecutionResult> chains preprocess → compile → link → prepare_execution → execute and extracts ScriptResult",
+        "Each pipeline stage error is wrapped with context (e.g. 'forge compilation failed: ...', 'forge linking failed: ...')",
+        "console.rs contains decode_console_logs(logs: &[Log]) -> Vec<String> that filters for console.log address and decodes all variants",
+        "Unrecognized console.log formats are silently skipped (not errors)",
+        "cargo check --workspace and cargo clippy --workspace pass"
       ],
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-005",
-      "title": "Lookup Index Build and Query",
-      "description": "As a developer, I want a lookup index that maps contract names, addresses, and tags to deployment IDs so that deployments can be queried efficiently without scanning all records.",
+      "title": "ContractsByArtifact Wrapper and Artifact Queries",
+      "description": "As a developer, I want an ArtifactIndex wrapper around ContractsByArtifact so that I can look up contracts by name, creation bytecode, or deployed bytecode through a stable API.",
       "acceptanceCriteria": [
-        "lookup.rs module with build_lookup_index(deployments) -> LookupIndex: by_name maps lowercase contract_name to IDs, by_address maps lowercase address to ID (skips empty), by_tag maps each tag to IDs",
-        "LookupStore struct with new, load, save, rebuild methods; rebuild builds from deployments, saves, and returns index",
-        "Query methods on LookupIndex: find_by_name (case-insensitive), find_by_address (case-insensitive), find_by_tag (exact match)",
-        "Tests: build from fixture deployments verifying name/address/tag mappings, case-insensitive lookups, empty deployments produces empty index, rebuild-save-reload round-trip",
-        "cargo check, cargo test, and cargo clippy pass"
+        "artifacts.rs contains ArtifactIndex struct wrapping ContractsByArtifact",
+        "ArtifactIndex::from_compile_output(output: &CompilationOutput) -> Result<Self> builds the index from compilation output",
+        "find_by_name, find_by_creation_code, find_by_deployed_code methods return Option<ArtifactMatch>",
+        "inner() method provides access to underlying ContractsByArtifact for passing to foundry APIs",
+        "ArtifactMatch struct contains artifact_id, name, abi (JsonAbi), has_bytecode, and has_deployed_bytecode fields",
+        "Unit test: construct an ArtifactMatch and verify field access",
+        "cargo check --workspace and cargo clippy --workspace pass"
       ],
       "priority": 5,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Registry Facade, Migration Detection, and Integration Tests",
-      "description": "As a developer, I want a Registry facade that ties together all stores and the lookup index with migration detection so that callers have a single entry point for all registry operations.",
+      "title": "Broadcast File Reader",
+      "description": "As a developer, I want to read historical broadcast files via BroadcastReader so that past deployment data is available as a supplementary data source.",
       "acceptanceCriteria": [
-        "registry.rs with Registry struct: open(project_root) reads registry.json and checks version (error if > REGISTRY_VERSION), init(project_root) creates .treb/ and registry.json if missing",
-        "Delegate methods for deployments (get/insert/update/remove/list/count), transactions, and safe transactions; deployment mutations auto-trigger lookup index rebuild",
-        "MetaStore (internal) for registry.json read/write with atomic writes; rebuild_lookup_index and lookup methods on Registry",
-        "Integration tests: insert 3 deployments + 2 transactions + 1 safe tx then verify retrieval; insert/remove deployment verifies lookup index updates; version 2 registry.json returns descriptive error; open with no .treb/ returns ok",
-        "Golden file integration test: load deployments_map.json, transactions_map.json, safe_txs_map.json through stores, save, re-read, verify JSON value equality",
-        "cargo check, cargo test, and cargo clippy pass"
+        "broadcast.rs contains BroadcastData struct with sequence (ScriptSequence), chain_id (u64), and timestamp (u128) fields",
+        "read_latest_broadcast(config, contract_name, chain_id) resolves broadcast directory from config and returns the most recent BroadcastData",
+        "read_all_broadcasts(config, contract_name, chain_id) returns Vec<BroadcastData> sorted by timestamp newest first",
+        "BroadcastTransaction struct with hash, contract_name, contract_address, function, tx_type fields provides a simplified view of TransactionWithMetadata",
+        "BroadcastData::transactions() maps sequence.transactions to Vec<BroadcastTransaction>",
+        "Error messages include broadcast directory path and contract name for debugging",
+        "cargo check --workspace and cargo clippy --workspace pass"
       ],
       "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Forge Version Detection and Integration Tests",
+      "description": "As a developer, I want forge version detection from foundry crate metadata and integration tests against a sample Foundry project fixture so that the compilation and artifact lookup pipeline is validated end-to-end.",
+      "acceptanceCriteria": [
+        "version.rs contains ForgeVersion struct with version (String) and commit (Option<String>) fields",
+        "detect_forge_version() reads version from foundry-config CARGO_PKG_VERSION and returns ForgeVersion",
+        "ForgeVersion::display_string() formats as 'forge v1.5.1' or 'forge v1.5.1 (abc1234)' with commit",
+        "Integration test fixture at crates/treb-forge/tests/fixtures/sample-project/ with foundry.toml, src/Counter.sol, and script/Deploy.s.sol",
+        "Integration test: compile_project against fixture succeeds and returns artifacts including Counter",
+        "Integration test: ArtifactIndex::from_compile_output returns index where find_by_name('Counter') matches",
+        "Integration test: detect_forge_version() returns a non-empty version string",
+        "cargo test --workspace passes (all existing tests plus new ones)",
+        "cargo clippy --workspace passes"
+      ],
+      "priority": 7,
       "passes": false,
       "notes": ""
     }
