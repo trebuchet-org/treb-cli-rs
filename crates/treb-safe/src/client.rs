@@ -66,6 +66,40 @@ impl SafeServiceClient {
         Ok(())
     }
 
+    // ── All multisig transactions ────────────────────────────────────────
+
+    /// Fetch all multisig transactions for a Safe (both executed and pending).
+    ///
+    /// Endpoint: `GET /safes/{safe_address}/multisig-transactions/`
+    pub async fn get_multisig_transactions(
+        &self,
+        safe_address: &str,
+    ) -> Result<SafeServiceMultisigResponse, TrebError> {
+        let url = format!(
+            "{}/safes/{}/multisig-transactions/",
+            self.base_url, safe_address
+        );
+        let resp = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| TrebError::Safe(format!("multisig transactions request failed: {e}")))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(TrebError::Safe(format!(
+                "multisig transactions returned {status}: {body}"
+            )));
+        }
+
+        let body = resp.text().await.unwrap_or_default();
+        serde_json::from_str(&body).map_err(|e| {
+            TrebError::Safe(format!("failed to parse multisig transactions response: {e}"))
+        })
+    }
+
     // ── Pending transactions ─────────────────────────────────────────────
 
     /// Fetch pending (non-executed) multisig transactions for a Safe.

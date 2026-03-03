@@ -11,6 +11,7 @@ treb-core = { workspace = true }
 treb-config = { workspace = true }
 treb-registry = { workspace = true }
 treb-forge = { workspace = true }
+treb-safe = { workspace = true }
 treb-verify = { workspace = true }
 serde = { workspace = true }
 chrono = { workspace = true }

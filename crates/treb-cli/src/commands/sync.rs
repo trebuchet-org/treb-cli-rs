@@ -1,52 +1,15 @@
 use std::collections::HashMap;
-use std::time::Duration;
 
 use alloy_chains::Chain;
 use anyhow::Context;
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use treb_core::types::enums::TransactionStatus;
 use treb_core::types::safe_transaction::Confirmation;
 use treb_registry::Registry;
+use treb_safe::SafeServiceClient;
+use treb_safe::types::{SafeServiceMultisigResponse, SafeServiceTx};
 
 use crate::output;
-
-// ── Safe Transaction Service response types ─────────────────────────────
-
-/// Top-level response from Safe Transaction Service multisig-transactions endpoint.
-#[derive(Debug, Deserialize)]
-struct SafeServiceResponse {
-    results: Vec<SafeServiceTx>,
-}
-
-/// A single multisig transaction as returned by the Safe Transaction Service.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
-struct SafeServiceTx {
-    safe_tx_hash: String,
-    #[serde(default)]
-    nonce: u64,
-    #[serde(default)]
-    is_executed: bool,
-    /// On-chain transaction hash (present when executed).
-    #[serde(default)]
-    transaction_hash: Option<String>,
-    /// When the transaction was executed on-chain.
-    #[serde(default)]
-    execution_date: Option<DateTime<Utc>>,
-    #[serde(default)]
-    confirmations: Vec<SafeServiceConfirmation>,
-}
-
-/// A signer confirmation from the Safe Transaction Service.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SafeServiceConfirmation {
-    owner: String,
-    signature: String,
-    submission_date: DateTime<Utc>,
-}
 
 // ── JSON output types ───────────────────────────────────────────────────
 
@@ -59,46 +22,7 @@ struct SyncOutputJson {
     errors: Vec<String>,
 }
 
-// ── Chain name mapping ──────────────────────────────────────────────────
-
-/// Map a chain ID to the Safe Transaction Service URL chain name segment.
-///
-/// The Safe Transaction Service uses specific chain name segments that may
-/// differ from alloy-chains naming. This function handles known overrides
-/// and falls back to alloy-chains for the rest.
-fn safe_service_chain_name(chain_id: u64) -> Option<String> {
-    // Known Safe Transaction Service chain name segments
-    match chain_id {
-        1 => Some("mainnet".into()),
-        10 => Some("optimism".into()),
-        56 => Some("bsc".into()),
-        100 => Some("gnosis-chain".into()),
-        137 => Some("polygon".into()),
-        324 => Some("zksync".into()),
-        8453 => Some("base".into()),
-        42161 => Some("arbitrum".into()),
-        42220 => Some("celo".into()),
-        43114 => Some("avalanche".into()),
-        59144 => Some("linea".into()),
-        534352 => Some("scroll".into()),
-        11155111 => Some("sepolia".into()),
-        84532 => Some("base-sepolia".into()),
-        _ => {
-            // Fall back to alloy-chains named chain
-            let chain = Chain::from_id(chain_id);
-            chain.named().map(|n| n.as_str().to_lowercase())
-        }
-    }
-}
-
-/// Build the Safe Transaction Service API URL for a given safe address and chain.
-fn safe_service_url(chain_id: u64, safe_address: &str) -> Option<String> {
-    safe_service_chain_name(chain_id).map(|chain_name| {
-        format!(
-            "https://safe-transaction-{chain_name}.safe.global/api/v1/safes/{safe_address}/multisig-transactions/"
-        )
-    })
-}
+// ── Chain ID resolution ─────────────────────────────────────────────────
 
 /// Resolve a network name or numeric chain ID to a u64 chain ID.
 fn resolve_chain_id(network: &str) -> anyhow::Result<u64> {
@@ -184,10 +108,8 @@ pub async fn run(
             .push(stx.safe_tx_hash.clone());
     }
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .context("failed to build HTTP client")?;
+    // Cache SafeServiceClient instances per chain_id to avoid redundant construction.
+    let mut clients: HashMap<u64, SafeServiceClient> = HashMap::new();
 
     let mut updated_count = 0usize;
     let mut newly_executed_count = 0usize;
@@ -196,71 +118,60 @@ pub async fn run(
     let synced_count = filtered.len();
 
     for ((safe_address, chain_id), local_hashes) in &groups {
-        let url = match safe_service_url(*chain_id, safe_address) {
-            Some(u) => u,
+        let client = match clients.get(chain_id) {
+            Some(c) => c,
             None => {
-                let msg = format!(
-                    "unsupported chain {chain_id} for Safe Transaction Service (safe {safe_address})"
-                );
-                errors.push(msg.clone());
-                if !json {
-                    eprintln!("warning: {msg}");
+                match SafeServiceClient::new(*chain_id) {
+                    Some(c) => {
+                        clients.insert(*chain_id, c);
+                        clients.get(chain_id).unwrap()
+                    }
+                    None => {
+                        let msg = format!(
+                            "unsupported chain {chain_id} for Safe Transaction Service (safe {safe_address})"
+                        );
+                        errors.push(msg.clone());
+                        if !json {
+                            eprintln!("warning: {msg}");
+                        }
+                        continue;
+                    }
                 }
-                continue;
             }
         };
-
-        // Fetch multisig transactions from the Safe Transaction Service
-        let resp = match client.get(&url).send().await {
-            Ok(r) => r,
-            Err(e) => {
-                let msg = format!(
-                    "failed to reach Safe service for {} (chain {chain_id}): {e}",
-                    output::truncate_address(safe_address)
-                );
-                errors.push(msg.clone());
-                if !json {
-                    eprintln!("warning: {msg}");
-                }
-                continue;
-            }
-        };
-
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
 
         if debug {
             eprintln!(
-                "[debug] GET {url}\n[debug] status: {status}\n[debug] body: {body}"
+                "[debug] GET {}/safes/{}/multisig-transactions/",
+                client.base_url(),
+                safe_address
             );
         }
 
-        if !status.is_success() {
-            let msg = format!(
-                "Safe service returned {status} for {} (chain {chain_id})",
-                output::truncate_address(safe_address)
-            );
-            errors.push(msg.clone());
-            if !json {
-                eprintln!("warning: {msg}");
-            }
-            continue;
-        }
-
-        let service_resp: SafeServiceResponse = match serde_json::from_str(&body) {
-            Ok(r) => r,
-            Err(e) => {
-                let msg = format!(
-                    "failed to parse Safe service response for {} (chain {chain_id}): {e}",
-                    output::truncate_address(safe_address)
-                );
-                errors.push(msg.clone());
-                if !json {
-                    eprintln!("warning: {msg}");
+        // Fetch multisig transactions from the Safe Transaction Service
+        let service_resp: SafeServiceMultisigResponse =
+            match client.get_multisig_transactions(safe_address).await {
+                Ok(resp) => {
+                    if debug {
+                        eprintln!(
+                            "[debug] received {} results",
+                            resp.results.len()
+                        );
+                    }
+                    resp
                 }
-                continue;
-            }
-        };
+                Err(e) => {
+                    let msg = format!(
+                        "Safe service error for {} (chain {chain_id}): {e}",
+                        output::truncate_address(safe_address)
+                    );
+                    errors.push(msg.clone());
+                    if !json {
+                        eprintln!("warning: {msg}");
+                    }
+                    continue;
+                }
+            };
 
         // Index service results by safeTxHash for fast lookup
         let service_map: HashMap<&str, &SafeServiceTx> = service_resp
@@ -372,66 +283,7 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── Chain name resolution ───────────────────────────────────────────
-
-    #[test]
-    fn safe_chain_name_mainnet() {
-        assert_eq!(safe_service_chain_name(1).unwrap(), "mainnet");
-    }
-
-    #[test]
-    fn safe_chain_name_optimism() {
-        assert_eq!(safe_service_chain_name(10).unwrap(), "optimism");
-    }
-
-    #[test]
-    fn safe_chain_name_polygon() {
-        assert_eq!(safe_service_chain_name(137).unwrap(), "polygon");
-    }
-
-    #[test]
-    fn safe_chain_name_arbitrum() {
-        assert_eq!(safe_service_chain_name(42161).unwrap(), "arbitrum");
-    }
-
-    #[test]
-    fn safe_chain_name_base() {
-        assert_eq!(safe_service_chain_name(8453).unwrap(), "base");
-    }
-
-    #[test]
-    fn safe_chain_name_celo() {
-        assert_eq!(safe_service_chain_name(42220).unwrap(), "celo");
-    }
-
-    #[test]
-    fn safe_chain_name_gnosis_chain() {
-        assert_eq!(safe_service_chain_name(100).unwrap(), "gnosis-chain");
-    }
-
-    #[test]
-    fn safe_chain_name_sepolia() {
-        assert_eq!(safe_service_chain_name(11155111).unwrap(), "sepolia");
-    }
-
-    // ── Safe service URL construction ───────────────────────────────────
-
-    #[test]
-    fn safe_service_url_mainnet() {
-        let url = safe_service_url(1, "0x1234567890abcdef1234567890abcdef12345678").unwrap();
-        assert_eq!(
-            url,
-            "https://safe-transaction-mainnet.safe.global/api/v1/safes/0x1234567890abcdef1234567890abcdef12345678/multisig-transactions/"
-        );
-    }
-
-    #[test]
-    fn safe_service_url_polygon() {
-        let url = safe_service_url(137, "0xabcdef").unwrap();
-        assert!(url.contains("safe-transaction-polygon.safe.global"));
-        assert!(url.contains("0xabcdef"));
-    }
+    use treb_safe::types::{SafeServiceConfirmation, SafeServiceMultisigResponse};
 
     // ── Chain ID resolution ─────────────────────────────────────────────
 
@@ -454,11 +306,16 @@ mod tests {
         assert!(resolve_chain_id("nonexistent_chain_xyz").is_err());
     }
 
-    // ── SafeServiceResponse deserialization ─────────────────────────────
+    // ── SafeServiceMultisigResponse deserialization ─────────────────────
+    // These tests verify that the treb_safe types work correctly for sync's
+    // deserialization needs (confirmations, execution status, etc.)
 
     #[test]
     fn deserialize_safe_service_response_executed() {
         let json = r#"{
+            "count": 1,
+            "next": null,
+            "previous": null,
             "results": [
                 {
                     "safeTxHash": "0xabc123",
@@ -482,7 +339,7 @@ mod tests {
             ]
         }"#;
 
-        let resp: SafeServiceResponse = serde_json::from_str(json).unwrap();
+        let resp: SafeServiceMultisigResponse = serde_json::from_str(json).unwrap();
         assert_eq!(resp.results.len(), 1);
         let tx = &resp.results[0];
         assert_eq!(tx.safe_tx_hash, "0xabc123");
@@ -497,6 +354,9 @@ mod tests {
     #[test]
     fn deserialize_safe_service_response_pending() {
         let json = r#"{
+            "count": 1,
+            "next": null,
+            "previous": null,
             "results": [
                 {
                     "safeTxHash": "0xpending123",
@@ -513,7 +373,7 @@ mod tests {
             ]
         }"#;
 
-        let resp: SafeServiceResponse = serde_json::from_str(json).unwrap();
+        let resp: SafeServiceMultisigResponse = serde_json::from_str(json).unwrap();
         assert_eq!(resp.results.len(), 1);
         let tx = &resp.results[0];
         assert!(!tx.is_executed);
@@ -524,9 +384,59 @@ mod tests {
 
     #[test]
     fn deserialize_safe_service_response_empty() {
-        let json = r#"{ "results": [] }"#;
-        let resp: SafeServiceResponse = serde_json::from_str(json).unwrap();
+        let json = r#"{ "count": 0, "next": null, "previous": null, "results": [] }"#;
+        let resp: SafeServiceMultisigResponse = serde_json::from_str(json).unwrap();
         assert!(resp.results.is_empty());
+    }
+
+    // ── Confirmation field mapping ──────────────────────────────────────
+
+    #[test]
+    fn confirmation_field_mapping_from_service() {
+        let json = r#"{
+            "owner": "0xOwnerAddr",
+            "signature": "0xdeadbeef",
+            "submissionDate": "2025-06-15T14:30:00Z"
+        }"#;
+
+        let conf: SafeServiceConfirmation = serde_json::from_str(json).unwrap();
+        // Verify the fields sync.rs uses to build Confirmation records
+        let mapped = Confirmation {
+            signer: conf.owner.clone(),
+            signature: conf.signature.clone(),
+            confirmed_at: conf.submission_date,
+        };
+        assert_eq!(mapped.signer, "0xOwnerAddr");
+        assert_eq!(mapped.signature, "0xdeadbeef");
+        assert!(mapped.confirmed_at.timestamp() > 0);
+    }
+
+    // ── Client construction via treb_safe ───────────────────────────────
+
+    #[test]
+    fn safe_service_client_supported_chains() {
+        // Verify SafeServiceClient can be constructed for all chains sync needs
+        let chains = [1, 10, 56, 100, 137, 324, 8453, 42161, 42220, 43114, 59144, 534352, 11155111, 84532];
+        for chain_id in chains {
+            assert!(
+                SafeServiceClient::new(chain_id).is_some(),
+                "chain {chain_id} should be supported"
+            );
+        }
+    }
+
+    #[test]
+    fn safe_service_client_unsupported_chain() {
+        assert!(SafeServiceClient::new(999999).is_none());
+    }
+
+    #[test]
+    fn safe_service_client_base_url_format() {
+        let client = SafeServiceClient::new(1).unwrap();
+        assert_eq!(
+            client.base_url(),
+            "https://safe-transaction-mainnet.safe.global/api/v1"
+        );
     }
 
     // ── Registry integration tests ──────────────────────────────────────

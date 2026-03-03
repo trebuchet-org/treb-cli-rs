@@ -7915,6 +7915,7 @@ dependencies = [
  "treb-core",
  "treb-forge",
  "treb-registry",
+ "treb-safe",
  "treb-verify",
 ]
 
