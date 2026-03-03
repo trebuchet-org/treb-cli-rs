@@ -1,108 +1,28 @@
 ## Codebase Patterns
-- `run_migrations` and `MigrationReport` live in `treb-registry/src/migrations.rs`, exported from crate root
-- `MIGRATIONS` static slice in `treb-registry` uses `(target_version, MigrationFn)` tuples; v0→v1 is a no-op migration that just bumps the version
-- To add future registry migrations: add `(N, migrate_vN-1_to_vN)` entries to `MIGRATIONS` in `migrations.rs`
-- TransactionStatus variants: Simulated, Queued, Executed, Failed — no "Pending"
-- GovernorProposal uses `proposal_id` (not `id`) as the primary key field
-- `treb_registry::io::read_json_file` / `write_json_file` are pub in the io module
-- RegistryMeta exported from treb_registry crate root; io module is pub
-- serde rename_all = "camelCase" on enums changes variant names (BrokenTransactionRef → brokenTransactionRef); use no rename_all to keep PascalCase variant names in JSON
-- `toml` crate is in workspace deps but was only a dev-dep in treb-cli; added to main deps for migrate.rs serialization
----
+- `treb-cli` is a binary crate; `lib.rs` was created for the `ui` module to be testable. `main.rs` keeps `mod commands; mod output; mod ui;`.
+- `TrebError::Cli(String)` variant added to `treb-core/src/error.rs` for CLI/interaction errors.
+- `dialoguer` requires `features = ["fuzzy-select"]` for `FuzzySelect`; declared in workspace Cargo.toml.
+- `fuzzy_select_deployment` uses a lifetime `'a` to tie the returned ref to the input slice.
+- Tests for non-TTY behavior skip when `console::Term::stdout().is_term()` to avoid hanging in interactive sessions.
+- `DeploymentStrategy` fields: `method`, `salt`, `init_code_hash`, `factory`, `constructor_args`, `entropy` (no `kind`/`factory_address`).
+- `ArtifactInfo` fields: `path`, `compiler_version`, `bytecode_hash`, `script_path`, `git_commit`.
+- `VerificationInfo` fields: `status`, `etherscan_url`, `verified_at`, `reason`, `verifiers: HashMap`.
 
 # Ralph Progress Log
-Started: Tue Mar  3 09:39:47 PM CET 2026
+Started: Tue Mar  3 10:18:41 PM CET 2026
 ---
 
-## 2026-03-03 - P19-US-001
-- What was implemented: `treb prune` validation infrastructure and dry-run mode
-  - Created `crates/treb-cli/src/commands/prune.rs` with PruneArgs, PruneCandidate, PruneCandidateKind, find_prune_candidates(), backup_registry(), run()
-  - Created `crates/treb-cli/src/commands/reset.rs` with ResetArgs and full reset implementation
-  - Created `crates/treb-cli/src/commands/migrate.rs` with MigrateSubcommand, MigrationReport, serialize_treb_config_v2(), run_migrations(), run_config(), run_registry()
-  - Updated commands/mod.rs to export all three new modules
-  - Updated main.rs: replaced Prune/Reset/Migrate stubs with proper clap Args/Subcommand variants and handler calls
-  - Added `toml` to treb-cli Cargo.toml [dependencies]
-- Files changed: prune.rs (new), reset.rs (new), migrate.rs (new), commands/mod.rs, main.rs, Cargo.toml
+## 2026-03-03 - P20-US-001
+- What was implemented: Fuzzy deployment selector infrastructure
+  - Added `nucleo-matcher`, `dialoguer` (with `fuzzy-select` feature), `console` to workspace Cargo.toml and treb-cli Cargo.toml
+  - Added `TrebError::Cli(String)` variant to `treb-core/src/error.rs`
+  - Created `crates/treb-cli/src/lib.rs` exposing `pub mod ui`
+  - Created `crates/treb-cli/src/ui/mod.rs`, `ui/selector.rs`, `ui/prompt.rs`
+  - Added `mod ui;` to `main.rs` (binary also has direct access)
+- Files changed: Cargo.toml, Cargo.lock, crates/treb-cli/Cargo.toml, crates/treb-core/src/error.rs, crates/treb-cli/src/lib.rs, crates/treb-cli/src/main.rs, crates/treb-cli/src/ui/{mod,selector,prompt}.rs
 - **Learnings for future iterations:**
-  - TransactionStatus has no Pending variant; use Queued for orphaned Safe transactions
-  - GovernorProposal primary key is proposal_id, not id
-  - serde rename_all = "camelCase" on enums converts variant names to camelCase — avoid if PascalCase output is desired
-  - The v1→v2 config conversion is already implemented via convert_v1_to_resolved() in treb-config, but that returns ResolvedSenders (not TrebFileConfigV2), so a new convert_v1_to_v2() function was written in migrate.rs
----
-
-## 2026-03-03 - P19-US-002
-- What was implemented: `treb prune` destructive pruning with backup
-  - The core implementation (backup_registry, confirmation prompt, remove logic, output) was already present from P19-US-001
-  - Added 3 new unit tests to prune.rs:
-    - `destructive_prune_removes_candidates_and_leaves_clean_registry`: verifies after removing all candidates, find_prune_candidates returns empty vec
-    - `backup_registry_creates_backup_dir`: verifies backup dir is created under .treb/backups/
-    - `dry_run_does_not_modify_registry`: verifies dry-run leaves registry unchanged
-- Files changed: crates/treb-cli/src/commands/prune.rs (tests added)
-- **Learnings for future iterations:**
-  - P19-US-001 already implemented the full destructive prune logic; P19-US-002 was primarily about test coverage
-  - `snapshot_registry` copies only specific SNAPSHOT_FILES by name, so having backup_dir inside registry_dir is safe (no recursive loop)
-  - When acceptance criteria say "after X, Y returns empty" — that's a test requirement, not just implementation
----
-
-## 2026-03-03 - P19-US-003
-- What was implemented: `treb reset` — Scoped Registry Reset with Backup
-  - The full implementation was already present from P19-US-001 (ResetArgs, run() with filters, backup, removal, confirmation prompt)
-  - Added `full_reset_empties_lookup_index` test: creates registry with 2 deployments, removes all, verifies lookup.by_name and lookup.by_address are empty
-  - Cleaned up unused imports and dead code from reset.rs test module (`use super::*`, `TransactionStatus`, `make_transaction` function)
-- Files changed: crates/treb-cli/src/commands/reset.rs (test added, cleanup)
-- **Learnings for future iterations:**
-  - `remove_deployment` already calls `rebuild_lookup_index()` internally — no manual rebuild needed after reset
-  - When story says "Lookup index is empty after full reset" — this works automatically via the Registry facade, just needs a test to verify
-  - Removing `use super::*` from test module requires explicitly importing only what's actually needed
----
-
-## 2026-03-03 - P19-US-004
-- What was implemented: `treb migrate config` — Config Format Detection and v1→v2 Conversion
-  - Added `serialize_treb_config_v2()` to `treb-config` crate (`trebfile.rs`) and exported from `lib.rs`
-  - Added round-trip test for `serialize_treb_config_v2` in `treb-config`
-  - Rewrote `migrate.rs` to use `treb_config::serialize_treb_config_v2` (removed local copy)
-  - Added foundry.toml sender migration: `extract_treb_senders_from_foundry` called during v1→v2 migration
-  - Refactored `run_config` to handle `TrebConfigFormat::None` with foundry senders fallback
-  - Added 5 new unit tests: golden v1→v2 conversion, dry-run no file modification, already-v2 exits cleanly, backup creation, foundry sender migration
-- Files changed: crates/treb-config/src/trebfile.rs, crates/treb-config/src/lib.rs, crates/treb-cli/src/commands/migrate.rs
-- **Learnings for future iterations:**
-  - `serialize_treb_config_v2` is now in `treb-config` crate — use `treb_config::serialize_treb_config_v2` from migrate.rs
-  - `extract_treb_senders_from_foundry(project_root, "default")` extracts legacy foundry.toml sender keys
-  - `detect_treb_config_format` returns `TrebConfigFormat::None` when no treb.toml exists (not an error)
-  - `toml::to_string_pretty` with HashMap produces non-deterministic key order — golden tests should parse result and compare fields, not strings
-  - `async fn run_config` is private but accessible via `use super::*` in the test module; test with `#[tokio::test]`
----
-
-## 2026-03-03 - P19-US-005
-- What was implemented: `treb migrate registry` — Versioned Registry Migration Runner
-  - Created `crates/treb-registry/src/migrations.rs` with `MigrationReport`, `MIGRATIONS` static slice, `run_migrations(registry_dir)`
-  - `MIGRATIONS` = `[(1, migrate_v0_to_v1)]` — v0→v1 is a no-op (just bumps the version in registry.json)
-  - Each migration step creates a backup at `.treb/backups/migrate-v{N}-<timestamp>/` before mutating
-  - Returns `TrebError::Registry` when version > REGISTRY_VERSION
-  - Exported `run_migrations` and `MigrationReport` from `treb-registry/src/lib.rs`
-  - Removed local `run_migrations`/`MigrationReport` from `treb-cli/src/commands/migrate.rs`; replaced with imports from `treb_registry`
-  - Updated `run_registry` to pass `&registry_dir` instead of `project_root`
-  - Updated existing tests in migrate.rs to call `run_migrations(&registry_dir)` instead of old `run_migrations(dir.path())`
-  - Added 5 unit tests in `migrations.rs`: up-to-date, v0 applies migration, v0 creates backup, newer version error, JSON serialization
-- Files changed: crates/treb-registry/src/migrations.rs (new), crates/treb-registry/src/lib.rs, crates/treb-cli/src/commands/migrate.rs
-- **Learnings for future iterations:**
-  - `run_migrations` takes `registry_dir` (`.treb/`) not `project_root` — since it's in treb-registry crate
-  - `TrebError` implements `std::error::Error`, so `?` converts it to `anyhow::Error` in async fn returning `anyhow::Result`
-  - `serde::Serialize` import in migrate.rs was only for `MigrationReport` — remove it when moving struct to another crate
-  - Tests for `run_migrations` belong in `treb-registry/src/migrations.rs`, not in `treb-cli` (canonical source of truth)
----
-
-## 2026-03-03 - P19-US-006
-- What was implemented: Integration tests for `treb prune`, `treb reset`, and `treb migrate`
-  - Created `crates/treb-cli/tests/cli_prune_reset_migrate.rs` with 10 end-to-end integration tests
-  - prune tests: dry-run outputs candidates / no file changes, `--yes` removes entry + creates backup, clean registry prints "Nothing to prune."
-  - reset tests: full reset empties stores + creates backup, `--network 1` removes only chain-1 entries, `--namespace default` removes only default-namespace entries
-  - migrate config tests: `--dry-run` prints v2 content without writing, non-dry-run rewrites treb.toml + creates .bak file, already-v2 prints "already v2" message unchanged
-  - migrate registry test: `--dry-run` on current-version registry outputs "up to date"
-- Files changed: crates/treb-cli/tests/cli_prune_reset_migrate.rs (new)
-- **Learnings for future iterations:**
-  - Integration tests can use `treb_registry::Registry::init(tmp.path())` directly (no need to run `treb init` via CLI) — creates `.treb/` structure with all needed files
-  - After `registry.insert_deployment(...)`, CLI subprocess reading `Registry::open(cwd)` sees the written data (inserts are synchronous file writes)
-  - `assert_cmd::cargo::cargo_bin_cmd!("treb-cli")` + `.current_dir(tmp.path())` correctly sets CLI's working directory for all project-root checks
-  - For the prune/reset "nothing to do" path, ensure you put data in the registry that satisfies the "empty" condition (clean refs or empty stores)
+  - `dialoguer` v0.11 needs `features = ["fuzzy-select"]` for `FuzzySelect` — not enabled by default
+  - `fuzzy_select_deployment` returns borrowed `&Deployment` so needs explicit `'a` lifetime
+  - Unit tests for non-TTY behavior must guard with `if is_term() { return; }` to skip in interactive terminals
+  - The actual struct field names for `DeploymentStrategy` are `method/salt/init_code_hash/factory/constructor_args/entropy`, not `kind/factory_address/salt`
 ---
