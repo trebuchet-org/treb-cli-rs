@@ -4,9 +4,14 @@
 //! decoding, deployment hydration, duplicate detection, and registry recording.
 //! All pipeline types and the [`RunPipeline`] orchestrator live here.
 
+mod duplicates;
 mod hydration;
 mod types;
 
+pub use duplicates::{
+    check_duplicate, resolve_duplicates, ConflictType, DuplicateConflict, DuplicateStrategy,
+    ResolvedDuplicates,
+};
 pub use hydration::{
     generate_deployment_id, hydrate_deployment, hydrate_safe_transactions, hydrate_transactions,
 };

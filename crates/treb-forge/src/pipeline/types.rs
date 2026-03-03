@@ -117,6 +117,7 @@ pub struct RecordedTransaction {
 // ---------------------------------------------------------------------------
 
 /// A deployment that was skipped due to duplicate detection.
+#[derive(Debug)]
 pub struct SkippedDeployment {
     /// The deployment that was not recorded.
     pub deployment: Deployment,

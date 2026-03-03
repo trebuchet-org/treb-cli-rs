@@ -28,9 +28,10 @@ pub use sender::{
 };
 pub use version::{detect_forge_version, ForgeVersion};
 pub use pipeline::{
-    generate_deployment_id, hydrate_deployment, hydrate_safe_transactions, hydrate_transactions,
-    resolve_git_commit, PipelineConfig, PipelineContext, PipelineResult, RecordedDeployment,
-    RecordedTransaction, SkippedDeployment,
+    check_duplicate, resolve_duplicates, generate_deployment_id, hydrate_deployment,
+    hydrate_safe_transactions, hydrate_transactions, resolve_git_commit, ConflictType,
+    DuplicateConflict, DuplicateStrategy, PipelineConfig, PipelineContext, PipelineResult,
+    RecordedDeployment, RecordedTransaction, ResolvedDuplicates, SkippedDeployment,
 };
 
 // Re-export foundry-linking for downstream use (Phase 8 deployment recording pipeline).
