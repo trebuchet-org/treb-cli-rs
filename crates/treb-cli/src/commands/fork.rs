@@ -27,7 +27,7 @@ pub enum ForkSubcommand {
     /// Enter fork mode for a network: snapshot registry and record fork state
     ///
     /// Snapshots the current registry and records an active fork entry in
-    /// `fork-state.json`. Run `treb dev anvil start --network <name>` after
+    /// `fork.json`. Run `treb dev anvil start --network <name>` after
     /// this to start a local node pointing at the forked chain.
     Enter {
         /// Network name (must match an entry in foundry.toml [rpc_endpoints])
@@ -131,7 +131,7 @@ pub async fn run(subcommand: ForkSubcommand) -> anyhow::Result<()> {
 /// Enter fork mode for a network.
 ///
 /// Validates the project is initialized, resolves the upstream RPC URL,
-/// snapshots the registry, and records a [`ForkEntry`] in `fork-state.json`.
+/// snapshots the registry, and records a [`ForkEntry`] in `fork.json`.
 ///
 /// The `rpc_url` and `port` fields in the stored [`ForkEntry`] are left empty
 /// until `treb dev anvil start --network <network>` fills them in.
@@ -205,7 +205,7 @@ pub async fn run_enter(
 /// Exit fork mode for a network.
 ///
 /// Restores the registry from its snapshot, removes the snapshot directory,
-/// and removes the [`ForkEntry`] from `fork-state.json`.
+/// and removes the [`ForkEntry`] from `fork.json`.
 pub async fn run_exit(network: String) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     let treb_dir = cwd.join(TREB_DIR);

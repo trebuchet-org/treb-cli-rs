@@ -61,7 +61,7 @@ pub struct ForkHistoryEntry {
 // ForkState
 // ---------------------------------------------------------------------------
 
-/// Top-level fork state persisted to `fork-state.json`.
+/// Top-level fork state persisted to `fork.json`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ForkState {

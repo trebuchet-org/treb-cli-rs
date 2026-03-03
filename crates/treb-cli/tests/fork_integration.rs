@@ -157,7 +157,7 @@ fn fork_diff_with_no_changes() {
 // ── fork exit restores registry ───────────────────────────────────────────────
 
 /// `treb fork exit` should restore `deployments.json` from the snapshot and
-/// remove the active fork entry from `fork-state.json`.
+/// remove the active fork entry from `fork.json`.
 #[test]
 fn fork_exit_restores_registry() {
     let (root, treb_dir) = make_project();
@@ -227,7 +227,7 @@ fn fork_exit_restores_registry() {
 
 // ── fork enter creates state and snapshot ─────────────────────────────────────
 
-/// `treb fork enter` should create a fork-state.json entry and a snapshot
+/// `treb fork enter` should create a fork.json entry and a snapshot
 /// directory.  This test spawns a local Anvil node so that the chain-ID fetch
 /// succeeds without requiring external network access.
 #[tokio::test(flavor = "multi_thread")]
@@ -257,10 +257,10 @@ async fn fork_enter_creates_state_and_snapshot() {
     .await
     .expect("fork enter task panicked");
 
-    // fork-state.json should exist with an active entry for "testnet".
+    // fork.json should exist with an active entry for "testnet".
     assert!(
         treb_dir.join(FORK_STATE_FILE).exists(),
-        "fork-state.json should be created by `treb fork enter`"
+        "fork.json should be created by `treb fork enter`"
     );
 
     let mut store = ForkStateStore::new(&treb_dir);
@@ -295,7 +295,7 @@ async fn fork_enter_creates_state_and_snapshot() {
 
 /// On Unix, `treb dev anvil start` should respond to SIGTERM by shutting down
 /// the Anvil instance and exiting cleanly.  The test also verifies that an
-/// "anvil-stop" history entry is written to `fork-state.json` when `--network`
+/// "anvil-stop" history entry is written to `fork.json` when `--network`
 /// is provided.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]

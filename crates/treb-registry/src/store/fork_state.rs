@@ -74,14 +74,14 @@ pub fn remove_snapshot(snapshot_dir: &Path) -> Result<(), TrebError> {
 
 // ── ForkStateStore ──────────────────────────────────────────────────────────
 
-/// Persistent store for fork-mode state backed by `fork-state.json`.
+/// Persistent store for fork-mode state backed by `fork.json`.
 pub struct ForkStateStore {
     path: PathBuf,
     data: ForkState,
 }
 
 impl ForkStateStore {
-    /// Create a new store pointing at `<registry_dir>/fork-state.json`.
+    /// Create a new store pointing at `<registry_dir>/fork.json`.
     /// Call [`load`](Self::load) to read existing data from disk.
     pub fn new(registry_dir: &Path) -> Self {
         Self {

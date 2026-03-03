@@ -27,10 +27,10 @@ pub const DEPLOYMENTS_FILE: &str = "deployments.json";
 pub const TRANSACTIONS_FILE: &str = "transactions.json";
 
 /// File storing the safe-transaction map (`{hash: SafeTransaction}`).
-pub const SAFE_TXS_FILE: &str = "safe_txs.json";
+pub const SAFE_TXS_FILE: &str = "safe-txs.json";
 
 /// File storing the governor-proposal map (`{id: GovernorProposal}`).
-pub const GOVERNOR_PROPOSALS_FILE: &str = "governor_proposals.json";
+pub const GOVERNOR_PROPOSALS_FILE: &str = "governor-txs.json";
 
 /// File storing the lookup index.
 pub const LOOKUP_FILE: &str = "lookup.json";
@@ -42,7 +42,7 @@ pub const REGISTRY_FILE: &str = "registry.json";
 pub const REGISTRY_DIR: &str = ".treb";
 
 /// File storing fork-mode state (active forks, history).
-pub const FORK_STATE_FILE: &str = "fork-state.json";
+pub const FORK_STATE_FILE: &str = "fork.json";
 
 /// Current registry format version.
 pub const REGISTRY_VERSION: u32 = 1;

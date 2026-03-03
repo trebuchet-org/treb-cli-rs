@@ -1,4 +1,4 @@
-//! Persistent store for governor proposals backed by `governor_proposals.json`.
+//! Persistent store for governor proposals backed by `governor-txs.json`.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -10,7 +10,7 @@ use crate::io::{read_json_file_or_default, with_file_lock, write_json_file};
 use crate::GOVERNOR_PROPOSALS_FILE;
 
 /// CRUD store for governor proposals, persisted as a
-/// `HashMap<String, GovernorProposal>` in `governor_proposals.json` inside the
+/// `HashMap<String, GovernorProposal>` in `governor-txs.json` inside the
 /// registry directory. Keyed by `proposal_id`.
 pub struct GovernorProposalStore {
     path: PathBuf,
@@ -18,7 +18,7 @@ pub struct GovernorProposalStore {
 }
 
 impl GovernorProposalStore {
-    /// Create a new store pointing at `<registry_dir>/governor_proposals.json`.
+    /// Create a new store pointing at `<registry_dir>/governor-txs.json`.
     /// Call [`load`](Self::load) to read existing data from disk.
     pub fn new(registry_dir: &std::path::Path) -> Self {
         Self {

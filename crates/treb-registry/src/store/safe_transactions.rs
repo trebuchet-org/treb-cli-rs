@@ -1,4 +1,4 @@
-//! Persistent store for safe transactions backed by `safe_txs.json`.
+//! Persistent store for safe transactions backed by `safe-txs.json`.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -10,7 +10,7 @@ use crate::io::{read_json_file_or_default, with_file_lock, write_json_file};
 use crate::SAFE_TXS_FILE;
 
 /// CRUD store for safe transactions, persisted as a
-/// `HashMap<String, SafeTransaction>` in `safe_txs.json` inside the registry
+/// `HashMap<String, SafeTransaction>` in `safe-txs.json` inside the registry
 /// directory. Keyed by `safe_tx_hash`.
 pub struct SafeTransactionStore {
     path: PathBuf,
@@ -18,7 +18,7 @@ pub struct SafeTransactionStore {
 }
 
 impl SafeTransactionStore {
-    /// Create a new store pointing at `<registry_dir>/safe_txs.json`.
+    /// Create a new store pointing at `<registry_dir>/safe-txs.json`.
     /// Call [`load`](Self::load) to read existing data from disk.
     pub fn new(registry_dir: &std::path::Path) -> Self {
         Self {
