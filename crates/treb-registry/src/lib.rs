@@ -10,7 +10,7 @@ pub mod types;
 // Re-export registry types at crate root for convenience.
 pub use lookup::LookupStore;
 pub use registry::Registry;
-pub use store::{DeploymentStore, SafeTransactionStore, TransactionStore};
+pub use store::{DeploymentStore, GovernorProposalStore, SafeTransactionStore, TransactionStore};
 pub use types::{LookupIndex, RegistryMeta};
 
 // ── File-name constants ────────────────────────────────────────────────────
@@ -23,6 +23,9 @@ pub const TRANSACTIONS_FILE: &str = "transactions.json";
 
 /// File storing the safe-transaction map (`{hash: SafeTransaction}`).
 pub const SAFE_TXS_FILE: &str = "safe_txs.json";
+
+/// File storing the governor-proposal map (`{id: GovernorProposal}`).
+pub const GOVERNOR_PROPOSALS_FILE: &str = "governor_proposals.json";
 
 /// File storing the lookup index.
 pub const LOOKUP_FILE: &str = "lookup.json";

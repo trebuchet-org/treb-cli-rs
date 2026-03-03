@@ -5,12 +5,12 @@
 
 use std::path::{Path, PathBuf};
 
-use treb_core::types::{Deployment, SafeTransaction, Transaction};
+use treb_core::types::{Deployment, GovernorProposal, SafeTransaction, Transaction};
 use treb_core::TrebError;
 
 use crate::io::{read_json_file, write_json_file};
 use crate::lookup::LookupStore;
-use crate::store::{DeploymentStore, SafeTransactionStore, TransactionStore};
+use crate::store::{DeploymentStore, GovernorProposalStore, SafeTransactionStore, TransactionStore};
 use crate::types::{LookupIndex, RegistryMeta};
 use crate::{REGISTRY_DIR, REGISTRY_FILE, REGISTRY_VERSION};
 
@@ -41,13 +41,14 @@ impl MetaStore {
 
 /// Unified facade for the `.treb/` registry directory.
 ///
-/// Holds all stores (deployments, transactions, safe transactions, lookup
-/// index) and provides delegate methods for CRUD operations. Deployment
-/// mutations automatically trigger a lookup index rebuild.
+/// Holds all stores (deployments, transactions, safe transactions, governor
+/// proposals, lookup index) and provides delegate methods for CRUD operations.
+/// Deployment mutations automatically trigger a lookup index rebuild.
 pub struct Registry {
     deployments: DeploymentStore,
     transactions: TransactionStore,
     safe_transactions: SafeTransactionStore,
+    governor_proposals: GovernorProposalStore,
     lookup: LookupStore,
 }
 
@@ -77,17 +78,20 @@ impl Registry {
         let mut deployments = DeploymentStore::new(&registry_dir);
         let mut transactions = TransactionStore::new(&registry_dir);
         let mut safe_transactions = SafeTransactionStore::new(&registry_dir);
+        let mut governor_proposals = GovernorProposalStore::new(&registry_dir);
         let lookup = LookupStore::new(&registry_dir);
 
         // Load existing data (no-ops if files don't exist).
         deployments.load()?;
         transactions.load()?;
         safe_transactions.load()?;
+        governor_proposals.load()?;
 
         Ok(Self {
             deployments,
             transactions,
             safe_transactions,
+            governor_proposals,
             lookup,
         })
     }
@@ -218,6 +222,47 @@ impl Registry {
     /// Return the number of safe transactions.
     pub fn safe_transaction_count(&self) -> usize {
         self.safe_transactions.count()
+    }
+
+    // ── Governor proposal delegates ───────────────────────────────────────
+
+    /// Get a governor proposal by ID.
+    pub fn get_governor_proposal(&self, proposal_id: &str) -> Option<&GovernorProposal> {
+        self.governor_proposals.get(proposal_id)
+    }
+
+    /// Insert a new governor proposal.
+    pub fn insert_governor_proposal(
+        &mut self,
+        proposal: GovernorProposal,
+    ) -> Result<(), TrebError> {
+        self.governor_proposals.insert(proposal)
+    }
+
+    /// Update an existing governor proposal.
+    pub fn update_governor_proposal(
+        &mut self,
+        proposal: GovernorProposal,
+    ) -> Result<(), TrebError> {
+        self.governor_proposals.update(proposal)
+    }
+
+    /// Remove a governor proposal by ID.
+    pub fn remove_governor_proposal(
+        &mut self,
+        proposal_id: &str,
+    ) -> Result<GovernorProposal, TrebError> {
+        self.governor_proposals.remove(proposal_id)
+    }
+
+    /// List all governor proposals sorted by `proposed_at` (descending).
+    pub fn list_governor_proposals(&self) -> Vec<&GovernorProposal> {
+        self.governor_proposals.list()
+    }
+
+    /// Return the number of governor proposals.
+    pub fn governor_proposal_count(&self) -> usize {
+        self.governor_proposals.count()
     }
 
     // ── Lookup index ─────────────────────────────────────────────────────
