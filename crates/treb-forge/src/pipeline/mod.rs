@@ -6,6 +6,7 @@
 
 mod duplicates;
 mod hydration;
+mod orchestrator;
 mod types;
 
 pub use duplicates::{
@@ -15,6 +16,7 @@ pub use duplicates::{
 pub use hydration::{
     generate_deployment_id, hydrate_deployment, hydrate_safe_transactions, hydrate_transactions,
 };
+pub use orchestrator::RunPipeline;
 pub use types::{
     PipelineConfig, PipelineContext, PipelineResult, RecordedDeployment, RecordedTransaction,
     SkippedDeployment,
