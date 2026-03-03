@@ -10,6 +10,7 @@ license.workspace = true
 treb-core = { workspace = true }
 treb-config = { workspace = true }
 treb-registry = { workspace = true }
+treb-safe = { workspace = true }
 
 # Foundry
 foundry-config = { workspace = true }

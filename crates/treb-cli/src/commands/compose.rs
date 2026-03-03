@@ -679,6 +679,7 @@ pub async fn run(
             script_path: PathBuf::from(&component.script),
             git_commit,
             project_root: cwd.clone(),
+            deployer_sender: None,
         };
 
         // Execute pipeline.

@@ -223,6 +223,29 @@ pub fn hydrate_safe_transactions(
         .collect()
 }
 
+/// Populate `safe_context` on transactions that belong to a Safe batch.
+///
+/// For each `SafeTransaction`, this sets `safe_context` on all `Transaction`
+/// records whose IDs appear in the Safe transaction's `transaction_ids`.
+/// The `batch_index` is the position of the transaction within the Safe batch.
+pub fn populate_safe_context(
+    transactions: &mut [Transaction],
+    safe_transactions: &[SafeTransaction],
+) {
+    for safe_tx in safe_transactions {
+        for (batch_index, tx_id) in safe_tx.transaction_ids.iter().enumerate() {
+            if let Some(tx) = transactions.iter_mut().find(|t| t.id == *tx_id) {
+                tx.safe_context = Some(treb_core::types::transaction::SafeContext {
+                    safe_address: safe_tx.safe_address.clone(),
+                    safe_tx_hash: safe_tx.safe_tx_hash.clone(),
+                    batch_index: batch_index as i64,
+                    proposer_address: safe_tx.proposed_by.clone(),
+                });
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,6 +267,7 @@ mod tests {
             script_path: PathBuf::from("script/Deploy.s.sol"),
             git_commit: "abc1234".to_string(),
             project_root: PathBuf::from("/tmp/project"),
+            deployer_sender: None,
         }
     }
 
@@ -634,5 +658,153 @@ mod tests {
 
         let safe_txs = hydrate_safe_transactions(&[], &ctx);
         assert!(safe_txs.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // populate_safe_context tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn populate_safe_context_links_transactions_to_safe_batch() {
+        let ctx = test_context();
+        let tx_id_1 = b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let tx_id_2 = b256!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+
+        // Create two simulated transactions
+        let events = vec![TransactionSimulated {
+            transactions: vec![
+                SimulatedTransaction {
+                    transactionId: tx_id_1,
+                    senderId: "deployer".to_string(),
+                    sender: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+                    returnData: Bytes::new(),
+                    transaction: crate::events::abi::Transaction {
+                        to: address!("5FbDB2315678afecb367f032d93F642f64180aa3"),
+                        data: Bytes::new(),
+                        value: U256::ZERO,
+                    },
+                },
+                SimulatedTransaction {
+                    transactionId: tx_id_2,
+                    senderId: "deployer".to_string(),
+                    sender: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+                    returnData: Bytes::new(),
+                    transaction: crate::events::abi::Transaction {
+                        to: address!("e7f1725E7734CE288F8367e1Bb143E90bb3F0512"),
+                        data: Bytes::new(),
+                        value: U256::ZERO,
+                    },
+                },
+            ],
+        }];
+
+        let mut transactions = hydrate_transactions(&events, &[], &ctx);
+        assert_eq!(transactions.len(), 2);
+        // Both should have no safe_context initially
+        assert!(transactions[0].safe_context.is_none());
+        assert!(transactions[1].safe_context.is_none());
+
+        // Create a SafeTransaction that groups both transactions
+        let safe_txs = vec![SafeTransaction {
+            safe_tx_hash: "0xsafehash".to_string(),
+            safe_address: "0x0000000000000000000000000000000000000042".to_string(),
+            chain_id: 1,
+            status: TransactionStatus::Queued,
+            nonce: 0,
+            transactions: Vec::new(),
+            transaction_ids: vec![
+                format!("{:#x}", tx_id_1),
+                format!("{:#x}", tx_id_2),
+            ],
+            proposed_by: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
+            proposed_at: chrono::Utc::now(),
+            confirmations: Vec::new(),
+            executed_at: None,
+            execution_tx_hash: String::new(),
+        }];
+
+        // Populate safe_context
+        populate_safe_context(&mut transactions, &safe_txs);
+
+        // Transaction 1 should have batch_index 0
+        let ctx1 = transactions[0].safe_context.as_ref().expect("should have safe_context");
+        assert_eq!(ctx1.safe_address, "0x0000000000000000000000000000000000000042");
+        assert_eq!(ctx1.safe_tx_hash, "0xsafehash");
+        assert_eq!(ctx1.batch_index, 0);
+        assert_eq!(ctx1.proposer_address, "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
+
+        // Transaction 2 should have batch_index 1
+        let ctx2 = transactions[1].safe_context.as_ref().expect("should have safe_context");
+        assert_eq!(ctx2.batch_index, 1);
+        assert_eq!(ctx2.safe_tx_hash, "0xsafehash");
+    }
+
+    #[test]
+    fn populate_safe_context_skips_unlinked_transactions() {
+        let ctx = test_context();
+        let tx_id = b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+
+        let events = vec![TransactionSimulated {
+            transactions: vec![SimulatedTransaction {
+                transactionId: tx_id,
+                senderId: "deployer".to_string(),
+                sender: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+                returnData: Bytes::new(),
+                transaction: crate::events::abi::Transaction {
+                    to: address!("5FbDB2315678afecb367f032d93F642f64180aa3"),
+                    data: Bytes::new(),
+                    value: U256::ZERO,
+                },
+            }],
+        }];
+
+        let mut transactions = hydrate_transactions(&events, &[], &ctx);
+
+        // SafeTransaction references a different transaction ID
+        let safe_txs = vec![SafeTransaction {
+            safe_tx_hash: "0xsafehash".to_string(),
+            safe_address: "0x0000000000000000000000000000000000000042".to_string(),
+            chain_id: 1,
+            status: TransactionStatus::Queued,
+            nonce: 0,
+            transactions: Vec::new(),
+            transaction_ids: vec!["0xdeadbeef".to_string()],
+            proposed_by: "0xProposer".to_string(),
+            proposed_at: chrono::Utc::now(),
+            confirmations: Vec::new(),
+            executed_at: None,
+            execution_tx_hash: String::new(),
+        }];
+
+        populate_safe_context(&mut transactions, &safe_txs);
+
+        // Transaction should NOT have safe_context since its ID doesn't match
+        assert!(transactions[0].safe_context.is_none());
+    }
+
+    #[test]
+    fn populate_safe_context_no_safe_transactions() {
+        let ctx = test_context();
+        let tx_id = b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+
+        let events = vec![TransactionSimulated {
+            transactions: vec![SimulatedTransaction {
+                transactionId: tx_id,
+                senderId: "deployer".to_string(),
+                sender: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+                returnData: Bytes::new(),
+                transaction: crate::events::abi::Transaction {
+                    to: address!("5FbDB2315678afecb367f032d93F642f64180aa3"),
+                    data: Bytes::new(),
+                    value: U256::ZERO,
+                },
+            }],
+        }];
+
+        let mut transactions = hydrate_transactions(&events, &[], &ctx);
+        populate_safe_context(&mut transactions, &[]);
+
+        // No safe_context should be populated
+        assert!(transactions[0].safe_context.is_none());
     }
 }

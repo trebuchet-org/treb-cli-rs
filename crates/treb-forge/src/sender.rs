@@ -60,6 +60,48 @@ impl ResolvedSender {
             } => *governor_address,
         }
     }
+
+    /// Returns `true` if this is a Safe multisig sender.
+    pub fn is_safe(&self) -> bool {
+        matches!(self, Self::Safe { .. })
+    }
+
+    /// Returns `true` if this is an OZ Governor sender.
+    pub fn is_governor(&self) -> bool {
+        matches!(self, Self::Governor { .. })
+    }
+
+    /// Returns the inner sub-signer for composite sender types.
+    ///
+    /// For Safe senders, this is the signing wallet.
+    /// For Governor senders, this is the proposer wallet.
+    /// For Wallet/InMemory senders, returns `self`.
+    pub fn sub_signer(&self) -> &ResolvedSender {
+        match self {
+            Self::Safe { signer, .. } => signer,
+            Self::Governor { proposer, .. } => proposer,
+            _ => self,
+        }
+    }
+
+    /// Returns the underlying `WalletSigner` if this is a Wallet or InMemory sender.
+    ///
+    /// Returns `None` for Safe or Governor senders — use `sub_signer().wallet_signer()`
+    /// to reach the leaf signer.
+    pub fn wallet_signer(&self) -> Option<&WalletSigner> {
+        match self {
+            Self::Wallet(ws) | Self::InMemory(ws) => Some(ws),
+            _ => None,
+        }
+    }
+
+    /// Returns the Safe multisig address if this is a Safe sender.
+    pub fn safe_address(&self) -> Option<Address> {
+        match self {
+            Self::Safe { safe_address, .. } => Some(*safe_address),
+            _ => None,
+        }
+    }
 }
 
 /// Resolve a single sender by name from its configuration.
@@ -736,5 +778,107 @@ mod tests {
         assert!(matches!(resolved.get("deployer"), Some(ResolvedSender::Wallet(_))));
         assert!(matches!(resolved.get("my-safe"), Some(ResolvedSender::Safe { .. })));
         assert!(matches!(resolved.get("my-gov"), Some(ResolvedSender::Governor { .. })));
+    }
+
+    // ---- is_safe / is_governor / sub_signer / wallet_signer / safe_address tests ----
+
+    #[tokio::test]
+    async fn is_safe_returns_true_for_safe_sender() {
+        let signer = ResolvedSender::Wallet(in_memory_signer(0).unwrap());
+        let safe = ResolvedSender::Safe {
+            safe_address: address!("0000000000000000000000000000000000000042"),
+            signer: Box::new(signer),
+        };
+        assert!(safe.is_safe());
+        assert!(!safe.is_governor());
+    }
+
+    #[tokio::test]
+    async fn is_governor_returns_true_for_governor_sender() {
+        let proposer = ResolvedSender::Wallet(in_memory_signer(0).unwrap());
+        let gov = ResolvedSender::Governor {
+            governor_address: address!("0000000000000000000000000000000000000099"),
+            timelock_address: None,
+            proposer: Box::new(proposer),
+        };
+        assert!(gov.is_governor());
+        assert!(!gov.is_safe());
+    }
+
+    #[test]
+    fn is_safe_and_governor_false_for_wallet() {
+        let wallet = ResolvedSender::Wallet(in_memory_signer(0).unwrap());
+        assert!(!wallet.is_safe());
+        assert!(!wallet.is_governor());
+    }
+
+    #[test]
+    fn sub_signer_returns_inner_for_safe() {
+        let ws = in_memory_signer(0).unwrap();
+        let expected_addr = ws.address();
+        let safe = ResolvedSender::Safe {
+            safe_address: address!("0000000000000000000000000000000000000042"),
+            signer: Box::new(ResolvedSender::Wallet(ws)),
+        };
+        let sub = safe.sub_signer();
+        assert!(matches!(sub, ResolvedSender::Wallet(_)));
+        assert_eq!(sub.sender_address(), expected_addr);
+    }
+
+    #[test]
+    fn sub_signer_returns_inner_for_governor() {
+        let ws = in_memory_signer(0).unwrap();
+        let expected_addr = ws.address();
+        let gov = ResolvedSender::Governor {
+            governor_address: address!("0000000000000000000000000000000000000099"),
+            timelock_address: None,
+            proposer: Box::new(ResolvedSender::Wallet(ws)),
+        };
+        let sub = gov.sub_signer();
+        assert!(matches!(sub, ResolvedSender::Wallet(_)));
+        assert_eq!(sub.sender_address(), expected_addr);
+    }
+
+    #[test]
+    fn sub_signer_returns_self_for_wallet() {
+        let ws = in_memory_signer(0).unwrap();
+        let expected_addr = ws.address();
+        let wallet = ResolvedSender::Wallet(ws);
+        let sub = wallet.sub_signer();
+        assert_eq!(sub.sender_address(), expected_addr);
+    }
+
+    #[test]
+    fn wallet_signer_returns_some_for_wallet() {
+        let ws = in_memory_signer(0).unwrap();
+        let expected_addr = ws.address();
+        let wallet = ResolvedSender::Wallet(ws);
+        let ws_ref = wallet.wallet_signer().expect("should return Some");
+        assert_eq!(ws_ref.address(), expected_addr);
+    }
+
+    #[test]
+    fn wallet_signer_returns_none_for_safe() {
+        let safe = ResolvedSender::Safe {
+            safe_address: address!("0000000000000000000000000000000000000042"),
+            signer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
+        };
+        assert!(safe.wallet_signer().is_none());
+    }
+
+    #[test]
+    fn safe_address_returns_some_for_safe_sender() {
+        let addr = address!("0000000000000000000000000000000000000042");
+        let safe = ResolvedSender::Safe {
+            safe_address: addr,
+            signer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
+        };
+        assert_eq!(safe.safe_address(), Some(addr));
+    }
+
+    #[test]
+    fn safe_address_returns_none_for_wallet() {
+        let wallet = ResolvedSender::Wallet(in_memory_signer(0).unwrap());
+        assert!(wallet.safe_address().is_none());
     }
 }

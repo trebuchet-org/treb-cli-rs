@@ -12,6 +12,7 @@ use treb_core::types::safe_transaction::SafeTransaction;
 use treb_core::types::transaction::Transaction;
 
 use crate::events::ExtractedCollision;
+use crate::sender::ResolvedSender;
 
 // ---------------------------------------------------------------------------
 // PipelineConfig
@@ -66,6 +67,8 @@ pub struct PipelineContext {
     pub git_commit: String,
     /// The project root directory.
     pub project_root: PathBuf,
+    /// The resolved deployer sender, used to detect Safe/Governor flows.
+    pub deployer_sender: Option<ResolvedSender>,
 }
 
 // ---------------------------------------------------------------------------

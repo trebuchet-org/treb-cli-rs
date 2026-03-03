@@ -114,7 +114,7 @@ pub async fn run(
     let effective_rpc_url = rpc_url.or_else(|| resolved.network.clone());
 
     // ── Sender resolution ────────────────────────────────────────────────
-    let resolved_senders = resolve_all_senders(&resolved.senders)
+    let mut resolved_senders = resolve_all_senders(&resolved.senders)
         .await
         .context("failed to resolve senders")?;
 
@@ -167,11 +167,15 @@ pub async fn run(
 
     let git_commit = resolve_git_commit();
 
+    // Extract the deployer sender so the pipeline can detect Safe/Governor flows.
+    let deployer_sender = resolved_senders.remove("deployer");
+
     let pipeline_context = PipelineContext {
         config: pipeline_config,
         script_path: PathBuf::from(script),
         git_commit,
         project_root: cwd.clone(),
+        deployer_sender,
     };
 
     // ── Broadcast confirmation prompt ──────────────────────────────────

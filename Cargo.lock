@@ -7975,6 +7975,7 @@ dependencies = [
  "treb-config",
  "treb-core",
  "treb-registry",
+ "treb-safe",
 ]
 
 [[package]]

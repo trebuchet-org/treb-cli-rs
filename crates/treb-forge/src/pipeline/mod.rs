@@ -15,6 +15,7 @@ pub use duplicates::{
 };
 pub use hydration::{
     generate_deployment_id, hydrate_deployment, hydrate_safe_transactions, hydrate_transactions,
+    populate_safe_context,
 };
 pub use orchestrator::RunPipeline;
 pub use types::{
