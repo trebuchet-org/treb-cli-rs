@@ -36,5 +36,8 @@ pub const REGISTRY_FILE: &str = "registry.json";
 /// Directory name for the registry inside the project root.
 pub const REGISTRY_DIR: &str = ".treb";
 
+/// File storing fork-mode state (active forks, history).
+pub const FORK_STATE_FILE: &str = "fork-state.json";
+
 /// Current registry format version.
 pub const REGISTRY_VERSION: u32 = 1;

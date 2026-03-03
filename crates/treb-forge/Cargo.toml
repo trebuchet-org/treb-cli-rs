@@ -22,6 +22,7 @@ foundry-evm = { workspace = true }
 foundry-cheatcodes = { workspace = true }
 foundry-wallets = { workspace = true }
 foundry-linking = { workspace = true }
+anvil = { workspace = true }
 
 # Alloy
 alloy-primitives = { workspace = true }

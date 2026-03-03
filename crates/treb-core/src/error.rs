@@ -21,6 +21,10 @@ pub enum TrebError {
     #[error("safe error: {0}")]
     Safe(String),
 
+    /// Fork-mode errors.
+    #[error("fork error: {0}")]
+    Fork(String),
+
     /// I/O errors (file system, network).
     #[error(transparent)]
     Io(#[from] std::io::Error),
@@ -28,3 +32,14 @@ pub enum TrebError {
 
 /// A `Result` alias using [`TrebError`] as the default error type.
 pub type Result<T> = std::result::Result<T, TrebError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fork_error_displays_correctly() {
+        let err = TrebError::Fork("network already forked".into());
+        assert_eq!(err.to_string(), "fork error: network already forked");
+    }
+}
