@@ -40,3 +40,15 @@ Started: Tue Mar  3 09:39:47 PM CET 2026
   - `snapshot_registry` copies only specific SNAPSHOT_FILES by name, so having backup_dir inside registry_dir is safe (no recursive loop)
   - When acceptance criteria say "after X, Y returns empty" — that's a test requirement, not just implementation
 ---
+
+## 2026-03-03 - P19-US-003
+- What was implemented: `treb reset` — Scoped Registry Reset with Backup
+  - The full implementation was already present from P19-US-001 (ResetArgs, run() with filters, backup, removal, confirmation prompt)
+  - Added `full_reset_empties_lookup_index` test: creates registry with 2 deployments, removes all, verifies lookup.by_name and lookup.by_address are empty
+  - Cleaned up unused imports and dead code from reset.rs test module (`use super::*`, `TransactionStatus`, `make_transaction` function)
+- Files changed: crates/treb-cli/src/commands/reset.rs (test added, cleanup)
+- **Learnings for future iterations:**
+  - `remove_deployment` already calls `rebuild_lookup_index()` internally — no manual rebuild needed after reset
+  - When story says "Lookup index is empty after full reset" — this works automatically via the Registry facade, just needs a test to verify
+  - Removing `use super::*` from test module requires explicitly importing only what's actually needed
+---
