@@ -16,6 +16,8 @@ Started: Tue Mar  3 05:43:07 PM CET 2026
 - Signal handling: use `tokio::select!` on `ctrl_c()` + SIGTERM wrapped in `#[cfg(unix)]`; requires `signal` feature in tokio workspace dep
 - In Rust 2024 edition, avoid `ref` in `if let (Some(ref x), ...)` patterns when matching `&Option<T>` — the compiler implicitly borrows; use `if let (Some(x), ...)` instead
 - Port reachability: `is_port_reachable(port: u16) -> bool` using `TcpStream::connect` with port=0 guard is the idiomatic pattern for checking if an Anvil instance is alive
+- CLI integration tests needing a live RPC: spawn `AnvilConfig::new().port(0).spawn()` in test process; the CLI subprocess can connect to it over TCP. Use `#[tokio::test(flavor = "multi_thread")]` + `spawn_blocking` for async tests calling blocking CLI.
+- Signal handling tests: use `std::process::Command::new("kill").arg(pid)` to send SIGTERM to a subprocess on Unix (default signal is SIGTERM)
 
 ---
 
@@ -182,4 +184,29 @@ Started: Tue Mar  3 05:43:07 PM CET 2026
   - `alloy_primitives::bytes!("hexstring")` macro uses `Bytes::from_static(&hex_literal)` under the hood — efficient, references static binary data embedded in the binary, no heap allocation
   - `Bytes::from_static` is NOT const-constructible, so large bytecode constants should be returned from a function using `bytes!` macro rather than trying to define a `const` or `static`
   - The CreateX v1.0.0 deployed bytecode is ~6.5KB and can be fetched from `artifacts/src/CreateX.sol/CreateX.json` in the pcaversaccio/createx GitHub repo (under `deployedBytecode.object`)
+---
+
+## 2026-03-03 - P18-US-008
+- What was implemented:
+  - Anvil integration tests in `crates/treb-forge/tests/anvil_integration_test.rs`: spawn_works, deploy_createx_succeeds, verify_createx_returns_true, snapshot_revert_round_trip_preserves_createx, dropping_instance_frees_port
+  - Fork CLI integration tests in `crates/treb-cli/tests/fork_integration.rs`:
+    - fork_status_with_no_forks: verifies "No active forks" message
+    - fork_status_json_outputs_valid_json: pre-populated state, verifies JSON array shape
+    - fork_history_with_empty_history: verifies "No fork history" message
+    - fork_diff_with_no_changes: pre-populated matching registry + snapshot, verifies "No changes detected"
+    - fork_exit_restores_registry: pre-populated state, verifies registry restored and snapshot dir removed
+    - fork_enter_creates_state_and_snapshot: spawns real Anvil, runs binary with --rpc-url, verifies fork-state.json created and snapshot dir exists
+  - Signal handling test (Unix only): spawns upstream Anvil in test process, pre-populates fork state with upstream URL, starts `treb dev anvil start --network testnet --port 38247` as subprocess, sends SIGTERM via `kill <pid>`, verifies process exits and "anvil-stop" history entry written
+- Files changed:
+  - `crates/treb-forge/tests/anvil_integration_test.rs` (new file)
+  - `crates/treb-cli/tests/fork_integration.rs` (new file)
+  - `ralph/.state/prd.json` (P18-US-008 marked passes: true)
+- **Learnings for future iterations:**
+  - For CLI integration tests that need a live RPC endpoint, spawn `AnvilConfig::new().port(0).spawn()` in the test process — the subprocess binary can connect to it over TCP
+  - Use `#[tokio::test(flavor = "multi_thread")]` for async integration tests that call blocking operations (assert_cmd) within a tokio runtime
+  - Use `spawn_blocking` for blocking operations (assert_cmd) inside async tests to avoid blocking the tokio executor
+  - Signal handling tests: use `std::process::Command::new("kill").arg(pid)` to send SIGTERM — `kill <pid>` without a signal flag defaults to SIGTERM on Unix
+  - `assert_cmd::cargo::cargo_bin("name")` (deprecated but usable with `#[allow(deprecated)]`) gives the binary PathBuf for use with `std::process::Command::new`
+  - Port 38247 is used for the signal handling test to avoid conflicts; if this ever causes a test flake, consider using dynamic port discovery via fork-state.json polling
+  - Integration tests in `tests/` can access regular `[dependencies]` of the crate (not just `[dev-dependencies]`) — `treb_registry`, `treb_forge`, `treb_core` are all accessible
 ---
