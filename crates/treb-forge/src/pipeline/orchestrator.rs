@@ -31,12 +31,29 @@ use super::PipelineContext;
 /// result is fully populated but the registry is left unchanged.
 pub struct RunPipeline {
     context: PipelineContext,
+    /// Optional pre-built ScriptConfig. When provided, this is used instead
+    /// of building one from PipelineConfig. This allows the CLI layer to wire
+    /// in all flags (broadcast, sender credentials, legacy, etc.) directly.
+    script_config: Option<ScriptConfig>,
 }
 
 impl RunPipeline {
     /// Create a new pipeline orchestrator with the given execution context.
     pub fn new(context: PipelineContext) -> Self {
-        Self { context }
+        Self {
+            context,
+            script_config: None,
+        }
+    }
+
+    /// Set a pre-built ScriptConfig for this pipeline.
+    ///
+    /// When set, the pipeline uses this config instead of building one from
+    /// `PipelineConfig`. This allows the CLI layer to wire in all flags
+    /// (broadcast, sender credentials, legacy, verify, etc.) directly.
+    pub fn with_script_config(mut self, config: ScriptConfig) -> Self {
+        self.script_config = Some(config);
+        self
     }
 
     /// Execute the full deployment recording pipeline.
@@ -62,11 +79,18 @@ impl RunPipeline {
         let artifact_index = ArtifactIndex::from_compile_output(compilation);
 
         // 2. Build script args and execute
-        let mut script_config = ScriptConfig::new(&self.context.config.script_path);
-        script_config
-            .sig(&self.context.config.script_sig)
-            .args(self.context.config.script_args.clone())
-            .chain_id(self.context.config.chain_id);
+        let script_config = match self.script_config {
+            Some(config) => config,
+            None => {
+                // Fallback: build from PipelineConfig (backward compatibility)
+                let mut config = ScriptConfig::new(&self.context.config.script_path);
+                config
+                    .sig(&self.context.config.script_sig)
+                    .args(self.context.config.script_args.clone())
+                    .chain_id(self.context.config.chain_id);
+                config
+            }
+        };
 
         let script_args = script_config.into_script_args()?;
         let execution = execute_script(script_args).await?;
