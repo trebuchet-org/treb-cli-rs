@@ -1,3 +1,29 @@
+## 2026-03-04 - P1-US-003
+- What was implemented: Restructure ForkEntry to Match Go Schema
+  - Added `SnapshotEntry` struct with fields: `index`, `snapshot_id`, `command`, `timestamp` (all camelCase via serde)
+  - Added Go-compatible fields to `ForkEntry`: `env_var_name`, `original_rpc`, `anvil_pid`, `pid_file`, `log_file`, `entered_at`, `snapshots`
+  - Removed `evm_snapshot_id: Option<String>` field from `ForkEntry`
+  - Updated `run_enter` to populate new fields (`env_var_name` = `ETH_RPC_URL_<NETWORK>`, `original_rpc` = fork_url, `entered_at` = now)
+  - Updated `run_revert` to read last snapshot from `snapshots.last()` and push new snapshot entries
+  - Updated `run_restart` to push snapshot entries instead of setting `evm_snapshot_id`
+  - Renamed `store_fork_state_snapshot_id` to `store_fork_state_snapshot` in `dev.rs`; now pushes `SnapshotEntry` with command="enter"
+  - Updated `fork_entry_camel_case_keys` test to assert all new Go-compatible keys present and no snake_case equivalents
+  - Updated all 6 `sample_fork_entry`/`sample_entry` helpers across test files
+  - Exported `SnapshotEntry` from `treb_core::types::mod.rs`
+- Files changed:
+  - crates/treb-core/src/types/fork.rs (SnapshotEntry struct + ForkEntry fields + tests)
+  - crates/treb-core/src/types/mod.rs (re-export SnapshotEntry)
+  - crates/treb-cli/src/commands/fork.rs (run_enter, run_revert, run_restart + test helpers)
+  - crates/treb-cli/src/commands/dev.rs (store_fork_state_snapshot + test helpers)
+  - crates/treb-cli/tests/fork_integration.rs (all ForkEntry constructors)
+  - crates/treb-registry/src/store/fork_state.rs (test helper)
+- **Learnings for future iterations:**
+  - New Go-compatible fields use `#[serde(default)]` so they deserialize from Go-written JSON even when Rust-specific fields are absent
+  - `snapshots: Vec<SnapshotEntry>` with `#[serde(default)]` correctly deserializes as empty vec when the field is missing in older JSON
+  - When replacing a single `Option<T>` field with a `Vec<T>`, the "last" element pattern (`vec.last()`) preserves the same "most recent snapshot" semantics
+  - The `fork_url` variable in `run_enter` needs `.clone()` before moving into `ForkEntry` since it's used for both `fork_url` and `original_rpc` fields
+---
+
 ## 2026-03-03 - P20-US-009
 - What was implemented: Final End-to-End Integration Test Suite
   - Created `crates/treb-cli/tests/e2e_workflow.rs` with 6 full multi-command workflow tests
