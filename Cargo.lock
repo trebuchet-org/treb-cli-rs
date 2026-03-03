@@ -7786,6 +7786,9 @@ version = "0.1.0"
 dependencies = [
  "alloy-json-abi 1.5.7",
  "alloy-primitives 1.5.7",
+ "alloy-signer",
+ "alloy-signer-ledger",
+ "alloy-signer-trezor",
  "anyhow",
  "eyre",
  "forge-script",
@@ -7795,6 +7798,7 @@ dependencies = [
  "foundry-compilers",
  "foundry-config",
  "foundry-evm",
+ "foundry-wallets",
  "serde",
  "serde_json",
  "tempfile",
