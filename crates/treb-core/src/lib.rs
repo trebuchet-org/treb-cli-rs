@@ -4,7 +4,14 @@ pub mod error;
 pub mod primitives {
     //! Re-exports of alloy primitive types used throughout treb.
     pub use alloy_primitives::{Address, B256, U256};
+
+    /// EVM chain identifier.
+    pub type ChainId = u64;
+
+    /// Transaction hash (32-byte keccak digest).
+    pub type TxHash = B256;
 }
+pub mod types;
 
 // Convenience re-exports.
 pub use error::{Result, TrebError};
