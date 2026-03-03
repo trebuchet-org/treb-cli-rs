@@ -52,3 +52,20 @@ Started: Tue Mar  3 09:39:47 PM CET 2026
   - When story says "Lookup index is empty after full reset" — this works automatically via the Registry facade, just needs a test to verify
   - Removing `use super::*` from test module requires explicitly importing only what's actually needed
 ---
+
+## 2026-03-03 - P19-US-004
+- What was implemented: `treb migrate config` — Config Format Detection and v1→v2 Conversion
+  - Added `serialize_treb_config_v2()` to `treb-config` crate (`trebfile.rs`) and exported from `lib.rs`
+  - Added round-trip test for `serialize_treb_config_v2` in `treb-config`
+  - Rewrote `migrate.rs` to use `treb_config::serialize_treb_config_v2` (removed local copy)
+  - Added foundry.toml sender migration: `extract_treb_senders_from_foundry` called during v1→v2 migration
+  - Refactored `run_config` to handle `TrebConfigFormat::None` with foundry senders fallback
+  - Added 5 new unit tests: golden v1→v2 conversion, dry-run no file modification, already-v2 exits cleanly, backup creation, foundry sender migration
+- Files changed: crates/treb-config/src/trebfile.rs, crates/treb-config/src/lib.rs, crates/treb-cli/src/commands/migrate.rs
+- **Learnings for future iterations:**
+  - `serialize_treb_config_v2` is now in `treb-config` crate — use `treb_config::serialize_treb_config_v2` from migrate.rs
+  - `extract_treb_senders_from_foundry(project_root, "default")` extracts legacy foundry.toml sender keys
+  - `detect_treb_config_format` returns `TrebConfigFormat::None` when no treb.toml exists (not an error)
+  - `toml::to_string_pretty` with HashMap produces non-deterministic key order — golden tests should parse result and compare fields, not strings
+  - `async fn run_config` is private but accessible via `use super::*` in the test module; test with `#[tokio::test]`
+---
