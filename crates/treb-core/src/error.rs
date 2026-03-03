@@ -25,6 +25,10 @@ pub enum TrebError {
     #[error("fork error: {0}")]
     Fork(String),
 
+    /// CLI interaction errors (non-TTY, missing input, selector failure).
+    #[error("cli error: {0}")]
+    Cli(String),
+
     /// I/O errors (file system, network).
     #[error(transparent)]
     Io(#[from] std::io::Error),

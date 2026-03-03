@@ -1,5 +1,6 @@
 mod commands;
 mod output;
+mod ui;
 
 use clap::{Parser, Subcommand};
 
