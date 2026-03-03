@@ -81,7 +81,7 @@
         "cargo test --workspace passes with all existing and new tests green"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]

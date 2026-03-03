@@ -1,3 +1,28 @@
+## 2026-03-04 - P1-US-005
+- What was implemented: Add File Rename Migration (v1 → v2)
+  - Added `migrate_v1_to_v2` function in `migrations.rs` that renames old-format files to new Go-compatible names
+  - Renames: `safe_txs.json` → `safe-txs.json`, `governor_proposals.json` → `governor-txs.json`, `fork-state.json` → `fork.json`
+  - Migration walks `.treb/snapshots/*/` to rename files in fork snapshot directories too
+  - No-clobber: skips rename if the new file already exists
+  - Added `FILE_RENAMES` const array and `rename_if_needed` helper
+  - Registered migration in `MIGRATIONS` array as `(2, migrate_v1_to_v2)`
+  - Bumped `REGISTRY_VERSION` from 1 to 2
+  - Updated `RegistryMeta::new()` to use `REGISTRY_VERSION` instead of hardcoded `1`
+  - Added 6 unit tests: renames old files, no-clobber, missing files, snapshot dirs, no snapshots dir, full integration (backup + version bump)
+  - Fixed 3 tests in other files that hardcoded version expectations
+- Files changed:
+  - crates/treb-registry/src/migrations.rs (migration function + 6 tests)
+  - crates/treb-registry/src/lib.rs (REGISTRY_VERSION bump)
+  - crates/treb-registry/src/types.rs (RegistryMeta::new uses REGISTRY_VERSION + test fix)
+  - crates/treb-registry/src/registry.rs (test fix for version check)
+  - crates/treb-cli/tests/cli_init.rs (test fix for version assertion)
+- **Learnings for future iterations:**
+  - `RegistryMeta::new()` should always use `REGISTRY_VERSION` const, not a hardcoded number — prevents test breakage when version bumps
+  - The migration framework already handles timestamped backups and version bumping — migration functions only need the data transformation logic
+  - `fs::rename` is atomic within the same filesystem, making it safe for file renames without locks
+  - Tests that assert specific version numbers should use `REGISTRY_VERSION` const to stay resilient across version bumps
+---
+
 ## 2026-03-04 - P1-US-004
 - What was implemented: Verify Config and Registry Schema Compatibility
   - Confirmed `config.local.json` field names (`namespace`, `network`) already match Go CLI schema exactly
@@ -195,6 +220,8 @@
 ---
 
 ## Codebase Patterns
+- Migration functions in `migrations.rs` only need data transformation logic — the runner handles backups, version bumps, and ordering automatically
+- `RegistryMeta::new()` uses `REGISTRY_VERSION` const — tests should assert against the const, not hardcoded numbers
 - File constants defined in `crates/treb-registry/src/lib.rs` — all stores reference these constants, changing values there propagates automatically
 - `registry.list_deployments()` returns `Vec<&Deployment>` (borrows from registry); clone with `.into_iter().cloned().collect()` to get owned `Vec<Deployment>` for passing to selector functions that take `&[Deployment]`.
 - `build.rs` cannot import from the binary crate being built — use clap's builder API (not derive macros) to define the CLI structure independently for completion generation.
