@@ -53,6 +53,7 @@ comfy-table = "7"
 nucleo-matcher = "0.3"
 dialoguer = { version = "0.11", features = ["fuzzy-select"] }
 console = "0.15"
+owo-colors = { version = "4", features = ["supports-colors"] }
 
 # Environment
 dotenvy = "0.15"

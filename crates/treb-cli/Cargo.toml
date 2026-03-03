@@ -28,6 +28,7 @@ toml = { workspace = true }
 nucleo-matcher = { workspace = true }
 dialoguer = { workspace = true }
 console = { workspace = true }
+owo-colors = { workspace = true }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }

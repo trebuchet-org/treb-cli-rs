@@ -8,6 +8,10 @@ use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(name = "treb", version, about)]
 struct Cli {
+    /// Disable colored output (also respected via NO_COLOR env var)
+    #[arg(long, global = true)]
+    no_color: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -336,6 +340,9 @@ enum ConfigSubcommand {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+
+    // Apply color settings before any output is produced.
+    ui::color::color_enabled(cli.no_color);
 
     match cli.command {
         Commands::Run {
