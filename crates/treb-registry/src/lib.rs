@@ -3,12 +3,14 @@
 
 pub mod io;
 pub mod lookup;
+pub mod migrations;
 pub mod registry;
 pub mod store;
 pub mod types;
 
 // Re-export registry types at crate root for convenience.
 pub use lookup::LookupStore;
+pub use migrations::{run_migrations, MigrationReport};
 pub use registry::Registry;
 pub use store::fork_state::{remove_snapshot, restore_registry, snapshot_registry};
 pub use store::{

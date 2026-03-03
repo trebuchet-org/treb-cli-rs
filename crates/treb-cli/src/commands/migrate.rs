@@ -10,12 +10,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context};
 use clap::Subcommand;
-use serde::Serialize;
 use treb_config::{
     detect_treb_config_format, extract_treb_senders_from_foundry, load_treb_config_v1,
     serialize_treb_config_v2, AccountConfig, TrebConfigFormat,
 };
-use treb_registry::{snapshot_registry, REGISTRY_DIR, REGISTRY_VERSION};
+use treb_registry::{run_migrations, REGISTRY_DIR, REGISTRY_VERSION};
 
 use crate::output;
 
@@ -39,96 +38,6 @@ pub enum MigrateSubcommand {
         #[arg(long)]
         dry_run: bool,
     },
-}
-
-// ── MigrationReport ────────────────────────────────────────────────────────────
-
-/// Report returned by `run_migrations`.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MigrationReport {
-    /// Version numbers of migrations that were applied.
-    pub applied: Vec<u32>,
-    /// The registry version after all migrations.
-    pub current_version: u32,
-}
-
-// ── run_migrations ─────────────────────────────────────────────────────────────
-
-/// Apply all pending registry migrations in order.
-///
-/// Currently there are no migrations (v1 is the only version). This function
-/// returns immediately with an empty report when the registry is already at
-/// [`REGISTRY_VERSION`], and returns a `TrebError::Registry` error when the
-/// recorded version is *newer* than the tool supports.
-pub fn run_migrations(project_root: &Path) -> anyhow::Result<MigrationReport> {
-    use treb_registry::io::read_json_file;
-    use treb_registry::types::RegistryMeta;
-    use treb_registry::REGISTRY_FILE;
-
-    let registry_dir = project_root.join(REGISTRY_DIR);
-    let meta_path = registry_dir.join(REGISTRY_FILE);
-
-    let current_version = if meta_path.exists() {
-        let meta: RegistryMeta = read_json_file(&meta_path)
-            .map_err(|e| anyhow::anyhow!("failed to read registry.json: {e}"))?;
-        meta.version
-    } else {
-        // No registry.json — treat as current version (nothing to migrate).
-        REGISTRY_VERSION
-    };
-
-    if current_version > REGISTRY_VERSION {
-        bail!(
-            "registry version {} is newer than supported version {}; please upgrade treb",
-            current_version,
-            REGISTRY_VERSION
-        );
-    }
-
-    // Static migration table: (target_version, migration_fn).
-    // Currently empty — v1 is the initial version.
-    type MigrationFn = fn(&Path) -> anyhow::Result<()>;
-    static MIGRATIONS: &[(u32, MigrationFn)] = &[];
-
-    let mut applied = Vec::new();
-    let mut version = current_version;
-
-    for &(target_version, migration_fn) in MIGRATIONS {
-        if target_version > version {
-            // Backup before each migration step.
-            let ts = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis();
-            let backup_dir =
-                registry_dir.join(format!("backups/migrate-v{target_version}-{ts}"));
-            snapshot_registry(&registry_dir, &backup_dir).with_context(|| {
-                format!(
-                    "failed to create migration backup at {}",
-                    backup_dir.display()
-                )
-            })?;
-
-            migration_fn(project_root)?;
-
-            // Bump version in registry.json.
-            use treb_registry::io::write_json_file;
-            let mut meta: RegistryMeta = read_json_file(&meta_path)
-                .map_err(|e| anyhow::anyhow!("failed to read registry.json: {e}"))?;
-            meta.version = target_version;
-            write_json_file(&meta_path, &meta)
-                .map_err(|e| anyhow::anyhow!("failed to write registry.json: {e}"))?;
-
-            version = target_version;
-            applied.push(target_version);
-        }
-    }
-
-    Ok(MigrationReport {
-        applied,
-        current_version: version,
-    })
 }
 
 // ── run ───────────────────────────────────────────────────────────────────────
@@ -383,7 +292,7 @@ async fn run_registry(project_root: &Path, dry_run: bool) -> anyhow::Result<()> 
         return Ok(());
     }
 
-    let report = run_migrations(project_root)?;
+    let report = run_migrations(&registry_dir)?;
     println!(
         "Registry migrated to version {}. Applied: {:?}",
         report.current_version, report.applied
@@ -654,7 +563,8 @@ derivation_path = "m/44'/60'/0'/0/0"
         std::fs::write(dir.path().join("foundry.toml"), "[profile.default]\n").unwrap();
         let _ = treb_registry::Registry::init(dir.path()).unwrap();
 
-        let report = run_migrations(dir.path()).unwrap();
+        let registry_dir = dir.path().join(treb_registry::REGISTRY_DIR);
+        let report = run_migrations(&registry_dir).unwrap();
         assert!(report.applied.is_empty());
         assert_eq!(report.current_version, REGISTRY_VERSION);
     }
@@ -673,7 +583,7 @@ derivation_path = "m/44'/60'/0'/0/0"
         meta.version = REGISTRY_VERSION + 1;
         write_json_file(&registry_dir.join(REGISTRY_FILE), &meta).unwrap();
 
-        let result = run_migrations(dir.path());
+        let result = run_migrations(&registry_dir);
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("newer than supported"), "got: {msg}");
