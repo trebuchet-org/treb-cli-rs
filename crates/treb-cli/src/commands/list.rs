@@ -1,6 +1,12 @@
 //! `treb list` command implementation.
 
+use std::env;
+
+use anyhow::{bail, Context};
 use treb_core::types::Deployment;
+use treb_registry::Registry;
+
+use crate::output;
 
 /// Filter criteria for deployments. All specified filters are combined with AND logic.
 pub struct DeploymentFilters {
@@ -81,18 +87,90 @@ pub fn filter_deployments<'a>(
         .collect()
 }
 
+/// Truncate an address to `0xABCD...EFGH` format (first 4 + last 4 hex chars).
+fn truncate_address(address: &str) -> String {
+    if address.len() >= 10 {
+        format!("{}...{}", &address[..6], &address[address.len() - 4..])
+    } else {
+        address.to_string()
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
-    _network: Option<String>,
-    _namespace: Option<String>,
-    _type: Option<String>,
-    _tag: Option<String>,
-    _contract: Option<String>,
-    _label: Option<String>,
-    _fork: bool,
-    _no_fork: bool,
-    _json: bool,
+    network: Option<String>,
+    namespace: Option<String>,
+    deployment_type: Option<String>,
+    tag: Option<String>,
+    contract: Option<String>,
+    label: Option<String>,
+    fork: bool,
+    no_fork: bool,
+    json: bool,
 ) -> anyhow::Result<()> {
+    let cwd = env::current_dir().context("failed to determine current directory")?;
+
+    if !cwd.join("foundry.toml").exists() {
+        bail!(
+            "no foundry.toml found in {}\n\n\
+             Run `forge init` to create a Foundry project, then `treb init`.",
+            cwd.display()
+        );
+    }
+    if !cwd.join(".treb").exists() {
+        bail!(
+            "project not initialized — .treb/ directory not found in {}\n\n\
+             Run `treb init` first.",
+            cwd.display()
+        );
+    }
+
+    let registry = Registry::open(&cwd).context("failed to open registry")?;
+    let all_deployments = registry.list_deployments();
+
+    let filters = DeploymentFilters {
+        network,
+        namespace,
+        deployment_type,
+        tag,
+        contract,
+        label,
+        fork,
+        no_fork,
+    };
+
+    let filtered = filter_deployments(&all_deployments, &filters);
+
+    if json {
+        output::print_json(&filtered)?;
+    } else if filtered.is_empty() {
+        println!("No deployments found.");
+    } else {
+        let mut table = output::build_table(&[
+            "Name",
+            "Label",
+            "Namespace",
+            "Chain",
+            "Type",
+            "Address",
+            "Verification",
+        ]);
+
+        for d in &filtered {
+            table.add_row(vec![
+                d.contract_name.as_str(),
+                d.label.as_str(),
+                d.namespace.as_str(),
+                &d.chain_id.to_string(),
+                &d.deployment_type.to_string(),
+                &truncate_address(&d.address),
+                &d.verification.status.to_string(),
+            ]);
+        }
+
+        output::print_table(&table);
+    }
+
     Ok(())
 }
 
