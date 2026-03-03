@@ -4,7 +4,9 @@
 //! Forge scripts in dependency order.
 
 use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
 
+use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
 
 // ── Compose file schema ──────────────────────────────────────────────────
@@ -40,12 +42,77 @@ pub struct Component {
     pub verify: Option<bool>,
 }
 
+// ── Parsing and validation ───────────────────────────────────────────────
+
+/// Load and parse a compose YAML file from disk.
+pub fn load_compose_file(path: &str) -> anyhow::Result<ComposeFile> {
+    let path = Path::new(path);
+    if !path.exists() {
+        bail!("compose file not found: {}", path.display());
+    }
+    let contents = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read compose file: {}", path.display()))?;
+    let compose: ComposeFile = serde_yaml::from_str(&contents)
+        .with_context(|| format!("failed to parse compose file: {}", path.display()))?;
+    Ok(compose)
+}
+
+/// Validate a parsed compose file.
+///
+/// Checks structural invariants that serde alone cannot enforce:
+/// non-empty group, non-empty components, valid script paths,
+/// valid dependency references, no self-dependencies, and valid
+/// component names.
+pub fn validate_compose_file(compose: &ComposeFile) -> anyhow::Result<()> {
+    if compose.group.is_empty() {
+        bail!("compose file validation failed: 'group' must not be empty");
+    }
+    if compose.components.is_empty() {
+        bail!("compose file validation failed: 'components' must not be empty");
+    }
+    for (name, component) in &compose.components {
+        // Validate component name: alphanumeric, hyphens, underscores only
+        if !name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        {
+            bail!(
+                "component '{}' has an invalid name: must contain only alphanumeric characters, hyphens, and underscores",
+                name
+            );
+        }
+        // Validate script is non-empty
+        if component.script.is_empty() {
+            bail!(
+                "component '{}' has an empty 'script' field",
+                name
+            );
+        }
+        // Validate dependency references
+        if let Some(deps) = &component.deps {
+            for dep in deps {
+                if dep == name {
+                    bail!("component '{}' cannot depend on itself", name);
+                }
+                if !compose.components.contains_key(dep) {
+                    bail!(
+                        "component '{}' depends on unknown component '{}'",
+                        name,
+                        dep
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 // ── Command entry point ──────────────────────────────────────────────────
 
 /// Execute a compose deployment pipeline.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
-    _file: String,
+    file: String,
     _network: Option<String>,
     _rpc_url: Option<String>,
     _namespace: Option<String>,
@@ -61,7 +128,12 @@ pub async fn run(
     _env_vars: Vec<String>,
     _non_interactive: bool,
 ) -> anyhow::Result<()> {
-    // Stub — full implementation in subsequent user stories.
+    // Parse and validate the compose file.
+    let compose = load_compose_file(&file)?;
+    validate_compose_file(&compose)?;
+
+    // Remaining orchestration implemented in subsequent user stories.
+    let _ = compose;
     Ok(())
 }
 
@@ -172,5 +244,181 @@ components:
         // serde_yaml with default settings ignores unknown fields
         let result = serde_yaml::from_str::<ComposeFile>(yaml);
         assert!(result.is_ok(), "unknown fields should be ignored: {:?}", result.err());
+    }
+
+    // ── Validation tests ────────────────────────────────────────────────
+
+    #[test]
+    fn validate_valid_compose_file() {
+        let yaml = r#"
+group: my-deploy
+components:
+  libs:
+    script: script/DeployLibs.s.sol
+  core:
+    script: script/DeployCore.s.sol
+    deps:
+      - libs
+"#;
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        assert!(validate_compose_file(&compose).is_ok());
+    }
+
+    #[test]
+    fn validate_empty_group_fails() {
+        let yaml = r#"
+group: ""
+components:
+  a:
+    script: script/A.s.sol
+"#;
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let err = validate_compose_file(&compose).unwrap_err();
+        assert!(
+            err.to_string().contains("'group' must not be empty"),
+            "expected empty group error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_empty_components_fails() {
+        let yaml = r#"
+group: test
+components: {}
+"#;
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let err = validate_compose_file(&compose).unwrap_err();
+        assert!(
+            err.to_string().contains("'components' must not be empty"),
+            "expected empty components error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_empty_script_fails() {
+        let yaml = r#"
+group: test
+components:
+  bad:
+    script: ""
+"#;
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let err = validate_compose_file(&compose).unwrap_err();
+        assert!(
+            err.to_string().contains("component 'bad'")
+                && err.to_string().contains("empty 'script'"),
+            "expected empty script error for 'bad', got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_unknown_dep_fails() {
+        let yaml = r#"
+group: test
+components:
+  a:
+    script: script/A.s.sol
+    deps:
+      - nonexistent
+"#;
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let err = validate_compose_file(&compose).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("component 'a' depends on unknown component 'nonexistent'"),
+            "expected unknown dep error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_self_dep_fails() {
+        let yaml = r#"
+group: test
+components:
+  a:
+    script: script/A.s.sol
+    deps:
+      - a
+"#;
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let err = validate_compose_file(&compose).unwrap_err();
+        assert!(
+            err.to_string().contains("component 'a' cannot depend on itself"),
+            "expected self-dep error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_invalid_component_name_fails() {
+        let yaml = r#"
+group: test
+components:
+  "bad name":
+    script: script/A.s.sol
+"#;
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let err = validate_compose_file(&compose).unwrap_err();
+        assert!(
+            err.to_string().contains("component 'bad name'")
+                && err.to_string().contains("invalid name"),
+            "expected invalid name error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_component_name_with_hyphens_and_underscores() {
+        let yaml = r#"
+group: test
+components:
+  my-component_v2:
+    script: script/A.s.sol
+"#;
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        assert!(validate_compose_file(&compose).is_ok());
+    }
+
+    // ── Loading tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn load_missing_file_fails() {
+        let err = load_compose_file("/nonexistent/path/compose.yaml").unwrap_err();
+        assert!(
+            err.to_string().contains("compose file not found"),
+            "expected file not found error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn load_malformed_yaml_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bad.yaml");
+        std::fs::write(&path, "not: [valid: yaml: {{").unwrap();
+        let err = load_compose_file(path.to_str().unwrap()).unwrap_err();
+        assert!(
+            format!("{:#}", err).contains("failed to parse compose file"),
+            "expected parse error, got: {:#}",
+            err
+        );
+    }
+
+    #[test]
+    fn load_valid_file_succeeds() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("deploy.yaml");
+        std::fs::write(
+            &path,
+            "group: test\ncomponents:\n  a:\n    script: script/A.s.sol\n",
+        )
+        .unwrap();
+        let compose = load_compose_file(path.to_str().unwrap()).unwrap();
+        assert_eq!(compose.group, "test");
+        assert_eq!(compose.components.len(), 1);
     }
 }
