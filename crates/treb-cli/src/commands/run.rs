@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::env;
+use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::PathBuf;
 
 use anyhow::{bail, Context};
@@ -172,6 +173,29 @@ pub async fn run(
         git_commit,
         project_root: cwd.clone(),
     };
+
+    // ── Broadcast confirmation prompt ──────────────────────────────────
+    if broadcast && !dry_run {
+        let should_prompt = !non_interactive && io::stdin().is_terminal();
+        if should_prompt {
+            eprintln!("About to broadcast transactions to the network.");
+            eprintln!("  Script: {}", script);
+            eprintln!("  Namespace: {}", resolved.namespace);
+            if let Some(ref url) = effective_rpc_url {
+                eprintln!("  RPC: {}", url);
+            }
+            eprint!("Proceed? [y/N] ");
+            io::stderr().flush().ok();
+
+            let mut input = String::new();
+            io::stdin().lock().read_line(&mut input).ok();
+            let answer = input.trim().to_lowercase();
+
+            if answer != "y" && answer != "yes" {
+                bail!("broadcast cancelled by user");
+            }
+        }
+    }
 
     // ── Open registry and execute pipeline ───────────────────────────────
     let mut registry = Registry::open(&cwd).context("failed to open registry")?;
