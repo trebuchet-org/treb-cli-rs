@@ -58,7 +58,7 @@ struct RenderParam {
     placeholder: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Default)]
 struct RenderContext {
     contract_name: String,
     import_path: String,
@@ -66,6 +66,12 @@ struct RenderContext {
     has_constructor_params: bool,
     constructor_params: Vec<RenderParam>,
     constructor_args: String,
+    // Proxy template fields
+    is_create: bool,
+    is_create2: bool,
+    is_create3: bool,
+    proxy_contract: String,
+    has_custom_proxy: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -218,7 +224,415 @@ contract Deploy{{contract_name}} is Script {
 }
 ";
 
+// ── ERC1967 proxy template ──────────────────────────────────────────────
+
+const ERC1967_PROXY_TEMPLATE: &str = "\
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.13;
+
+import {Script, console} from \"forge-std/Script.sol\";
+import { {{contract_name}} } from \"{{import_path}}\";
+{{#if has_custom_proxy}}
+// TODO: Import your custom proxy contract: {{proxy_contract}}
+{{else}}
+import { ERC1967Proxy } from \"@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol\";
+{{/if}}
+{{#if is_create3}}
+
+interface ICreateX {
+    function deployCreate3(bytes32 salt, bytes memory initCode) external payable returns (address);
+}
+{{/if}}
+
+contract Deploy{{contract_name}} is Script {
+{{#if is_create3}}
+    // TODO: Set the CreateX factory address for your network
+    // See https://github.com/pcaversaccio/createx for deployment addresses
+    ICreateX constant CREATEX = ICreateX(address(0));
+
+{{/if}}
+    function run() public {
+        vm.startBroadcast();
+{{#if is_create2}}
+
+        // TODO: Set your deployment salt
+        bytes32 salt = bytes32(0);
+{{/if}}
+{{#if is_create3}}
+
+        // TODO: Set your deployment salt
+        bytes32 salt = bytes32(0);
+{{/if}}
+{{#if has_constructor_params}}
+
+        // TODO: Set constructor arguments
+{{#each constructor_params}}
+        {{solidity_type}} {{name}} = {{placeholder}}; // TODO: replace placeholder
+{{/each}}
+{{/if}}
+
+        // Deploy implementation
+{{#if is_create}}
+{{#if has_constructor_params}}
+        {{contract_name}} implementation = new {{contract_name}}({{constructor_args}});
+{{else}}
+        {{contract_name}} implementation = new {{contract_name}}();
+{{/if}}
+{{/if}}
+{{#if is_create2}}
+{{#if has_constructor_params}}
+        {{contract_name}} implementation = new {{contract_name}}{salt: salt}({{constructor_args}});
+{{else}}
+        {{contract_name}} implementation = new {{contract_name}}{salt: salt}();
+{{/if}}
+{{/if}}
+{{#if is_create3}}
+{{#if has_constructor_params}}
+        bytes memory implInitCode = abi.encodePacked(
+            type({{contract_name}}).creationCode,
+            abi.encode({{constructor_args}})
+        );
+{{else}}
+        bytes memory implInitCode = type({{contract_name}}).creationCode;
+{{/if}}
+        address implAddr = CREATEX.deployCreate3(salt, implInitCode);
+        {{contract_name}} implementation = {{contract_name}}(implAddr);
+{{/if}}
+
+        // TODO: Set initialization data for the proxy.
+        // If your contract uses an initializer, encode the call here.
+        // Use initData = \"\" if no initialization is needed.
+        bytes memory initData = abi.encodeWithSelector(
+            {{contract_name}}.initialize.selector
+            // TODO: Add initialize function arguments
+        );
+
+        // Deploy ERC1967 proxy
+        {{proxy_contract}} proxy = new {{proxy_contract}}(
+            address(implementation),
+            initData
+        );
+
+        console.log(\"{{contract_name}} implementation deployed at:\", address(implementation));
+        console.log(\"{{proxy_contract}} deployed at:\", address(proxy));
+
+        vm.stopBroadcast();
+    }
+}
+";
+
+// ── UUPS proxy template ────────────────────────────────────────────────
+
+const UUPS_PROXY_TEMPLATE: &str = "\
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.13;
+
+import {Script, console} from \"forge-std/Script.sol\";
+import { {{contract_name}} } from \"{{import_path}}\";
+{{#if has_custom_proxy}}
+// TODO: Import your custom proxy contract: {{proxy_contract}}
+{{else}}
+import { ERC1967Proxy } from \"@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol\";
+{{/if}}
+{{#if is_create3}}
+
+interface ICreateX {
+    function deployCreate3(bytes32 salt, bytes memory initCode) external payable returns (address);
+}
+{{/if}}
+
+// NOTE: {{contract_name}} must inherit UUPSUpgradeable and override _authorizeUpgrade.
+contract Deploy{{contract_name}} is Script {
+{{#if is_create3}}
+    // TODO: Set the CreateX factory address for your network
+    // See https://github.com/pcaversaccio/createx for deployment addresses
+    ICreateX constant CREATEX = ICreateX(address(0));
+
+{{/if}}
+    function run() public {
+        vm.startBroadcast();
+{{#if is_create2}}
+
+        // TODO: Set your deployment salt
+        bytes32 salt = bytes32(0);
+{{/if}}
+{{#if is_create3}}
+
+        // TODO: Set your deployment salt
+        bytes32 salt = bytes32(0);
+{{/if}}
+{{#if has_constructor_params}}
+
+        // TODO: Set constructor arguments
+{{#each constructor_params}}
+        {{solidity_type}} {{name}} = {{placeholder}}; // TODO: replace placeholder
+{{/each}}
+{{/if}}
+
+        // Deploy implementation (must inherit UUPSUpgradeable)
+{{#if is_create}}
+{{#if has_constructor_params}}
+        {{contract_name}} implementation = new {{contract_name}}({{constructor_args}});
+{{else}}
+        {{contract_name}} implementation = new {{contract_name}}();
+{{/if}}
+{{/if}}
+{{#if is_create2}}
+{{#if has_constructor_params}}
+        {{contract_name}} implementation = new {{contract_name}}{salt: salt}({{constructor_args}});
+{{else}}
+        {{contract_name}} implementation = new {{contract_name}}{salt: salt}();
+{{/if}}
+{{/if}}
+{{#if is_create3}}
+{{#if has_constructor_params}}
+        bytes memory implInitCode = abi.encodePacked(
+            type({{contract_name}}).creationCode,
+            abi.encode({{constructor_args}})
+        );
+{{else}}
+        bytes memory implInitCode = type({{contract_name}}).creationCode;
+{{/if}}
+        address implAddr = CREATEX.deployCreate3(salt, implInitCode);
+        {{contract_name}} implementation = {{contract_name}}(implAddr);
+{{/if}}
+
+        // TODO: Set initialization data for the proxy
+        bytes memory initData = abi.encodeWithSelector(
+            {{contract_name}}.initialize.selector
+            // TODO: Add initialize function arguments
+        );
+
+        // Deploy UUPS proxy (uses ERC1967Proxy)
+        {{proxy_contract}} proxy = new {{proxy_contract}}(
+            address(implementation),
+            initData
+        );
+
+        console.log(\"{{contract_name}} implementation deployed at:\", address(implementation));
+        console.log(\"{{proxy_contract}} deployed at:\", address(proxy));
+
+        vm.stopBroadcast();
+    }
+}
+";
+
+// ── Transparent proxy template ─────────────────────────────────────────
+
+const TRANSPARENT_PROXY_TEMPLATE: &str = "\
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.13;
+
+import {Script, console} from \"forge-std/Script.sol\";
+import { {{contract_name}} } from \"{{import_path}}\";
+{{#if has_custom_proxy}}
+// TODO: Import your custom proxy contract: {{proxy_contract}}
+{{else}}
+import { TransparentUpgradeableProxy } from \"@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol\";
+{{/if}}
+{{#if is_create3}}
+
+interface ICreateX {
+    function deployCreate3(bytes32 salt, bytes memory initCode) external payable returns (address);
+}
+{{/if}}
+
+contract Deploy{{contract_name}} is Script {
+{{#if is_create3}}
+    // TODO: Set the CreateX factory address for your network
+    // See https://github.com/pcaversaccio/createx for deployment addresses
+    ICreateX constant CREATEX = ICreateX(address(0));
+
+{{/if}}
+    function run() public {
+        vm.startBroadcast();
+{{#if is_create2}}
+
+        // TODO: Set your deployment salt
+        bytes32 salt = bytes32(0);
+{{/if}}
+{{#if is_create3}}
+
+        // TODO: Set your deployment salt
+        bytes32 salt = bytes32(0);
+{{/if}}
+{{#if has_constructor_params}}
+
+        // TODO: Set constructor arguments
+{{#each constructor_params}}
+        {{solidity_type}} {{name}} = {{placeholder}}; // TODO: replace placeholder
+{{/each}}
+{{/if}}
+
+        // Deploy implementation
+{{#if is_create}}
+{{#if has_constructor_params}}
+        {{contract_name}} implementation = new {{contract_name}}({{constructor_args}});
+{{else}}
+        {{contract_name}} implementation = new {{contract_name}}();
+{{/if}}
+{{/if}}
+{{#if is_create2}}
+{{#if has_constructor_params}}
+        {{contract_name}} implementation = new {{contract_name}}{salt: salt}({{constructor_args}});
+{{else}}
+        {{contract_name}} implementation = new {{contract_name}}{salt: salt}();
+{{/if}}
+{{/if}}
+{{#if is_create3}}
+{{#if has_constructor_params}}
+        bytes memory implInitCode = abi.encodePacked(
+            type({{contract_name}}).creationCode,
+            abi.encode({{constructor_args}})
+        );
+{{else}}
+        bytes memory implInitCode = type({{contract_name}}).creationCode;
+{{/if}}
+        address implAddr = CREATEX.deployCreate3(salt, implInitCode);
+        {{contract_name}} implementation = {{contract_name}}(implAddr);
+{{/if}}
+
+        // TODO: Set the proxy admin address
+        address proxyAdmin = msg.sender; // TODO: replace with actual admin
+
+        // TODO: Set initialization data for the proxy
+        bytes memory initData = abi.encodeWithSelector(
+            {{contract_name}}.initialize.selector
+            // TODO: Add initialize function arguments
+        );
+
+        // Deploy transparent proxy
+        {{proxy_contract}} proxy = new {{proxy_contract}}(
+            address(implementation),
+            proxyAdmin,
+            initData
+        );
+
+        console.log(\"{{contract_name}} implementation deployed at:\", address(implementation));
+        console.log(\"{{proxy_contract}} deployed at:\", address(proxy));
+
+        vm.stopBroadcast();
+    }
+}
+";
+
+// ── Beacon proxy template ──────────────────────────────────────────────
+
+const BEACON_PROXY_TEMPLATE: &str = "\
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.13;
+
+import {Script, console} from \"forge-std/Script.sol\";
+import { {{contract_name}} } from \"{{import_path}}\";
+import { UpgradeableBeacon } from \"@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol\";
+{{#if has_custom_proxy}}
+// TODO: Import your custom proxy contract: {{proxy_contract}}
+{{else}}
+import { BeaconProxy } from \"@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol\";
+{{/if}}
+{{#if is_create3}}
+
+interface ICreateX {
+    function deployCreate3(bytes32 salt, bytes memory initCode) external payable returns (address);
+}
+{{/if}}
+
+contract Deploy{{contract_name}} is Script {
+{{#if is_create3}}
+    // TODO: Set the CreateX factory address for your network
+    // See https://github.com/pcaversaccio/createx for deployment addresses
+    ICreateX constant CREATEX = ICreateX(address(0));
+
+{{/if}}
+    function run() public {
+        vm.startBroadcast();
+{{#if is_create2}}
+
+        // TODO: Set your deployment salt
+        bytes32 salt = bytes32(0);
+{{/if}}
+{{#if is_create3}}
+
+        // TODO: Set your deployment salt
+        bytes32 salt = bytes32(0);
+{{/if}}
+{{#if has_constructor_params}}
+
+        // TODO: Set constructor arguments
+{{#each constructor_params}}
+        {{solidity_type}} {{name}} = {{placeholder}}; // TODO: replace placeholder
+{{/each}}
+{{/if}}
+
+        // Deploy implementation
+{{#if is_create}}
+{{#if has_constructor_params}}
+        {{contract_name}} implementation = new {{contract_name}}({{constructor_args}});
+{{else}}
+        {{contract_name}} implementation = new {{contract_name}}();
+{{/if}}
+{{/if}}
+{{#if is_create2}}
+{{#if has_constructor_params}}
+        {{contract_name}} implementation = new {{contract_name}}{salt: salt}({{constructor_args}});
+{{else}}
+        {{contract_name}} implementation = new {{contract_name}}{salt: salt}();
+{{/if}}
+{{/if}}
+{{#if is_create3}}
+{{#if has_constructor_params}}
+        bytes memory implInitCode = abi.encodePacked(
+            type({{contract_name}}).creationCode,
+            abi.encode({{constructor_args}})
+        );
+{{else}}
+        bytes memory implInitCode = type({{contract_name}}).creationCode;
+{{/if}}
+        address implAddr = CREATEX.deployCreate3(salt, implInitCode);
+        {{contract_name}} implementation = {{contract_name}}(implAddr);
+{{/if}}
+
+        // TODO: Set the beacon owner address
+        address beaconOwner = msg.sender; // TODO: replace with actual owner
+
+        // Deploy upgradeable beacon
+        UpgradeableBeacon beacon = new UpgradeableBeacon(
+            address(implementation),
+            beaconOwner
+        );
+
+        // TODO: Set initialization data for the proxy
+        bytes memory initData = abi.encodeWithSelector(
+            {{contract_name}}.initialize.selector
+            // TODO: Add initialize function arguments
+        );
+
+        // Deploy beacon proxy
+        {{proxy_contract}} proxy = new {{proxy_contract}}(
+            address(beacon),
+            initData
+        );
+
+        console.log(\"{{contract_name}} implementation deployed at:\", address(implementation));
+        console.log(\"UpgradeableBeacon deployed at:\", address(beacon));
+        console.log(\"{{proxy_contract}} deployed at:\", address(proxy));
+
+        vm.stopBroadcast();
+    }
+}
+";
+
 // ── Helpers ──────────────────────────────────────────────────────────────
+
+/// Return the default proxy contract name for a given proxy pattern.
+fn default_proxy_contract(proxy: &str) -> &str {
+    match proxy {
+        "erc1967" | "uups" => "ERC1967Proxy",
+        "transparent" => "TransparentUpgradeableProxy",
+        "beacon" => "BeaconProxy",
+        _ => "",
+    }
+}
 
 /// Return a Solidity placeholder literal for the given type.
 fn placeholder_for_type(solidity_type: &str) -> String {
@@ -408,6 +822,16 @@ pub async fn run(
         })
         .collect();
 
+    let proxy_contract_name = match &context.proxy_contract {
+        Some(name) => name.clone(),
+        None => context
+            .proxy
+            .as_deref()
+            .map(default_proxy_contract)
+            .unwrap_or("")
+            .to_string(),
+    };
+
     let render_ctx = RenderContext {
         contract_name: context.contract_name.clone(),
         import_path,
@@ -415,6 +839,11 @@ pub async fn run(
         has_constructor_params,
         constructor_params: render_params,
         constructor_args,
+        is_create: context.strategy == "create",
+        is_create2: context.strategy == "create2",
+        is_create3: context.strategy == "create3",
+        proxy_contract: proxy_contract_name,
+        has_custom_proxy: context.proxy_contract.is_some(),
     };
 
     // ── Render template ──────────────────────────────────────────────────
@@ -427,9 +856,22 @@ pub async fn run(
         .context("failed to register CREATE2 template")?;
     hbs.register_template_string("create3", CREATE3_TEMPLATE)
         .context("failed to register CREATE3 template")?;
+    hbs.register_template_string("proxy_erc1967", ERC1967_PROXY_TEMPLATE)
+        .context("failed to register ERC1967 proxy template")?;
+    hbs.register_template_string("proxy_uups", UUPS_PROXY_TEMPLATE)
+        .context("failed to register UUPS proxy template")?;
+    hbs.register_template_string("proxy_transparent", TRANSPARENT_PROXY_TEMPLATE)
+        .context("failed to register transparent proxy template")?;
+    hbs.register_template_string("proxy_beacon", BEACON_PROXY_TEMPLATE)
+        .context("failed to register beacon proxy template")?;
+
+    let template_name = match &context.proxy {
+        Some(proxy) => format!("proxy_{proxy}"),
+        None => context.strategy.clone(),
+    };
 
     let code = hbs
-        .render(&context.strategy, &render_ctx)
+        .render(&template_name, &render_ctx)
         .context("failed to render deployment script")?;
 
     // ── Output ───────────────────────────────────────────────────────────
@@ -662,6 +1104,7 @@ mod tests {
                 },
             ],
             constructor_args: "initialCount, owner".to_string(),
+            ..Default::default()
         };
 
         let code = render_create(&ctx);
@@ -685,6 +1128,7 @@ mod tests {
             has_constructor_params: false,
             constructor_params: vec![],
             constructor_args: String::new(),
+            ..Default::default()
         };
 
         let code = render_create(&ctx);
@@ -701,6 +1145,7 @@ mod tests {
             has_constructor_params: false,
             constructor_params: vec![],
             constructor_args: String::new(),
+            ..Default::default()
         };
 
         let code = render_create(&ctx);
@@ -719,6 +1164,7 @@ mod tests {
             has_constructor_params: false,
             constructor_params: vec![],
             constructor_args: String::new(),
+            ..Default::default()
         };
 
         let code = render_create(&ctx);
@@ -765,6 +1211,7 @@ mod tests {
                 },
             ],
             constructor_args: "initialCount, owner".to_string(),
+            ..Default::default()
         };
 
         let code = render_create2(&ctx);
@@ -789,6 +1236,7 @@ mod tests {
             has_constructor_params: false,
             constructor_params: vec![],
             constructor_args: String::new(),
+            ..Default::default()
         };
 
         let code = render_create2(&ctx);
@@ -806,6 +1254,7 @@ mod tests {
             has_constructor_params: false,
             constructor_params: vec![],
             constructor_args: String::new(),
+            ..Default::default()
         };
 
         let code = render_create2(&ctx);
@@ -841,6 +1290,7 @@ mod tests {
                 },
             ],
             constructor_args: "initialCount".to_string(),
+            ..Default::default()
         };
 
         let code = render_create3(&ctx);
@@ -868,6 +1318,7 @@ mod tests {
             has_constructor_params: false,
             constructor_params: vec![],
             constructor_args: String::new(),
+            ..Default::default()
         };
 
         let code = render_create3(&ctx);
@@ -887,6 +1338,7 @@ mod tests {
             has_constructor_params: false,
             constructor_params: vec![],
             constructor_args: String::new(),
+            ..Default::default()
         };
 
         let code = render_create3(&ctx);
@@ -904,6 +1356,7 @@ mod tests {
             has_constructor_params: false,
             constructor_params: vec![],
             constructor_args: String::new(),
+            ..Default::default()
         };
 
         let code = render_create3(&ctx);
@@ -920,10 +1373,403 @@ mod tests {
             has_constructor_params: false,
             constructor_params: vec![],
             constructor_args: String::new(),
+            ..Default::default()
         };
 
         let code = render_create2(&ctx);
         assert!(code.contains("// TODO: Set your deployment salt"));
+    }
+
+    // ── default_proxy_contract ────────────────────────────────────────────
+
+    #[test]
+    fn default_proxy_contract_erc1967() {
+        assert_eq!(default_proxy_contract("erc1967"), "ERC1967Proxy");
+    }
+
+    #[test]
+    fn default_proxy_contract_uups() {
+        assert_eq!(default_proxy_contract("uups"), "ERC1967Proxy");
+    }
+
+    #[test]
+    fn default_proxy_contract_transparent() {
+        assert_eq!(default_proxy_contract("transparent"), "TransparentUpgradeableProxy");
+    }
+
+    #[test]
+    fn default_proxy_contract_beacon() {
+        assert_eq!(default_proxy_contract("beacon"), "BeaconProxy");
+    }
+
+    // ── Proxy template rendering helpers ────────────────────────────────
+
+    fn render_proxy(template_name: &str, template: &str, ctx: &RenderContext) -> String {
+        let mut hbs = Handlebars::new();
+        hbs.register_escape_fn(handlebars::no_escape);
+        hbs.set_strict_mode(true);
+        hbs.register_template_string(template_name, template).unwrap();
+        hbs.render(template_name, ctx).unwrap()
+    }
+
+    // ── ERC1967 proxy template rendering ────────────────────────────────
+
+    #[test]
+    fn render_erc1967_create_with_constructor() {
+        let ctx = RenderContext {
+            contract_name: "Counter".to_string(),
+            import_path: "../src/Counter.sol".to_string(),
+            has_constructor_params: true,
+            constructor_params: vec![
+                RenderParam {
+                    name: "initialCount".to_string(),
+                    solidity_type: "uint256".to_string(),
+                    placeholder: "0".to_string(),
+                },
+            ],
+            constructor_args: "initialCount".to_string(),
+            is_create: true,
+            proxy_contract: "ERC1967Proxy".to_string(),
+            ..Default::default()
+        };
+
+        let code = render_proxy("proxy_erc1967", ERC1967_PROXY_TEMPLATE, &ctx);
+        assert!(code.contains("import { Counter } from \"../src/Counter.sol\";"));
+        assert!(code.contains("import { ERC1967Proxy } from \"@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol\";"));
+        assert!(code.contains("contract DeployCounter is Script"));
+        assert!(code.contains("uint256 initialCount = 0;"));
+        assert!(code.contains("Counter implementation = new Counter(initialCount);"));
+        assert!(code.contains("Counter.initialize.selector"));
+        assert!(code.contains("ERC1967Proxy proxy = new ERC1967Proxy("));
+        assert!(code.contains("address(implementation),"));
+        assert!(code.contains("console.log(\"Counter implementation deployed at:\", address(implementation));"));
+        assert!(code.contains("console.log(\"ERC1967Proxy deployed at:\", address(proxy));"));
+    }
+
+    #[test]
+    fn render_erc1967_create_no_constructor() {
+        let ctx = RenderContext {
+            contract_name: "Token".to_string(),
+            import_path: "../src/Token.sol".to_string(),
+            is_create: true,
+            proxy_contract: "ERC1967Proxy".to_string(),
+            ..Default::default()
+        };
+
+        let code = render_proxy("proxy_erc1967", ERC1967_PROXY_TEMPLATE, &ctx);
+        assert!(code.contains("Token implementation = new Token();"));
+        assert!(!code.contains("TODO: Set constructor arguments"));
+        assert!(code.contains("ERC1967Proxy proxy = new ERC1967Proxy("));
+    }
+
+    #[test]
+    fn render_erc1967_create2() {
+        let ctx = RenderContext {
+            contract_name: "Counter".to_string(),
+            import_path: "../src/Counter.sol".to_string(),
+            is_create2: true,
+            proxy_contract: "ERC1967Proxy".to_string(),
+            ..Default::default()
+        };
+
+        let code = render_proxy("proxy_erc1967", ERC1967_PROXY_TEMPLATE, &ctx);
+        assert!(code.contains("bytes32 salt = bytes32(0);"));
+        assert!(code.contains("// TODO: Set your deployment salt"));
+        assert!(code.contains("Counter implementation = new Counter{salt: salt}();"));
+        assert!(code.contains("ERC1967Proxy proxy = new ERC1967Proxy("));
+        assert!(!code.contains("ICreateX"));
+    }
+
+    #[test]
+    fn render_erc1967_create3() {
+        let ctx = RenderContext {
+            contract_name: "Counter".to_string(),
+            import_path: "../src/Counter.sol".to_string(),
+            is_create3: true,
+            proxy_contract: "ERC1967Proxy".to_string(),
+            ..Default::default()
+        };
+
+        let code = render_proxy("proxy_erc1967", ERC1967_PROXY_TEMPLATE, &ctx);
+        assert!(code.contains("interface ICreateX"));
+        assert!(code.contains("ICreateX constant CREATEX = ICreateX(address(0));"));
+        assert!(code.contains("bytes32 salt = bytes32(0);"));
+        assert!(code.contains("type(Counter).creationCode"));
+        assert!(code.contains("CREATEX.deployCreate3(salt, implInitCode)"));
+        assert!(code.contains("Counter implementation = Counter(implAddr);"));
+        assert!(code.contains("ERC1967Proxy proxy = new ERC1967Proxy("));
+    }
+
+    #[test]
+    fn render_erc1967_custom_proxy_contract() {
+        let ctx = RenderContext {
+            contract_name: "Counter".to_string(),
+            import_path: "../src/Counter.sol".to_string(),
+            is_create: true,
+            proxy_contract: "MyProxy".to_string(),
+            has_custom_proxy: true,
+            ..Default::default()
+        };
+
+        let code = render_proxy("proxy_erc1967", ERC1967_PROXY_TEMPLATE, &ctx);
+        assert!(code.contains("// TODO: Import your custom proxy contract: MyProxy"));
+        assert!(!code.contains("@openzeppelin"));
+        assert!(code.contains("MyProxy proxy = new MyProxy("));
+        assert!(code.contains("console.log(\"MyProxy deployed at:\", address(proxy));"));
+    }
+
+    // ── UUPS proxy template rendering ───────────────────────────────────
+
+    #[test]
+    fn render_uups_create_no_constructor() {
+        let ctx = RenderContext {
+            contract_name: "Token".to_string(),
+            import_path: "../src/Token.sol".to_string(),
+            is_create: true,
+            proxy_contract: "ERC1967Proxy".to_string(),
+            ..Default::default()
+        };
+
+        let code = render_proxy("proxy_uups", UUPS_PROXY_TEMPLATE, &ctx);
+        assert!(code.contains("// NOTE: Token must inherit UUPSUpgradeable and override _authorizeUpgrade."));
+        assert!(code.contains("Deploy implementation (must inherit UUPSUpgradeable)"));
+        assert!(code.contains("Token implementation = new Token();"));
+        assert!(code.contains("Deploy UUPS proxy (uses ERC1967Proxy)"));
+        assert!(code.contains("ERC1967Proxy proxy = new ERC1967Proxy("));
+        assert!(code.contains("import { ERC1967Proxy }"));
+    }
+
+    #[test]
+    fn render_uups_create2_with_constructor() {
+        let ctx = RenderContext {
+            contract_name: "Counter".to_string(),
+            import_path: "../src/Counter.sol".to_string(),
+            has_constructor_params: true,
+            constructor_params: vec![
+                RenderParam {
+                    name: "owner".to_string(),
+                    solidity_type: "address".to_string(),
+                    placeholder: "address(0)".to_string(),
+                },
+            ],
+            constructor_args: "owner".to_string(),
+            is_create2: true,
+            proxy_contract: "ERC1967Proxy".to_string(),
+            ..Default::default()
+        };
+
+        let code = render_proxy("proxy_uups", UUPS_PROXY_TEMPLATE, &ctx);
+        assert!(code.contains("bytes32 salt = bytes32(0);"));
+        assert!(code.contains("address owner = address(0);"));
+        assert!(code.contains("Counter implementation = new Counter{salt: salt}(owner);"));
+        assert!(code.contains("ERC1967Proxy proxy = new ERC1967Proxy("));
+    }
+
+    // ── Transparent proxy template rendering ────────────────────────────
+
+    #[test]
+    fn render_transparent_create_no_constructor() {
+        let ctx = RenderContext {
+            contract_name: "Token".to_string(),
+            import_path: "../src/Token.sol".to_string(),
+            is_create: true,
+            proxy_contract: "TransparentUpgradeableProxy".to_string(),
+            ..Default::default()
+        };
+
+        let code = render_proxy("proxy_transparent", TRANSPARENT_PROXY_TEMPLATE, &ctx);
+        assert!(code.contains("import { TransparentUpgradeableProxy } from \"@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol\";"));
+        assert!(code.contains("Token implementation = new Token();"));
+        assert!(code.contains("address proxyAdmin = msg.sender;"));
+        assert!(code.contains("// TODO: Set the proxy admin address"));
+        assert!(code.contains("TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy("));
+        assert!(code.contains("proxyAdmin,"));
+    }
+
+    #[test]
+    fn render_transparent_create2_with_constructor() {
+        let ctx = RenderContext {
+            contract_name: "Counter".to_string(),
+            import_path: "../src/Counter.sol".to_string(),
+            has_constructor_params: true,
+            constructor_params: vec![
+                RenderParam {
+                    name: "initialCount".to_string(),
+                    solidity_type: "uint256".to_string(),
+                    placeholder: "0".to_string(),
+                },
+            ],
+            constructor_args: "initialCount".to_string(),
+            is_create2: true,
+            proxy_contract: "TransparentUpgradeableProxy".to_string(),
+            ..Default::default()
+        };
+
+        let code = render_proxy("proxy_transparent", TRANSPARENT_PROXY_TEMPLATE, &ctx);
+        assert!(code.contains("bytes32 salt = bytes32(0);"));
+        assert!(code.contains("uint256 initialCount = 0;"));
+        assert!(code.contains("Counter implementation = new Counter{salt: salt}(initialCount);"));
+        assert!(code.contains("TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy("));
+        assert!(code.contains("proxyAdmin,"));
+    }
+
+    #[test]
+    fn render_transparent_custom_proxy_contract() {
+        let ctx = RenderContext {
+            contract_name: "Counter".to_string(),
+            import_path: "../src/Counter.sol".to_string(),
+            is_create: true,
+            proxy_contract: "MyProxy".to_string(),
+            has_custom_proxy: true,
+            ..Default::default()
+        };
+
+        let code = render_proxy("proxy_transparent", TRANSPARENT_PROXY_TEMPLATE, &ctx);
+        assert!(code.contains("// TODO: Import your custom proxy contract: MyProxy"));
+        assert!(!code.contains("TransparentUpgradeableProxy"));
+        assert!(code.contains("MyProxy proxy = new MyProxy("));
+    }
+
+    // ── Beacon proxy template rendering ─────────────────────────────────
+
+    #[test]
+    fn render_beacon_create_no_constructor() {
+        let ctx = RenderContext {
+            contract_name: "Token".to_string(),
+            import_path: "../src/Token.sol".to_string(),
+            is_create: true,
+            proxy_contract: "BeaconProxy".to_string(),
+            ..Default::default()
+        };
+
+        let code = render_proxy("proxy_beacon", BEACON_PROXY_TEMPLATE, &ctx);
+        assert!(code.contains("import { UpgradeableBeacon } from \"@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol\";"));
+        assert!(code.contains("import { BeaconProxy } from \"@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol\";"));
+        assert!(code.contains("Token implementation = new Token();"));
+        assert!(code.contains("address beaconOwner = msg.sender;"));
+        assert!(code.contains("// TODO: Set the beacon owner address"));
+        assert!(code.contains("UpgradeableBeacon beacon = new UpgradeableBeacon("));
+        assert!(code.contains("address(implementation),"));
+        assert!(code.contains("beaconOwner"));
+        assert!(code.contains("BeaconProxy proxy = new BeaconProxy("));
+        assert!(code.contains("address(beacon),"));
+        assert!(code.contains("console.log(\"UpgradeableBeacon deployed at:\", address(beacon));"));
+        assert!(code.contains("console.log(\"BeaconProxy deployed at:\", address(proxy));"));
+    }
+
+    #[test]
+    fn render_beacon_create2_with_constructor() {
+        let ctx = RenderContext {
+            contract_name: "Counter".to_string(),
+            import_path: "../src/Counter.sol".to_string(),
+            has_constructor_params: true,
+            constructor_params: vec![
+                RenderParam {
+                    name: "owner".to_string(),
+                    solidity_type: "address".to_string(),
+                    placeholder: "address(0)".to_string(),
+                },
+            ],
+            constructor_args: "owner".to_string(),
+            is_create2: true,
+            proxy_contract: "BeaconProxy".to_string(),
+            ..Default::default()
+        };
+
+        let code = render_proxy("proxy_beacon", BEACON_PROXY_TEMPLATE, &ctx);
+        assert!(code.contains("bytes32 salt = bytes32(0);"));
+        assert!(code.contains("address owner = address(0);"));
+        assert!(code.contains("Counter implementation = new Counter{salt: salt}(owner);"));
+        assert!(code.contains("UpgradeableBeacon beacon = new UpgradeableBeacon("));
+        assert!(code.contains("BeaconProxy proxy = new BeaconProxy("));
+    }
+
+    #[test]
+    fn render_beacon_create3() {
+        let ctx = RenderContext {
+            contract_name: "Token".to_string(),
+            import_path: "../src/Token.sol".to_string(),
+            is_create3: true,
+            proxy_contract: "BeaconProxy".to_string(),
+            ..Default::default()
+        };
+
+        let code = render_proxy("proxy_beacon", BEACON_PROXY_TEMPLATE, &ctx);
+        assert!(code.contains("interface ICreateX"));
+        assert!(code.contains("ICreateX constant CREATEX = ICreateX(address(0));"));
+        assert!(code.contains("CREATEX.deployCreate3(salt, implInitCode)"));
+        assert!(code.contains("Token implementation = Token(implAddr);"));
+        assert!(code.contains("UpgradeableBeacon beacon = new UpgradeableBeacon("));
+        assert!(code.contains("BeaconProxy proxy = new BeaconProxy("));
+    }
+
+    #[test]
+    fn render_beacon_custom_proxy_contract() {
+        let ctx = RenderContext {
+            contract_name: "Counter".to_string(),
+            import_path: "../src/Counter.sol".to_string(),
+            is_create: true,
+            proxy_contract: "MyBeaconProxy".to_string(),
+            has_custom_proxy: true,
+            ..Default::default()
+        };
+
+        let code = render_proxy("proxy_beacon", BEACON_PROXY_TEMPLATE, &ctx);
+        assert!(code.contains("import { UpgradeableBeacon }"));
+        assert!(code.contains("// TODO: Import your custom proxy contract: MyBeaconProxy"));
+        assert!(!code.contains("import { BeaconProxy }"));
+        assert!(code.contains("MyBeaconProxy proxy = new MyBeaconProxy("));
+    }
+
+    // ── Strategy + proxy composition ────────────────────────────────────
+
+    #[test]
+    fn render_create2_uups_composition() {
+        let ctx = RenderContext {
+            contract_name: "Counter".to_string(),
+            import_path: "../src/Counter.sol".to_string(),
+            has_constructor_params: true,
+            constructor_params: vec![
+                RenderParam {
+                    name: "initialCount".to_string(),
+                    solidity_type: "uint256".to_string(),
+                    placeholder: "0".to_string(),
+                },
+            ],
+            constructor_args: "initialCount".to_string(),
+            is_create2: true,
+            proxy_contract: "ERC1967Proxy".to_string(),
+            ..Default::default()
+        };
+
+        let code = render_proxy("proxy_uups", UUPS_PROXY_TEMPLATE, &ctx);
+        // CREATE2 strategy
+        assert!(code.contains("bytes32 salt = bytes32(0);"));
+        assert!(code.contains("Counter implementation = new Counter{salt: salt}(initialCount);"));
+        // UUPS proxy
+        assert!(code.contains("must inherit UUPSUpgradeable"));
+        assert!(code.contains("ERC1967Proxy proxy = new ERC1967Proxy("));
+    }
+
+    #[test]
+    fn render_create3_transparent_composition() {
+        let ctx = RenderContext {
+            contract_name: "Token".to_string(),
+            import_path: "../src/Token.sol".to_string(),
+            is_create3: true,
+            proxy_contract: "TransparentUpgradeableProxy".to_string(),
+            ..Default::default()
+        };
+
+        let code = render_proxy("proxy_transparent", TRANSPARENT_PROXY_TEMPLATE, &ctx);
+        // CREATE3 strategy
+        assert!(code.contains("interface ICreateX"));
+        assert!(code.contains("CREATEX.deployCreate3(salt, implInitCode)"));
+        assert!(code.contains("Token implementation = Token(implAddr);"));
+        // Transparent proxy
+        assert!(code.contains("address proxyAdmin = msg.sender;"));
+        assert!(code.contains("TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy("));
+        assert!(code.contains("proxyAdmin,"));
     }
 
     // ── GenDeployOutput serialization ────────────────────────────────────
