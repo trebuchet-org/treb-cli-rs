@@ -6261,6 +6261,7 @@ name = "treb-config"
 version = "0.1.0"
 dependencies = [
  "dotenvy",
+ "foundry-config",
  "serde",
  "serde_json",
  "tempfile",

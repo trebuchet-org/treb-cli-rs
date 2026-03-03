@@ -5,6 +5,8 @@
 //! crates depend on `treb-config` for resolved configuration and never
 //! parse config files directly.
 
+pub mod env;
+pub mod foundry;
 pub mod local;
 pub mod trebfile;
 pub mod trebfile_v1;
@@ -25,3 +27,9 @@ pub use trebfile::{detect_treb_config_format, expand_env_vars, load_treb_config_
 
 // Re-export treb.toml v1 parser functions.
 pub use trebfile_v1::{convert_v1_to_resolved, load_treb_config_v1};
+
+// Re-export .env loading.
+pub use env::load_dotenv;
+
+// Re-export foundry config integration.
+pub use foundry::{extract_treb_senders_from_foundry, load_foundry_config, rpc_endpoints};
