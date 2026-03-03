@@ -1,0 +1,134 @@
+# Ralph Progress Log
+Started: Tue Mar  3 03:08:02 AM CET 2026
+---
+
+## Codebase Patterns
+- Workspace crates follow pattern: `crates/<name>/Cargo.toml` with `version.workspace = true`, `edition.workspace = true`, etc.
+- All shared deps are declared in root `[workspace.dependencies]` and referenced with `{ workspace = true }` in crate Cargo.toml
+- Enum serde: use `#[serde(rename = "string_value")]` on each variant for string representation
+- Enum pattern: derive `Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize` + manual `Display` and `FromStr` impls
+- Test pattern: serde round-trip tests iterate `(variant, expected_string)` tuples
+- Error pattern: all treb errors use `TrebError` from `treb-core::error` with variants like `Config(String)`
+- Type aliases: use `pub type Alias = OriginalType;` when two types share identical shape (e.g., `AccountConfig = SenderConfig`)
+- File I/O modules: return `Result<T>` using `treb_core::error::Result`; use `TrebError::Config(String)` for parse/validation errors, and `TrebError::Io` (via `From<std::io::Error>`) for filesystem errors
+- JSON output format: `serde_json::to_string_pretty` produces 2-space indentation; append `\n` for trailing newline to match Go format
+- Test pattern for filesystem: use `tempfile::TempDir` for isolated temp directories in tests
+- Env var tests: never share env var names between tests that run in parallel — use unique names or inline fixture TOML to avoid race conditions
+- Format detection: inspect TOML line-by-line for section headers (`[accounts`, `[namespace`, `[ns.`) rather than parsing TOML
+- Shared helpers: use `pub(crate)` visibility for internal helpers shared between modules (e.g., `expand_sender_config_env_vars`)
+- V1 merge pattern: start with ns.default, overlay ns.<namespace> — senders use HashMap insert (namespace wins), profile/slow use if-let override
+- Dotenv loading: use `dotenvy::from_path_override()` — silently skips missing files by ignoring the Result
+- Foundry custom sections: `foundry_config::Config` doesn't preserve custom `[profile.*.treb.*]` sections — re-read foundry.toml as raw TOML via `toml::Value` and navigate manually
+- Rust 2024 edition: `env::remove_var` is unsafe — wrap in `unsafe` block with SAFETY comment in tests
+- Foundry config API: use `Config::load_with_root(project_root)` to specify project root, `config.root` gives the project root path
+- Resolver pattern: `ResolveOpts` struct bundles all CLI/external overrides, `resolve_config` returns `ResolvedConfig`
+- V2 namespace hierarchy: dot-walk "production.ntt" → levels ["default", "production", "production.ntt"]; each level's profile/senders override previous
+- Missing namespace detection: error if none of the non-default hierarchy levels exist as keys in config.namespace
+- Validation pattern: `validate_config` → iterates senders calling `validate_sender`; hard errors short-circuit, warnings accumulate; cross-references checked via `all_senders` map
+- Validation error format: `[senders.<name>] in <config_source>: <description>. <fix instruction>` — always include location + actionable fix
+
+## 2026-03-03 - US-001
+- Implemented treb-config crate scaffold with all configuration data types
+- Files changed:
+  - `Cargo.toml` (workspace): added treb-config to members and deps, added toml/dotenvy workspace deps
+  - `Cargo.lock`: updated with new deps
+  - `crates/treb-config/Cargo.toml`: new crate manifest
+  - `crates/treb-config/src/lib.rs`: module declarations and re-exports
+  - `crates/treb-config/src/types.rs`: all config types (SenderType, SenderConfig, AccountConfig, NamespaceRoles, ForkConfig, TrebFileConfigV2, TrebFileConfigV1, NamespaceConfigV1, LocalConfig, ResolvedConfig, ResolvedSenders, TrebConfigFormat, ConfigWarning) + 9 unit tests
+- **Learnings for future iterations:**
+  - SenderConfig `type_` field must use `#[serde(rename = "type")]` for TOML/JSON compat with Go
+  - AccountConfig is a type alias for SenderConfig (same shape)
+  - LocalConfig default: namespace="default", network="" (empty string, not None)
+  - ResolvedConfig does not derive Serialize/Deserialize — it's an internal-only struct
+  - TrebFileConfigV2 uses `#[serde(default)]` on all fields so empty TOML parses to defaults
+---
+
+## 2026-03-03 - US-002
+- Implemented local config store for `.treb/config.local.json`
+- Files changed:
+  - `Cargo.toml` (workspace): added `tempfile = "3"` to workspace deps
+  - `crates/treb-config/Cargo.toml`: added `tempfile` dev-dependency
+  - `crates/treb-config/src/local.rs`: new module with `load_local_config` and `save_local_config` functions
+  - `crates/treb-config/src/lib.rs`: added `local` module declaration and re-exports
+- **Learnings for future iterations:**
+  - `serde_json::to_string_pretty` uses 2-space indentation by default — matches Go's `json.MarshalIndent("", "  ")`
+  - Must manually append `\n` after `to_string_pretty` for trailing newline (Go does this automatically)
+  - `TrebError::Io` auto-converts via `#[from] std::io::Error` — use `?` on fs operations, only wrap serde errors manually as `TrebError::Config`
+  - `tempfile::TempDir` auto-cleans up on drop — good for isolated filesystem tests
+---
+
+## 2026-03-03 - US-003
+- Implemented treb.toml v2 parser with env var expansion and format detection
+- Files changed:
+  - `crates/treb-config/src/trebfile.rs`: new module with `load_treb_config_v2`, `detect_treb_config_format`, `expand_env_vars`, and `expand_sender_config_env_vars` functions + 12 tests
+  - `crates/treb-config/src/lib.rs`: added `trebfile` module declaration and re-exports
+  - `crates/treb-config/tests/fixtures/treb_v2.toml`: test fixture with accounts, namespaces, fork config, and env var reference
+- **Learnings for future iterations:**
+  - Env var tests race when sharing env var names — use unique var names per test or use inline fixture TOML instead of shared fixture files
+  - `expand_env_vars` replaces `${VAR_NAME}` patterns; `$VAR` without braces is left as-is (matches Go behavior)
+  - `detect_treb_config_format` uses line-by-line text inspection (not TOML parsing) — avoids errors on invalid TOML when just detecting format
+  - `expand_sender_config_env_vars` mutates SenderConfig in-place after TOML parsing — applied to all string fields (address, private_key, safe, signer, derivation_path, governor, timelock, proposer)
+  - File-not-found vs parse-error: use distinct `TrebError::Config` messages ("treb.toml not found" vs "invalid TOML in")
+---
+
+## 2026-03-03 - US-004
+- Implemented treb.toml v1 parser (legacy read-only) with `load_treb_config_v1` and `convert_v1_to_resolved`
+- Files changed:
+  - `crates/treb-config/src/trebfile.rs`: changed `expand_sender_config_env_vars` visibility to `pub(crate)` for reuse
+  - `crates/treb-config/src/trebfile_v1.rs`: new module with `load_treb_config_v1` (parse + env var expansion) and `convert_v1_to_resolved` (merge ns.default with ns.<namespace>) + 10 tests
+  - `crates/treb-config/src/lib.rs`: added `trebfile_v1` module declaration and re-exports
+  - `crates/treb-config/tests/fixtures/treb_v1.toml`: test fixture with [ns.default] and [ns.live] sections
+- **Learnings for future iterations:**
+  - `expand_sender_config_env_vars` was made `pub(crate)` in trebfile.rs to share between v1 and v2 parsers — no need to duplicate
+  - V1 merge strategy: start with ns.default senders, then overlay ns.<namespace> senders (namespace wins on conflicts)
+  - V1 slow flag precedence: top-level -> ns.default.slow -> ns.<namespace>.slow (most specific wins)
+  - When namespace doesn't exist in v1 config, fall back to defaults (don't error) — the resolver layer handles missing namespace errors
+  - `convert_v1_to_resolved` returns `ResolvedSenders` (not `Result`) — it never fails, just returns defaults for missing data
+---
+
+## 2026-03-03 - US-005
+- Implemented .env loading via dotenvy and foundry config integration
+- Files changed:
+  - `Cargo.lock`: updated with foundry-config dep
+  - `crates/treb-config/Cargo.toml`: added `foundry-config` dependency
+  - `crates/treb-config/src/env.rs`: new module with `load_dotenv` function + 3 tests
+  - `crates/treb-config/src/foundry.rs`: new module with `load_foundry_config`, `extract_treb_senders_from_foundry`, `rpc_endpoints` functions + 7 tests
+  - `crates/treb-config/src/lib.rs`: added `env` and `foundry` module declarations and re-exports
+- **Learnings for future iterations:**
+  - `dotenvy::from_path_override()` overrides existing env vars — this is the correct semantic for `.env.local` overriding `.env`
+  - `foundry_config::Config` doesn't store unknown fields like `[profile.*.treb.*]` — must re-read foundry.toml as raw `toml::Value` to extract treb-specific sections
+  - `foundry_config::Config::load_with_root()` specifies the project root; errors map via `TrebError::Config`
+  - `config.rpc_endpoints` implements `Deref<BTreeMap<String, RpcEndpoint>>` — iterate with `.iter()`, get URL via `.endpoint.to_string()`
+  - `RpcEndpointUrl` has `Url(String)` and `Env(String)` variants — `to_string()` gives the raw value for both
+  - `env::remove_var` is unsafe in Rust 2024 edition — tests need `unsafe` block with unique var names per test
+---
+
+## 2026-03-03 - US-006
+- Implemented namespace resolution and layered config merger
+- Files changed:
+  - `crates/treb-config/src/resolver.rs`: new module with `ResolveOpts` struct, `resolve_namespace_v2` (dot-hierarchy walk with role→account mapping), `resolve_config` (full layered merger) + 10 tests
+  - `crates/treb-config/src/lib.rs`: added `resolver` module declaration and re-exports
+- **Learnings for future iterations:**
+  - V2 namespace hierarchy walks dot-separated levels: "production.ntt" → ["default", "production", "production.ntt"]
+  - Each level accumulates profile (last non-None wins) and senders (later levels override earlier role→account mappings)
+  - After accumulating role→account_name, resolve to SenderConfig via accounts map; undefined accounts get default SenderConfig (validation catches later)
+  - Missing namespace detection: error only if NO non-default hierarchy levels exist in config.namespace (allows "production.sub" if "production" is defined)
+  - `resolve_config` precedence: CLI > treb.toml > foundry.toml > local config > .env
+  - V2 has no "slow" concept — always false; v1 slow flag comes from convert_v1_to_resolved
+  - Foundry fallback only triggers when format is TrebConfigFormat::None AND senders are empty
+  - config_source tracks the winning config source: "treb.toml (v2)", "treb.toml (v1)", "foundry.toml", or "defaults"
+---
+
+## 2026-03-03 - US-007
+- Implemented config validation and error reporting module
+- Files changed:
+  - `crates/treb-config/src/validation.rs`: new module with `validate_config` and `validate_sender` functions + 17 tests
+  - `crates/treb-config/src/lib.rs`: added `validation` module declaration and re-exports
+- **Learnings for future iterations:**
+  - `validate_config` iterates all senders and short-circuits on first hard error — warnings accumulate across all senders
+  - `validate_sender` takes `all_senders` map for cross-reference checks (safe.signer, oz_governor.proposer must reference existing senders)
+  - Error messages follow pattern: `[senders.<name>] in <config_source>: <description>. <fix instruction>`
+  - Ledger/Trezor missing address/derivation_path are warnings (non-fatal), all other missing required fields are errors
+  - `ConfigWarning` has `message` (what's wrong + how to fix) and `location` (section + config source) fields
+  - Private_key type requires `private_key` field; Safe requires `safe` + `signer` (referencing existing sender); OZGovernor requires `governor` + `proposer` (referencing existing sender)
+---

@@ -1,0 +1,8 @@
+# Runtime state (regenerated each run)
+.state/
+
+# OS files
+.DS_Store
+
+# Claude Code internal
+.claude/

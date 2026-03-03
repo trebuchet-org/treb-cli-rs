@@ -1,0 +1,103 @@
+{
+  "project": "treb-cli-rs",
+  "branchName": "ralph/phase-04-registry-system-read-write",
+  "description": "Phase 4 — Registry System (Read/Write): Build the JSON-backed deployment registry (treb-registry crate) — treb's persistent storage layer for deployments, transactions, and Safe transactions. Provides CRUD operations, lookup index, atomic file I/O with locking, and migration detection. Exact Go compatibility is mandatory.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "treb-registry Crate Scaffold and Registry Types",
+      "description": "As a developer, I want a treb-registry workspace crate with RegistryMeta and LookupIndex types so that downstream registry modules have a foundation to build on.",
+      "acceptanceCriteria": [
+        "crates/treb-registry/ created with Cargo.toml and src/lib.rs; crate added to workspace members and workspace dependencies",
+        "Dependencies added: treb-core, serde, serde_json, chrono, thiserror (workspace); dev-dep: tempfile (workspace)",
+        "RegistryMeta struct with version (u32), created_at and updated_at (DateTime<Utc>) using camelCase serde renames; new() sets version=1 and timestamps to Utc::now()",
+        "LookupIndex struct with by_name (HashMap<String, Vec<String>>), by_address (HashMap<String, String>), by_tag (HashMap<String, Vec<String>>) using camelCase serde renames; Default returns empty maps",
+        "Constants: DEPLOYMENTS_FILE, TRANSACTIONS_FILE, SAFE_TXS_FILE, LOOKUP_FILE, REGISTRY_FILE, REGISTRY_DIR, REGISTRY_VERSION",
+        "Module structure: lib.rs with re-exports, types.rs for registry types; unit tests for RegistryMeta and LookupIndex serde round-trip",
+        "cargo check, cargo test, and cargo clippy pass"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Atomic File I/O with Locking",
+      "description": "As a developer, I want atomic file read/write primitives and advisory file locking so that all registry operations are safe against partial writes and concurrent access.",
+      "acceptanceCriteria": [
+        "io.rs module with read_json_file<T>(path) returning deserialized T or TrebError::Registry/Io on failure",
+        "read_json_file_or_default<T: Default>(path) returns T::default() if file missing, otherwise same as read_json_file",
+        "write_json_file<T: Serialize>(path, value) creates parent dirs, writes via NamedTempFile + persist(), 2-space indented JSON with trailing newline",
+        "with_file_lock<F, T>(path, f) acquires exclusive advisory lock on <path>.lock, executes f, releases on drop via RAII; uses fs2 crate",
+        "Tests: atomic write creates correct JSON with trailing newline, creates parent dirs, read nonexistent returns default, invalid JSON returns descriptive error, write-then-read round-trips, concurrent lock blocks",
+        "cargo check, cargo test, and cargo clippy pass"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Deployment Store (CRUD)",
+      "description": "As a developer, I want a DeploymentStore with create, read, update, delete, and list operations over deployments.json so that deployments can be persisted and retrieved.",
+      "acceptanceCriteria": [
+        "store/deployments.rs with DeploymentStore struct: new(registry_dir), load, save, get, insert, update, remove, list (sorted by created_at), count",
+        "insert returns TrebError::Registry if ID already exists; update returns error if ID not found and sets updated_at to Utc::now()",
+        "All mutating operations use with_file_lock and atomic writes from US-002",
+        "Tests: insert-then-get, duplicate insert error, update success + updated_at change, update nonexistent error, remove returns deployment, list sorted by created_at, empty store operations",
+        "Golden file test: load deployments_map.json fixture, save through store, re-read and verify via serde_json::Value equality",
+        "cargo check, cargo test, and cargo clippy pass"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Transaction and Safe Transaction Stores",
+      "description": "As a developer, I want TransactionStore and SafeTransactionStore with CRUD operations so that transactions and Safe transactions can be persisted and retrieved.",
+      "acceptanceCriteria": [
+        "store/transactions.rs with TransactionStore: same API as DeploymentStore, keyed by transaction.id, list sorted by created_at",
+        "store/safe_transactions.rs with SafeTransactionStore: same API, keyed by safe_transaction.safe_tx_hash, list sorted by proposed_at",
+        "store/mod.rs organizes store modules with re-exports; all mutating operations use file locking and atomic writes",
+        "Tests: transaction and safe transaction insert/get/update/remove round-trips, list ordering correct for both stores",
+        "Golden file tests: transactions_map.json and safe_txs_map.json fixtures round-trip through stores with serde_json::Value equality",
+        "cargo check, cargo test, and cargo clippy pass"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Lookup Index Build and Query",
+      "description": "As a developer, I want a lookup index that maps contract names, addresses, and tags to deployment IDs so that deployments can be queried efficiently without scanning all records.",
+      "acceptanceCriteria": [
+        "lookup.rs module with build_lookup_index(deployments) -> LookupIndex: by_name maps lowercase contract_name to IDs, by_address maps lowercase address to ID (skips empty), by_tag maps each tag to IDs",
+        "LookupStore struct with new, load, save, rebuild methods; rebuild builds from deployments, saves, and returns index",
+        "Query methods on LookupIndex: find_by_name (case-insensitive), find_by_address (case-insensitive), find_by_tag (exact match)",
+        "Tests: build from fixture deployments verifying name/address/tag mappings, case-insensitive lookups, empty deployments produces empty index, rebuild-save-reload round-trip",
+        "cargo check, cargo test, and cargo clippy pass"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Registry Facade, Migration Detection, and Integration Tests",
+      "description": "As a developer, I want a Registry facade that ties together all stores and the lookup index with migration detection so that callers have a single entry point for all registry operations.",
+      "acceptanceCriteria": [
+        "registry.rs with Registry struct: open(project_root) reads registry.json and checks version (error if > REGISTRY_VERSION), init(project_root) creates .treb/ and registry.json if missing",
+        "Delegate methods for deployments (get/insert/update/remove/list/count), transactions, and safe transactions; deployment mutations auto-trigger lookup index rebuild",
+        "MetaStore (internal) for registry.json read/write with atomic writes; rebuild_lookup_index and lookup methods on Registry",
+        "Integration tests: insert 3 deployments + 2 transactions + 1 safe tx then verify retrieval; insert/remove deployment verifies lookup index updates; version 2 registry.json returns descriptive error; open with no .treb/ returns ok",
+        "Golden file integration test: load deployments_map.json, transactions_map.json, safe_txs_map.json through stores, save, re-read, verify JSON value equality",
+        "cargo check, cargo test, and cargo clippy pass"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

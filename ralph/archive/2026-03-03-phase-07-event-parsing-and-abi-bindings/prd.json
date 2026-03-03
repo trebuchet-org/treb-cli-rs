@@ -1,0 +1,109 @@
+{
+  "project": "treb-cli-rs",
+  "branchName": "ralph/phase-07-event-parsing-and-abi-bindings",
+  "description": "Event parsing layer that converts raw EVM logs from forge script execution into structured treb domain events, including ABI bindings, proxy detection, natspec parsing, and library detection support",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "ABI Definitions via alloy sol! Macro",
+      "description": "As a developer, I want type-safe ABI definitions for ITrebEvents, ICreateX, and ERC-1967 proxy events using alloy's sol! macro so that event decoding is compile-time verified against the Solidity interface",
+      "acceptanceCriteria": [
+        "alloy-sol-types added to workspace deps and treb-forge/Cargo.toml",
+        "sol! macro compiles and generates types for all ITrebEvents events (TransactionSimulated, ContractDeployed, SafeTransactionQueued, SafeTransactionExecuted, DeploymentCollision, GovernorProposalCreated) with DeploymentDetails and SimulatedTransaction structs",
+        "sol! macro compiles and generates types for all ICreateX events (ContractCreation with salt, ContractCreation without salt, Create3ProxyContractCreation)",
+        "sol! macro compiles and generates types for ERC-1967 proxy events (Upgraded, AdminChanged, BeaconUpgraded)",
+        "events module created at crates/treb-forge/src/events/ with mod.rs and abi.rs, registered in lib.rs with re-exports",
+        "Unit test: construct each event type manually and verify field access",
+        "Typecheck passes (cargo check && cargo clippy)"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Event Log Decoder",
+      "description": "As a developer, I want a decoder that takes raw EVM Log entries and decodes them against known event signatures into typed Rust enums so that downstream consumers get structured event data",
+      "acceptanceCriteria": [
+        "TrebEvent, CreateXEvent, ProxyEvent, and ParsedEvent enums defined with all variants matching the PRD specification in crates/treb-forge/src/events/decoder.rs",
+        "decode_events correctly decodes all ITrebEvents, ICreateX, and ERC-1967 proxy event types from raw logs using topic[0] signature matching",
+        "Unrecognized logs produce ParsedEvent::Unknown (not errors); malformed known events are logged as warnings and skipped",
+        "Proxy events include the emitting log address as proxy_address",
+        "Unit test: synthetic ContractDeployed logs decode with all fields matching known values",
+        "Unit test: mixed logs (treb + proxy + unknown) decode in emission order",
+        "Typecheck passes (cargo check && cargo clippy)"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Deployment Extraction from Events",
+      "description": "As a developer, I want to extract deployment information (address, deployer, strategy, salt, label) from decoded events so that downstream phases can create registry entries",
+      "acceptanceCriteria": [
+        "ExtractedDeployment struct defined with all fields: address, deployer, transaction_id, contract_name, label, strategy, salt, bytecode_hash, init_code_hash, constructor_args, entropy, artifact_match",
+        "extract_deployments maps ContractDeployed events to ExtractedDeployment with all DeploymentDetails fields correctly populated",
+        "Strategy string parsing: 'create' -> Create, 'create2' -> Create2, 'create3' -> Create3, unknown defaults to Create",
+        "extract_collisions returns DeploymentCollision data from DeploymentCollision events",
+        "When ArtifactIndex is None, artifact_match is None without panicking",
+        "Unit tests: extract deployment with all fields verified, extract collision, unknown strategy defaults to Create",
+        "Typecheck passes (cargo check && cargo clippy)"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Proxy Relationship Linking",
+      "description": "As a developer, I want to detect proxy relationships from ERC-1967 events so that proxy-implementation pairs are correctly linked for deployment recording",
+      "acceptanceCriteria": [
+        "ProxyType enum (Transparent, UUPS, Beacon, Minimal) and ProxyRelationship struct defined in crates/treb-forge/src/events/proxy.rs",
+        "Upgraded event alone results in UUPS proxy type; Upgraded + AdminChanged from same address results in Transparent",
+        "BeaconUpgraded event results in Beacon proxy type",
+        "Multiple proxies in the same execution are tracked independently by address in HashMap<Address, ProxyRelationship>",
+        "link_proxy_to_deployment matches proxy address to the corresponding ExtractedDeployment",
+        "Unit tests: single UUPS, TransparentUpgradeableProxy, Beacon proxy, multiple proxies in same execution",
+        "Typecheck passes (cargo check && cargo clippy)"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Script Parameter / Natspec Parser",
+      "description": "As a developer, I want to parse @custom:env natspec annotations from compiled script artifacts so that treb can discover what parameters a deployment script expects",
+      "acceptanceCriteria": [
+        "foundry-linking added to workspace deps and treb-forge/Cargo.toml, re-exported from lib.rs",
+        "ParameterType enum with all 10 types (String, Address, Uint256, Int256, Bytes32, Bytes, Bool, Sender, Deployment, Artifact) and ScriptParameter struct defined in crates/treb-forge/src/events/params.rs",
+        "parse_script_parameters extracts parameters from devdoc JSON at methods.run().custom:env path",
+        ":optional suffix on type is parsed correctly to set optional=true",
+        "Missing devdoc or missing run() method returns empty vec (not error)",
+        "Unit tests: single param, optional param, multi-param string, empty devdoc",
+        "Typecheck passes (cargo check && cargo clippy)"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Integration Tests with Captured Log Fixtures",
+      "description": "As a developer, I want integration tests that validate the full event parsing pipeline against realistic log fixtures so that the end-to-end flow from raw logs to structured deployment data is verified",
+      "acceptanceCriteria": [
+        "At least 5 JSON fixture files created in crates/treb-forge/tests/fixtures/events/ (simple_deploy, create2_deploy, proxy_deploy, multi_deploy, collision) with hex-encoded log data matching alloy Log serialization",
+        "Integration test: simple deploy round-trip (raw logs -> decode -> extract deployment) succeeds with correct address and label",
+        "Integration test: CREATE2 deploy with salt correctly decoded with ContractCreation event",
+        "Integration test: proxy relationship detection identifies Transparent type with correct implementation and admin addresses",
+        "Integration test: full pipeline (decode -> extract deployments -> extract proxies -> link relationships) works end-to-end",
+        "All existing tests continue to pass (cargo test --workspace)",
+        "Typecheck passes (cargo check && cargo clippy)"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

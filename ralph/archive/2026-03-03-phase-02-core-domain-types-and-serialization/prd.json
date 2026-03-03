@@ -1,0 +1,100 @@
+{
+  "project": "treb-cli-rs",
+  "branchName": "ralph/phase-02-core-domain-types-and-serialization",
+  "description": "Core domain types and serialization for treb-core: deployments, transactions, safe transactions, governor proposals, contracts, and networks with byte-identical JSON compatibility to the Go version",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Foundation Types — Enums, Newtypes, and Module Structure",
+      "description": "As a developer, I want shared enums (DeploymentType, DeploymentMethod, TransactionStatus, VerificationStatus, ProposalStatus), domain newtypes (DeploymentId), and a types module hierarchy in treb-core so that all subsequent domain models have a common vocabulary.",
+      "acceptanceCriteria": [
+        "serde, serde_json, chrono (with serde feature), and alloy-json-abi are added to [workspace.dependencies] and wired into treb-core/Cargo.toml",
+        "crates/treb-core/src/types/mod.rs exists with pub mod declarations and is declared as pub mod types in lib.rs",
+        "All five enums (DeploymentType, DeploymentMethod, TransactionStatus, VerificationStatus, ProposalStatus) defined with correct string representations matching Go constants and deriving Clone, Debug, PartialEq, Eq, Hash with Display and FromStr implementations",
+        "DeploymentId newtype wrapping String with Serialize/Deserialize, and primitives module extended with ChainId and TxHash type aliases",
+        "Unit tests for each enum covering serialize/deserialize round-trip, Display formatting, and FromStr parsing",
+        "cargo check, cargo test, and cargo clippy pass with no warnings"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Deployment Model",
+      "description": "As a developer, I want the Deployment struct and all its nested types (DeploymentStrategy, ProxyInfo, ProxyUpgrade, ArtifactInfo, VerificationInfo, VerifierStatus) defined with exact camelCase JSON field names matching the Go version so that deployment data round-trips identically.",
+      "acceptanceCriteria": [
+        "Deployment struct defined in crates/treb-core/src/types/deployment.rs with all required fields (id, namespace, chainId, contractName, label, address, type, transactionId, deploymentStrategy, proxyInfo, artifact, verification, tags, createdAt, updatedAt) using exact camelCase JSON names",
+        "All nested structs (DeploymentStrategy, ProxyInfo, ProxyUpgrade, ArtifactInfo, VerificationInfo, VerifierStatus) defined with correct fields and omitempty semantics via skip_serializing_if",
+        "tags field serializes as null (not []) when None, matching Go's nil slice behavior; all structs derive Clone, Debug, PartialEq, Serialize, Deserialize",
+        "Unit test: construct a Deployment, serialize to JSON, verify camelCase field names and omitempty behavior",
+        "cargo check and cargo test pass"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Transaction Model",
+      "description": "As a developer, I want the Transaction struct and its nested types (Operation, SafeContext) defined with exact camelCase JSON field names matching the Go version so that transaction data round-trips identically.",
+      "acceptanceCriteria": [
+        "Transaction struct defined in crates/treb-core/src/types/transaction.rs with all required fields (id, chainId, hash, status, blockNumber, sender, nonce, deployments, operations, safeContext, environment, createdAt) using exact camelCase JSON names",
+        "Operation struct with fields type, target, method, result (HashMap<String, serde_json::Value>) and SafeContext struct with fields safeAddress, safeTxHash, batchIndex, proposerAddress",
+        "blockNumber omitted when 0 (matching Go omitempty on uint64); deployments and operations serialize as [] when empty (never null)",
+        "All structs derive Clone, Debug, PartialEq, Serialize, Deserialize",
+        "Unit test: construct a Transaction, serialize to JSON, verify field names and omitempty behavior",
+        "cargo check and cargo test pass"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Safe Transaction and Governor Proposal Models",
+      "description": "As a developer, I want the SafeTransaction struct (with SafeTxData and Confirmation sub-types) and the GovernorProposal struct defined with exact camelCase JSON field names matching the Go version so that safe transaction and proposal data round-trips identically.",
+      "acceptanceCriteria": [
+        "SafeTransaction struct defined in crates/treb-core/src/types/safe_transaction.rs with all required fields including transactions (Vec<SafeTxData>), confirmations (Vec<Confirmation>), and optional executedAt/executionTxHash/description",
+        "SafeTxData struct (to, value, data, operation) and Confirmation struct (signer, signature, confirmedAt) defined; GovernorProposal struct defined in governor_proposal.rs with all required fields",
+        "Vec fields (transactions, transactionIds, confirmations) serialize as [] when empty; executionTxHash omitted when empty string matching Go omitempty",
+        "All structs derive Clone, Debug, PartialEq, Serialize, Deserialize",
+        "Unit tests for both SafeTransaction and GovernorProposal serialization",
+        "cargo check and cargo test pass"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Contract and Network Models",
+      "description": "As a developer, I want the Contract struct and its nested artifact types (Artifact, BytecodeObject, ArtifactMetadata) plus the Network type defined so that compiled Solidity artifact data can be represented and serialized.",
+      "acceptanceCriteria": [
+        "Contract struct defined in crates/treb-core/src/types/contract.rs with fields name, path, artifactPath (omitempty), version (omitempty), artifact (Option<Artifact>, omitempty)",
+        "Artifact struct with abi (serde_json::Value), bytecode/deployedBytecode (BytecodeObject), methodIdentifiers (HashMap), rawMetadata, metadata (ArtifactMetadata) and all nested sub-types defined",
+        "Network type alias (pub type Network = String) defined; all structs derive Clone, Debug, PartialEq, Serialize, Deserialize",
+        "Unit test: construct a Contract with minimal Artifact, serialize, verify JSON structure",
+        "cargo check and cargo test pass"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Golden File Fixtures and Serde Round-Trip Tests",
+      "description": "As a developer, I want comprehensive serde round-trip tests using real Go-generated JSON fixtures so that I can verify byte-level JSON compatibility between the Rust and Go implementations.",
+      "acceptanceCriteria": [
+        "Test fixture directory at crates/treb-core/tests/fixtures/ with golden JSON files extracted from real Go-generated data: deployment.json, deployment_with_proxy.json, transaction.json, safe_transaction.json, deployments_map.json, transactions_map.json, safe_txs_map.json",
+        "Integration test file at crates/treb-core/tests/serde_golden.rs with round-trip tests: deserialize JSON to Rust type, re-serialize, parse both as serde_json::Value, assert equality",
+        "Tests cover HashMap<String, Deployment>, HashMap<String, Transaction>, and HashMap<String, SafeTransaction> deserialization matching actual registry file format",
+        "All fixture files are real data from Go version (from /home/sol/projects/treb-state/.treb/), scrubbed of sensitive data if needed",
+        "All tests pass with cargo test and cargo clippy passes with no warnings"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}
