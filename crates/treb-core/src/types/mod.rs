@@ -2,7 +2,9 @@
 
 pub mod deployment;
 pub mod enums;
+pub mod governor_proposal;
 pub mod ids;
+pub mod safe_transaction;
 pub mod transaction;
 
 pub use deployment::{
@@ -12,5 +14,7 @@ pub use deployment::{
 pub use enums::{
     DeploymentMethod, DeploymentType, ProposalStatus, TransactionStatus, VerificationStatus,
 };
+pub use governor_proposal::GovernorProposal;
 pub use ids::DeploymentId;
+pub use safe_transaction::{Confirmation, SafeTransaction, SafeTxData};
 pub use transaction::{Operation, SafeContext, Transaction};
