@@ -1,0 +1,2 @@
+# Allow interior mutability for bytes types (foundry-aligned).
+ignore-interior-mutability = ["bytes::Bytes", "alloy_primitives::Bytes"]
