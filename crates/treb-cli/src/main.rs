@@ -15,11 +15,45 @@ struct Cli {
 enum Commands {
     /// Execute a deployment script
     Run,
-    /// List deployments
+    /// List deployments in the registry
     #[command(alias = "ls")]
-    List,
-    /// Show deployment details
-    Show,
+    List {
+        /// Filter by network name or chain ID
+        #[arg(long)]
+        network: Option<String>,
+        /// Filter by namespace
+        #[arg(long)]
+        namespace: Option<String>,
+        /// Filter by deployment type (SINGLETON, PROXY, LIBRARY)
+        #[arg(long, value_name = "TYPE")]
+        r#type: Option<String>,
+        /// Filter by tag
+        #[arg(long)]
+        tag: Option<String>,
+        /// Filter by contract name
+        #[arg(long)]
+        contract: Option<String>,
+        /// Filter by deployment label
+        #[arg(long)]
+        label: Option<String>,
+        /// Show only fork deployments (namespace starts with fork/)
+        #[arg(long)]
+        fork: bool,
+        /// Hide fork deployments
+        #[arg(long)]
+        no_fork: bool,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show detailed information about a specific deployment
+    Show {
+        /// Deployment identifier (full ID, name, address, name:label, or namespace/name)
+        deployment: String,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Initialize a treb project
     Init {
         /// Overwrite local config even if already initialized
@@ -95,8 +129,12 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::Run => println!("run: not yet implemented"),
-        Commands::List => println!("list: not yet implemented"),
-        Commands::Show => println!("show: not yet implemented"),
+        Commands::List { network, namespace, r#type, tag, contract, label, fork, no_fork, json } => {
+            commands::list::run(network, namespace, r#type, tag, contract, label, fork, no_fork, json).await?
+        }
+        Commands::Show { deployment, json } => {
+            commands::show::run(&deployment, json).await?
+        }
         Commands::Init { force } => commands::init::run(force).await?,
         Commands::Config { subcommand } => match subcommand {
             ConfigSubcommand::Show { json } => commands::config::show(json).await?,
