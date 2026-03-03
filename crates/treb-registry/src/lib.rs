@@ -51,4 +51,4 @@ pub const REGISTRY_DIR: &str = ".treb";
 pub const FORK_STATE_FILE: &str = "fork.json";
 
 /// Current registry format version.
-pub const REGISTRY_VERSION: u32 = 1;
+pub const REGISTRY_VERSION: u32 = 2;

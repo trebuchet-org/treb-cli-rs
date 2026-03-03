@@ -390,7 +390,7 @@ mod tests {
         assert!(meta_path.exists(), "registry.json should be created");
 
         let meta: RegistryMeta = crate::io::read_json_file(&meta_path).unwrap();
-        assert_eq!(meta.version, 1);
+        assert_eq!(meta.version, REGISTRY_VERSION);
     }
 
     #[test]
@@ -404,22 +404,23 @@ mod tests {
     }
 
     #[test]
-    fn version_2_registry_returns_descriptive_error() {
+    fn newer_version_registry_returns_descriptive_error() {
         let dir = TempDir::new().unwrap();
         let registry_dir = dir.path().join(REGISTRY_DIR);
         fs::create_dir_all(&registry_dir).unwrap();
 
+        let future_version = REGISTRY_VERSION + 1;
         let mut meta = RegistryMeta::new();
-        meta.version = 2;
+        meta.version = future_version;
         write_json_file(&registry_dir.join(REGISTRY_FILE), &meta).unwrap();
 
         let result = Registry::open(dir.path());
         let msg = match result {
             Err(e) => e.to_string(),
-            Ok(_) => panic!("expected error for version 2 registry"),
+            Ok(_) => panic!("expected error for version {future_version} registry"),
         };
         assert!(
-            msg.contains("newer than supported") && msg.contains("version 2"),
+            msg.contains("newer than supported"),
             "expected descriptive version error, got: {msg}"
         );
     }

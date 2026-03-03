@@ -23,10 +23,10 @@ fn init_creates_treb_directory_with_correct_files() {
         .stdout(predicate::str::contains(".treb"))
         .stdout(predicate::str::contains("treb config show"));
 
-    // Verify registry.json exists with version 1.
+    // Verify registry.json exists with the current version.
     let registry_json = fs::read_to_string(tmp.path().join(".treb/registry.json")).unwrap();
     let registry: serde_json::Value = serde_json::from_str(&registry_json).unwrap();
-    assert_eq!(registry["version"], 1);
+    assert_eq!(registry["version"], treb_registry::REGISTRY_VERSION);
 
     // Verify config.local.json has defaults.
     let config_json = fs::read_to_string(tmp.path().join(".treb/config.local.json")).unwrap();

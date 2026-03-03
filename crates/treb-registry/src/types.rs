@@ -29,11 +29,11 @@ pub struct RegistryMeta {
 }
 
 impl RegistryMeta {
-    /// Create a new `RegistryMeta` with version 1 and current timestamps.
+    /// Create a new `RegistryMeta` at the current [`REGISTRY_VERSION`](crate::REGISTRY_VERSION).
     pub fn new() -> Self {
         let now = Utc::now();
         Self {
-            version: 1,
+            version: crate::REGISTRY_VERSION,
             created_at: now,
             updated_at: now,
         }
@@ -64,9 +64,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_meta_new_sets_version_1() {
+    fn registry_meta_new_sets_current_version() {
         let meta = RegistryMeta::new();
-        assert_eq!(meta.version, 1);
+        assert_eq!(meta.version, crate::REGISTRY_VERSION);
     }
 
     #[test]

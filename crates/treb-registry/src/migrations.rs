@@ -3,6 +3,7 @@
 //! Applies forward-only migrations in version order, creating a timestamped
 //! backup before each step for safe rollback.
 
+use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -36,13 +37,78 @@ type MigrationFn = fn(&Path) -> Result<(), TrebError>;
 /// Each entry is `(target_version, migration_fn)`. The runner applies all
 /// entries where `target_version > current_version` in ascending order and
 /// creates a timestamped backup before each one.
-static MIGRATIONS: &[(u32, MigrationFn)] = &[(1, migrate_v0_to_v1)];
+static MIGRATIONS: &[(u32, MigrationFn)] = &[(1, migrate_v0_to_v1), (2, migrate_v1_to_v2)];
 
 /// v0 → v1: first release of the versioned registry format.
 ///
 /// No data transformations are required — v1 is the initial versioned release.
 /// The runner's post-step version bump in `registry.json` is the only change.
 fn migrate_v0_to_v1(_registry_dir: &Path) -> Result<(), TrebError> {
+    Ok(())
+}
+
+/// Old-to-new filename renames applied by the v1 → v2 migration.
+const FILE_RENAMES: &[(&str, &str)] = &[
+    ("safe_txs.json", "safe-txs.json"),
+    ("governor_proposals.json", "governor-txs.json"),
+    ("fork-state.json", "fork.json"),
+];
+
+/// Rename `old` to `new` inside `dir`, skipping if `old` doesn't exist or
+/// `new` already exists (no clobber).
+fn rename_if_needed(dir: &Path, old: &str, new: &str) -> Result<(), TrebError> {
+    let old_path = dir.join(old);
+    let new_path = dir.join(new);
+    if old_path.exists() && !new_path.exists() {
+        fs::rename(&old_path, &new_path).map_err(|e| {
+            TrebError::Registry(format!(
+                "failed to rename {} → {} in {}: {e}",
+                old,
+                new,
+                dir.display()
+            ))
+        })?;
+    }
+    Ok(())
+}
+
+/// v1 → v2: rename registry files to match Go CLI filenames.
+///
+/// Renames:
+/// - `safe_txs.json` → `safe-txs.json`
+/// - `governor_proposals.json` → `governor-txs.json`
+/// - `fork-state.json` → `fork.json`
+///
+/// Also walks `.treb/snapshots/*/` to rename files inside fork snapshot
+/// directories. Skips renames where the old file doesn't exist or the new
+/// file already exists (no clobber).
+fn migrate_v1_to_v2(registry_dir: &Path) -> Result<(), TrebError> {
+    // Rename files in the top-level registry directory.
+    for &(old, new) in FILE_RENAMES {
+        rename_if_needed(registry_dir, old, new)?;
+    }
+
+    // Rename files inside fork snapshot directories.
+    let snapshots_dir = registry_dir.join("snapshots");
+    if snapshots_dir.is_dir() {
+        for entry in fs::read_dir(&snapshots_dir).map_err(|e| {
+            TrebError::Registry(format!(
+                "failed to read snapshots directory {}: {e}",
+                snapshots_dir.display()
+            ))
+        })? {
+            let entry = entry.map_err(|e| {
+                TrebError::Registry(format!("failed to read snapshot entry: {e}"))
+            })?;
+            let path = entry.path();
+            if path.is_dir() {
+                for &(old, new) in FILE_RENAMES {
+                    rename_if_needed(&path, old, new)?;
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -211,5 +277,148 @@ mod tests {
         let obj = json.as_object().unwrap();
         assert!(obj.contains_key("applied"), "should have 'applied' key");
         assert!(obj.contains_key("currentVersion"), "should have 'currentVersion' key");
+    }
+
+    // ── v1 → v2 migration tests ──────────────────────────────────────────
+
+    #[test]
+    fn v1_to_v2_renames_old_files() {
+        let dir = TempDir::new().unwrap();
+        let registry_dir = dir.path().join(REGISTRY_DIR);
+        std::fs::create_dir_all(&registry_dir).unwrap();
+
+        // Create old-format files.
+        std::fs::write(registry_dir.join("safe_txs.json"), r#"{"h1":{}}"#).unwrap();
+        std::fs::write(
+            registry_dir.join("governor_proposals.json"),
+            r#"{"p1":{}}"#,
+        )
+        .unwrap();
+        std::fs::write(registry_dir.join("fork-state.json"), r#"{"forks":{}}"#).unwrap();
+
+        migrate_v1_to_v2(&registry_dir).unwrap();
+
+        // New files exist with correct content.
+        assert!(registry_dir.join("safe-txs.json").exists());
+        assert!(registry_dir.join("governor-txs.json").exists());
+        assert!(registry_dir.join("fork.json").exists());
+
+        assert_eq!(
+            std::fs::read_to_string(registry_dir.join("safe-txs.json")).unwrap(),
+            r#"{"h1":{}}"#
+        );
+        assert_eq!(
+            std::fs::read_to_string(registry_dir.join("governor-txs.json")).unwrap(),
+            r#"{"p1":{}}"#
+        );
+        assert_eq!(
+            std::fs::read_to_string(registry_dir.join("fork.json")).unwrap(),
+            r#"{"forks":{}}"#
+        );
+
+        // Old files no longer exist.
+        assert!(!registry_dir.join("safe_txs.json").exists());
+        assert!(!registry_dir.join("governor_proposals.json").exists());
+        assert!(!registry_dir.join("fork-state.json").exists());
+    }
+
+    #[test]
+    fn v1_to_v2_skips_when_new_file_exists_no_clobber() {
+        let dir = TempDir::new().unwrap();
+        let registry_dir = dir.path().join(REGISTRY_DIR);
+        std::fs::create_dir_all(&registry_dir).unwrap();
+
+        // Both old and new exist — old should NOT overwrite new.
+        std::fs::write(registry_dir.join("safe_txs.json"), "old-content").unwrap();
+        std::fs::write(registry_dir.join("safe-txs.json"), "new-content").unwrap();
+
+        migrate_v1_to_v2(&registry_dir).unwrap();
+
+        // New file keeps its content (no clobber).
+        assert_eq!(
+            std::fs::read_to_string(registry_dir.join("safe-txs.json")).unwrap(),
+            "new-content"
+        );
+        // Old file still exists (wasn't renamed because new already existed).
+        assert!(registry_dir.join("safe_txs.json").exists());
+    }
+
+    #[test]
+    fn v1_to_v2_skips_when_old_file_missing() {
+        let dir = TempDir::new().unwrap();
+        let registry_dir = dir.path().join(REGISTRY_DIR);
+        std::fs::create_dir_all(&registry_dir).unwrap();
+
+        // No old files present — migration should succeed silently.
+        migrate_v1_to_v2(&registry_dir).unwrap();
+
+        assert!(!registry_dir.join("safe-txs.json").exists());
+        assert!(!registry_dir.join("governor-txs.json").exists());
+        assert!(!registry_dir.join("fork.json").exists());
+    }
+
+    #[test]
+    fn v1_to_v2_renames_files_in_snapshot_dirs() {
+        let dir = TempDir::new().unwrap();
+        let registry_dir = dir.path().join(REGISTRY_DIR);
+        let snap_dir = registry_dir.join("snapshots/mainnet");
+        std::fs::create_dir_all(&snap_dir).unwrap();
+
+        // Create old-format files in the snapshot directory.
+        std::fs::write(snap_dir.join("safe_txs.json"), r#"{"s1":{}}"#).unwrap();
+        std::fs::write(snap_dir.join("governor_proposals.json"), r#"{"g1":{}}"#).unwrap();
+
+        migrate_v1_to_v2(&registry_dir).unwrap();
+
+        assert!(snap_dir.join("safe-txs.json").exists());
+        assert!(snap_dir.join("governor-txs.json").exists());
+        assert!(!snap_dir.join("safe_txs.json").exists());
+        assert!(!snap_dir.join("governor_proposals.json").exists());
+    }
+
+    #[test]
+    fn v1_to_v2_handles_no_snapshots_dir() {
+        let dir = TempDir::new().unwrap();
+        let registry_dir = dir.path().join(REGISTRY_DIR);
+        std::fs::create_dir_all(&registry_dir).unwrap();
+
+        // No snapshots/ directory — should succeed.
+        migrate_v1_to_v2(&registry_dir).unwrap();
+    }
+
+    #[test]
+    fn full_v1_to_v2_migration_creates_backup_and_bumps_version() {
+        let dir = TempDir::new().unwrap();
+        let registry_dir = init_registry_dir(dir.path());
+
+        // Downgrade to v1 and create old-format files.
+        let meta_path = registry_dir.join(REGISTRY_FILE);
+        let mut meta: RegistryMeta = read_json_file(&meta_path).unwrap();
+        meta.version = 1;
+        write_json_file(&meta_path, &meta).unwrap();
+
+        std::fs::write(registry_dir.join("safe_txs.json"), "{}").unwrap();
+        std::fs::write(registry_dir.join("fork-state.json"), "{}").unwrap();
+
+        let report = run_migrations(&registry_dir).unwrap();
+        assert!(report.applied.contains(&2), "v2 migration should be applied");
+        assert_eq!(report.current_version, REGISTRY_VERSION);
+
+        // Verify version bumped on disk.
+        let updated: RegistryMeta = read_json_file(&meta_path).unwrap();
+        assert_eq!(updated.version, 2);
+
+        // Verify files were renamed.
+        assert!(registry_dir.join("safe-txs.json").exists());
+        assert!(registry_dir.join("fork.json").exists());
+
+        // Verify backup was created.
+        let backups_dir = registry_dir.join("backups");
+        let v2_backups: Vec<_> = std::fs::read_dir(&backups_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with("migrate-v2-"))
+            .collect();
+        assert!(!v2_backups.is_empty(), "backup for v2 migration should exist");
     }
 }
