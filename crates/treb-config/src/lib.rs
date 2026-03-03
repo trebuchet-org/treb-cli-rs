@@ -12,6 +12,7 @@ pub mod resolver;
 pub mod trebfile;
 pub mod trebfile_v1;
 pub mod types;
+pub mod validation;
 
 // Re-export all config types at the crate root for convenience.
 pub use types::{
@@ -37,3 +38,6 @@ pub use foundry::{extract_treb_senders_from_foundry, load_foundry_config, rpc_en
 
 // Re-export resolver.
 pub use resolver::{resolve_config, resolve_namespace_v2, ResolveOpts};
+
+// Re-export validation.
+pub use validation::{validate_config, validate_sender};
