@@ -80,3 +80,21 @@ Started: Tue Mar  3 05:43:07 PM CET 2026
   - `NodeConfig::default().silent()` suppresses startup output; `with_port(0)` for OS-assigned ports
   - Use retry loop (poll every 50ms up to 2s) instead of fixed sleep for port-free test — more robust
 ---
+
+## 2026-03-03 - P18-US-004
+- What was implemented:
+  - `CREATEX_ADDRESS` constant (`address!("ba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed")`) in `createx.rs`
+  - `createx_deployed_bytecode()` function returning the full CreateX v1.0.0 deployed bytecode via `alloy_primitives::bytes!` macro (references static binary data, zero-copy)
+  - `deploy_createx(anvil: &AnvilInstance)` — calls `anvil.set_code()` to inject factory bytecode at canonical address
+  - `verify_createx(anvil: &AnvilInstance)` — calls `anvil.get_code()` and returns `true` if non-empty
+  - 4 unit tests: verify_returns_false_before_deploy, deploy_succeeds_on_fresh_anvil, verify_returns_true_after_deploy, code_at_address_matches_expected_bytecode
+  - Module registered in `crates/treb-forge/src/lib.rs` with public re-exports
+- Files changed:
+  - `crates/treb-forge/src/createx.rs` (new file)
+  - `crates/treb-forge/src/lib.rs` (pub mod createx + re-exports)
+  - `ralph/.state/prd.json` (P18-US-004 marked passes: true)
+- **Learnings for future iterations:**
+  - `alloy_primitives::bytes!("hexstring")` macro uses `Bytes::from_static(&hex_literal)` under the hood — efficient, references static binary data embedded in the binary, no heap allocation
+  - `Bytes::from_static` is NOT const-constructible, so large bytecode constants should be returned from a function using `bytes!` macro rather than trying to define a `const` or `static`
+  - The CreateX v1.0.0 deployed bytecode is ~6.5KB and can be fetched from `artifacts/src/CreateX.sol/CreateX.json` in the pcaversaccio/createx GitHub repo (under `deployedBytecode.object`)
+---
