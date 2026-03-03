@@ -5,6 +5,7 @@
 //! accessed through Rust crate APIs with no subprocess calls to `forge`.
 
 pub mod anvil;
+pub mod createx;
 pub mod artifacts;
 pub mod broadcast;
 pub mod compiler;
@@ -17,6 +18,7 @@ pub mod version;
 
 // Re-export key public types for convenience.
 pub use anvil::{AnvilConfig, AnvilInstance};
+pub use createx::{createx_deployed_bytecode, deploy_createx, verify_createx, CREATEX_ADDRESS};
 pub use artifacts::{ArtifactIndex, ArtifactMatch};
 pub use broadcast::{read_all_broadcasts, read_latest_broadcast, BroadcastData, BroadcastTransaction};
 pub use compiler::{compile_files, compile_project, CompilationOutput};
