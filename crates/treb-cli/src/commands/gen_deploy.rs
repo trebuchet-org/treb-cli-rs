@@ -122,6 +122,102 @@ contract Deploy{{contract_name}} is Script {
 }
 ";
 
+// ── CREATE2 template ────────────────────────────────────────────────────
+
+const CREATE2_TEMPLATE: &str = "\
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.13;
+
+import {Script, console} from \"forge-std/Script.sol\";
+import { {{contract_name}} } from \"{{import_path}}\";
+
+contract Deploy{{contract_name}} is Script {
+    function run() public {
+        vm.startBroadcast();
+
+        // TODO: Set your deployment salt
+        bytes32 salt = bytes32(0);
+{{#if is_library}}
+
+        // Library deployment — deploy raw bytecode via CREATE2
+        bytes memory bytecode = type({{contract_name}}).creationCode;
+        address deployed;
+        assembly {
+            deployed := create2(0, add(bytecode, 0x20), mload(bytecode), salt)
+        }
+        require(deployed != address(0), \"{{contract_name}} deployment failed\");
+
+        console.log(\"{{contract_name}} deployed at:\", deployed);
+{{else}}
+{{#if has_constructor_params}}
+
+        // TODO: Set constructor arguments
+{{#each constructor_params}}
+        {{solidity_type}} {{name}} = {{placeholder}}; // TODO: replace placeholder
+{{/each}}
+
+        {{@root.contract_name}} deployed = new {{@root.contract_name}}{salt: salt}({{@root.constructor_args}});
+{{else}}
+
+        {{contract_name}} deployed = new {{contract_name}}{salt: salt}();
+{{/if}}
+
+        console.log(\"{{contract_name}} deployed at:\", address(deployed));
+{{/if}}
+
+        vm.stopBroadcast();
+    }
+}
+";
+
+// ── CREATE3 template ────────────────────────────────────────────────────
+
+const CREATE3_TEMPLATE: &str = "\
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.13;
+
+import {Script, console} from \"forge-std/Script.sol\";
+import { {{contract_name}} } from \"{{import_path}}\";
+
+interface ICreateX {
+    function deployCreate3(bytes32 salt, bytes memory initCode) external payable returns (address);
+}
+
+contract Deploy{{contract_name}} is Script {
+    // TODO: Set the CreateX factory address for your network
+    // See https://github.com/pcaversaccio/createx for deployment addresses
+    ICreateX constant CREATEX = ICreateX(address(0));
+
+    function run() public {
+        vm.startBroadcast();
+
+        // TODO: Set your deployment salt
+        bytes32 salt = bytes32(0);
+{{#if has_constructor_params}}
+
+        // TODO: Set constructor arguments
+{{#each constructor_params}}
+        {{solidity_type}} {{name}} = {{placeholder}}; // TODO: replace placeholder
+{{/each}}
+
+        bytes memory initCode = abi.encodePacked(
+            type({{@root.contract_name}}).creationCode,
+            abi.encode({{@root.constructor_args}})
+        );
+{{else}}
+
+        bytes memory initCode = type({{contract_name}}).creationCode;
+{{/if}}
+
+        address deployed = CREATEX.deployCreate3(salt, initCode);
+
+        console.log(\"{{contract_name}} deployed at:\", deployed);
+
+        vm.stopBroadcast();
+    }
+}
+";
+
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 /// Return a Solidity placeholder literal for the given type.
@@ -327,9 +423,13 @@ pub async fn run(
     hbs.set_strict_mode(true);
     hbs.register_template_string("create", CREATE_TEMPLATE)
         .context("failed to register CREATE template")?;
+    hbs.register_template_string("create2", CREATE2_TEMPLATE)
+        .context("failed to register CREATE2 template")?;
+    hbs.register_template_string("create3", CREATE3_TEMPLATE)
+        .context("failed to register CREATE3 template")?;
 
     let code = hbs
-        .render("create", &render_ctx)
+        .render(&context.strategy, &render_ctx)
         .context("failed to render deployment script")?;
 
     // ── Output ───────────────────────────────────────────────────────────
@@ -633,6 +733,197 @@ mod tests {
         // Should have vm.startBroadcast/stopBroadcast
         assert!(code.contains("vm.startBroadcast();"));
         assert!(code.contains("vm.stopBroadcast();"));
+    }
+
+    // ── CREATE2 template rendering ──────────────────────────────────────
+
+    fn render_create2(ctx: &RenderContext) -> String {
+        let mut hbs = Handlebars::new();
+        hbs.register_escape_fn(handlebars::no_escape);
+        hbs.set_strict_mode(true);
+        hbs.register_template_string("create2", CREATE2_TEMPLATE).unwrap();
+        hbs.render("create2", ctx).unwrap()
+    }
+
+    #[test]
+    fn render_create2_with_constructor() {
+        let ctx = RenderContext {
+            contract_name: "Counter".to_string(),
+            import_path: "../src/Counter.sol".to_string(),
+            is_library: false,
+            has_constructor_params: true,
+            constructor_params: vec![
+                RenderParam {
+                    name: "initialCount".to_string(),
+                    solidity_type: "uint256".to_string(),
+                    placeholder: "0".to_string(),
+                },
+                RenderParam {
+                    name: "owner".to_string(),
+                    solidity_type: "address".to_string(),
+                    placeholder: "address(0)".to_string(),
+                },
+            ],
+            constructor_args: "initialCount, owner".to_string(),
+        };
+
+        let code = render_create2(&ctx);
+        assert!(code.contains("// SPDX-License-Identifier: UNLICENSED"));
+        assert!(code.contains("pragma solidity ^0.8.13;"));
+        assert!(code.contains("import { Counter } from \"../src/Counter.sol\";"));
+        assert!(code.contains("contract DeployCounter is Script"));
+        assert!(code.contains("bytes32 salt = bytes32(0);"));
+        assert!(code.contains("// TODO: Set your deployment salt"));
+        assert!(code.contains("uint256 initialCount = 0;"));
+        assert!(code.contains("address owner = address(0);"));
+        assert!(code.contains("Counter deployed = new Counter{salt: salt}(initialCount, owner);"));
+        assert!(code.contains("console.log(\"Counter deployed at:\", address(deployed));"));
+    }
+
+    #[test]
+    fn render_create2_no_constructor() {
+        let ctx = RenderContext {
+            contract_name: "SimpleContract".to_string(),
+            import_path: "../src/SimpleContract.sol".to_string(),
+            is_library: false,
+            has_constructor_params: false,
+            constructor_params: vec![],
+            constructor_args: String::new(),
+        };
+
+        let code = render_create2(&ctx);
+        assert!(code.contains("bytes32 salt = bytes32(0);"));
+        assert!(code.contains("SimpleContract deployed = new SimpleContract{salt: salt}();"));
+        assert!(!code.contains("TODO: Set constructor"));
+    }
+
+    #[test]
+    fn render_create2_library() {
+        let ctx = RenderContext {
+            contract_name: "MathLib".to_string(),
+            import_path: "../src/MathLib.sol".to_string(),
+            is_library: true,
+            has_constructor_params: false,
+            constructor_params: vec![],
+            constructor_args: String::new(),
+        };
+
+        let code = render_create2(&ctx);
+        assert!(code.contains("bytes32 salt = bytes32(0);"));
+        assert!(code.contains("type(MathLib).creationCode"));
+        assert!(code.contains("deployed := create2(0,"));
+        assert!(code.contains("console.log(\"MathLib deployed at:\", deployed);"));
+        assert!(!code.contains("new MathLib"));
+    }
+
+    // ── CREATE3 template rendering ──────────────────────────────────────
+
+    fn render_create3(ctx: &RenderContext) -> String {
+        let mut hbs = Handlebars::new();
+        hbs.register_escape_fn(handlebars::no_escape);
+        hbs.set_strict_mode(true);
+        hbs.register_template_string("create3", CREATE3_TEMPLATE).unwrap();
+        hbs.render("create3", ctx).unwrap()
+    }
+
+    #[test]
+    fn render_create3_with_constructor() {
+        let ctx = RenderContext {
+            contract_name: "Counter".to_string(),
+            import_path: "../src/Counter.sol".to_string(),
+            is_library: false,
+            has_constructor_params: true,
+            constructor_params: vec![
+                RenderParam {
+                    name: "initialCount".to_string(),
+                    solidity_type: "uint256".to_string(),
+                    placeholder: "0".to_string(),
+                },
+            ],
+            constructor_args: "initialCount".to_string(),
+        };
+
+        let code = render_create3(&ctx);
+        assert!(code.contains("// SPDX-License-Identifier: UNLICENSED"));
+        assert!(code.contains("pragma solidity ^0.8.13;"));
+        assert!(code.contains("import { Counter } from \"../src/Counter.sol\";"));
+        assert!(code.contains("interface ICreateX"));
+        assert!(code.contains("deployCreate3(bytes32 salt, bytes memory initCode)"));
+        assert!(code.contains("ICreateX constant CREATEX = ICreateX(address(0));"));
+        assert!(code.contains("// TODO: Set the CreateX factory address"));
+        assert!(code.contains("bytes32 salt = bytes32(0);"));
+        assert!(code.contains("uint256 initialCount = 0;"));
+        assert!(code.contains("type(Counter).creationCode"));
+        assert!(code.contains("abi.encode(initialCount)"));
+        assert!(code.contains("CREATEX.deployCreate3(salt, initCode)"));
+        assert!(code.contains("console.log(\"Counter deployed at:\", deployed);"));
+    }
+
+    #[test]
+    fn render_create3_no_constructor() {
+        let ctx = RenderContext {
+            contract_name: "Token".to_string(),
+            import_path: "../src/Token.sol".to_string(),
+            is_library: false,
+            has_constructor_params: false,
+            constructor_params: vec![],
+            constructor_args: String::new(),
+        };
+
+        let code = render_create3(&ctx);
+        assert!(code.contains("bytes memory initCode = type(Token).creationCode;"));
+        assert!(code.contains("CREATEX.deployCreate3(salt, initCode)"));
+        assert!(!code.contains("abi.encode"));
+        assert!(!code.contains("abi.encodePacked"));
+        assert!(!code.contains("TODO: Set constructor"));
+    }
+
+    #[test]
+    fn render_create3_library() {
+        let ctx = RenderContext {
+            contract_name: "MathLib".to_string(),
+            import_path: "../src/MathLib.sol".to_string(),
+            is_library: true,
+            has_constructor_params: false,
+            constructor_params: vec![],
+            constructor_args: String::new(),
+        };
+
+        let code = render_create3(&ctx);
+        assert!(code.contains("bytes memory initCode = type(MathLib).creationCode;"));
+        assert!(code.contains("CREATEX.deployCreate3(salt, initCode)"));
+        assert!(!code.contains("abi.encode"));
+    }
+
+    #[test]
+    fn render_create3_has_todo_comments() {
+        let ctx = RenderContext {
+            contract_name: "Counter".to_string(),
+            import_path: "../src/Counter.sol".to_string(),
+            is_library: false,
+            has_constructor_params: false,
+            constructor_params: vec![],
+            constructor_args: String::new(),
+        };
+
+        let code = render_create3(&ctx);
+        assert!(code.contains("// TODO: Set the CreateX factory address"));
+        assert!(code.contains("// TODO: Set your deployment salt"));
+    }
+
+    #[test]
+    fn render_create2_has_todo_comments() {
+        let ctx = RenderContext {
+            contract_name: "Counter".to_string(),
+            import_path: "../src/Counter.sol".to_string(),
+            is_library: false,
+            has_constructor_params: false,
+            constructor_params: vec![],
+            constructor_args: String::new(),
+        };
+
+        let code = render_create2(&ctx);
+        assert!(code.contains("// TODO: Set your deployment salt"));
     }
 
     // ── GenDeployOutput serialization ────────────────────────────────────
