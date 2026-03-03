@@ -70,3 +70,18 @@ Started: Wed Mar  4 12:35:25 AM CET 2026
   - `alloy_primitives` is not a direct dep of treb-cli — use `treb_forge` re-exports or avoid in test assertions
   - AnvilNode is a thin wrapper; Drop cleanup is handled by AnvilInstance's existing Drop impl
 ---
+
+## 2026-03-04 - P2-US-005
+- Implemented TestContext composition struct composing TestWorkdir, TrebRunner, and HashMap<String, AnvilNode>
+- `new(fixture_name)` creates workdir + runner; `with_anvil(name)` spawns node and rewrites foundry.toml ports
+- `run()` and `run_with_env()` delegate to TrebRunner; `anvil(name)` retrieves named nodes
+- Created framework_context.rs with 6 smoke tests: version, init, run_with_env, accessors, anvil reachability, port rewrite verification
+- Files changed:
+  - crates/treb-cli/tests/framework/context.rs (implemented from stub)
+  - crates/treb-cli/tests/framework_context.rs (new)
+- **Learnings for future iterations:**
+  - `treb init` requires foundry.toml in cwd and creates .treb/ with registry.json, config.local.json, etc.
+  - TestWorkdir auto-creates .treb/ — remove it first if testing `treb init`
+  - Builder-style `with_anvil()` consuming self works well for async setup chains
+  - All 6 tests pass including async anvil tests — full workspace green
+---
