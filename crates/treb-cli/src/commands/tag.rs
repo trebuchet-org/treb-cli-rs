@@ -8,6 +8,7 @@ use treb_registry::Registry;
 
 use crate::commands::resolve::resolve_deployment;
 use crate::output;
+use crate::ui::selector::fuzzy_select_deployment_id;
 
 /// JSON output for tag operations.
 #[derive(Serialize)]
@@ -21,7 +22,7 @@ struct TagOutputJson {
 }
 
 pub async fn run(
-    deployment_query: &str,
+    deployment_query: Option<String>,
     add: Option<String>,
     remove: Option<String>,
     json: bool,
@@ -45,7 +46,18 @@ pub async fn run(
 
     let mut registry = Registry::open(&cwd).context("failed to open registry")?;
     let lookup = registry.load_lookup_index().context("failed to load lookup index")?;
-    let resolved = resolve_deployment(deployment_query, &registry, &lookup)?;
+
+    let query = match deployment_query {
+        Some(q) => q,
+        None => {
+            let deployments: Vec<_> = registry.list_deployments().into_iter().cloned().collect();
+            fuzzy_select_deployment_id(&deployments)
+                .map_err(|e| anyhow::anyhow!("{e}"))?
+                .ok_or_else(|| anyhow::anyhow!("no deployment selected"))?
+        }
+    };
+
+    let resolved = resolve_deployment(&query, &registry, &lookup)?;
     let deployment_id = resolved.id.clone();
 
     match (add, remove) {

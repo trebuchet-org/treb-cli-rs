@@ -8,8 +8,9 @@ use treb_registry::Registry;
 
 use crate::commands::resolve::resolve_deployment;
 use crate::output;
+use crate::ui::selector::fuzzy_select_deployment_id;
 
-pub async fn run(deployment_query: &str, json: bool) -> anyhow::Result<()> {
+pub async fn run(deployment_query: Option<String>, json: bool) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
 
     if !cwd.join("foundry.toml").exists() {
@@ -29,7 +30,18 @@ pub async fn run(deployment_query: &str, json: bool) -> anyhow::Result<()> {
 
     let registry = Registry::open(&cwd).context("failed to open registry")?;
     let lookup = registry.load_lookup_index().context("failed to load lookup index")?;
-    let deployment = resolve_deployment(deployment_query, &registry, &lookup)?;
+
+    let query = match deployment_query {
+        Some(q) => q,
+        None => {
+            let deployments: Vec<_> = registry.list_deployments().into_iter().cloned().collect();
+            fuzzy_select_deployment_id(&deployments)
+                .map_err(|e| anyhow::anyhow!("{e}"))?
+                .ok_or_else(|| anyhow::anyhow!("no deployment selected"))?
+        }
+    };
+
+    let deployment = resolve_deployment(&query, &registry, &lookup)?;
 
     if json {
         output::print_json(deployment)?;

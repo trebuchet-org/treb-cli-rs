@@ -4,7 +4,6 @@
 //! creating a timestamped backup before any mutation.
 
 use std::env;
-use std::io::{self, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context};
@@ -113,18 +112,15 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
 
     // Confirm.
     if !args.yes {
-        eprint!(
+        let message = format!(
             "About to remove {} deployment(s), {} transaction(s), {} safe transaction(s), \
-             {} governor proposal(s). A backup will be created first. Continue? [y/N] ",
+             {} governor proposal(s). A backup will be created first. Continue?",
             deployments_to_remove.len(),
             transactions_to_remove.len(),
             safe_txs_to_remove.len(),
             governor_proposals_to_remove.len(),
         );
-        io::stderr().flush()?;
-        let mut response = String::new();
-        io::stdin().read_line(&mut response)?;
-        if !response.trim().eq_ignore_ascii_case("y") {
+        if !crate::ui::prompt::confirm(&message, false) {
             println!("Cancelled.");
             return Ok(());
         }

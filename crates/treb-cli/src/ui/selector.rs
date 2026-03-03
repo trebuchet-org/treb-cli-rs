@@ -107,6 +107,14 @@ pub fn multiselect_deployments<'a>(
     Ok(selections.into_iter().filter_map(|i| deployments.get(i)).collect())
 }
 
+/// Convenience wrapper that returns the ID of the selected deployment.
+///
+/// Returns `Ok(None)` when the list is empty or the user aborts.
+/// Returns `Err(TrebError::Cli(...))` when not running in a TTY.
+pub fn fuzzy_select_deployment_id(deployments: &[Deployment]) -> Result<Option<String>> {
+    Ok(fuzzy_select_deployment(deployments, None)?.map(|d| d.id.clone()))
+}
+
 /// Score-based fuzzy filter: returns indices of items that match `query`.
 fn fuzzy_filter(items: &[String], query: &str) -> Vec<usize> {
     use nucleo_matcher::{
@@ -194,7 +202,8 @@ mod tests {
             return; // skip in interactive sessions
         }
         let d = make_deployment("id1", "Counter", "0xabc");
-        let result = fuzzy_select_deployment(&[d], None);
+        let deployments = [d];
+        let result = fuzzy_select_deployment(&deployments, None);
         assert!(matches!(result, Err(TrebError::Cli(_))));
     }
 

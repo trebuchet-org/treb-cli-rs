@@ -12,6 +12,7 @@ use treb_verify::VerifyOpts;
 
 use crate::commands::resolve::resolve_deployment;
 use crate::output;
+use crate::ui::selector::fuzzy_select_deployment_id;
 
 /// JSON output for a single verification result.
 #[derive(Serialize)]
@@ -42,14 +43,6 @@ pub async fn run(
     delay: u64,
     json: bool,
 ) -> anyhow::Result<()> {
-    // Validate that either a deployment or --all is provided.
-    if deployment.is_none() && !all {
-        bail!(
-            "either a <DEPLOYMENT> argument or --all flag is required\n\n\
-             Usage:\n  treb verify <DEPLOYMENT>\n  treb verify --all"
-        );
-    }
-
     // Validate verifier value.
     match verifier {
         "etherscan" | "sourcify" | "blockscout" => {}
@@ -84,10 +77,20 @@ pub async fn run(
 
     // --- Single deployment verification ---
 
-    let query = deployment.as_deref().unwrap();
     let mut registry = Registry::open(&cwd).context("failed to open registry")?;
     let lookup = registry.load_lookup_index().context("failed to load lookup index")?;
-    let resolved = resolve_deployment(query, &registry, &lookup)?;
+
+    let query = match deployment {
+        Some(q) => q,
+        None => {
+            let deployments: Vec<_> = registry.list_deployments().into_iter().cloned().collect();
+            fuzzy_select_deployment_id(&deployments)
+                .map_err(|e| anyhow::anyhow!("{e}"))?
+                .ok_or_else(|| anyhow::anyhow!("no deployment selected"))?
+        }
+    };
+
+    let resolved = resolve_deployment(&query, &registry, &lookup)?;
 
     // Capture fields we need after the borrow on registry is released.
     let deployment_id = resolved.id.clone();

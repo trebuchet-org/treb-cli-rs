@@ -4,7 +4,6 @@
 //! candidates, and (in destructive mode) removes them with a timestamped backup.
 
 use std::env;
-use std::io::{self, Write};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -240,14 +239,11 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
 
     // Destructive mode: confirm, backup, then remove.
     if !args.yes {
-        eprint!(
-            "About to remove {} entry(s). A backup will be created first. Continue? [y/N] ",
+        let message = format!(
+            "About to remove {} entry(s). A backup will be created first. Continue?",
             candidates.len()
         );
-        io::stderr().flush()?;
-        let mut response = String::new();
-        io::stdin().read_line(&mut response)?;
-        if !response.trim().eq_ignore_ascii_case("y") {
+        if !crate::ui::prompt::confirm(&message, false) {
             println!("Cancelled.");
             return Ok(());
         }

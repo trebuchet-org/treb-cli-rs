@@ -100,8 +100,8 @@ enum Commands {
     },
     /// Show detailed information about a specific deployment
     Show {
-        /// Deployment identifier (full ID, name, address, name:label, or namespace/name)
-        deployment: String,
+        /// Deployment identifier (full ID, name, address, name:label, or namespace/name); omit to select interactively
+        deployment: Option<String>,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -151,8 +151,8 @@ enum Commands {
     },
     /// Manage tags on a deployment
     Tag {
-        /// Deployment identifier (full ID, name, address, name:label, or namespace/name)
-        deployment: String,
+        /// Deployment identifier (full ID, name, address, name:label, or namespace/name); omit to select interactively
+        deployment: Option<String>,
         /// Add a tag to the deployment
         #[arg(long, conflicts_with = "remove")]
         add: Option<String>,
@@ -382,7 +382,7 @@ async fn main() -> anyhow::Result<()> {
             commands::list::run(network, namespace, r#type, tag, contract, label, fork, no_fork, json).await?
         }
         Commands::Show { deployment, json } => {
-            commands::show::run(&deployment, json).await?
+            commands::show::run(deployment, json).await?
         }
         Commands::Init { force } => commands::init::run(force).await?,
         Commands::Config { subcommand } => match subcommand {
@@ -417,7 +417,7 @@ async fn main() -> anyhow::Result<()> {
             .await?
         }
         Commands::Tag { deployment, add, remove, json } => {
-            commands::tag::run(&deployment, add, remove, json).await?
+            commands::tag::run(deployment, add, remove, json).await?
         }
         Commands::Register {
             tx_hash,

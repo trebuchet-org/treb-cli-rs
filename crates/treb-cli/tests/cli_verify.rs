@@ -116,13 +116,17 @@ fn verify_without_deployment_or_all_fails() {
     let tmp = tempfile::tempdir().unwrap();
     init_project(&tmp);
 
+    // Without a deployment argument or --all in non-TTY mode, the fuzzy
+    // selector is invoked. On an empty registry it returns "no deployment
+    // selected"; on a non-empty registry in non-TTY it returns a TTY error.
+    // Either way the command should exit non-zero with a clear message.
     treb()
         .arg("verify")
         .current_dir(tmp.path())
         .assert()
         .failure()
         .stderr(
-            predicate::str::contains("DEPLOYMENT").or(predicate::str::contains("--all")),
+            predicate::str::contains("no deployment").or(predicate::str::contains("no TTY")),
         );
 }
 
