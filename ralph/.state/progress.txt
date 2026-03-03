@@ -15,6 +15,18 @@
 Started: Tue Mar  3 10:18:41 PM CET 2026
 ---
 
+## 2026-03-03 - P20-US-003
+- What was implemented: Interactive network selector and batch multiselect
+  - `run.rs`: added `use console::Term` and `use crate::ui::selector::fuzzy_select_network`; when `--network` is `None`, `!non_interactive`, and TTY detected, loads foundry RPC endpoints and presents `fuzzy_select_network` for interactive selection
+  - `verify.rs`: added `use console::Term` and `use crate::ui::selector::multiselect_deployments`; in `run_batch`, candidates are first collected as owned `Vec<Deployment>`, then TTY-checked: TTY presents `multiselect_deployments` for subset selection, non-TTY verifies all
+  - Both `fuzzy_select_network` and `multiselect_deployments` were already implemented in `ui/selector.rs` from earlier work; this story just wired them into the commands
+- Files changed: crates/treb-cli/src/commands/run.rs, crates/treb-cli/src/commands/verify.rs
+- **Learnings for future iterations:**
+  - Network names for fuzzy selector come from `treb_config::rpc_endpoints(foundry_cfg).keys()` — already available since `ensure_initialized` guarantees foundry.toml exists
+  - When restructuring to use multiselect in batch, collect owned `Vec<Deployment>` first (with `.cloned()`), then pass `&[Deployment]` to selector — avoids registry borrow conflicts
+  - An early-return when `candidate_ids.is_empty()` after multiselect is needed in case user selects nothing
+---
+
 ## 2026-03-03 - P20-US-002
 - What was implemented: Wired deployment fuzzy selector into commands
   - Added `fuzzy_select_deployment_id` convenience wrapper to `ui/selector.rs`
