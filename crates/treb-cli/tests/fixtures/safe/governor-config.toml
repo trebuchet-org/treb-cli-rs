@@ -1,0 +1,18 @@
+# Test fixture: treb.toml with a Governor sender
+
+[accounts.deployer]
+type = "private_key"
+address = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+
+[accounts.governance]
+type = "oz_governor"
+governor = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+timelock = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+proposer = "deployer"
+
+[namespace.default]
+profile = "default"
+
+[namespace.default.senders]
+deployer = "governance"

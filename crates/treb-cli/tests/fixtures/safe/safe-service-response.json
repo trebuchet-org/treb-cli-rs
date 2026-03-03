@@ -1,0 +1,60 @@
+{
+  "count": 2,
+  "next": null,
+  "previous": null,
+  "results": [
+    {
+      "safeTxHash": "0xabc123def456abc123def456abc123def456abc123def456abc123def456abc1",
+      "to": "0x1234567890123456789012345678901234567890",
+      "value": "0",
+      "data": "0x60806040",
+      "operation": 0,
+      "nonce": 5,
+      "safeTxGas": "0",
+      "baseGas": "0",
+      "gasPrice": "0",
+      "gasToken": "0x0000000000000000000000000000000000000000",
+      "refundReceiver": "0x0000000000000000000000000000000000000000",
+      "isExecuted": true,
+      "transactionHash": "0xonchain111222333444555666777888999aaa111222333444555666777888999aa",
+      "executionDate": "2025-01-15T10:30:00Z",
+      "confirmations": [
+        {
+          "owner": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+          "signature": "0xdeadbeef01",
+          "submissionDate": "2025-01-14T08:00:00Z",
+          "signatureType": "EOA"
+        },
+        {
+          "owner": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+          "signature": "0xdeadbeef02",
+          "submissionDate": "2025-01-14T09:00:00Z",
+          "signatureType": "EOA"
+        }
+      ]
+    },
+    {
+      "safeTxHash": "0xpending999888777666555444333222111000aaa999888777666555444333222111",
+      "to": "0x1234567890123456789012345678901234567890",
+      "value": "1000000000000000000",
+      "data": "0xabcdef",
+      "operation": 0,
+      "nonce": 6,
+      "safeTxGas": "0",
+      "baseGas": "0",
+      "gasPrice": "0",
+      "gasToken": "0x0000000000000000000000000000000000000000",
+      "refundReceiver": "0x0000000000000000000000000000000000000000",
+      "isExecuted": false,
+      "transactionHash": null,
+      "executionDate": null,
+      "confirmations": [
+        {
+          "owner": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+          "signature": "0xdeadbeef03",
+          "submissionDate": "2025-02-01T12:00:00Z"
+        }
+      ]
+    }
+  ]
+}

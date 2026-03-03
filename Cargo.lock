@@ -7911,6 +7911,7 @@ dependencies = [
  "serde_yaml",
  "tempfile",
  "tokio",
+ "toml 0.8.23",
  "treb-config",
  "treb-core",
  "treb-forge",
