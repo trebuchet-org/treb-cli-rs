@@ -1,5 +1,6 @@
 //! Domain types for treb — deployments, transactions, and related models.
 
+pub mod contract;
 pub mod deployment;
 pub mod enums;
 pub mod governor_proposal;
@@ -7,6 +8,10 @@ pub mod ids;
 pub mod safe_transaction;
 pub mod transaction;
 
+pub use contract::{
+    Artifact, ArtifactCompiler, ArtifactMetadata, ArtifactOutput, ArtifactSettings, BytecodeObject,
+    Contract, Network,
+};
 pub use deployment::{
     ArtifactInfo, Deployment, DeploymentStrategy, ProxyInfo, ProxyUpgrade, VerificationInfo,
     VerifierStatus,
