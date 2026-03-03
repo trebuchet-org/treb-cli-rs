@@ -13,7 +13,7 @@ pub mod version;
 
 // Re-export key public types for convenience.
 pub use artifacts::{ArtifactIndex, ArtifactMatch};
-pub use broadcast::BroadcastReader;
+pub use broadcast::{read_all_broadcasts, read_latest_broadcast, BroadcastData, BroadcastTransaction};
 pub use compiler::{compile_files, compile_project, CompilationOutput};
 pub use console::decode_console_logs;
 pub use script::{build_script_config, execute_script, ExecutionResult, ScriptConfig};
