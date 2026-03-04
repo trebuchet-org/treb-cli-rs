@@ -4,6 +4,24 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+/// Generate a deployment ID string.
+///
+/// Returns `namespace/chainId/ContractName` when `label` is empty,
+/// `namespace/chainId/ContractName:label` when non-empty. This matches
+/// the Go CLI's convention exactly.
+pub fn generate_deployment_id(
+    namespace: &str,
+    chain_id: u64,
+    contract_name: &str,
+    label: &str,
+) -> String {
+    if label.is_empty() {
+        format!("{namespace}/{chain_id}/{contract_name}")
+    } else {
+        format!("{namespace}/{chain_id}/{contract_name}:{label}")
+    }
+}
+
 /// A deployment identifier, typically in the form `namespace/chainId/ContractName:Label`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -63,5 +81,33 @@ mod tests {
         let from_str: DeploymentId = "a/b/c".into();
         let from_string: DeploymentId = String::from("a/b/c").into();
         assert_eq!(from_str, from_string);
+    }
+
+    #[test]
+    fn generate_id_empty_label_omits_colon() {
+        assert_eq!(
+            generate_deployment_id("default", 31337, "Counter", ""),
+            "default/31337/Counter"
+        );
+    }
+
+    #[test]
+    fn generate_id_non_empty_label_includes_colon() {
+        assert_eq!(
+            generate_deployment_id("default", 31337, "Counter", "v2"),
+            "default/31337/Counter:v2"
+        );
+    }
+
+    #[test]
+    fn generate_id_various_namespaces_and_chains() {
+        assert_eq!(
+            generate_deployment_id("production", 1, "Token", "main"),
+            "production/1/Token:main"
+        );
+        assert_eq!(
+            generate_deployment_id("staging", 11155111, "Token", ""),
+            "staging/11155111/Token"
+        );
     }
 }

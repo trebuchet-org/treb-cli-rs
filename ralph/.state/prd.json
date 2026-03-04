@@ -1,134 +1,99 @@
 {
   "project": "treb-cli-rs",
-  "branchName": "ralph/phase-10-command-parity-fork-subcommands",
-  "description": "Phase 10 adds golden-file integration tests for all seven treb fork subcommands (enter, exit, revert, restart, status, history, diff) plus fork.json schema verification tests and output format fixes for Go CLI parity.",
+  "branchName": "ralph/phase-01-deployment-id-label-transactionid-and-artifact-path-fixes",
+  "description": "Fix four foundational on-disk format incompatibilities between Rust CLI and Go CLI: deployment ID construction (omit label suffix when empty), label default (empty string instead of contract name), transaction ID format (tx-0x prefix), and artifact path (relative source path instead of absolute compiled-output path).",
   "userStories": [
     {
-      "id": "P10-US-001",
-      "title": "Fork Status Golden File Tests",
-      "description": "As a developer, I want golden-file integration tests for treb fork status so that the output format for no-forks, active fork, JSON, and uninitialized states is locked down and regression-tested.",
+      "id": "P1-US-001",
+      "title": "Fix Deployment ID Construction (Omit Label When Empty)",
+      "description": "As a developer, I want deployment IDs to use the format namespace/chainId/ContractName when label is empty and namespace/chainId/ContractName:label when non-empty, so that on-disk IDs are byte-identical to the Go CLI.",
       "acceptanceCriteria": [
-        "integration_fork.rs contains 4 #[test] functions for status",
-        "fork_status_no_forks golden output contains 'No active forks.'",
-        "fork_status_with_active_fork golden output shows table with all 7 columns and 'stopped' status",
-        "fork_status_json golden output is valid JSON with correct camelCase field names",
-        "fork_status_not_initialized uses expect_err(true) and mentions treb init",
-        "PathNormalizer replaces workdir paths with <PROJECT_ROOT>",
-        "TimestampNormalizer replaces timestamps with <TIMESTAMP>",
-        "cargo test --workspace passes",
-        "cargo clippy --workspace passes with no warnings"
+        "generate_deployment_id(\"default\", 31337, \"Counter\", \"\") returns \"default/31337/Counter\"",
+        "generate_deployment_id(\"default\", 31337, \"Counter\", \"v2\") returns \"default/31337/Counter:v2\"",
+        "The register command's manual ID construction uses the same shared function (no duplication)",
+        "resolve_deployment() correctly resolves both ID formats (with and without label)",
+        "Unit tests for generate_deployment_id() cover both empty and non-empty labels",
+        "cargo check passes across the entire workspace"
       ],
       "priority": 1,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P10-US-002",
-      "title": "Fork History Golden File Tests",
-      "description": "As a developer, I want golden-file integration tests for treb fork history so that the output format for empty history, entries display, network filtering, JSON output, and uninitialized state is locked down.",
+      "id": "P1-US-002",
+      "title": "Fix Label Default to Empty String",
+      "description": "As a developer, I want the label field to default to empty string when unspecified, so that deployment records match the Go CLI's convention of never defaulting label to the contract name or 'default'.",
       "acceptanceCriteria": [
-        "integration_fork.rs contains 5 #[test] functions for history",
-        "fork_history_empty golden output contains 'No fork history.'",
-        "fork_history_with_entries golden output shows table with 4 columns in most-recent-first order",
-        "fork_history_network_filter golden output only contains mainnet entries",
-        "fork_history_json golden output is valid JSON array with correct field names",
-        "History entries with details = None show '-' in table and omit details in JSON",
-        "cargo test --workspace passes",
-        "cargo clippy --workspace passes with no warnings"
+        "When treb register is called without --label, the resulting deployment has \"label\": \"\"",
+        "When treb run deploys a contract whose on-chain event has an empty label, the resulting deployment has \"label\": \"\"",
+        "When a label IS explicitly provided (via --label or on-chain event), it is stored as-is",
+        "A contract_display_name helper returns ContractName when label is empty, ContractName:label when non-empty",
+        "cargo check passes across the entire workspace"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P10-US-003",
-      "title": "Fork Diff Golden File Tests",
-      "description": "As a developer, I want golden-file integration tests for treb fork diff so that the output format for no-changes, with-changes, JSON output, and not-forked error is locked down.",
+      "id": "P1-US-003",
+      "title": "Fix Transaction ID Format to Use tx- Prefix",
+      "description": "As a developer, I want all transaction IDs stored as \"tx-0x<full_64_hex_chars>\" so that the format matches the Go CLI's tx-prefixed convention exactly.",
       "acceptanceCriteria": [
-        "integration_fork.rs contains 4 #[test] functions for diff",
-        "fork_diff_no_changes golden output contains 'No changes detected for network mainnet.'",
-        "fork_diff_with_changes golden output shows table with Change/File/Key columns",
-        "fork_diff_json golden output is valid JSON with network, changes, clean fields",
-        "fork_diff_not_forked uses expect_err(true) and mentions 'not in fork mode'",
-        "cargo test --workspace passes",
-        "cargo clippy --workspace passes with no warnings"
+        "In the run pipeline, transaction_id is stored as \"tx-0x<full_64_hex_chars>\"",
+        "In the register command, transaction_id uses the same full-hash format: \"tx-0x<full_hash>\"",
+        "Transaction records created by hydrate_transactions() use the tx- prefixed ID as their map key",
+        "All references to transaction IDs (in Deployment.transactionId and Transaction.id) are consistent",
+        "cargo check passes across the entire workspace"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P10-US-004",
-      "title": "Fork Enter/Exit Error Path and Exit Success Golden File Tests",
-      "description": "As a developer, I want golden-file integration tests for treb fork enter error paths and treb fork exit (errors + success) so that error messages and exit success output are locked down.",
+      "id": "P1-US-004",
+      "title": "Fix Artifact Path to Use Relative Source Path",
+      "description": "As a developer, I want artifact.path to store the relative Solidity source path (e.g., \"src/Counter.sol\") extracted from forge artifact metadata, so that it matches the Go CLI's format instead of storing the absolute compiled artifact path.",
       "acceptanceCriteria": [
-        "integration_fork.rs contains 5 #[test] functions for enter/exit",
-        "fork_enter_not_initialized uses expect_err(true) and mentions treb init",
-        "fork_enter_already_forked error suggests running treb fork exit",
-        "fork_enter_no_rpc_url error mentions the missing network/RPC",
-        "fork_exit_not_forked error contains 'not actively forked'",
-        "fork_exit_success golden output contains both confirmation lines (exited + registry restored)",
-        "After fork_exit_success, the fork state no longer contains mainnet",
-        "cargo test --workspace passes",
-        "cargo clippy --workspace passes with no warnings"
+        "artifact.path stores the relative source file path (e.g., \"src/Counter.sol\") for deployments created via treb run",
+        "The source path is extracted from forge artifact metadata (sourceName or equivalent field), not constructed from the artifact file path",
+        "If no artifact match is found, artifact.path is \"\" (empty string)",
+        "For treb register (which lacks artifact metadata), artifact.path remains \"\"",
+        "cargo check passes across the entire workspace"
       ],
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P10-US-005",
-      "title": "Fork Revert/Restart Error Path Golden File Tests",
-      "description": "As a developer, I want golden-file integration tests for treb fork revert and treb fork restart error conditions so that error messages for not-forked and port-unreachable states are locked down.",
+      "id": "P1-US-005",
+      "title": "Update Lookup Index and ID Parsing for Both ID Formats",
+      "description": "As a developer, I want the lookup index and deployment resolution to handle both new Go-compatible IDs (namespace/chainId/Name) and old Rust-style IDs (namespace/chainId/Name:label) so that existing .treb/ directories continue to work.",
       "acceptanceCriteria": [
-        "integration_fork.rs contains 5 #[test] functions for revert/restart errors",
-        "fork_revert_not_forked error mentions 'not in fork mode'",
-        "fork_revert_no_active_forks golden output contains 'No active forks to revert.'",
-        "fork_revert_port_unreachable error mentions port 18545 and 'not reachable'",
-        "fork_restart_not_forked error mentions 'not in fork mode'",
-        "fork_restart_port_unreachable error mentions port 18545 and 'not reachable'",
-        "cargo test --workspace passes",
-        "cargo clippy --workspace passes with no warnings"
+        "LookupIndex::build() correctly indexes deployments regardless of whether the ID has a label suffix or not",
+        "resolve_deployment() with query \"Counter\" resolves a deployment with ID \"default/31337/Counter\" (no label)",
+        "resolve_deployment() with query \"Counter:v2\" resolves a deployment with ID \"default/31337/Counter:v2\"",
+        "resolve_deployment() with query \"default/31337/Counter\" resolves by exact match",
+        "Querying by address still works correctly regardless of ID format",
+        "Loading a deployments.json with old-style IDs (e.g., \"default/31337/Counter:Counter\") does not crash",
+        "cargo check passes; unit tests added for resolution edge cases"
       ],
       "priority": 5,
       "passes": false,
       "notes": ""
     },
     {
-      "id": "P10-US-006",
-      "title": "fork.json Schema Verification Tests",
-      "description": "As a developer, I want unit tests that verify fork.json serialization matches the Go CLI's JSON schema so that fork state is interoperable between Go and Rust CLIs.",
+      "id": "P1-US-006",
+      "title": "Update Golden Files and Verify All Tests Pass",
+      "description": "As a developer, I want all golden files regenerated with the corrected formats and all tests passing, so that the test suite validates the new on-disk format end-to-end.",
       "acceptanceCriteria": [
-        "6 unit tests verify fork.json schema compatibility",
-        "All camelCase field names are verified against Go's format",
-        "Optional field omission (skip_serializing_if) is tested for forkBlockNumber and details",
-        "Go-compatible fields (envVarName, originalRpc, anvilPid, pidFile, logFile) are present in serialized output",
-        "Round-trip test confirms serialize -> deserialize -> serialize produces identical JSON",
-        "Go fixture compatibility test deserializes a known-good Go-format JSON string",
-        "cargo test --workspace passes",
-        "cargo clippy --workspace passes with no warnings"
+        "All golden files under tests/golden/ are regenerated using UPDATE_GOLDEN=1 cargo test",
+        "The normalizer handles the new tx-0x<HASH> format consistently",
+        "cargo test passes with zero failures across the entire workspace (without UPDATE_GOLDEN)",
+        "cargo clippy passes with no new warnings",
+        "Spot-check at least 3 golden files confirming: deployment IDs without trailing colon when label is empty, \"label\": \"\" (empty string), \"transactionId\": \"tx-0x...\" format, and artifact.path as relative source path",
+        "cargo check passes across the entire workspace"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": "P10-US-007",
-      "title": "Output Format Fixes and Final Cleanup",
-      "description": "As a developer, I want all golden files from P10-US-001 through P10-US-005 reviewed for Go CLI output parity so that any format discrepancies are fixed and all tests pass.",
-      "acceptanceCriteria": [
-        "All golden files from P10-US-001 through P10-US-005 have been reviewed for output correctness",
-        "Fork status table format (columns, alignment, empty-state message) matches Go CLI output",
-        "Fork history table format (columns, ordering, null-details display) matches Go CLI output",
-        "Fork diff table format (columns, change labels, file labels) matches Go CLI output",
-        "Fork enter/exit success messages match Go CLI phrasing",
-        "Fork error messages are consistent across all subcommands",
-        "JSON output field naming is camelCase and matches Go CLI for all fork commands",
-        "All golden files are regenerated after fixes",
-        "cargo test --workspace passes (all phases 5-10)",
-        "cargo clippy --workspace passes with no warnings"
-      ],
-      "priority": 7,
       "passes": false,
       "notes": ""
     }

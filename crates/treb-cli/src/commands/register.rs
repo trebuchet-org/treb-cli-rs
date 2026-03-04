@@ -13,7 +13,7 @@ use chrono::Utc;
 use serde::Serialize;
 use treb_core::types::{
     ArtifactInfo, Deployment, DeploymentMethod, DeploymentStrategy, DeploymentType, Operation,
-    Transaction, TransactionStatus, VerificationInfo, VerificationStatus,
+    Transaction, TransactionStatus, VerificationInfo, VerificationStatus, generate_deployment_id,
 };
 use treb_registry::Registry;
 
@@ -390,9 +390,8 @@ pub async fn run(
             format!("{}_{i}", effective_label)
         };
 
-        let deployment_id = format!(
-            "{}/{}/{}:{}",
-            effective_namespace, chain_id, name, dep_label
+        let deployment_id = generate_deployment_id(
+            &effective_namespace, chain_id, &name, &dep_label
         );
 
         // Duplicate detection

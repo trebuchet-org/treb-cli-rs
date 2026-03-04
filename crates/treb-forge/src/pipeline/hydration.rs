@@ -14,6 +14,7 @@ use treb_core::types::deployment::{
 };
 use treb_core::types::enums::{DeploymentType, ProposalStatus, TransactionStatus, VerificationStatus};
 use treb_core::types::governor_proposal::GovernorProposal;
+pub use treb_core::types::ids::generate_deployment_id;
 use treb_core::types::safe_transaction::SafeTransaction;
 use treb_core::types::transaction::Transaction;
 
@@ -22,16 +23,6 @@ use crate::events::deployments::ExtractedDeployment;
 use crate::events::proxy::{ProxyRelationship, ProxyType};
 
 use super::PipelineContext;
-
-/// Generate a deployment ID in the format `{namespace}/{chainId}/{contractName}:{label}`.
-pub fn generate_deployment_id(
-    namespace: &str,
-    chain_id: u64,
-    contract_name: &str,
-    label: &str,
-) -> String {
-    format!("{namespace}/{chain_id}/{contract_name}:{label}")
-}
 
 /// Convert a [`B256`] value to a `0x`-prefixed lowercase hex string.
 ///
