@@ -1,0 +1,14 @@
+$ treb config show --json
+{
+  "namespace": "default",
+  "network": null,
+  "profile": "default",
+  "config_source": "treb.toml (v2)",
+  "project_root": "<PROJECT_ROOT>",
+  "senders": {
+    "anvil": {
+      "type": "private_key",
+      "private_key": "<HASH>"
+    }
+  }
+}

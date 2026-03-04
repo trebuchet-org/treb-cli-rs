@@ -1,0 +1,18 @@
+$ treb config show
+    Namespace:  default
+      Network:  mainnet
+      Profile:  default
+Config Source:  treb.toml (v2)
+ Project Root:  <PROJECT_ROOT>
+
+┌───────┬─────────────┬─────────┐
+│ Role  ┆ Type        ┆ Address │
+╞═══════╪═════════════╪═════════╡
+│ anvil ┆ private_key ┆         │
+└───────┴─────────────┴─────────┘
+
+--- .treb/config.local.json ---
+{
+  "namespace": "default",
+  "network": "mainnet"
+}

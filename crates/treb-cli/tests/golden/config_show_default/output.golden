@@ -1,0 +1,12 @@
+$ treb config show
+    Namespace:  default
+      Network:  not set
+      Profile:  default
+Config Source:  treb.toml (v2)
+ Project Root:  <PROJECT_ROOT>
+
+┌───────┬─────────────┬─────────┐
+│ Role  ┆ Type        ┆ Address │
+╞═══════╪═════════════╪═════════╡
+│ anvil ┆ private_key ┆         │
+└───────┴─────────────┴─────────┘

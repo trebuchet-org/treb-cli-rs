@@ -1,0 +1,2 @@
+$ treb config set invalid_key value
+Error: unknown config key 'invalid_key'; valid keys: namespace, network
