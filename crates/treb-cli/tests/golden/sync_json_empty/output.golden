@@ -1,0 +1,8 @@
+$ treb sync --json
+{
+  "synced": 0,
+  "updated": 0,
+  "newly_executed": 0,
+  "removed": 0,
+  "errors": []
+}

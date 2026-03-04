@@ -1,0 +1,2 @@
+$ treb sync
+Error: no .treb/ registry found. Run `treb init` to initialize.
