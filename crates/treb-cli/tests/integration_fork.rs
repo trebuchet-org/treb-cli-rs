@@ -1,13 +1,13 @@
 //! Golden-file integration tests for `treb fork` subcommands.
 //!
-//! Tests exercise status and history subcommands including table output,
-//! JSON output, filtering, and uninitialized project error paths.
+//! Tests exercise status, history, and diff subcommands including table output,
+//! JSON output, filtering, and uninitialized/error state paths.
 
 mod framework;
 
 use chrono::{TimeZone, Utc};
 use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
-use treb_registry::ForkStateStore;
+use treb_registry::{ForkStateStore, DEPLOYMENTS_FILE, TRANSACTIONS_FILE};
 
 use framework::context::TestContext;
 use framework::integration_test::{run_integration_test, IntegrationTest};
@@ -241,6 +241,126 @@ fn fork_history_not_initialized() {
             std::fs::remove_dir_all(ctx.path().join(".treb")).unwrap();
         })
         .test(&["fork", "history"])
+        .expect_err(true)
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── Diff helpers ────────────────────────────────────────────────────────
+
+/// Pre-populate fork state with an active fork and matching registry files
+/// (no changes between current and snapshot).
+fn seed_fork_diff_no_changes(project_root: &std::path::Path) {
+    let treb_dir = project_root.join(".treb");
+    let snapshot_dir = treb_dir.join("snapshots").join("mainnet");
+    std::fs::create_dir_all(&snapshot_dir).unwrap();
+
+    // Write identical registry files to both locations
+    let deployments = r#"{"Counter_1": {"address": "0xaaa"}}"#;
+    std::fs::write(treb_dir.join(DEPLOYMENTS_FILE), deployments).unwrap();
+    std::fs::write(snapshot_dir.join(DEPLOYMENTS_FILE), deployments).unwrap();
+
+    let transactions = r#"{"tx_1": {"hash": "0x111"}}"#;
+    std::fs::write(treb_dir.join(TRANSACTIONS_FILE), transactions).unwrap();
+    std::fs::write(snapshot_dir.join(TRANSACTIONS_FILE), transactions).unwrap();
+
+    // Insert active fork entry
+    let mut store = ForkStateStore::new(&treb_dir);
+    store.insert_active_fork(sample_fork_entry(&treb_dir)).unwrap();
+}
+
+/// Pre-populate fork state with an active fork and differing registry files
+/// (added, removed, and modified entries).
+fn seed_fork_diff_with_changes(project_root: &std::path::Path) {
+    let treb_dir = project_root.join(".treb");
+    let snapshot_dir = treb_dir.join("snapshots").join("mainnet");
+    std::fs::create_dir_all(&snapshot_dir).unwrap();
+
+    // Snapshot: original state
+    let snap_deployments = r#"{"Counter_1": {"address": "0xaaa"}, "Removed_2": {"address": "0xccc"}}"#;
+    std::fs::write(snapshot_dir.join(DEPLOYMENTS_FILE), snap_deployments).unwrap();
+
+    // Current: added Token_3, removed Removed_2
+    let curr_deployments = r#"{"Counter_1": {"address": "0xaaa"}, "Token_3": {"address": "0xbbb"}}"#;
+    std::fs::write(treb_dir.join(DEPLOYMENTS_FILE), curr_deployments).unwrap();
+
+    // Transactions: no changes (both match)
+    let transactions = r#"{"tx_1": {"hash": "0x111"}}"#;
+    std::fs::write(treb_dir.join(TRANSACTIONS_FILE), transactions).unwrap();
+    std::fs::write(snapshot_dir.join(TRANSACTIONS_FILE), transactions).unwrap();
+
+    // Insert active fork entry
+    let mut store = ForkStateStore::new(&treb_dir);
+    store.insert_active_fork(sample_fork_entry(&treb_dir)).unwrap();
+}
+
+// ── fork diff: no changes ───────────────────────────────────────────────
+
+/// `treb fork diff --network mainnet` with identical registry and snapshot
+/// should print "No changes detected for network mainnet."
+#[test]
+fn fork_diff_no_changes() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_diff_no_changes")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_fork_diff_no_changes(ctx.path()))
+        .test(&["fork", "diff", "--network", "mainnet"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork diff: with changes ─────────────────────────────────────────────
+
+/// `treb fork diff --network mainnet` with added and removed entries should
+/// display a table with Change, File, and Key columns.
+#[test]
+fn fork_diff_with_changes() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_diff_with_changes")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_fork_diff_with_changes(ctx.path()))
+        .test(&["fork", "diff", "--network", "mainnet"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork diff: JSON output ──────────────────────────────────────────────
+
+/// `treb fork diff --network mainnet --json` should emit valid JSON with
+/// network, changes, and clean fields.
+#[test]
+fn fork_diff_json() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_diff_json")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_fork_diff_with_changes(ctx.path()))
+        .test(&["fork", "diff", "--network", "mainnet", "--json"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork diff: not forked ───────────────────────────────────────────────
+
+/// `treb fork diff --network mainnet` when no fork is active should error
+/// with a message mentioning "not in fork mode".
+#[test]
+fn fork_diff_not_forked() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_diff_not_forked")
+        .setup(&["init"])
+        .test(&["fork", "diff", "--network", "mainnet"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 

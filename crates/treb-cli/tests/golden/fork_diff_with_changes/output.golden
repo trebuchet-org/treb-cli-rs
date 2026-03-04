@@ -1,0 +1,8 @@
+$ treb fork diff --network mainnet
+┌─────────┬─────────────┬───────────┐
+│ Change  ┆ File        ┆ Key       │
+╞═════════╪═════════════╪═══════════╡
+│ removed ┆ deployments ┆ Removed_2 │
+├╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌┤
+│ added   ┆ deployments ┆ Token_3   │
+└─────────┴─────────────┴───────────┘
