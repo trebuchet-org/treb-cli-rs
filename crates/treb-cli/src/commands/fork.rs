@@ -220,10 +220,15 @@ pub async fn run_exit(network: String) -> anyhow::Result<()> {
     let mut store = ForkStateStore::new(&treb_dir);
     store.load().context("failed to load fork state")?;
 
-    // Remove active fork entry (errors if not active)
+    // Check if actively forked first (consistent error message with revert/restart/diff)
+    if store.get_active_fork(&network).is_none() {
+        bail!("network '{}' is not in fork mode", network);
+    }
+
+    // Remove active fork entry
     let entry = store
         .remove_active_fork(&network)
-        .with_context(|| format!("cannot exit: network '{network}' is not actively forked"))?;
+        .context("failed to remove fork entry")?;
 
     // Restore registry from snapshot
     let snapshot_dir = PathBuf::from(&entry.snapshot_dir);

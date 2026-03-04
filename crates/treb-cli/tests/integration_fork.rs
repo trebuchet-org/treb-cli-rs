@@ -451,7 +451,7 @@ fn fork_enter_no_rpc_url() {
 // ── fork exit: not forked ───────────────────────────────────────────────
 
 /// `treb fork exit --network mainnet` when mainnet is not actively forked
-/// should error with a message containing "not actively forked".
+/// should error with a message containing "not in fork mode".
 #[test]
 fn fork_exit_not_forked() {
     let ctx = TestContext::new("minimal-project");
