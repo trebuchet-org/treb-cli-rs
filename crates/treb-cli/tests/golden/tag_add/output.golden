@@ -1,0 +1,10 @@
+$ treb tag --add v3-release mainnet/42220/FPMM:v<VERSION>
+Added tag 'v3-release' to 'mainnet/42220/FPMM:v<VERSION>'
+
+--- .treb/tag_check.json ---
+{
+  "deploymentId": "mainnet/42220/FPMM:v<VERSION>",
+  "tags": [
+    "v3-release"
+  ]
+}

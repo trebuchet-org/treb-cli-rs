@@ -1,0 +1,6 @@
+$ treb tag --json mainnet/42220/FPMM:v<VERSION>
+{
+  "deploymentId": "mainnet/42220/FPMM:v<VERSION>",
+  "action": "show",
+  "tags": []
+}
