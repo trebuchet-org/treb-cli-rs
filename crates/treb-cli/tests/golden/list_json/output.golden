@@ -1,4 +1,4 @@
-$ treb list --json
+=== cmd 0: [list --json] ===
 [
   {
     "id": "mainnet/42220/FPMM:v<VERSION>",

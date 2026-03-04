@@ -1,4 +1,4 @@
-$ treb compose simple.yaml --dry-run --json
+=== cmd 0: [compose simple.yaml --dry-run --json] ===
 [
   {
     "step": 1,

@@ -1,2 +1,2 @@
-$ treb compose bad-dep.yaml --dry-run
+=== cmd 0: [compose bad-dep.yaml --dry-run] ===
 Error: invalid orchestration configuration: component 'token' depends on non-existent component 'nonexistent'

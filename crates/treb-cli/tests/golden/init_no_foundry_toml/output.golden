@@ -1,4 +1,4 @@
-$ treb init
+=== cmd 0: [init] ===
 Error: no foundry.toml found in <PROJECT_ROOT>
 
 treb requires a Foundry project. Run `forge init` first, then try `treb init` again.

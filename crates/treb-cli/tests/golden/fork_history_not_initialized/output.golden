@@ -1,4 +1,4 @@
-$ treb fork history
+=== cmd 0: [fork history] ===
 Error: project not initialized — .treb/ directory not found
 
 Run `treb init` first.

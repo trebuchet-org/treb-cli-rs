@@ -1,5 +1,6 @@
-$ treb gen-deploy Counter --proxy uups --output script/DeployCounter_uups.s.sol
+=== cmd 0: [gen-deploy Counter --proxy uups --output script/DeployCounter_uups.s.sol] ===
 Generated deploy script: script/DeployCounter_uups.s.sol
+
 
 --- script/DeployCounter_uups.s.sol ---
 // SPDX-License-Identifier: UNLICENSED

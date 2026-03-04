@@ -1,4 +1,4 @@
-$ treb fork enter --network mainnet
+=== cmd 0: [fork enter --network mainnet] ===
 Error: no RPC URL configured for network 'mainnet' in foundry.toml
 
 Add it under [rpc_endpoints] or pass --rpc-url to specify directly.

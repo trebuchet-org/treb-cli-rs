@@ -1,4 +1,4 @@
-$ treb fork status --json
+=== cmd 0: [fork status --json] ===
 [
   {
     "network": "mainnet",

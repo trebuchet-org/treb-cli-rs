@@ -1,2 +1,2 @@
-$ treb gen-deploy MathLib --proxy erc1967
+=== cmd 0: [gen-deploy MathLib --proxy erc1967] ===
 Error: libraries cannot be deployed behind proxies

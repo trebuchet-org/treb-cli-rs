@@ -1,4 +1,4 @@
-$ treb fork history --network mainnet
+=== cmd 0: [fork history --network mainnet] ===
 ┌─────────────────────────┬─────────┬─────────┬────────────────────────────┐
 │ Timestamp               ┆ Action  ┆ Network ┆ Details                    │
 ╞═════════════════════════╪═════════╪═════════╪════════════════════════════╡

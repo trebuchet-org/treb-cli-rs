@@ -1,4 +1,4 @@
-$ treb reset --yes
+=== cmd 0: [reset --yes] ===
 Reset complete.
   Deployments removed:         3
   Transactions removed:        2

@@ -1,4 +1,4 @@
-$ treb run script/Deploy.s.sol --network anvil-31337 --dry-run --non-interactive
+=== cmd 0: [run script/Deploy.s.sol --network anvil-31337 --dry-run --non-interactive] ===
 No files changed, compilation skipped
 [DRY RUN] No changes were written to the registry.
 

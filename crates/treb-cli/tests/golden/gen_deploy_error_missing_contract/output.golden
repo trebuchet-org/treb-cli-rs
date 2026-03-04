@@ -1,4 +1,4 @@
-$ treb gen-deploy NonExistentContract
+=== cmd 0: [gen-deploy NonExistentContract] ===
 Error: contract 'NonExistentContract' not found in compilation output.
 
 Available contracts: Counter, MathLib, SimpleContract

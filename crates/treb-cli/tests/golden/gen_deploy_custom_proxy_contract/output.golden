@@ -1,5 +1,6 @@
-$ treb gen-deploy Counter --proxy erc1967 --proxy-contract MyCustomProxy --output script/DeployCounter_custom_proxy.s.sol
+=== cmd 0: [gen-deploy Counter --proxy erc1967 --proxy-contract MyCustomProxy --output script/DeployCounter_custom_proxy.s.sol] ===
 Generated deploy script: script/DeployCounter_custom_proxy.s.sol
+
 
 --- script/DeployCounter_custom_proxy.s.sol ---
 // SPDX-License-Identifier: UNLICENSED

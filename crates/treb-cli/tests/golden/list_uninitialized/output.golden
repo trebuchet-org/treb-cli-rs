@@ -1,4 +1,4 @@
-$ treb list
+=== cmd 0: [list] ===
 Error: project not initialized — .treb/ directory not found in <PROJECT_ROOT>
 
 Run `treb init` first.

@@ -1,2 +1,2 @@
-$ treb fork restart --network mainnet
+=== cmd 0: [fork restart --network mainnet] ===
 Error: Anvil node for network 'mainnet' is not reachable at port 18545; cannot restart

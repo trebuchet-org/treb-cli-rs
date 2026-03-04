@@ -1,2 +1,2 @@
-$ treb prune --dry-run
+=== cmd 0: [prune --dry-run] ===
 Nothing to prune.

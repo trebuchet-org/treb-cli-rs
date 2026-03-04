@@ -1,2 +1,2 @@
-$ treb sync
+=== cmd 0: [sync] ===
 Error: no .treb/ registry found. Run `treb init` to initialize.

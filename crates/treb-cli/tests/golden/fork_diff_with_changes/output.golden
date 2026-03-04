@@ -1,4 +1,4 @@
-$ treb fork diff --network mainnet
+=== cmd 0: [fork diff --network mainnet] ===
 ┌─────────┬─────────────┬───────────┐
 │ Change  ┆ File        ┆ Key       │
 ╞═════════╪═════════════╪═══════════╡

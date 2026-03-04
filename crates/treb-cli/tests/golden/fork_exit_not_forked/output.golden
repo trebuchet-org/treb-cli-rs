@@ -1,2 +1,2 @@
-$ treb fork exit --network mainnet
+=== cmd 0: [fork exit --network mainnet] ===
 Error: network 'mainnet' is not in fork mode

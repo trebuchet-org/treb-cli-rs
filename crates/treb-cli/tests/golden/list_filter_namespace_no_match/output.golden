@@ -1,2 +1,2 @@
-$ treb list --namespace nonexistent
+=== cmd 0: [list --namespace nonexistent] ===
 No deployments found.

@@ -1,4 +1,4 @@
-$ treb migrate config --json
+=== cmd 0: [migrate config --json] ===
 {
   "status": "already_v2",
   "message": "treb.toml is already v2 format"

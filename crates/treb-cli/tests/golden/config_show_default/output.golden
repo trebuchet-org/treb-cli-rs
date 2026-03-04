@@ -1,4 +1,4 @@
-$ treb config show
+=== cmd 0: [config show] ===
     Namespace:  default
       Network:  not set
       Profile:  default

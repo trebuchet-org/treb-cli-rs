@@ -1,4 +1,4 @@
-$ treb show anything
+=== cmd 0: [show anything] ===
 Error: project not initialized — .treb/ directory not found in <PROJECT_ROOT>
 
 Run `treb init` first.

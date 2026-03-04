@@ -1,4 +1,4 @@
-$ treb run script/NonExistent.s.sol --network anvil-31337 --broadcast --non-interactive
+=== cmd 0: [run script/NonExistent.s.sol --network anvil-31337 --broadcast --non-interactive] ===
 Compiling and executing script/NonExistent.s.sol...
 Error: pipeline execution failed
 

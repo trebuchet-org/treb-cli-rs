@@ -1,4 +1,4 @@
-$ treb version --json
+=== cmd 0: [version --json] ===
 {
   "version": "0.1.0",
   "git_commit": "<SHORT_HASH>",

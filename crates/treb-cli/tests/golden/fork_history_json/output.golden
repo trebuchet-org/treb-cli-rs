@@ -1,4 +1,4 @@
-$ treb fork history --json
+=== cmd 0: [fork history --json] ===
 [
   {
     "action": "restart",

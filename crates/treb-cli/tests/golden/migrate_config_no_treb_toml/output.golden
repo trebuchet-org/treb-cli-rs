@@ -1,2 +1,2 @@
-$ treb migrate config
+=== cmd 0: [migrate config] ===
 Error: no treb.toml found in <PROJECT_ROOT>

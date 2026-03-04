@@ -146,7 +146,7 @@ pub fn run_integration_test(test: &IntegrationTest, ctx: &TestContext) {
 
     // 4. Test commands — collect output
     let mut output = String::new();
-    for cmd in &test.test_cmds {
+    for (i, cmd) in test.test_cmds.iter().enumerate() {
         let assertion = ctx.run(cmd);
         let stdout = String::from_utf8_lossy(&assertion.get_output().stdout).to_string();
         let stderr = String::from_utf8_lossy(&assertion.get_output().stderr).to_string();
@@ -157,13 +157,14 @@ pub fn run_integration_test(test: &IntegrationTest, ctx: &TestContext) {
             assertion.success();
         }
 
-        output.push_str(&format!("$ treb {}\n", cmd.join(" ")));
+        output.push_str(&format!("=== cmd {}: [{}] ===\n", i, cmd.join(" ")));
         if !stdout.is_empty() {
             output.push_str(&stdout);
         }
         if !stderr.is_empty() {
             output.push_str(&stderr);
         }
+        output.push('\n');
     }
 
     // 5. post_test hook

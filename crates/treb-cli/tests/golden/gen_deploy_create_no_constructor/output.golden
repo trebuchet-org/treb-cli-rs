@@ -1,5 +1,6 @@
-$ treb gen-deploy SimpleContract --strategy create --output script/DeploySimpleContract.s.sol
+=== cmd 0: [gen-deploy SimpleContract --strategy create --output script/DeploySimpleContract.s.sol] ===
 Generated deploy script: script/DeploySimpleContract.s.sol
+
 
 --- script/DeploySimpleContract.s.sol ---
 // SPDX-License-Identifier: UNLICENSED

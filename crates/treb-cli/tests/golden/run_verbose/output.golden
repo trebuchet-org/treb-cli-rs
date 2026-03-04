@@ -1,4 +1,4 @@
-$ treb run script/Deploy.s.sol --network anvil-31337 --broadcast --non-interactive --verbose
+=== cmd 0: [run script/Deploy.s.sol --network anvil-31337 --broadcast --non-interactive --verbose] ===
 No files changed, compilation skipped
 ┌──────────┬────────────────────────────────────────────┬───────────┬───────────┬───────┐
 │ Contract ┆ Address                                    ┆ Type      ┆ Namespace ┆ Chain │
@@ -14,6 +14,7 @@ Sender [anvil]: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
 Compiling and executing script/Deploy.s.sol...
 Execution complete.
 Result: 1 deployment(s), 1 transaction(s), 0 skipped
+
 
 --- .treb/deployments.json ---
 {

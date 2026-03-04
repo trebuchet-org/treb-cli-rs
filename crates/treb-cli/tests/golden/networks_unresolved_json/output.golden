@@ -1,4 +1,4 @@
-$ treb networks --json
+=== cmd 0: [networks --json] ===
 [
   {
     "name": "mainnet",

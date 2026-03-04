@@ -1,4 +1,4 @@
-$ treb compose simple.yaml --dry-run
+=== cmd 0: [compose simple.yaml --dry-run] ===
 
 Orchestrating simple-deploy
 Execution plan: 2 components

@@ -1,4 +1,4 @@
-$ treb compose diamond.yaml --dry-run
+=== cmd 0: [compose diamond.yaml --dry-run] ===
 
 Orchestrating diamond-deploy
 Execution plan: 4 components

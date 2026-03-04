@@ -1,4 +1,4 @@
-$ treb config show --json
+=== cmd 0: [config show --json] ===
 {
   "namespace": "default",
   "network": null,

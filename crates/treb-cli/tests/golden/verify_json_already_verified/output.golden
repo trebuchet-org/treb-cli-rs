@@ -1,4 +1,4 @@
-$ treb verify dep-verified --json
+=== cmd 0: [verify dep-verified --json] ===
 {
   "deploymentId": "dep-verified",
   "contractName": "TestContract",

@@ -1,4 +1,4 @@
-$ treb fork diff --network mainnet --json
+=== cmd 0: [fork diff --network mainnet --json] ===
 {
   "network": "mainnet",
   "changes": [

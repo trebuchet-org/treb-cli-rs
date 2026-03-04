@@ -1,4 +1,4 @@
-$ treb show mainnet/42220/FPMMFactory:v<VERSION>
+=== cmd 0: [show mainnet/42220/FPMMFactory:v<VERSION>] ===
 ── Identity ──
        ID:  mainnet/42220/FPMMFactory:v<VERSION>
  Contract:  FPMMFactory

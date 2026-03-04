@@ -1,4 +1,4 @@
-$ treb reset --yes --json
+=== cmd 0: [reset --yes --json] ===
 {
   "removedDeployments": 3,
   "removedTransactions": 2,

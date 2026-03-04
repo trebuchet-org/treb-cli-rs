@@ -1,6 +1,7 @@
-$ treb init
+=== cmd 0: [init] ===
 Initialized treb project at <PROJECT_ROOT>/.treb
 Run `treb config show` to view your configuration.
+
 
 --- .treb/config.local.json ---
 {

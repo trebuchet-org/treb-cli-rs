@@ -1,2 +1,2 @@
-$ treb migrate registry
+=== cmd 0: [migrate registry] ===
 Registry is up to date (version 2).

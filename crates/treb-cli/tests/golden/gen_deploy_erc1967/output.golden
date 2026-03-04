@@ -1,5 +1,6 @@
-$ treb gen-deploy Counter --proxy erc1967 --output script/DeployCounter_erc1967.s.sol
+=== cmd 0: [gen-deploy Counter --proxy erc1967 --output script/DeployCounter_erc1967.s.sol] ===
 Generated deploy script: script/DeployCounter_erc1967.s.sol
+
 
 --- script/DeployCounter_erc1967.s.sol ---
 // SPDX-License-Identifier: UNLICENSED

@@ -1,2 +1,2 @@
-$ treb fork restart --network mainnet
+=== cmd 0: [fork restart --network mainnet] ===
 Error: network 'mainnet' is not in fork mode

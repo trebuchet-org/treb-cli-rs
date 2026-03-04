@@ -1,2 +1,2 @@
-$ treb migrate registry --dry-run
+=== cmd 0: [migrate registry --dry-run] ===
 Registry is up to date (version 2).

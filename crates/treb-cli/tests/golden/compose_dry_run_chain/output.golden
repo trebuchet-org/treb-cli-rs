@@ -1,4 +1,4 @@
-$ treb compose chain.yaml --dry-run
+=== cmd 0: [compose chain.yaml --dry-run] ===
 
 Orchestrating chain-deploy
 Execution plan: 3 components

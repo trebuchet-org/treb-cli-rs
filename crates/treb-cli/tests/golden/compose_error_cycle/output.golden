@@ -1,2 +1,2 @@
-$ treb compose cycle.yaml --dry-run
+=== cmd 0: [compose cycle.yaml --dry-run] ===
 Error: circular dependency detected involving components: [alpha, beta, gamma]

@@ -1,4 +1,4 @@
-$ treb migrate config --dry-run
+=== cmd 0: [migrate config --dry-run] ===
 [accounts.deployer]
 type = "private_key"
 address = "0xDeployerAddr"

@@ -1,4 +1,4 @@
-$ treb sync --json
+=== cmd 0: [sync --json] ===
 {
   "synced": 0,
   "updated": 0,

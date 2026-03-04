@@ -1,2 +1,2 @@
-$ treb verify --all
+=== cmd 0: [verify --all] ===
 No unverified deployments found.

@@ -1,4 +1,4 @@
-$ treb list --contract FPMM
+=== cmd 0: [list --contract FPMM] ===
 ┌──────┬────────┬───────────┬───────┬───────────┬───────────────┬──────────────┐
 │ Name ┆ Label  ┆ Namespace ┆ Chain ┆ Type      ┆ Address       ┆ Verification │
 ╞══════╪════════╪═══════════╪═══════╪═══════════╪═══════════════╪══════════════╡

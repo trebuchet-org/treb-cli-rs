@@ -1,4 +1,4 @@
-$ treb gen-deploy Counter --json
+=== cmd 0: [gen-deploy Counter --json] ===
 {
   "contract_name": "Counter",
   "strategy": "create",

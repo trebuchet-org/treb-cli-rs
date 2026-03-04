@@ -1,2 +1,2 @@
-$ treb fork revert --network mainnet --all
+=== cmd 0: [fork revert --network mainnet --all] ===
 No active forks to revert.

@@ -1,2 +1,2 @@
-$ treb compose nonexistent.yaml --dry-run
+=== cmd 0: [compose nonexistent.yaml --dry-run] ===
 Error: compose file not found: nonexistent.yaml

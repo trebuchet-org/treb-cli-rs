@@ -1,4 +1,4 @@
-$ treb run script/Deploy.s.sol --network anvil-31337 --sig nonexistent() --broadcast --non-interactive
+=== cmd 0: [run script/Deploy.s.sol --network anvil-31337 --sig nonexistent() --broadcast --non-interactive] ===
 No files changed, compilation skipped
 Compiling and executing script/Deploy.s.sol...
 Error: pipeline execution failed

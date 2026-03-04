@@ -1,2 +1,2 @@
-$ treb tag --remove v3-release mainnet/42220/FPMM:v<VERSION>
+=== cmd 0: [tag --remove v3-release mainnet/42220/FPMM:v<VERSION>] ===
 Removed tag 'v3-release' from 'mainnet/42220/FPMM:v<VERSION>'
