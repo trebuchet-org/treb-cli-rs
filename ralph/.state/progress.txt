@@ -46,3 +46,17 @@ Started: Wed Mar  4 12:57:44 AM CET 2026
   - `AnvilInstance::snapshot()` returns `U256`, `revert()` returns `bool` — false means snapshot ID not found
   - EVM snapshot revert is destructive (consumes the snapshot) — must re-snapshot after revert for pool reuse
 ---
+
+## 2026-03-04 - P3-US-004
+- Implemented `clean_workspace(workdir: &Path)` standalone function in `framework/cleanup.rs`
+- Removes `.treb/`, `broadcast/`, `cache/`, `out/` directories entirely
+- Cleans `script/deploy/` contents but preserves `.gitkeep`
+- Recreates `.treb/` as empty directory after removal
+- Missing directories silently skipped (best-effort cleanup)
+- 4 unit tests: artifact removal, source/config preservation, gitkeep preservation, missing dirs
+- Files changed: `crates/treb-cli/tests/framework/cleanup.rs` (new), `crates/treb-cli/tests/framework/mod.rs` (registered module)
+- **Learnings for future iterations:**
+  - `clean_workspace` is a standalone function (not a method) consistent with snapshot utilities pattern
+  - REMOVE_DIRS constant makes it easy to extend the list of cleaned directories
+  - `script/deploy/` cleanup iterates entries and skips `.gitkeep` by filename match
+---
