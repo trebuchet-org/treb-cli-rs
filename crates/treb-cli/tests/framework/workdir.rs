@@ -7,6 +7,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// The default fixture name used by integration tests.
+pub const DEFAULT_FIXTURE: &str = "project";
+
 /// Items that are symlinked (immutable deps — never modified by tests).
 const SYMLINK_ITEMS: &[&str] = &["lib", "test", ".gitignore", "remappings.txt"];
 
