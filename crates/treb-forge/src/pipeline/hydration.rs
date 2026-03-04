@@ -93,7 +93,7 @@ pub fn hydrate_deployment(
 
     let artifact = match &extracted.artifact_match {
         Some(am) => ArtifactInfo {
-            path: am.artifact_id.path.to_string_lossy().to_string(),
+            path: am.artifact_id.source.to_string_lossy().to_string(),
             compiler_version: String::new(),
             bytecode_hash: b256_to_hex(extracted.bytecode_hash),
             script_path: context.config.script_path.clone(),
@@ -525,7 +525,7 @@ mod tests {
         extracted.artifact_match = Some(artifact_match);
 
         let deployment = hydrate_deployment(&extracted, None, &ctx);
-        assert_eq!(deployment.artifact.path, "out/Counter.sol/Counter.json");
+        assert_eq!(deployment.artifact.path, "src/Counter.sol");
     }
 
     #[test]

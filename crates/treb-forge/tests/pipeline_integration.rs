@@ -213,7 +213,7 @@ fn transaction_linking_deployments_to_transactions() {
     let (_dir, mut registry) = init_registry();
 
     let tx_id = b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-    let tx_id_hex = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let tx_id_hex = "tx-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
     // Create two deployments sharing the same transaction
     let extracted1 = make_extracted_create(
