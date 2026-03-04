@@ -324,4 +324,40 @@ mod tests {
         let index = store.load().unwrap();
         assert_eq!(index, LookupIndex::default());
     }
+
+    #[test]
+    fn build_indexes_both_id_formats() {
+        let mut deployments = HashMap::new();
+        // Go-compatible: no label → ID has no colon
+        deployments.insert(
+            "default/31337/Counter".to_string(),
+            make_deployment("default/31337/Counter", "Counter", "0xAAA", None),
+        );
+        // With label → ID has colon
+        deployments.insert(
+            "default/31337/Counter:v2".to_string(),
+            make_deployment("default/31337/Counter:v2", "Counter", "0xBBB", None),
+        );
+        // Old-style: label equals contract name
+        deployments.insert(
+            "default/31337/Token:Token".to_string(),
+            make_deployment("default/31337/Token:Token", "Token", "0xCCC", None),
+        );
+
+        let index = build_lookup_index(&deployments);
+
+        // Both Counter deployments indexed under "counter"
+        let counter_ids = index.find_by_name("Counter").unwrap();
+        assert_eq!(counter_ids.len(), 2);
+        assert!(counter_ids.contains(&"default/31337/Counter".to_string()));
+        assert!(counter_ids.contains(&"default/31337/Counter:v2".to_string()));
+
+        // Token indexed under "token"
+        let token_ids = index.find_by_name("Token").unwrap();
+        assert_eq!(token_ids.len(), 1);
+        assert!(token_ids.contains(&"default/31337/Token:Token".to_string()));
+
+        // All 3 addresses indexed
+        assert_eq!(index.by_address.len(), 3);
+    }
 }

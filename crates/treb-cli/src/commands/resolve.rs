@@ -304,4 +304,133 @@ mod tests {
         assert!(err.contains("no deployment found"));
         assert!(err.contains("treb list"));
     }
+
+    // ── Go-compatible ID format (no label) tests ────────────────────────
+
+    fn setup_registry_mixed_ids() -> (TempDir, Registry) {
+        let tmp = TempDir::new().unwrap();
+        let mut registry = Registry::init(tmp.path()).unwrap();
+
+        let deployments = vec![
+            // New Go-compatible format: no label → no colon in ID
+            make_deployment(
+                "default/31337/Counter",
+                "default",
+                31337,
+                "Counter",
+                "",
+                "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            ),
+            // With label → colon in ID
+            make_deployment(
+                "default/31337/Counter:v2",
+                "default",
+                31337,
+                "Counter",
+                "v2",
+                "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+            ),
+            // Old Rust-style ID where label equals contract name
+            make_deployment(
+                "default/31337/Token:Token",
+                "default",
+                31337,
+                "Token",
+                "Token",
+                "0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+            ),
+        ];
+
+        for d in deployments {
+            registry.insert_deployment(d).unwrap();
+        }
+
+        (tmp, registry)
+    }
+
+    #[test]
+    fn resolve_no_label_by_exact_id() {
+        let (_tmp, registry) = setup_registry_mixed_ids();
+        let lookup = registry.load_lookup_index().unwrap();
+        let result = resolve_deployment("default/31337/Counter", &registry, &lookup);
+        assert!(result.is_ok());
+        let d = result.unwrap();
+        assert_eq!(d.id, "default/31337/Counter");
+        assert_eq!(d.label, "");
+    }
+
+    #[test]
+    fn resolve_with_label_by_exact_id() {
+        let (_tmp, registry) = setup_registry_mixed_ids();
+        let lookup = registry.load_lookup_index().unwrap();
+        let result = resolve_deployment("default/31337/Counter:v2", &registry, &lookup);
+        assert!(result.is_ok());
+        let d = result.unwrap();
+        assert_eq!(d.id, "default/31337/Counter:v2");
+        assert_eq!(d.label, "v2");
+    }
+
+    #[test]
+    fn resolve_name_label_query_filters_correctly() {
+        let (_tmp, registry) = setup_registry_mixed_ids();
+        let lookup = registry.load_lookup_index().unwrap();
+        // "Counter:v2" → strategy 3 splits on ':', finds by name "Counter", filters label "v2"
+        let result = resolve_deployment("Counter:v2", &registry, &lookup);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().id, "default/31337/Counter:v2");
+    }
+
+    #[test]
+    fn resolve_name_only_ambiguous_when_both_formats_exist() {
+        let (_tmp, registry) = setup_registry_mixed_ids();
+        let lookup = registry.load_lookup_index().unwrap();
+        // "Counter" → strategy 5 → finds both Counter (no label) and Counter:v2
+        let result = resolve_deployment("Counter", &registry, &lookup);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("ambiguous"));
+    }
+
+    #[test]
+    fn resolve_by_address_with_no_label_id() {
+        let (_tmp, registry) = setup_registry_mixed_ids();
+        let lookup = registry.load_lookup_index().unwrap();
+        let result = resolve_deployment(
+            "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            &registry,
+            &lookup,
+        );
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().id, "default/31337/Counter");
+    }
+
+    #[test]
+    fn resolve_old_style_id_with_label_equals_name() {
+        let (_tmp, registry) = setup_registry_mixed_ids();
+        let lookup = registry.load_lookup_index().unwrap();
+        // Old-style ID where label == contract name doesn't crash
+        let result = resolve_deployment("default/31337/Token:Token", &registry, &lookup);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().id, "default/31337/Token:Token");
+    }
+
+    #[test]
+    fn resolve_old_style_by_name_label_query() {
+        let (_tmp, registry) = setup_registry_mixed_ids();
+        let lookup = registry.load_lookup_index().unwrap();
+        // "Token:Token" → strategy 3 → name="Token", label="Token"
+        let result = resolve_deployment("Token:Token", &registry, &lookup);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().id, "default/31337/Token:Token");
+    }
+
+    #[test]
+    fn resolve_unique_name_returns_single() {
+        let (_tmp, registry) = setup_registry_mixed_ids();
+        let lookup = registry.load_lookup_index().unwrap();
+        // "Token" → strategy 5 → only one Token deployment
+        let result = resolve_deployment("Token", &registry, &lookup);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().id, "default/31337/Token:Token");
+    }
 }
