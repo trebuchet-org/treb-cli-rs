@@ -78,7 +78,7 @@
         "cargo clippy --workspace passes with no warnings"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -95,7 +95,7 @@
         "cargo clippy --workspace passes with no warnings"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -116,7 +116,7 @@
         "cargo clippy --workspace passes with no warnings"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]

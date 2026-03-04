@@ -7,6 +7,8 @@ Started: Wed Mar  4 05:27:51 AM CET 2026
 - The `regex` crate does NOT support look-behind; use capture groups with alternation instead (e.g., `(prune|reset)-(\d{10,13})`)
 - For prune/reset/migrate golden tests, seed registry data via `post_setup_hook` using `Registry::open()` + `insert_deployment()`/`insert_transaction()` directly
 - `compose-project` fixture is empty (just `.gitkeep`) — use for tests that need no foundry.toml
+- To test "no .treb/" error path, use `pre_setup_hook` on `minimal-project` to `remove_dir_all(".treb")` since TestWorkdir auto-creates it
+- ALL JSON output structs must use `#[serde(rename_all = "camelCase")]` — this is the project-wide convention for CLI JSON output
 ---
 
 ## 2026-03-04 - P9-US-001
@@ -48,4 +50,49 @@ Started: Wed Mar  4 05:27:51 AM CET 2026
   - `migrate registry` on a freshly-initialized project always says "up to date" since `treb init` creates registry at REGISTRY_VERSION
   - The `--dry-run` flag for `migrate registry` only differs from non-dry-run when registry version < REGISTRY_VERSION; both show same "up to date" message otherwise
   - `serialize_treb_config_v2` includes an empty `[fork]` section in output even when fork config is default
+---
+
+## 2026-03-04 - P9-US-004
+- Implemented 6 golden-file integration tests for `treb verify`: verify_already_verified, verify_all_none_unverified, verify_json_already_verified, verify_error_unknown_verifier, verify_uninitialized, verify_no_foundry_project
+- Files changed:
+  - `crates/treb-cli/tests/integration_verify.rs` (new)
+  - `crates/treb-cli/tests/golden/verify_*/output.golden` (6 new golden files)
+- **Learnings for future iterations:**
+  - Verify command validates verifier name BEFORE checking foundry.toml/.treb — so unknown verifier errors fire even on uninitialized projects
+  - For "no .treb/" error path, use `pre_setup_hook` to delete `.treb/` directory (which TestWorkdir auto-creates) on `minimal-project` fixture
+  - `compose-project` fixture (no foundry.toml) triggers "no foundry.toml" error path
+  - Already-verified single deployment: text mode outputs to stderr only, JSON mode outputs to stdout only — no cross-contamination
+  - `VerifyOutputJson` uses `#[serde(rename_all = "camelCase")]` — field names: deploymentId, contractName, chainId, explorerUrl, verifiedAt
+  - Verify's `--all` batch path with empty/all-verified registry prints "No unverified deployments found." to stderr
+---
+
+## 2026-03-04 - P9-US-005
+- Implemented 5 golden-file integration tests for `treb sync`: sync_no_safe_txs, sync_no_safe_txs_network_filter, sync_json_empty, sync_uninitialized, sync_no_foundry_project
+- Files changed:
+  - `crates/treb-cli/tests/integration_sync.rs` (new)
+  - `crates/treb-cli/tests/golden/sync_*/output.golden` (5 new golden files)
+- **Learnings for future iterations:**
+  - Sync command tests are simpler than other commands — no registry seeding needed for empty-state paths
+  - Sync's `SyncOutputJson` now uses camelCase fields (synced, updated, newlyExecuted, removed, errors) — fixed in P9-US-006
+  - Sync's `--network` filter accepts both numeric chain IDs and named chains (e.g., "mainnet") via alloy-chains
+  - Error messages differ per command: sync uses `anyhow::bail!()` directly while verify has custom error formatting
+---
+
+## 2026-03-04 - P9-US-006
+- Reviewed all golden files from P9-US-001 through P9-US-005 against Go CLI output
+- Fixed JSON field naming inconsistency: added `#[serde(rename_all = "camelCase")]` to `ResetResult`, `SyncOutputJson`, and `PruneResult` structs
+- Regenerated golden files `reset_json/output.golden` and `sync_json_empty/output.golden` with camelCase field names
+- Updated unit test `sync_output_json_serialization` and integration test `sync_with_empty_registry_succeeds` for camelCase
+- Files changed:
+  - `crates/treb-cli/src/commands/prune.rs` (added camelCase to PruneResult)
+  - `crates/treb-cli/src/commands/reset.rs` (added camelCase to ResetResult)
+  - `crates/treb-cli/src/commands/sync.rs` (added camelCase to SyncOutputJson, updated unit test)
+  - `crates/treb-cli/tests/golden/reset_json/output.golden` (regenerated)
+  - `crates/treb-cli/tests/golden/sync_json_empty/output.golden` (regenerated)
+  - `crates/treb-cli/tests/safe_integration.rs` (updated field name assertion)
+- **Learnings for future iterations:**
+  - ALL JSON output structs in the CLI should use `#[serde(rename_all = "camelCase")]` for consistency
+  - When adding new `--json` output structs, always check existing patterns for field naming convention
+  - The Go CLI uses fundamentally different output format (emojis, colors, bullet points) — Rust CLI uses clean tables/text; "parity" means functional equivalence, not visual identity
+  - EpochNormalizer is properly shared in `framework/normalizer.rs` and used by prune, reset, and migrate test files
 ---

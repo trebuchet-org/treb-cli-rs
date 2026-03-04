@@ -277,6 +277,7 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
 
     if args.json {
         #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
         struct PruneResult<'a> {
             removed: &'a [PruneCandidate],
             backup_path: String,

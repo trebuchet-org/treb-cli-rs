@@ -256,7 +256,7 @@ fn sync_with_empty_registry_succeeds() {
 
     assert_eq!(json["synced"], 0);
     assert_eq!(json["updated"], 0);
-    assert_eq!(json["newly_executed"], 0);
+    assert_eq!(json["newlyExecuted"], 0);
 }
 
 #[test]

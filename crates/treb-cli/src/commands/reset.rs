@@ -155,6 +155,7 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
 
     if args.json {
         #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
         struct ResetResult {
             removed_deployments: usize,
             removed_transactions: usize,

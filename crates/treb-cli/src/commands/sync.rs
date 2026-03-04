@@ -14,6 +14,7 @@ use crate::output;
 // ── JSON output types ───────────────────────────────────────────────────
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct SyncOutputJson {
     synced: usize,
     updated: usize,
@@ -453,7 +454,7 @@ mod tests {
         let json = serde_json::to_string(&output).unwrap();
         assert!(json.contains("\"synced\":5"));
         assert!(json.contains("\"updated\":3"));
-        assert!(json.contains("\"newly_executed\":1"));
+        assert!(json.contains("\"newlyExecuted\":1"));
         assert!(json.contains("\"removed\":0"));
         assert!(json.contains("some error"));
     }

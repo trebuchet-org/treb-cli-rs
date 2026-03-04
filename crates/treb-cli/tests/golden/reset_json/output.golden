@@ -1,8 +1,8 @@
 $ treb reset --yes --json
 {
-  "removed_deployments": 3,
-  "removed_transactions": 2,
-  "removed_safe_transactions": 2,
-  "removed_governor_proposals": 2,
-  "backup_path": "<PROJECT_ROOT>/.treb/backups/reset-<EPOCH>"
+  "removedDeployments": 3,
+  "removedTransactions": 2,
+  "removedSafeTransactions": 2,
+  "removedGovernorProposals": 2,
+  "backupPath": "<PROJECT_ROOT>/.treb/backups/reset-<EPOCH>"
 }
