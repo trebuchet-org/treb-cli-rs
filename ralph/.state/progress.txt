@@ -147,3 +147,21 @@ Started: Tue Mar  4 2026
   - For tests needing pre-existing state (like a tag already added), modify deployments.json directly in post_setup_hook rather than chaining CLI commands
   - TestWorkdir auto-creates `.treb/` — uninitialized tests must use `pre_setup_hook` to `remove_dir_all(ctx.treb_dir())` (same pattern as list/show/config uninitialized tests)
 ---
+
+## 2026-03-04 - P6-US-006
+- Reviewed all 26 golden files (list: 9, show: 7, tag: 10) — all correct, no output format discrepancies
+- Fixed 13 clippy warnings across 8 files:
+  - `treb-core/src/types/fork.rs`: derive Default instead of manual impl
+  - `treb-registry/src/store/governor_proposals.rs`: sort_by_key with Reverse
+  - `treb-forge/src/pipeline/orchestrator.rs`: is_some_and instead of map_or(false, ..)
+  - `treb-cli/src/ui/selector.rs`: elide unnecessary lifetime
+  - `treb-cli/src/ui/color.rs`: #[allow(dead_code)] for palette constants
+  - `treb-cli/src/commands/fork.rs`: is_none_or instead of map_or(true, ..)
+  - `treb-cli/src/commands/gen_deploy.rs`: repeat_n instead of repeat().take()
+  - `treb-cli/src/commands/reset.rs`: is_none_or instead of map_or(true, ..) (5 occurrences)
+- **Learnings for future iterations:**
+  - Prefer `is_some_and`/`is_none_or` over `map_or(false/true, ..)` — clippy flags the latter as `unnecessary_map_or`
+  - Prefer `repeat_n(val, n)` over `repeat(val).take(n)` — clippy flags the latter as `manual_repeat_n`
+  - Prefer `sort_by_key` over `sort_by` when comparing a single field
+  - Color palette constants are defined but unused — use `#[allow(dead_code)]` rather than prefixing with `_` for public API constants
+---
