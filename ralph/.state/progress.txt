@@ -99,3 +99,20 @@ Started: Tue Mar  4 2026
   - `list_filter_namespace_no_match` returns "No deployments found." (not an error) because the command succeeds with empty results
   - All fixture deployments are in namespace "mainnet", chain 42220, so namespace filter "mainnet" returns all 3
 ---
+
+## 2026-03-04 - P6-US-003
+- Created `integration_show.rs` with 7 golden-file integration tests: show_full_id, show_json, show_proxy, show_non_proxy, show_by_contract_name, show_nonexistent, show_uninitialized
+- All tests use `IntegrationTest` + `run_integration_test` + `TestContext::new("project")` + `PathNormalizer`
+- Tests needing deployments use `post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))`
+- show_proxy uses the `TransparentUpgradeableProxy:FPMMFactory` fixture (PROXY type with UUPS proxyInfo)
+- show_non_proxy uses `FPMMFactory:v3.0.0` (SINGLETON, no proxyInfo — confirms Proxy Info section absent)
+- show_by_contract_name resolves `FPMMFactory` by unique contract name (resolution strategy #5)
+- Error tests: show_nonexistent (full ID format, "no deployment found"), show_uninitialized (no .treb/, "treb init")
+- Golden files at `tests/golden/show_*/output.golden`
+- Files changed: `crates/treb-cli/tests/integration_show.rs` (new), 7 golden files
+- **Learnings for future iterations:**
+  - The `show` command has a 5-strategy resolution cascade (full ID → address → name:label → namespace/name → contract name)
+  - For proxy tests, use `TransparentUpgradeableProxy:FPMMFactory` — the only fixture deployment with `proxyInfo` set
+  - For unique contract name resolution, use `FPMMFactory` — `FPMM` is ambiguous (shared across proxy fixture label)
+  - The `show` command's `print_kv` aligns keys right-padded per section — each section independently calculates max key width
+---
