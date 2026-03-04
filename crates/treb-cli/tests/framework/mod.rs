@@ -4,3 +4,4 @@ pub mod anvil_node;
 pub mod context;
 pub mod normalizer;
 pub mod golden;
+pub mod snapshot;
