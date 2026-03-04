@@ -227,6 +227,74 @@ impl Normalizer for DebugNormalizer {
     }
 }
 
+/// Normalizes forge output that varies between environments:
+/// - CRLF → LF, standalone \r removal
+/// - Foundry nightly build warning removal
+/// - Compiler warning block collapse to `Compiler run successful!\n`
+/// - Triple+ blank lines → double blank line
+pub struct ForgeOutputNormalizer;
+
+impl Normalizer for ForgeOutputNormalizer {
+    fn normalize(&self, input: &str) -> String {
+        // Normalize line endings: \r\n → \n, then strip remaining standalone \r
+        let result = input.replace("\r\n", "\n");
+        let result = result.replace('\r', "");
+
+        // Remove Foundry nightly warning
+        let nightly =
+            Regex::new(r"(?m)^Warning: This is a nightly build of Foundry\.[^\n]*\n?").unwrap();
+        let result = nightly.replace_all(&result, "");
+
+        // Remove "Compiler run successful with warnings:" + all warning lines until a blank line
+        let compiler_warnings =
+            Regex::new(r"Compiler run successful with warnings:\n(?:[^\n]+\n)*?\n").unwrap();
+        let result = compiler_warnings.replace_all(&result, "Compiler run successful!\n");
+
+        // Clean up triple+ blank lines
+        let blank_lines = Regex::new(r"\n{3,}").unwrap();
+        blank_lines.replace_all(&result, "\n\n").into_owned()
+    }
+}
+
+/// Replaces all occurrences of a specific label string with `<LABEL>`.
+/// Unlike unit-struct normalizers, this accepts a label at construction time.
+pub struct LabelNormalizer {
+    label: String,
+}
+
+impl LabelNormalizer {
+    pub fn new(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+        }
+    }
+}
+
+impl Normalizer for LabelNormalizer {
+    fn normalize(&self, input: &str) -> String {
+        input.replace(&self.label, "<LABEL>")
+    }
+}
+
+/// Handles bytecode differences in legacy Solidity versions (< 0.8.0).
+/// Normalizes `bytecodeHash`, `initCodeHash` JSON fields and `Gas:` values.
+pub struct LegacySolidityNormalizer;
+
+impl Normalizer for LegacySolidityNormalizer {
+    fn normalize(&self, input: &str) -> String {
+        let bytecode =
+            Regex::new(r#""bytecodeHash":\s*"0x[a-fA-F0-9]{64}""#).unwrap();
+        let result = bytecode.replace_all(input, r#""bytecodeHash": "0x<BYTECODE_HASH>""#);
+
+        let init_code =
+            Regex::new(r#""initCodeHash":\s*"0x[a-fA-F0-9]{64}""#).unwrap();
+        let result = init_code.replace_all(&result, r#""initCodeHash": "0x<INIT_CODE_HASH>""#);
+
+        let gas = Regex::new(r"Gas:\s*\d+").unwrap();
+        gas.replace_all(&result, "Gas: <GAS_AMOUNT>").into_owned()
+    }
+}
+
 /// Replaces absolute paths with `<PROJECT_ROOT>` for stable golden files.
 /// Paths are sorted longest-first to avoid partial matches.
 pub struct PathNormalizer {
@@ -655,5 +723,82 @@ mod tests {
             n.normalize("deployed contract to mainnet"),
             "deployed contract to mainnet"
         );
+    }
+
+    // --- ForgeOutputNormalizer ---
+
+    #[test]
+    fn forge_output_normalizer_handles_all_patterns() {
+        let n = ForgeOutputNormalizer;
+
+        // CRLF → LF
+        assert_eq!(n.normalize("line1\r\nline2\r\n"), "line1\nline2\n");
+
+        // Standalone \r removal
+        assert_eq!(n.normalize("before\rafter"), "beforeafter");
+
+        // Foundry nightly warning removal
+        let input = "output\nWarning: This is a nightly build of Foundry. Use at your own risk.\nmore output\n";
+        assert_eq!(n.normalize(input), "output\nmore output\n");
+
+        // Compiler warning block collapse
+        let input = "before\nCompiler run successful with warnings:\nWarning: unused variable\nWarning: shadowed\n\nafter\n";
+        assert_eq!(n.normalize(input), "before\nCompiler run successful!\nafter\n");
+
+        // Triple+ blank lines → double blank line
+        assert_eq!(n.normalize("a\n\n\n\nb"), "a\n\nb");
+    }
+
+    #[test]
+    fn forge_output_normalizer_no_match() {
+        let n = ForgeOutputNormalizer;
+        let input = "clean output\nno warnings\n";
+        assert_eq!(n.normalize(input), input);
+    }
+
+    // --- LabelNormalizer ---
+
+    #[test]
+    fn label_normalizer_replaces_label() {
+        let n = LabelNormalizer::new("my-project");
+        assert_eq!(
+            n.normalize("deployed my-project to mainnet, my-project is live"),
+            "deployed <LABEL> to mainnet, <LABEL> is live"
+        );
+    }
+
+    #[test]
+    fn label_normalizer_no_match() {
+        let n = LabelNormalizer::new("my-project");
+        let input = "no label references here";
+        assert_eq!(n.normalize(input), input);
+    }
+
+    // --- LegacySolidityNormalizer ---
+
+    #[test]
+    fn legacy_solidity_normalizer_replaces_hashes_and_gas() {
+        let n = LegacySolidityNormalizer;
+        let hash = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+
+        assert_eq!(
+            n.normalize(&format!(r#""bytecodeHash": "{hash}""#)),
+            r#""bytecodeHash": "0x<BYTECODE_HASH>""#
+        );
+        assert_eq!(
+            n.normalize(&format!(r#""initCodeHash": "{hash}""#)),
+            r#""initCodeHash": "0x<INIT_CODE_HASH>""#
+        );
+        assert_eq!(
+            n.normalize("Gas: 616952"),
+            "Gas: <GAS_AMOUNT>"
+        );
+    }
+
+    #[test]
+    fn legacy_solidity_normalizer_no_match() {
+        let n = LegacySolidityNormalizer;
+        let input = r#""name": "MyContract""#;
+        assert_eq!(n.normalize(input), input);
     }
 }
