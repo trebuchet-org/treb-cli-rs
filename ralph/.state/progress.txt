@@ -1,5 +1,13 @@
-# Ralph Progress Log
-Started: Wed Mar  4 01:58:35 AM CET 2026
+# Ralph Progress Log — Phase 06
+Started: Tue Mar  4 2026
+
+## Codebase Patterns
+- Integration tests use `mod framework;` and `mod helpers;` to import shared test infrastructure
+- Golden file tests follow: `TestContext::new("project")` → `IntegrationTest::new(name)` → `run_integration_test(&test, &ctx)`
+- `seed_registry(ctx.path())` in a `post_setup_hook` seeds registry with 3 fixture deployments (FPMM, FPMMFactory, TransparentUpgradeableProxy)
+- `PathNormalizer::new(vec![ctx.path().display().to_string()])` normalizes temp dir paths to `<PROJECT_ROOT>`
+- Setup commands with `treb init` create `.treb/` directory before seed_registry can write deployments
+- `UPDATE_GOLDEN=1 cargo test` regenerates golden files from actual output
 ---
 
 ## 2026-03-04 - P5-US-001
@@ -65,4 +73,14 @@ Started: Wed Mar  4 01:58:35 AM CET 2026
   - `config set namespace <value>` + `config show` will fail if the namespace doesn't exist in treb.toml — the resolver validates namespaces. Only set `network` for round-trip tests, or ensure the namespace is defined.
   - The `config show` command resolves config from multiple sources (local, treb.toml, foundry.toml); the "project" fixture has a treb.toml with "default" namespace and an "anvil" sender
   - `setup()` can be chained multiple times for multi-step setup (e.g., init → set → remove)
+---
+
+## 2026-03-04 - P6-US-001
+- Implemented `seed_registry` helper in `crates/treb-cli/tests/helpers/mod.rs`
+- Function reads `deployments_map.json` fixture, writes to `.treb/deployments.json`, rebuilds lookup index
+- Files changed: `crates/treb-cli/tests/helpers/mod.rs` (new)
+- **Learnings for future iterations:**
+  - `treb-registry` is a regular dependency of `treb-cli`, so it's available in integration tests without adding to `[dev-dependencies]`
+  - The `seed_registry` helper takes `&Path` (project root) rather than `&TestContext` for flexibility — use `ctx.path()` in hooks
+  - `env!("CARGO_MANIFEST_DIR")` resolves to the crate root at compile time, giving a stable path to fixtures
 ---
