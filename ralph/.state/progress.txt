@@ -10,6 +10,7 @@ Started: Tue Mar  4 2026
 - New normalizers should NOT be added to default_chain() — use as extras via `.extra_normalizer()`
 - Forge-specific normalizers: `CompilerOutputNormalizer`, `GasNormalizer`, `BlockNumberNormalizer`, `DurationNormalizer`
 - Anvil-backed golden file tests use `#[tokio::test(flavor = "multi_thread")]` with `TestContext::new("project").with_anvil("anvil-31337").await`
+- `effective_rpc_url` in run.rs is the network NAME (e.g., "anvil-31337"), not the actual URL — resolve via `treb_config::load_foundry_config` + `rpc_endpoints` for RPC calls
 - Fixture Deploy.s.sol must emit `ContractDeployed` and `TransactionSimulated` events for `treb run` to detect deployments
 - `treb run` does NOT auto-detect raw CREATE ops — it only finds deployments via treb-specific events
 - Error-path tests (no Anvil needed) use sync `#[test]`; Anvil-backed tests use `#[tokio::test(flavor = "multi_thread")]`
@@ -62,4 +63,18 @@ Started: Tue Mar  4 2026
   - Error-path tests that don't need Anvil should use sync `#[test]` (not `#[tokio::test]`) per PRD requirement
   - Missing script errors manifest as "forge preprocessing failed" connection errors when no Anvil is running, since forge tries RPC before compilation
   - `pre_setup_hook` runs before setup commands — use it to delete `.treb/` and `foundry.toml` to simulate uninitialized state
+---
+
+## 2026-03-04 - P7-US-004
+- Fixed chain_id=0 bug in `treb run` — chain ID was defaulting to 0 because PipelineConfig.chain_id was never resolved
+- Added `resolve_rpc_url_for_chain_id()` helper to resolve network names to actual RPC URLs via foundry.toml
+- Added `fetch_chain_id()` helper to query `eth_chainId` from the RPC endpoint before pipeline execution
+- Regenerated 5 golden files to reflect correct chain ID (31337 for Anvil)
+- Reviewed all 8 golden files for output correctness — other output areas (table format, summary lines, error messages, JSON structure) were correct as-is
+- Files changed: `crates/treb-cli/src/commands/run.rs`, 5 golden files (`run_basic`, `run_basic_json`, `run_debug`, `run_dry_run`, `run_verbose`)
+- **Learnings for future iterations:**
+  - `effective_rpc_url` in run.rs is the network NAME (e.g., "anvil-31337"), not the actual URL — must resolve via `treb_config::load_foundry_config` + `rpc_endpoints` to get the actual URL for RPC calls
+  - `PipelineConfig.chain_id` defaults to 0 and is used throughout hydration (deployment IDs, transactions) — always set it before pipeline execution
+  - Transaction `hash` field is intentionally empty ("") because `TransactionSimulated` events don't carry blockchain tx hashes — status is SIMULATED, not EXECUTED
+  - Multiple `rpc_call`/`json_rpc_call` implementations exist across commands (register.rs, fork.rs, networks.rs) — could be consolidated in future refactoring
 ---

@@ -40,7 +40,7 @@
       "id": "P7-US-004",
       "title": "Run Command Output Format Fixes",
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
