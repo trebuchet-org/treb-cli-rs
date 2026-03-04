@@ -1,0 +1,25 @@
+$ treb run script/Deploy.s.sol --network anvil-31337 --broadcast --non-interactive --json
+No files changed, compilation skipped
+{
+  "success": true,
+  "dry_run": false,
+  "deployments": [
+    {
+      "id": "default/0/Counter:Counter",
+      "contract_name": "Counter",
+      "address": "<ADDRESS>",
+      "namespace": "default",
+      "chain_id": 0,
+      "deployment_type": "SINGLETON"
+    }
+  ],
+  "transactions": [
+    {
+      "id": "<HASH>",
+      "hash": "",
+      "status": "SIMULATED"
+    }
+  ],
+  "skipped": [],
+  "console_logs": []
+}

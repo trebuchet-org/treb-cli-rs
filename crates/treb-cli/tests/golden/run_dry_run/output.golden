@@ -1,0 +1,13 @@
+$ treb run script/Deploy.s.sol --network anvil-31337 --dry-run --non-interactive
+No files changed, compilation skipped
+[DRY RUN] No changes were written to the registry.
+
+┌──────────┬────────────────────────────────────────────┬───────────┬───────────┬───────┐
+│ Contract ┆ Address                                    ┆ Type      ┆ Namespace ┆ Chain │
+╞══════════╪════════════════════════════════════════════╪═══════════╪═══════════╪═══════╡
+│ Counter  ┆ <ADDRESS> ┆ SINGLETON ┆ default   ┆ 0     │
+└──────────┴────────────────────────────────────────────┴───────────┴───────────┴───────┘
+
+1 deployment would be recorded, 1 transaction
+Compiling and executing script/Deploy.s.sol...
+Execution complete.
