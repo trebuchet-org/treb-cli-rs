@@ -72,11 +72,11 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
         .list_deployments()
         .iter()
         .filter(|d| {
-            let chain_ok = chain_id_filter.map_or(true, |id| d.chain_id == id);
+            let chain_ok = chain_id_filter.is_none_or(|id| d.chain_id == id);
             let ns_ok = args
                 .namespace
                 .as_deref()
-                .map_or(true, |ns| d.namespace.eq_ignore_ascii_case(ns));
+                .is_none_or(|ns| d.namespace.eq_ignore_ascii_case(ns));
             chain_ok && ns_ok
         })
         .map(|d| d.id.clone())
@@ -85,21 +85,21 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
     let transactions_to_remove: Vec<String> = registry
         .list_transactions()
         .iter()
-        .filter(|t| chain_id_filter.map_or(true, |id| t.chain_id == id))
+        .filter(|t| chain_id_filter.is_none_or(|id| t.chain_id == id))
         .map(|t| t.id.clone())
         .collect();
 
     let safe_txs_to_remove: Vec<String> = registry
         .list_safe_transactions()
         .iter()
-        .filter(|t| chain_id_filter.map_or(true, |id| t.chain_id == id))
+        .filter(|t| chain_id_filter.is_none_or(|id| t.chain_id == id))
         .map(|t| t.safe_tx_hash.clone())
         .collect();
 
     let governor_proposals_to_remove: Vec<String> = registry
         .list_governor_proposals()
         .iter()
-        .filter(|p| chain_id_filter.map_or(true, |id| p.chain_id == id))
+        .filter(|p| chain_id_filter.is_none_or(|id| p.chain_id == id))
         .map(|p| p.proposal_id.clone())
         .collect();
 

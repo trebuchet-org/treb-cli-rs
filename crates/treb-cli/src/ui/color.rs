@@ -11,18 +11,23 @@ use owo_colors::Style;
 // Palette constants
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 /// Color/style for stage/section headings.
 pub const STAGE: Style = Style::new().cyan().bold();
 
+#[allow(dead_code)]
 /// Color/style for success messages.
 pub const SUCCESS: Style = Style::new().green().bold();
 
+#[allow(dead_code)]
 /// Color/style for warnings.
 pub const WARNING: Style = Style::new().yellow();
 
+#[allow(dead_code)]
 /// Color/style for errors.
 pub const ERROR: Style = Style::new().red().bold();
 
+#[allow(dead_code)]
 /// Color/style for muted/secondary text.
 pub const MUTED: Style = Style::new().dimmed();
 

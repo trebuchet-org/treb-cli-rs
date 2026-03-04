@@ -55,7 +55,7 @@ pub fn fuzzy_select_deployment<'a>(
 ///
 /// Returns `Ok(None)` when the list is empty or the user aborts.
 /// Returns `Err(TrebError::Cli(...))` when not running in a TTY.
-pub fn fuzzy_select_network<'a>(networks: &'a [String]) -> Result<Option<&'a str>> {
+pub fn fuzzy_select_network(networks: &[String]) -> Result<Option<&str>> {
     if networks.is_empty() {
         return Ok(None);
     }

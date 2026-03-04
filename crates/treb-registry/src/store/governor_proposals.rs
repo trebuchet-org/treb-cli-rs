@@ -82,7 +82,7 @@ impl GovernorProposalStore {
     /// List all governor proposals sorted by `proposed_at` (descending).
     pub fn list(&self) -> Vec<&GovernorProposal> {
         let mut entries: Vec<&GovernorProposal> = self.data.values().collect();
-        entries.sort_by(|a, b| b.proposed_at.cmp(&a.proposed_at));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.proposed_at));
         entries
     }
 

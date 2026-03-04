@@ -522,7 +522,7 @@ pub async fn run_history(network: Option<String>, json: bool) -> anyhow::Result<
         .data()
         .history
         .iter()
-        .filter(|e| network.as_deref().map_or(true, |n| e.network == n))
+        .filter(|e| network.as_deref().is_none_or(|n| e.network == n))
         .collect();
 
     if json {

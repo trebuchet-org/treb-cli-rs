@@ -147,13 +147,13 @@ impl RunPipeline {
             .context
             .deployer_sender
             .as_ref()
-            .map_or(false, |s| s.is_safe());
+            .is_some_and(|s| s.is_safe());
 
         let is_governor_sender = self
             .context
             .deployer_sender
             .as_ref()
-            .map_or(false, |s| s.is_governor());
+            .is_some_and(|s| s.is_governor());
 
         if is_safe_sender {
             // Populate safe_context on Transaction records linked to Safe batches

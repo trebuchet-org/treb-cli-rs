@@ -664,9 +664,7 @@ fn relative_import_path(from_file: &Path, to_file: &Path) -> String {
     let mut parts: Vec<&str> = Vec::new();
 
     // Go up from the source directory.
-    for _ in 0..(from_components.len() - common_len) {
-        parts.push("..");
-    }
+    parts.extend(std::iter::repeat_n("..", from_components.len() - common_len));
 
     // Then descend to the target.
     for comp in &to_components[common_len..] {

@@ -97,22 +97,13 @@ pub struct ForkHistoryEntry {
 // ---------------------------------------------------------------------------
 
 /// Top-level fork state persisted to `fork.json`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ForkState {
     /// Active forks keyed by network name.
     pub forks: HashMap<String, ForkEntry>,
     /// History of fork actions (most recent first).
     pub history: Vec<ForkHistoryEntry>,
-}
-
-impl Default for ForkState {
-    fn default() -> Self {
-        Self {
-            forks: HashMap::new(),
-            history: Vec::new(),
-        }
-    }
 }
 
 #[cfg(test)]
