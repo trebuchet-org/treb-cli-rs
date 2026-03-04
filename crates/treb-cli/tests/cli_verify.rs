@@ -17,11 +17,7 @@ const MINIMAL_FOUNDRY_TOML: &str = "[profile.default]\n";
 /// Helper: create a temp dir with foundry.toml and run `treb init`.
 fn init_project(tmp: &tempfile::TempDir) {
     fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
-    treb()
-        .arg("init")
-        .current_dir(tmp.path())
-        .assert()
-        .success();
+    treb().arg("init").current_dir(tmp.path()).assert().success();
 }
 
 /// Helper: create a temp dir with foundry.toml, run `treb init`, then insert
@@ -36,9 +32,7 @@ fn init_project_with_deployments(tmp: &tempfile::TempDir) {
     fs::write(tmp.path().join(".treb/deployments.json"), &fixture_json).unwrap();
 
     let registry = treb_registry::Registry::open(tmp.path()).expect("registry should open");
-    registry
-        .rebuild_lookup_index()
-        .expect("lookup index rebuild should succeed");
+    registry.rebuild_lookup_index().expect("lookup index rebuild should succeed");
 }
 
 /// Helper: create a project where ALL deployments have verification.status = VERIFIED.
@@ -59,9 +53,7 @@ fn init_project_with_verified_deployments(tmp: &tempfile::TempDir) {
     fs::write(&path, serde_json::to_string_pretty(&map).unwrap()).unwrap();
 
     let registry = treb_registry::Registry::open(tmp.path()).expect("registry should open");
-    registry
-        .rebuild_lookup_index()
-        .expect("lookup index rebuild should succeed");
+    registry.rebuild_lookup_index().expect("lookup index rebuild should succeed");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -70,23 +62,15 @@ fn init_project_with_verified_deployments(tmp: &tempfile::TempDir) {
 
 #[test]
 fn verify_help_shows_all_flags() {
-    let output = treb()
-        .args(["verify", "--help"])
-        .output()
-        .expect("failed to run treb verify --help");
+    let output =
+        treb().args(["verify", "--help"]).output().expect("failed to run treb verify --help");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(stdout.contains("--all"), "help should show --all");
     assert!(stdout.contains("--verifier"), "help should show --verifier");
-    assert!(
-        stdout.contains("--verifier-url"),
-        "help should show --verifier-url"
-    );
-    assert!(
-        stdout.contains("--verifier-api-key"),
-        "help should show --verifier-api-key"
-    );
+    assert!(stdout.contains("--verifier-url"), "help should show --verifier-url");
+    assert!(stdout.contains("--verifier-api-key"), "help should show --verifier-api-key");
     assert!(stdout.contains("--force"), "help should show --force");
     assert!(stdout.contains("--watch"), "help should show --watch");
     assert!(stdout.contains("--retries"), "help should show --retries");
@@ -125,9 +109,7 @@ fn verify_without_deployment_or_all_fails() {
         .current_dir(tmp.path())
         .assert()
         .failure()
-        .stderr(
-            predicate::str::contains("no deployment").or(predicate::str::contains("no TTY")),
-        );
+        .stderr(predicate::str::contains("no deployment").or(predicate::str::contains("no TTY")));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -161,10 +143,7 @@ fn verify_accepts_etherscan_verifier() {
         .unwrap();
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !stderr.contains("unknown verifier"),
-        "etherscan should be a valid verifier: {stderr}"
-    );
+    assert!(!stderr.contains("unknown verifier"), "etherscan should be a valid verifier: {stderr}");
 }
 
 #[test]
@@ -179,10 +158,7 @@ fn verify_accepts_sourcify_verifier() {
         .unwrap();
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !stderr.contains("unknown verifier"),
-        "sourcify should be a valid verifier: {stderr}"
-    );
+    assert!(!stderr.contains("unknown verifier"), "sourcify should be a valid verifier: {stderr}");
 }
 
 #[test]
@@ -213,14 +189,7 @@ fn verify_custom_retries_and_delay_accepted() {
     init_project_with_deployments(&tmp);
 
     let output = treb()
-        .args([
-            "verify",
-            "NonexistentContract",
-            "--retries",
-            "10",
-            "--delay",
-            "3",
-        ])
+        .args(["verify", "NonexistentContract", "--retries", "10", "--delay", "3"])
         .current_dir(tmp.path())
         .output()
         .unwrap();
@@ -313,11 +282,8 @@ fn verify_all_force_proceeds_with_reverification() {
     let tmp = tempfile::tempdir().unwrap();
     init_project_with_verified_deployments(&tmp);
 
-    let output = treb()
-        .args(["verify", "--all", "--force"])
-        .current_dir(tmp.path())
-        .output()
-        .unwrap();
+    let output =
+        treb().args(["verify", "--all", "--force"]).current_dir(tmp.path()).output().unwrap();
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     // With --force, the batch should attempt verification (not print noop).
@@ -326,8 +292,5 @@ fn verify_all_force_proceeds_with_reverification() {
         "--all --force should not print noop message: {stderr}"
     );
     // Should show progress messages indicating it tried to verify.
-    assert!(
-        stderr.contains("Verifying"),
-        "--all --force should attempt verification: {stderr}"
-    );
+    assert!(stderr.contains("Verifying"), "--all --force should attempt verification: {stderr}");
 }

@@ -10,22 +10,20 @@ use std::collections::HashMap;
 
 use chrono::Utc;
 use treb_core::types::{
-    ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, ProposalStatus,
-    SafeTxData, TransactionStatus, VerificationInfo, VerificationStatus,
+    ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, ProposalStatus, SafeTxData,
+    TransactionStatus, VerificationInfo, VerificationStatus,
 };
 use treb_registry::Registry;
 
-use framework::context::TestContext;
-use framework::integration_test::{run_integration_test, IntegrationTest};
-use framework::normalizer::{EpochNormalizer, PathNormalizer};
+use framework::{
+    context::TestContext,
+    integration_test::{IntegrationTest, run_integration_test},
+    normalizer::{EpochNormalizer, PathNormalizer},
+};
 
 // ── Fixture builders ─────────────────────────────────────────────────────
 
-fn make_deployment(
-    id: &str,
-    chain_id: u64,
-    namespace: &str,
-) -> treb_core::types::Deployment {
+fn make_deployment(id: &str, chain_id: u64, namespace: &str) -> treb_core::types::Deployment {
     let ts = Utc::now();
     treb_core::types::Deployment {
         id: id.to_string(),
@@ -65,10 +63,7 @@ fn make_deployment(
     }
 }
 
-fn make_transaction(
-    id: &str,
-    chain_id: u64,
-) -> treb_core::types::Transaction {
+fn make_transaction(id: &str, chain_id: u64) -> treb_core::types::Transaction {
     let ts = Utc::now();
     treb_core::types::Transaction {
         id: id.to_string(),
@@ -86,10 +81,7 @@ fn make_transaction(
     }
 }
 
-fn make_safe_transaction(
-    hash: &str,
-    chain_id: u64,
-) -> treb_core::types::SafeTransaction {
+fn make_safe_transaction(hash: &str, chain_id: u64) -> treb_core::types::SafeTransaction {
     let ts = Utc::now();
     treb_core::types::SafeTransaction {
         safe_tx_hash: hash.to_string(),
@@ -112,10 +104,7 @@ fn make_safe_transaction(
     }
 }
 
-fn make_governor_proposal(
-    id: &str,
-    chain_id: u64,
-) -> treb_core::types::GovernorProposal {
+fn make_governor_proposal(id: &str, chain_id: u64) -> treb_core::types::GovernorProposal {
     let ts = Utc::now();
     treb_core::types::GovernorProposal {
         proposal_id: id.to_string(),

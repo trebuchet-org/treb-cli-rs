@@ -3,13 +3,15 @@
 //! Wipes registry state with optional --network and --namespace scoping,
 //! creating a timestamped backup before any mutation.
 
-use std::env;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    env,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use clap::Args;
 use serde::Serialize;
-use treb_registry::{snapshot_registry, Registry, REGISTRY_DIR};
+use treb_registry::{REGISTRY_DIR, Registry, snapshot_registry};
 
 use crate::output;
 
@@ -45,15 +47,10 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
 
     if !cwd.join("foundry.toml").exists() {
-        bail!(
-            "no foundry.toml found in {}\n\nRun `forge init`, then `treb init`.",
-            cwd.display()
-        );
+        bail!("no foundry.toml found in {}\n\nRun `forge init`, then `treb init`.", cwd.display());
     }
     if !cwd.join(".treb").exists() {
-        bail!(
-            "project not initialized — .treb/ directory not found\n\nRun `treb init` first."
-        );
+        bail!("project not initialized — .treb/ directory not found\n\nRun `treb init` first.");
     }
 
     // Resolve chain ID filter.
@@ -73,10 +70,8 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
         .iter()
         .filter(|d| {
             let chain_ok = chain_id_filter.is_none_or(|id| d.chain_id == id);
-            let ns_ok = args
-                .namespace
-                .as_deref()
-                .is_none_or(|ns| d.namespace.eq_ignore_ascii_case(ns));
+            let ns_ok =
+                args.namespace.as_deref().is_none_or(|ns| d.namespace.eq_ignore_ascii_case(ns));
             chain_ok && ns_ok
         })
         .map(|d| d.id.clone())
@@ -130,10 +125,7 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
     }
 
     // Backup.
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
     let registry_dir = cwd.join(REGISTRY_DIR);
     let backup_dir = registry_dir.join(format!("backups/reset-{ts}"));
     snapshot_registry(&registry_dir, &backup_dir)
@@ -241,12 +233,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut registry = Registry::init(dir.path()).unwrap();
 
-        registry
-            .insert_deployment(make_deployment("dep-1", 1, "default"))
-            .unwrap();
-        registry
-            .insert_deployment(make_deployment("dep-2", 42220, "default"))
-            .unwrap();
+        registry.insert_deployment(make_deployment("dep-1", 1, "default")).unwrap();
+        registry.insert_deployment(make_deployment("dep-2", 42220, "default")).unwrap();
 
         // Simulate what run() does when chain_id_filter = Some(1)
         let to_remove: Vec<String> = registry
@@ -264,12 +252,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut registry = Registry::init(dir.path()).unwrap();
 
-        registry
-            .insert_deployment(make_deployment("dep-1", 1, "default"))
-            .unwrap();
-        registry
-            .insert_deployment(make_deployment("dep-2", 1, "staging"))
-            .unwrap();
+        registry.insert_deployment(make_deployment("dep-1", 1, "default")).unwrap();
+        registry.insert_deployment(make_deployment("dep-2", 1, "staging")).unwrap();
 
         let to_remove: Vec<String> = registry
             .list_deployments()
@@ -298,33 +282,22 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut registry = Registry::init(dir.path()).unwrap();
 
-        registry
-            .insert_deployment(make_deployment("dep-1", 1, "default"))
-            .unwrap();
-        registry
-            .insert_deployment(make_deployment("dep-2", 1, "staging"))
-            .unwrap();
+        registry.insert_deployment(make_deployment("dep-1", 1, "default")).unwrap();
+        registry.insert_deployment(make_deployment("dep-2", 1, "staging")).unwrap();
 
         // Verify lookup index is non-empty before reset.
         let index_before = registry.load_lookup_index().unwrap();
         assert!(!index_before.by_name.is_empty(), "lookup should be populated");
 
         // Simulate a full reset: remove all deployments.
-        let ids: Vec<String> = registry
-            .list_deployments()
-            .iter()
-            .map(|d| d.id.clone())
-            .collect();
+        let ids: Vec<String> = registry.list_deployments().iter().map(|d| d.id.clone()).collect();
         for id in ids {
             registry.remove_deployment(&id).unwrap();
         }
 
         // Lookup index should now be empty.
         let index_after = registry.load_lookup_index().unwrap();
-        assert!(
-            index_after.by_name.is_empty(),
-            "lookup.by_name should be empty after full reset"
-        );
+        assert!(index_after.by_name.is_empty(), "lookup.by_name should be empty after full reset");
         assert!(
             index_after.by_address.is_empty(),
             "lookup.by_address should be empty after full reset"

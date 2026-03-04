@@ -7,11 +7,13 @@ mod framework;
 
 use chrono::{TimeZone, Utc};
 use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
-use treb_registry::{ForkStateStore, DEPLOYMENTS_FILE, TRANSACTIONS_FILE};
+use treb_registry::{DEPLOYMENTS_FILE, ForkStateStore, TRANSACTIONS_FILE};
 
-use framework::context::TestContext;
-use framework::integration_test::{run_integration_test, IntegrationTest};
-use framework::normalizer::PathNormalizer;
+use framework::{
+    context::TestContext,
+    integration_test::{IntegrationTest, run_integration_test},
+    normalizer::PathNormalizer,
+};
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -278,11 +280,13 @@ fn seed_fork_diff_with_changes(project_root: &std::path::Path) {
     std::fs::create_dir_all(&snapshot_dir).unwrap();
 
     // Snapshot: original state
-    let snap_deployments = r#"{"Counter_1": {"address": "0xaaa"}, "Removed_2": {"address": "0xccc"}}"#;
+    let snap_deployments =
+        r#"{"Counter_1": {"address": "0xaaa"}, "Removed_2": {"address": "0xccc"}}"#;
     std::fs::write(snapshot_dir.join(DEPLOYMENTS_FILE), snap_deployments).unwrap();
 
     // Current: added Token_3, removed Removed_2
-    let curr_deployments = r#"{"Counter_1": {"address": "0xaaa"}, "Token_3": {"address": "0xbbb"}}"#;
+    let curr_deployments =
+        r#"{"Counter_1": {"address": "0xaaa"}, "Token_3": {"address": "0xbbb"}}"#;
     std::fs::write(treb_dir.join(DEPLOYMENTS_FILE), curr_deployments).unwrap();
 
     // Transactions: no changes (both match)

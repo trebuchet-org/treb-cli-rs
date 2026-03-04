@@ -3,14 +3,16 @@
 //! Scans the deployment registry for broken cross-references, reports prune
 //! candidates, and (in destructive mode) removes them with a timestamped backup.
 
-use std::env;
-use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    env,
+    path::Path,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use clap::Args;
 use serde::{Deserialize, Serialize};
-use treb_registry::{snapshot_registry, Registry, REGISTRY_DIR};
+use treb_registry::{REGISTRY_DIR, Registry, snapshot_registry};
 
 use crate::output;
 
@@ -108,8 +110,7 @@ pub fn find_prune_candidates(
         }
 
         // Flag deployments that point to a missing transaction.
-        if !dep.transaction_id.is_empty()
-            && registry.get_transaction(&dep.transaction_id).is_none()
+        if !dep.transaction_id.is_empty() && registry.get_transaction(&dep.transaction_id).is_none()
         {
             candidates.push(PruneCandidate {
                 id: dep.id.clone(),
@@ -175,10 +176,7 @@ pub fn find_prune_candidates(
 ///
 /// Returns the path to the backup directory.
 pub fn backup_registry(project_root: &Path) -> anyhow::Result<std::path::PathBuf> {
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
     let registry_dir = project_root.join(REGISTRY_DIR);
     let backup_dir = registry_dir.join(format!("backups/prune-{ts}"));
     snapshot_registry(&registry_dir, &backup_dir)
@@ -193,15 +191,10 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
 
     if !cwd.join("foundry.toml").exists() {
-        bail!(
-            "no foundry.toml found in {}\n\nRun `forge init`, then `treb init`.",
-            cwd.display()
-        );
+        bail!("no foundry.toml found in {}\n\nRun `forge init`, then `treb init`.", cwd.display());
     }
     if !cwd.join(".treb").exists() {
-        bail!(
-            "project not initialized — .treb/ directory not found\n\nRun `treb init` first."
-        );
+        bail!("project not initialized — .treb/ directory not found\n\nRun `treb init` first.");
     }
 
     // Resolve chain ID filter from --network argument.
@@ -236,7 +229,10 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
                 ]);
             }
             output::print_table(&table);
-            println!("\n{} prune candidate(s) found. Re-run without --dry-run to remove.", candidates.len());
+            println!(
+                "\n{} prune candidate(s) found. Re-run without --dry-run to remove.",
+                candidates.len()
+            );
         }
         return Ok(());
     }
@@ -266,8 +262,7 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
                     removed.push(c);
                 }
             }
-            PruneCandidateKind::BrokenDeploymentRef
-            | PruneCandidateKind::OrphanedPendingEntry => {
+            PruneCandidateKind::BrokenDeploymentRef | PruneCandidateKind::OrphanedPendingEntry => {
                 if registry.remove_transaction(&c.id).is_ok() {
                     removed.push(c);
                 }
@@ -396,9 +391,7 @@ mod tests {
                 TransactionStatus::Executed,
             ))
             .unwrap();
-        registry
-            .insert_deployment(make_deployment("dep-1", "tx-1", 1))
-            .unwrap();
+        registry.insert_deployment(make_deployment("dep-1", "tx-1", 1)).unwrap();
 
         let candidates = find_prune_candidates(&registry, None, false);
         assert!(candidates.is_empty(), "expected no candidates in a clean registry");
@@ -410,9 +403,7 @@ mod tests {
         let mut registry = Registry::init(dir.path()).unwrap();
 
         // dep-1 points to tx-MISSING which does not exist
-        registry
-            .insert_deployment(make_deployment("dep-1", "tx-MISSING", 1))
-            .unwrap();
+        registry.insert_deployment(make_deployment("dep-1", "tx-MISSING", 1)).unwrap();
 
         let candidates = find_prune_candidates(&registry, None, false);
         assert_eq!(candidates.len(), 1);
@@ -447,12 +438,8 @@ mod tests {
         let mut registry = Registry::init(dir.path()).unwrap();
 
         // Two broken deployments on different chains.
-        registry
-            .insert_deployment(make_deployment("dep-1", "tx-MISSING-1", 1))
-            .unwrap();
-        registry
-            .insert_deployment(make_deployment("dep-2", "tx-MISSING-2", 42220))
-            .unwrap();
+        registry.insert_deployment(make_deployment("dep-1", "tx-MISSING-1", 1)).unwrap();
+        registry.insert_deployment(make_deployment("dep-2", "tx-MISSING-2", 42220)).unwrap();
 
         // Filter to chain 1 — only dep-1 should appear.
         let candidates = find_prune_candidates(&registry, Some(1), false);
@@ -483,7 +470,12 @@ mod tests {
 
         // A pending transaction (no deployment refs)
         registry
-            .insert_transaction(make_transaction("tx-pending", vec![], 1, TransactionStatus::Queued))
+            .insert_transaction(make_transaction(
+                "tx-pending",
+                vec![],
+                1,
+                TransactionStatus::Queued,
+            ))
             .unwrap();
 
         let candidates_no_pending = find_prune_candidates(&registry, None, false);
@@ -500,9 +492,7 @@ mod tests {
         let mut registry = Registry::init(dir.path()).unwrap();
 
         // dep-1 points to tx-MISSING (broken transaction ref)
-        registry
-            .insert_deployment(make_deployment("dep-1", "tx-MISSING", 1))
-            .unwrap();
+        registry.insert_deployment(make_deployment("dep-1", "tx-MISSING", 1)).unwrap();
         // tx-1 references dep-MISSING (broken deployment ref)
         registry
             .insert_transaction(make_transaction(
@@ -531,10 +521,7 @@ mod tests {
 
         // After pruning, no candidates should remain.
         let after_candidates = find_prune_candidates(&registry, None, false);
-        assert!(
-            after_candidates.is_empty(),
-            "registry should be clean after destructive prune"
-        );
+        assert!(after_candidates.is_empty(), "registry should be clean after destructive prune");
     }
 
     #[test]
@@ -544,9 +531,7 @@ mod tests {
         std::fs::write(dir.path().join("foundry.toml"), "").unwrap();
         let mut registry = Registry::init(dir.path()).unwrap();
         // Insert something so registry files exist.
-        registry
-            .insert_deployment(make_deployment("dep-1", "tx-1", 1))
-            .unwrap();
+        registry.insert_deployment(make_deployment("dep-1", "tx-1", 1)).unwrap();
 
         let backup_path = backup_registry(dir.path()).unwrap();
         assert!(
@@ -566,9 +551,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut registry = Registry::init(dir.path()).unwrap();
 
-        registry
-            .insert_deployment(make_deployment("dep-1", "tx-MISSING", 1))
-            .unwrap();
+        registry.insert_deployment(make_deployment("dep-1", "tx-MISSING", 1)).unwrap();
 
         // dry-run: just find candidates, do not remove
         let candidates = find_prune_candidates(&registry, None, false);

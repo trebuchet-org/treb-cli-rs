@@ -2,8 +2,10 @@
 
 mod framework;
 
-use framework::context::TestContext;
-use framework::integration_test::{run_integration_test, IntegrationTest};
+use framework::{
+    context::TestContext,
+    integration_test::{IntegrationTest, run_integration_test},
+};
 
 /// foundry.toml with unresolved env var endpoints (no real HTTP calls needed).
 const FOUNDRY_TOML_UNRESOLVED: &str = r#"[profile.default]

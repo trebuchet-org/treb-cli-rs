@@ -1,12 +1,9 @@
 //! Atomic file I/O primitives and advisory file locking for the registry.
 
-use std::fs;
-use std::io::Write;
-use std::path::Path;
+use std::{fs, io::Write, path::Path};
 
 use fs2::FileExt;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Serialize, de::DeserializeOwned};
 use tempfile::NamedTempFile;
 use treb_core::error::TrebError;
 
@@ -16,9 +13,8 @@ use treb_core::error::TrebError;
 /// deserialization failures.
 pub fn read_json_file<T: DeserializeOwned>(path: &Path) -> Result<T, TrebError> {
     let contents = fs::read_to_string(path)?;
-    serde_json::from_str(&contents).map_err(|e| {
-        TrebError::Registry(format!("failed to parse {}: {e}", path.display()))
-    })
+    serde_json::from_str(&contents)
+        .map_err(|e| TrebError::Registry(format!("failed to parse {}: {e}", path.display())))
 }
 
 /// Read and deserialize a JSON file, returning `T::default()` if the file does
@@ -85,11 +81,7 @@ where
         fs::create_dir_all(parent)?;
     }
 
-    let file = fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)?;
+    let file = fs::OpenOptions::new().create(true).write(true).truncate(false).open(&lock_path)?;
 
     file.lock_exclusive()?;
     let _guard = FileLockGuard { file };
@@ -101,10 +93,12 @@ where
 mod tests {
     use super::*;
 
-    use std::collections::HashMap;
-    use std::sync::{Arc, Barrier};
-    use std::thread;
-    use std::time::Instant;
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Barrier},
+        thread,
+        time::Instant,
+    };
 
     use serde::Deserialize;
     use tempfile::TempDir;
@@ -120,10 +114,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("sample.json");
 
-        let sample = Sample {
-            name: "hello".into(),
-            count: 42,
-        };
+        let sample = Sample { name: "hello".into(), count: 42 };
         write_json_file(&path, &sample).unwrap();
 
         let raw = fs::read_to_string(&path).unwrap();
@@ -141,10 +132,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("a").join("b").join("c").join("data.json");
 
-        let sample = Sample {
-            name: "nested".into(),
-            count: 1,
-        };
+        let sample = Sample { name: "nested".into(), count: 1 };
         write_json_file(&path, &sample).unwrap();
 
         assert!(path.exists());

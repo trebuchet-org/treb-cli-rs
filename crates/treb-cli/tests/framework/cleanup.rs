@@ -3,8 +3,7 @@
 //! `clean_workspace()` resets a [`TestWorkdir`] to a pristine state by removing
 //! build artifacts and treb state so the next test gets a clean workspace.
 
-use std::fs;
-use std::path::Path;
+use std::{fs, path::Path};
 
 /// Directories removed entirely during cleanup.
 const REMOVE_DIRS: &[&str] = &[".treb", "broadcast", "cache", "out"];

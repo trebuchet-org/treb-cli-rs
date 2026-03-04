@@ -5,14 +5,18 @@
 
 use std::path::{Path, PathBuf};
 
-use treb_core::types::{Deployment, GovernorProposal, SafeTransaction, Transaction};
-use treb_core::TrebError;
+use treb_core::{
+    TrebError,
+    types::{Deployment, GovernorProposal, SafeTransaction, Transaction},
+};
 
-use crate::io::{read_json_file, write_json_file};
-use crate::lookup::LookupStore;
-use crate::store::{DeploymentStore, GovernorProposalStore, SafeTransactionStore, TransactionStore};
-use crate::types::{LookupIndex, RegistryMeta};
-use crate::{REGISTRY_DIR, REGISTRY_FILE, REGISTRY_VERSION};
+use crate::{
+    REGISTRY_DIR, REGISTRY_FILE, REGISTRY_VERSION,
+    io::{read_json_file, write_json_file},
+    lookup::LookupStore,
+    store::{DeploymentStore, GovernorProposalStore, SafeTransactionStore, TransactionStore},
+    types::{LookupIndex, RegistryMeta},
+};
 
 // ── MetaStore (internal) ─────────────────────────────────────────────────
 
@@ -23,9 +27,7 @@ struct MetaStore {
 
 impl MetaStore {
     fn new(registry_dir: &Path) -> Self {
-        Self {
-            path: registry_dir.join(REGISTRY_FILE),
-        }
+        Self { path: registry_dir.join(REGISTRY_FILE) }
     }
 
     fn load(&self) -> Result<RegistryMeta, TrebError> {
@@ -87,13 +89,7 @@ impl Registry {
         safe_transactions.load()?;
         governor_proposals.load()?;
 
-        Ok(Self {
-            deployments,
-            transactions,
-            safe_transactions,
-            governor_proposals,
-            lookup,
-        })
+        Ok(Self { deployments, transactions, safe_transactions, governor_proposals, lookup })
     }
 
     /// Initialise a new registry at `<project_root>/.treb/`.
@@ -191,26 +187,17 @@ impl Registry {
     }
 
     /// Insert a new safe transaction.
-    pub fn insert_safe_transaction(
-        &mut self,
-        safe_tx: SafeTransaction,
-    ) -> Result<(), TrebError> {
+    pub fn insert_safe_transaction(&mut self, safe_tx: SafeTransaction) -> Result<(), TrebError> {
         self.safe_transactions.insert(safe_tx)
     }
 
     /// Update an existing safe transaction.
-    pub fn update_safe_transaction(
-        &mut self,
-        safe_tx: SafeTransaction,
-    ) -> Result<(), TrebError> {
+    pub fn update_safe_transaction(&mut self, safe_tx: SafeTransaction) -> Result<(), TrebError> {
         self.safe_transactions.update(safe_tx)
     }
 
     /// Remove a safe transaction by hash.
-    pub fn remove_safe_transaction(
-        &mut self,
-        hash: &str,
-    ) -> Result<SafeTransaction, TrebError> {
+    pub fn remove_safe_transaction(&mut self, hash: &str) -> Result<SafeTransaction, TrebError> {
         self.safe_transactions.remove(hash)
     }
 
@@ -282,8 +269,7 @@ impl Registry {
 mod tests {
     use super::*;
 
-    use std::collections::HashMap;
-    use std::fs;
+    use std::{collections::HashMap, fs};
 
     use chrono::Utc;
     use tempfile::TempDir;
@@ -431,28 +417,16 @@ mod tests {
         let mut registry = Registry::init(dir.path()).unwrap();
 
         // 3 deployments
-        registry
-            .insert_deployment(make_deployment("dep-1", 10))
-            .unwrap();
-        registry
-            .insert_deployment(make_deployment("dep-2", 20))
-            .unwrap();
-        registry
-            .insert_deployment(make_deployment("dep-3", 30))
-            .unwrap();
+        registry.insert_deployment(make_deployment("dep-1", 10)).unwrap();
+        registry.insert_deployment(make_deployment("dep-2", 20)).unwrap();
+        registry.insert_deployment(make_deployment("dep-3", 30)).unwrap();
 
         // 2 transactions
-        registry
-            .insert_transaction(make_transaction("tx-1", 10))
-            .unwrap();
-        registry
-            .insert_transaction(make_transaction("tx-2", 20))
-            .unwrap();
+        registry.insert_transaction(make_transaction("tx-1", 10)).unwrap();
+        registry.insert_transaction(make_transaction("tx-2", 20)).unwrap();
 
         // 1 safe transaction
-        registry
-            .insert_safe_transaction(make_safe_transaction("0xhash-1", 10))
-            .unwrap();
+        registry.insert_safe_transaction(make_safe_transaction("0xhash-1", 10)).unwrap();
 
         // Verify counts
         assert_eq!(registry.deployment_count(), 3);
@@ -486,9 +460,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut registry = Registry::init(dir.path()).unwrap();
 
-        registry
-            .insert_deployment(make_deployment("dep-1", 10))
-            .unwrap();
+        registry.insert_deployment(make_deployment("dep-1", 10)).unwrap();
 
         // Lookup should find the deployment
         let index = registry.load_lookup_index().unwrap();
@@ -507,8 +479,7 @@ mod tests {
 
     #[test]
     fn golden_file_integration_round_trip() {
-        let fixture_dir =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../treb-core/tests/fixtures");
+        let fixture_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../treb-core/tests/fixtures");
 
         // Load fixtures
         let deployments_json = fs::read_to_string(fixture_dir.join("deployments_map.json"))
@@ -518,8 +489,7 @@ mod tests {
         let safe_txs_json =
             fs::read_to_string(fixture_dir.join("safe_txs_map.json")).expect("safe_txs fixture");
 
-        let deployments_value: serde_json::Value =
-            serde_json::from_str(&deployments_json).unwrap();
+        let deployments_value: serde_json::Value = serde_json::from_str(&deployments_json).unwrap();
         let transactions_value: serde_json::Value =
             serde_json::from_str(&transactions_json).unwrap();
         let safe_txs_value: serde_json::Value = serde_json::from_str(&safe_txs_json).unwrap();
@@ -549,38 +519,24 @@ mod tests {
         // Re-read from disk and compare via serde_json::Value equality
         let treb_dir = dir.path().join(REGISTRY_DIR);
 
-        let saved_deps_raw =
-            fs::read_to_string(treb_dir.join(crate::DEPLOYMENTS_FILE)).unwrap();
+        let saved_deps_raw = fs::read_to_string(treb_dir.join(crate::DEPLOYMENTS_FILE)).unwrap();
         let saved_deps: serde_json::Value = serde_json::from_str(&saved_deps_raw).unwrap();
-        assert_eq!(
-            saved_deps, deployments_value,
-            "deployments golden file round-trip"
-        );
+        assert_eq!(saved_deps, deployments_value, "deployments golden file round-trip");
 
-        let saved_txs_raw =
-            fs::read_to_string(treb_dir.join(crate::TRANSACTIONS_FILE)).unwrap();
+        let saved_txs_raw = fs::read_to_string(treb_dir.join(crate::TRANSACTIONS_FILE)).unwrap();
         let saved_txs: serde_json::Value = serde_json::from_str(&saved_txs_raw).unwrap();
-        assert_eq!(
-            saved_txs, transactions_value,
-            "transactions golden file round-trip"
-        );
+        assert_eq!(saved_txs, transactions_value, "transactions golden file round-trip");
 
-        let saved_stxs_raw =
-            fs::read_to_string(treb_dir.join(crate::SAFE_TXS_FILE)).unwrap();
+        let saved_stxs_raw = fs::read_to_string(treb_dir.join(crate::SAFE_TXS_FILE)).unwrap();
         let saved_stxs: serde_json::Value = serde_json::from_str(&saved_stxs_raw).unwrap();
-        assert_eq!(
-            saved_stxs, safe_txs_value,
-            "safe transactions golden file round-trip"
-        );
+        assert_eq!(saved_stxs, safe_txs_value, "safe transactions golden file round-trip");
     }
 
     #[test]
     fn init_is_idempotent() {
         let dir = TempDir::new().unwrap();
         let mut registry = Registry::init(dir.path()).unwrap();
-        registry
-            .insert_deployment(make_deployment("dep-1", 10))
-            .unwrap();
+        registry.insert_deployment(make_deployment("dep-1", 10)).unwrap();
 
         // Init again — should not wipe existing data
         let registry2 = Registry::init(dir.path()).unwrap();

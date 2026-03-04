@@ -14,11 +14,7 @@ const MINIMAL_FOUNDRY_TOML: &str = "[profile.default]\n";
 /// fixture deployments and rebuild the lookup index.
 fn init_project_with_deployments(tmp: &tempfile::TempDir) {
     fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
-    treb()
-        .arg("init")
-        .current_dir(tmp.path())
-        .assert()
-        .success();
+    treb().arg("init").current_dir(tmp.path()).assert().success();
 
     // Read fixture deployments from treb-core test fixtures.
     let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -26,28 +22,17 @@ fn init_project_with_deployments(tmp: &tempfile::TempDir) {
     let fixture_json = fs::read_to_string(&fixture_path).expect("fixture file should exist");
 
     // Write deployments directly to .treb/deployments.json.
-    fs::write(
-        tmp.path().join(".treb/deployments.json"),
-        &fixture_json,
-    )
-    .unwrap();
+    fs::write(tmp.path().join(".treb/deployments.json"), &fixture_json).unwrap();
 
     // Rebuild the lookup index using the registry API.
-    let registry =
-        treb_registry::Registry::open(tmp.path()).expect("registry should open");
-    registry
-        .rebuild_lookup_index()
-        .expect("lookup index rebuild should succeed");
+    let registry = treb_registry::Registry::open(tmp.path()).expect("registry should open");
+    registry.rebuild_lookup_index().expect("lookup index rebuild should succeed");
 }
 
 /// Helper: create a temp dir with foundry.toml and run `treb init` (no deployments).
 fn init_empty_project(tmp: &tempfile::TempDir) {
     fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
-    treb()
-        .arg("init")
-        .current_dir(tmp.path())
-        .assert()
-        .success();
+    treb().arg("init").current_dir(tmp.path()).assert().success();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -78,18 +63,11 @@ fn list_table_shows_truncated_addresses() {
     let tmp = tempfile::tempdir().unwrap();
     init_project_with_deployments(&tmp);
 
-    let output = treb()
-        .arg("list")
-        .current_dir(tmp.path())
-        .output()
-        .unwrap();
+    let output = treb().arg("list").current_dir(tmp.path()).output().unwrap();
 
     let stdout = String::from_utf8(output.stdout).unwrap();
     // Address should be truncated: 0x42ed...833D
-    assert!(
-        stdout.contains("0x42ed...833D"),
-        "expected truncated address, got:\n{stdout}"
-    );
+    assert!(stdout.contains("0x42ed...833D"), "expected truncated address, got:\n{stdout}");
 }
 
 #[test]
@@ -97,11 +75,7 @@ fn list_json_outputs_valid_json_array() {
     let tmp = tempfile::tempdir().unwrap();
     init_project_with_deployments(&tmp);
 
-    let output = treb()
-        .args(["list", "--json"])
-        .current_dir(tmp.path())
-        .output()
-        .unwrap();
+    let output = treb().args(["list", "--json"]).current_dir(tmp.path()).output().unwrap();
 
     assert!(output.status.success());
     let json: serde_json::Value =
@@ -323,11 +297,7 @@ fn show_without_argument_fails() {
     let tmp = tempfile::tempdir().unwrap();
     init_project_with_deployments(&tmp);
 
-    treb()
-        .arg("show")
-        .current_dir(tmp.path())
-        .assert()
-        .failure();
+    treb().arg("show").current_dir(tmp.path()).assert().failure();
 }
 
 #[test]
@@ -362,11 +332,7 @@ fn show_non_proxy_deployment_hides_proxy_info() {
     let tmp = tempfile::tempdir().unwrap();
     init_project_with_deployments(&tmp);
 
-    let output = treb()
-        .args(["show", "FPMMFactory"])
-        .current_dir(tmp.path())
-        .output()
-        .unwrap();
+    let output = treb().args(["show", "FPMMFactory"]).current_dir(tmp.path()).output().unwrap();
 
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(

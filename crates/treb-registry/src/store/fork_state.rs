@@ -1,25 +1,24 @@
 //! Persistent store for fork-mode state and registry snapshot/restore.
 
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
-use treb_core::types::fork::{ForkEntry, ForkHistoryEntry, ForkState};
-use treb_core::TrebError;
+use treb_core::{
+    TrebError,
+    types::fork::{ForkEntry, ForkHistoryEntry, ForkState},
+};
 
-use crate::io::{read_json_file_or_default, with_file_lock, write_json_file};
 use crate::{
     DEPLOYMENTS_FILE, FORK_STATE_FILE, GOVERNOR_PROPOSALS_FILE, LOOKUP_FILE, SAFE_TXS_FILE,
     TRANSACTIONS_FILE,
+    io::{read_json_file_or_default, with_file_lock, write_json_file},
 };
 
 /// Registry JSON files that are snapshotted/restored during fork mode.
-const SNAPSHOT_FILES: &[&str] = &[
-    DEPLOYMENTS_FILE,
-    TRANSACTIONS_FILE,
-    SAFE_TXS_FILE,
-    GOVERNOR_PROPOSALS_FILE,
-    LOOKUP_FILE,
-];
+const SNAPSHOT_FILES: &[&str] =
+    &[DEPLOYMENTS_FILE, TRANSACTIONS_FILE, SAFE_TXS_FILE, GOVERNOR_PROPOSALS_FILE, LOOKUP_FILE];
 
 /// Maximum number of history entries retained.
 const MAX_HISTORY: usize = 100;
@@ -84,10 +83,7 @@ impl ForkStateStore {
     /// Create a new store pointing at `<registry_dir>/fork.json`.
     /// Call [`load`](Self::load) to read existing data from disk.
     pub fn new(registry_dir: &Path) -> Self {
-        Self {
-            path: registry_dir.join(FORK_STATE_FILE),
-            data: ForkState::default(),
-        }
+        Self { path: registry_dir.join(FORK_STATE_FILE), data: ForkState::default() }
     }
 
     /// Load fork state from disk, replacing any in-memory data.
@@ -110,14 +106,9 @@ impl ForkStateStore {
     /// already forked.
     pub fn insert_active_fork(&mut self, entry: ForkEntry) -> Result<(), TrebError> {
         if self.data.forks.contains_key(&entry.network) {
-            return Err(TrebError::Fork(format!(
-                "network already forked: {}",
-                entry.network
-            )));
+            return Err(TrebError::Fork(format!("network already forked: {}", entry.network)));
         }
-        self.data
-            .forks
-            .insert(entry.network.clone(), entry);
+        self.data.forks.insert(entry.network.clone(), entry);
         self.save()
     }
 
@@ -138,9 +129,10 @@ impl ForkStateStore {
     /// Remove an active fork entry by network name. Returns an error if the
     /// network is not actively forked.
     pub fn remove_active_fork(&mut self, network: &str) -> Result<ForkEntry, TrebError> {
-        let entry = self.data.forks.remove(network).ok_or_else(|| {
-            TrebError::Fork(format!("network is not actively forked: {network}"))
-        })?;
+        let entry =
+            self.data.forks.remove(network).ok_or_else(|| {
+                TrebError::Fork(format!("network is not actively forked: {network}"))
+            })?;
         self.save()?;
         Ok(entry)
     }
@@ -209,16 +201,8 @@ mod tests {
         let snap_path = snap_dir.path().join("snapshot");
 
         // Create some registry files
-        fs::write(
-            reg_dir.path().join(DEPLOYMENTS_FILE),
-            r#"{"dep1": {}}"#,
-        )
-        .unwrap();
-        fs::write(
-            reg_dir.path().join(TRANSACTIONS_FILE),
-            r#"{"tx1": {}}"#,
-        )
-        .unwrap();
+        fs::write(reg_dir.path().join(DEPLOYMENTS_FILE), r#"{"dep1": {}}"#).unwrap();
+        fs::write(reg_dir.path().join(TRANSACTIONS_FILE), r#"{"tx1": {}}"#).unwrap();
 
         snapshot_registry(reg_dir.path(), &snap_path).unwrap();
 
@@ -257,11 +241,7 @@ mod tests {
         fs::write(reg_dir.path().join(DEPLOYMENTS_FILE), r#"{"new": true}"#).unwrap();
 
         // Snapshot with old state
-        fs::write(
-            snap_dir.path().join(DEPLOYMENTS_FILE),
-            r#"{"old": true}"#,
-        )
-        .unwrap();
+        fs::write(snap_dir.path().join(DEPLOYMENTS_FILE), r#"{"old": true}"#).unwrap();
 
         restore_registry(snap_dir.path(), reg_dir.path()).unwrap();
 
@@ -323,16 +303,11 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut store = ForkStateStore::new(dir.path());
 
-        store
-            .insert_active_fork(sample_fork_entry("mainnet"))
-            .unwrap();
+        store.insert_active_fork(sample_fork_entry("mainnet")).unwrap();
         let result = store.insert_active_fork(sample_fork_entry("mainnet"));
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("already forked"),
-            "expected 'already forked' in: {msg}"
-        );
+        assert!(msg.contains("already forked"), "expected 'already forked' in: {msg}");
     }
 
     #[test]
@@ -340,9 +315,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut store = ForkStateStore::new(dir.path());
 
-        store
-            .insert_active_fork(sample_fork_entry("mainnet"))
-            .unwrap();
+        store.insert_active_fork(sample_fork_entry("mainnet")).unwrap();
         let removed = store.remove_active_fork("mainnet").unwrap();
         assert_eq!(removed.network, "mainnet");
         assert!(store.get_active_fork("mainnet").is_none());
@@ -356,10 +329,7 @@ mod tests {
         let result = store.remove_active_fork("mainnet");
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("not actively forked"),
-            "expected 'not actively forked' in: {msg}"
-        );
+        assert!(msg.contains("not actively forked"), "expected 'not actively forked' in: {msg}");
     }
 
     #[test]
@@ -367,9 +337,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut store = ForkStateStore::new(dir.path());
 
-        store
-            .insert_active_fork(sample_fork_entry("mainnet"))
-            .unwrap();
+        store.insert_active_fork(sample_fork_entry("mainnet")).unwrap();
 
         let mut entry2 = sample_fork_entry("sepolia");
         entry2.port = 8546;
@@ -385,12 +353,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut store = ForkStateStore::new(dir.path());
 
-        store
-            .add_history(sample_history_entry("enter", "mainnet"))
-            .unwrap();
-        store
-            .add_history(sample_history_entry("exit", "mainnet"))
-            .unwrap();
+        store.add_history(sample_history_entry("enter", "mainnet")).unwrap();
+        store.add_history(sample_history_entry("exit", "mainnet")).unwrap();
 
         let data = store.data();
         assert_eq!(data.history.len(), 2);
@@ -404,12 +368,7 @@ mod tests {
         let mut store = ForkStateStore::new(dir.path());
 
         for i in 0..110 {
-            store
-                .add_history(sample_history_entry(
-                    &format!("action-{i}"),
-                    "mainnet",
-                ))
-                .unwrap();
+            store.add_history(sample_history_entry(&format!("action-{i}"), "mainnet")).unwrap();
         }
 
         assert_eq!(store.data().history.len(), MAX_HISTORY);
@@ -424,12 +383,8 @@ mod tests {
         // Write data
         {
             let mut store = ForkStateStore::new(dir.path());
-            store
-                .insert_active_fork(sample_fork_entry("mainnet"))
-                .unwrap();
-            store
-                .add_history(sample_history_entry("enter", "mainnet"))
-                .unwrap();
+            store.insert_active_fork(sample_fork_entry("mainnet")).unwrap();
+            store.add_history(sample_history_entry("enter", "mainnet")).unwrap();
         }
 
         // Read back in a fresh store

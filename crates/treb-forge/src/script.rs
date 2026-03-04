@@ -3,8 +3,7 @@
 //! Builds `ScriptArgs` programmatically from treb's resolved configuration
 //! and drives the execution state machine through the full pipeline.
 
-use std::collections::HashMap;
-use std::str::FromStr;
+use std::{collections::HashMap, str::FromStr};
 
 use alloy_primitives::{Address, Bytes, Log};
 use forge_script::ScriptArgs;
@@ -278,12 +277,7 @@ pub fn build_script_config(
         .senders
         .get("deployer")
         .and_then(|s| s.address.as_deref())
-        .or_else(|| {
-            resolved
-                .senders
-                .values()
-                .find_map(|s| s.address.as_deref())
-        });
+        .or_else(|| resolved.senders.values().find_map(|s| s.address.as_deref()));
 
     if let Some(addr_str) = sender_address {
         let addr = Address::from_str(addr_str)
@@ -303,10 +297,10 @@ pub fn build_script_config(
 ///
 /// Extends [`build_script_config`] by wiring resolved senders into the wallet
 /// configuration. For the "deployer" role:
-/// - **Wallet / InMemory** senders: sets both `evm.sender` and injects the private
-///   key into `ScriptArgs.wallets` so forge can sign transactions.
-/// - **Safe / Governor** senders: sets only `evm.sender` to the contract address;
-///   actual signing is deferred to Phase 17.
+/// - **Wallet / InMemory** senders: sets both `evm.sender` and injects the private key into
+///   `ScriptArgs.wallets` so forge can sign transactions.
+/// - **Safe / Governor** senders: sets only `evm.sender` to the contract address; actual signing is
+///   deferred to Phase 17.
 pub fn build_script_config_with_senders(
     resolved: &ResolvedConfig,
     script_path: &str,
@@ -326,10 +320,8 @@ pub fn build_script_config_with_senders(
         match sender {
             ResolvedSender::Wallet(_) | ResolvedSender::InMemory(_) => {
                 // Get the private key hex from the original sender config
-                if let Some(pk) = resolved
-                    .senders
-                    .get("deployer")
-                    .and_then(|sc| sc.private_key.as_deref())
+                if let Some(pk) =
+                    resolved.senders.get("deployer").and_then(|sc| sc.private_key.as_deref())
                 {
                     config.private_key_hex(pk);
                 }
@@ -353,8 +345,7 @@ mod tests {
     use crate::sender;
 
     /// Anvil account 0 private key (well-known test key).
-    const ANVIL_KEY_0: &str =
-        "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+    const ANVIL_KEY_0: &str = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
     /// Anvil account 0 address.
     const ANVIL_ADDR_0: Address = address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
@@ -374,9 +365,7 @@ mod tests {
 
     #[test]
     fn script_config_new_produces_valid_script_args() {
-        let args = ScriptConfig::new("script/Deploy.s.sol")
-            .into_script_args()
-            .unwrap();
+        let args = ScriptConfig::new("script/Deploy.s.sol").into_script_args().unwrap();
 
         assert_eq!(args.path, "script/Deploy.s.sol");
         assert_eq!(args.sig, "run()");

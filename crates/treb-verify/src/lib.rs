@@ -1,11 +1,9 @@
-use std::path::PathBuf;
-use std::str::FromStr;
+use std::{path::PathBuf, str::FromStr};
 
 use alloy_chains::Chain;
 use alloy_primitives::Address;
-use anyhow::{bail, Result};
-use forge_verify::provider::VerificationProviderType;
-use forge_verify::{RetryArgs, VerifierArgs, VerifyArgs};
+use anyhow::{Result, bail};
+use forge_verify::{RetryArgs, VerifierArgs, VerifyArgs, provider::VerificationProviderType};
 use foundry_cli::opts::{EtherscanOpts, RpcOpts};
 use foundry_compilers::info::ContractInfo;
 use treb_core::types::deployment::Deployment;
@@ -56,20 +54,14 @@ pub fn build_verify_args(deployment: &Deployment, opts: &VerifyOpts) -> Result<V
         verifier_url: opts.verifier_url.clone(),
     };
 
-    let retry = RetryArgs {
-        retries: opts.retries,
-        delay: opts.delay,
-    };
+    let retry = RetryArgs { retries: opts.retries, delay: opts.delay };
 
     let etherscan = EtherscanOpts {
         key: opts.etherscan_api_key.clone(),
         chain: Some(Chain::from_id(deployment.chain_id)),
     };
 
-    let rpc = RpcOpts {
-        url: opts.rpc_url.clone(),
-        ..Default::default()
-    };
+    let rpc = RpcOpts { url: opts.rpc_url.clone(), ..Default::default() };
 
     Ok(VerifyArgs {
         address,
@@ -109,10 +101,7 @@ fn parse_contract_info(artifact_path: &str, contract_name: &str) -> ContractInfo
         .strip_prefix("out/")
         .and_then(|rest| rest.rfind('/').map(|idx| rest[..idx].to_string()));
 
-    ContractInfo {
-        path,
-        name: contract_name.to_string(),
-    }
+    ContractInfo { path, name: contract_name.to_string() }
 }
 
 /// Build an explorer URL for a verified contract based on the chain and verifier.
@@ -127,9 +116,9 @@ pub fn explorer_url(chain_id: u64, address: &str, verifier: &str) -> Option<Stri
                 .etherscan_urls()
                 .map(|(_, browser_url)| format!("{browser_url}/address/{address}#code"))
         }
-        "sourcify" => Some(format!(
-            "https://repo.sourcify.dev/contracts/full_match/{chain_id}/{address}/"
-        )),
+        "sourcify" => {
+            Some(format!("https://repo.sourcify.dev/contracts/full_match/{chain_id}/{address}/"))
+        }
         _ => None,
     }
 }
@@ -139,11 +128,9 @@ mod tests {
     use std::collections::HashMap;
 
     use chrono::{TimeZone, Utc};
-    use treb_core::types::deployment::{
-        ArtifactInfo, Deployment, DeploymentStrategy, VerificationInfo,
-    };
-    use treb_core::types::enums::{
-        DeploymentMethod, DeploymentType, VerificationStatus,
+    use treb_core::types::{
+        deployment::{ArtifactInfo, Deployment, DeploymentStrategy, VerificationInfo},
+        enums::{DeploymentMethod, DeploymentType, VerificationStatus},
     };
 
     use super::*;
@@ -267,10 +254,7 @@ mod tests {
     #[test]
     fn maps_verifier_etherscan() {
         let d = make_deployment();
-        let opts = VerifyOpts {
-            verifier: "etherscan".into(),
-            ..default_opts()
-        };
+        let opts = VerifyOpts { verifier: "etherscan".into(), ..default_opts() };
         let args = build_verify_args(&d, &opts).unwrap();
         assert_eq!(args.verifier.verifier, VerificationProviderType::Etherscan);
     }
@@ -278,10 +262,7 @@ mod tests {
     #[test]
     fn maps_verifier_sourcify() {
         let d = make_deployment();
-        let opts = VerifyOpts {
-            verifier: "sourcify".into(),
-            ..default_opts()
-        };
+        let opts = VerifyOpts { verifier: "sourcify".into(), ..default_opts() };
         let args = build_verify_args(&d, &opts).unwrap();
         assert_eq!(args.verifier.verifier, VerificationProviderType::Sourcify);
     }
@@ -289,10 +270,7 @@ mod tests {
     #[test]
     fn maps_verifier_blockscout() {
         let d = make_deployment();
-        let opts = VerifyOpts {
-            verifier: "blockscout".into(),
-            ..default_opts()
-        };
+        let opts = VerifyOpts { verifier: "blockscout".into(), ..default_opts() };
         let args = build_verify_args(&d, &opts).unwrap();
         assert_eq!(args.verifier.verifier, VerificationProviderType::Blockscout);
     }
@@ -300,10 +278,7 @@ mod tests {
     #[test]
     fn rejects_unsupported_verifier() {
         let d = make_deployment();
-        let opts = VerifyOpts {
-            verifier: "unknown".into(),
-            ..default_opts()
-        };
+        let opts = VerifyOpts { verifier: "unknown".into(), ..default_opts() };
         let err = build_verify_args(&d, &opts).unwrap_err();
         assert!(err.to_string().contains("unsupported verifier"));
     }
@@ -311,11 +286,7 @@ mod tests {
     #[test]
     fn maps_retry_args() {
         let d = make_deployment();
-        let opts = VerifyOpts {
-            retries: 10,
-            delay: 15,
-            ..default_opts()
-        };
+        let opts = VerifyOpts { retries: 10, delay: 15, ..default_opts() };
         let args = build_verify_args(&d, &opts).unwrap();
         assert_eq!(args.retry.retries, 10);
         assert_eq!(args.retry.delay, 15);
@@ -324,10 +295,7 @@ mod tests {
     #[test]
     fn maps_force_and_skip_is_verified_check() {
         let d = make_deployment();
-        let opts = VerifyOpts {
-            force: true,
-            ..default_opts()
-        };
+        let opts = VerifyOpts { force: true, ..default_opts() };
         let args = build_verify_args(&d, &opts).unwrap();
         assert!(args.force);
         assert!(args.skip_is_verified_check);
@@ -344,10 +312,7 @@ mod tests {
     #[test]
     fn maps_watch_flag() {
         let d = make_deployment();
-        let opts = VerifyOpts {
-            watch: true,
-            ..default_opts()
-        };
+        let opts = VerifyOpts { watch: true, ..default_opts() };
         let args = build_verify_args(&d, &opts).unwrap();
         assert!(args.watch);
     }
@@ -355,10 +320,7 @@ mod tests {
     #[test]
     fn maps_root_path() {
         let d = make_deployment();
-        let opts = VerifyOpts {
-            root: PathBuf::from("/my/project"),
-            ..default_opts()
-        };
+        let opts = VerifyOpts { root: PathBuf::from("/my/project"), ..default_opts() };
         let args = build_verify_args(&d, &opts).unwrap();
         assert_eq!(args.root, Some(PathBuf::from("/my/project")));
     }
@@ -373,19 +335,13 @@ mod tests {
         };
         let args = build_verify_args(&d, &opts).unwrap();
         assert_eq!(args.verifier.verifier_api_key, Some("my-api-key".into()));
-        assert_eq!(
-            args.verifier.verifier_url,
-            Some("https://custom-api.example.com".into())
-        );
+        assert_eq!(args.verifier.verifier_url, Some("https://custom-api.example.com".into()));
     }
 
     #[test]
     fn maps_etherscan_api_key() {
         let d = make_deployment();
-        let opts = VerifyOpts {
-            etherscan_api_key: Some("etherscan-key".into()),
-            ..default_opts()
-        };
+        let opts = VerifyOpts { etherscan_api_key: Some("etherscan-key".into()), ..default_opts() };
         let args = build_verify_args(&d, &opts).unwrap();
         assert_eq!(args.etherscan.key, Some("etherscan-key".into()));
     }
@@ -401,10 +357,7 @@ mod tests {
     #[test]
     fn maps_rpc_url() {
         let d = make_deployment();
-        let opts = VerifyOpts {
-            rpc_url: Some("https://rpc.example.com".into()),
-            ..default_opts()
-        };
+        let opts = VerifyOpts { rpc_url: Some("https://rpc.example.com".into()), ..default_opts() };
         let args = build_verify_args(&d, &opts).unwrap();
         assert_eq!(args.rpc.url, Some("https://rpc.example.com".into()));
     }

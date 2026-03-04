@@ -2,8 +2,7 @@
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
-use std::collections::HashMap;
-use std::fs;
+use std::{collections::HashMap, fs};
 
 use chrono::Utc;
 use treb_core::types::{
@@ -109,12 +108,9 @@ fn prune_dry_run_outputs_candidates_and_does_not_modify_files() {
     let mut registry = init_project(&tmp);
 
     // Insert a deployment with a broken transaction reference.
-    registry
-        .insert_deployment(make_deployment("dep-broken", "tx-missing", 1, "default"))
-        .unwrap();
+    registry.insert_deployment(make_deployment("dep-broken", "tx-missing", 1, "default")).unwrap();
 
-    let orig_deployments =
-        fs::read_to_string(tmp.path().join(".treb/deployments.json")).unwrap();
+    let orig_deployments = fs::read_to_string(tmp.path().join(".treb/deployments.json")).unwrap();
 
     treb()
         .args(["prune", "--dry-run"])
@@ -124,12 +120,8 @@ fn prune_dry_run_outputs_candidates_and_does_not_modify_files() {
         .stdout(predicate::str::contains("dep-broken"));
 
     // Deployments file must be unchanged.
-    let after_deployments =
-        fs::read_to_string(tmp.path().join(".treb/deployments.json")).unwrap();
-    assert_eq!(
-        orig_deployments, after_deployments,
-        "dry-run must not modify deployments.json"
-    );
+    let after_deployments = fs::read_to_string(tmp.path().join(".treb/deployments.json")).unwrap();
+    assert_eq!(orig_deployments, after_deployments, "dry-run must not modify deployments.json");
 
     // No prune backup should have been created.
     let backups_dir = tmp.path().join(".treb/backups");
@@ -151,15 +143,9 @@ fn prune_yes_removes_broken_entry_and_creates_backup() {
     let mut registry = init_project(&tmp);
 
     // Insert a deployment with a broken transaction reference.
-    registry
-        .insert_deployment(make_deployment("dep-broken", "tx-missing", 1, "default"))
-        .unwrap();
+    registry.insert_deployment(make_deployment("dep-broken", "tx-missing", 1, "default")).unwrap();
 
-    let output = treb()
-        .args(["prune", "--yes"])
-        .current_dir(tmp.path())
-        .output()
-        .unwrap();
+    let output = treb().args(["prune", "--yes"]).current_dir(tmp.path()).output().unwrap();
 
     assert!(output.status.success(), "prune --yes should succeed");
     let stdout = String::from_utf8(output.stdout).unwrap();
@@ -198,12 +184,8 @@ fn prune_dry_run_on_clean_registry_outputs_nothing_to_prune() {
     let mut registry = init_project(&tmp);
 
     // Insert a consistent entry (deployment + transaction that reference each other).
-    registry
-        .insert_transaction(make_transaction("tx-1", vec!["dep-1".to_string()], 1))
-        .unwrap();
-    registry
-        .insert_deployment(make_deployment("dep-1", "tx-1", 1, "default"))
-        .unwrap();
+    registry.insert_transaction(make_transaction("tx-1", vec!["dep-1".to_string()], 1)).unwrap();
+    registry.insert_deployment(make_deployment("dep-1", "tx-1", 1, "default")).unwrap();
 
     treb()
         .args(["prune", "--dry-run"])
@@ -220,18 +202,10 @@ fn reset_yes_empties_all_stores_and_creates_backup() {
     let tmp = tempfile::tempdir().unwrap();
     let mut registry = init_project(&tmp);
 
-    registry
-        .insert_deployment(make_deployment("dep-1", "", 1, "default"))
-        .unwrap();
-    registry
-        .insert_deployment(make_deployment("dep-2", "", 1, "staging"))
-        .unwrap();
+    registry.insert_deployment(make_deployment("dep-1", "", 1, "default")).unwrap();
+    registry.insert_deployment(make_deployment("dep-2", "", 1, "staging")).unwrap();
 
-    let output = treb()
-        .args(["reset", "--yes"])
-        .current_dir(tmp.path())
-        .output()
-        .unwrap();
+    let output = treb().args(["reset", "--yes"]).current_dir(tmp.path()).output().unwrap();
 
     assert!(output.status.success(), "reset --yes should succeed");
     let stdout = String::from_utf8(output.stdout).unwrap();
@@ -240,10 +214,7 @@ fn reset_yes_empties_all_stores_and_creates_backup() {
         stdout.contains("Reset complete."),
         "stdout should contain 'Reset complete.': {stdout}"
     );
-    assert!(
-        stdout.to_lowercase().contains("backup"),
-        "stdout should mention backup: {stdout}"
-    );
+    assert!(stdout.to_lowercase().contains("backup"), "stdout should mention backup: {stdout}");
 
     // Backup directory should exist.
     let backups_dir = tmp.path().join(".treb/backups");
@@ -270,18 +241,10 @@ fn reset_network_removes_only_matching_chain() {
     let mut registry = init_project(&tmp);
 
     // Two deployments on different chains.
-    registry
-        .insert_deployment(make_deployment("dep-chain1", "", 1, "default"))
-        .unwrap();
-    registry
-        .insert_deployment(make_deployment("dep-chain42220", "", 42220, "default"))
-        .unwrap();
+    registry.insert_deployment(make_deployment("dep-chain1", "", 1, "default")).unwrap();
+    registry.insert_deployment(make_deployment("dep-chain42220", "", 42220, "default")).unwrap();
 
-    treb()
-        .args(["reset", "--network", "1", "--yes"])
-        .current_dir(tmp.path())
-        .assert()
-        .success();
+    treb().args(["reset", "--network", "1", "--yes"]).current_dir(tmp.path()).assert().success();
 
     let registry_after = treb_registry::Registry::open(tmp.path()).unwrap();
     assert!(
@@ -300,12 +263,8 @@ fn reset_namespace_removes_only_matching_namespace() {
     let mut registry = init_project(&tmp);
 
     // Two deployments in different namespaces.
-    registry
-        .insert_deployment(make_deployment("dep-default", "", 1, "default"))
-        .unwrap();
-    registry
-        .insert_deployment(make_deployment("dep-staging", "", 1, "staging"))
-        .unwrap();
+    registry.insert_deployment(make_deployment("dep-default", "", 1, "default")).unwrap();
+    registry.insert_deployment(make_deployment("dep-staging", "", 1, "staging")).unwrap();
 
     treb()
         .args(["reset", "--namespace", "default", "--yes"])
@@ -334,11 +293,8 @@ fn migrate_config_dry_run_v1_prints_v2_content_without_modifying_file() {
 
     let original = fs::read_to_string(tmp.path().join("treb.toml")).unwrap();
 
-    let output = treb()
-        .args(["migrate", "config", "--dry-run"])
-        .current_dir(tmp.path())
-        .output()
-        .unwrap();
+    let output =
+        treb().args(["migrate", "config", "--dry-run"]).current_dir(tmp.path()).output().unwrap();
 
     assert!(output.status.success(), "migrate config --dry-run should succeed");
     let stdout = String::from_utf8(output.stdout).unwrap();

@@ -4,9 +4,11 @@
 //! and optional debug output (`TREB_TEST_DEBUG=1`).
 
 use assert_cmd::Command;
-use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::{
+    ffi::OsStr,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 /// Default timeout for CLI invocations.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
@@ -24,9 +26,7 @@ pub struct TrebRunner {
 impl TrebRunner {
     /// Create a new runner targeting the given workdir.
     pub fn new(workdir: &Path) -> Self {
-        Self {
-            workdir: workdir.to_path_buf(),
-        }
+        Self { workdir: workdir.to_path_buf() }
     }
 
     /// Run `treb <args>` with no extra environment variables.
@@ -49,9 +49,7 @@ impl TrebRunner {
     {
         let args: Vec<S> = args.into_iter().collect();
 
-        let debug = std::env::var("TREB_TEST_DEBUG")
-            .map(|v| v == "1")
-            .unwrap_or(false);
+        let debug = std::env::var("TREB_TEST_DEBUG").map(|v| v == "1").unwrap_or(false);
 
         #[allow(deprecated)]
         let bin_path = assert_cmd::cargo::cargo_bin("treb-cli");
@@ -60,17 +58,13 @@ impl TrebRunner {
             eprintln!("[TrebRunner] binary: {}", bin_path.display());
             eprintln!(
                 "[TrebRunner] args:   {:?}",
-                args.iter()
-                    .map(|a| a.as_ref().to_string_lossy())
-                    .collect::<Vec<_>>()
+                args.iter().map(|a| a.as_ref().to_string_lossy()).collect::<Vec<_>>()
             );
             eprintln!("[TrebRunner] cwd:    {}", self.workdir.display());
         }
 
         let mut cmd = Command::new(&bin_path);
-        cmd.current_dir(&self.workdir)
-            .timeout(DEFAULT_TIMEOUT)
-            .args(args);
+        cmd.current_dir(&self.workdir).timeout(DEFAULT_TIMEOUT).args(args);
 
         for (k, v) in env_vars {
             cmd.env(k, v);

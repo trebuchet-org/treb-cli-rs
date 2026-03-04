@@ -17,30 +17,19 @@ const MINIMAL_FOUNDRY_TOML: &str = "[profile.default]\n";
 /// Helper: create a temp dir with foundry.toml and run `treb init`.
 fn init_project(tmp: &tempfile::TempDir) {
     fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
-    treb()
-        .arg("init")
-        .current_dir(tmp.path())
-        .assert()
-        .success();
+    treb().arg("init").current_dir(tmp.path()).assert().success();
 }
 
 // ── Argument parsing tests ──────────────────────────────────────────────
 
 #[test]
 fn run_without_script_argument_fails() {
-    treb()
-        .arg("run")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("<SCRIPT>"));
+    treb().arg("run").assert().failure().stderr(predicate::str::contains("<SCRIPT>"));
 }
 
 #[test]
 fn run_help_shows_all_flags() {
-    let output = treb()
-        .args(["run", "--help"])
-        .output()
-        .expect("failed to run treb run --help");
+    let output = treb().args(["run", "--help"]).output().expect("failed to run treb run --help");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
@@ -59,24 +48,14 @@ fn run_help_shows_all_flags() {
     assert!(stdout.contains("--debug"), "help should show --debug");
     assert!(stdout.contains("--json"), "help should show --json");
     assert!(stdout.contains("--env"), "help should show --env");
-    assert!(
-        stdout.contains("--target-contract"),
-        "help should show --target-contract"
-    );
-    assert!(
-        stdout.contains("--non-interactive"),
-        "help should show --non-interactive"
-    );
+    assert!(stdout.contains("--target-contract"), "help should show --target-contract");
+    assert!(stdout.contains("--non-interactive"), "help should show --non-interactive");
 }
 
 #[test]
 fn run_sig_defaults_to_run() {
     // Run --help shows default value for --sig
-    treb()
-        .args(["run", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("run()"));
+    treb().args(["run", "--help"]).assert().success().stdout(predicate::str::contains("run()"));
 }
 
 // ── Error path tests ────────────────────────────────────────────────────
@@ -146,12 +125,7 @@ fn run_dry_run_and_json_flags_accepted() {
     // will fail, but the important thing is that the arg parsing succeeds
     // and the error is about pipeline execution, not arg parsing.
     let output = treb()
-        .args([
-            "run",
-            "script/Deploy.s.sol",
-            "--dry-run",
-            "--json",
-        ])
+        .args(["run", "script/Deploy.s.sol", "--dry-run", "--json"])
         .current_dir(tmp.path())
         .output()
         .expect("failed to run command");
@@ -171,12 +145,7 @@ fn run_broadcast_non_interactive_flags_accepted() {
     init_project(&tmp);
 
     let output = treb()
-        .args([
-            "run",
-            "script/Deploy.s.sol",
-            "--broadcast",
-            "--non-interactive",
-        ])
+        .args(["run", "script/Deploy.s.sol", "--broadcast", "--non-interactive"])
         .current_dir(tmp.path())
         .output()
         .expect("failed to run command");
@@ -194,14 +163,7 @@ fn run_multiple_env_vars_accepted() {
     init_project(&tmp);
 
     let output = treb()
-        .args([
-            "run",
-            "script/Deploy.s.sol",
-            "--env",
-            "FOO=bar",
-            "--env",
-            "BAZ=qux",
-        ])
+        .args(["run", "script/Deploy.s.sol", "--env", "FOO=bar", "--env", "BAZ=qux"])
         .current_dir(tmp.path())
         .output()
         .expect("failed to run command");
@@ -260,21 +222,13 @@ fn run_env_var_with_equals_in_value_accepted() {
     init_project(&tmp);
 
     let output = treb()
-        .args([
-            "run",
-            "script/Deploy.s.sol",
-            "--env",
-            "KEY=value=with=equals",
-        ])
+        .args(["run", "script/Deploy.s.sol", "--env", "KEY=value=with=equals"])
         .current_dir(tmp.path())
         .output()
         .expect("failed to run command");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !stderr.contains("missing '='"),
-        "should accept equals in value: {stderr}"
-    );
+    assert!(!stderr.contains("missing '='"), "should accept equals in value: {stderr}");
 }
 
 #[test]
@@ -289,8 +243,5 @@ fn run_env_var_empty_value_accepted() {
         .expect("failed to run command");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !stderr.contains("key cannot be empty"),
-        "should accept empty value: {stderr}"
-    );
+    assert!(!stderr.contains("key cannot be empty"), "should accept empty value: {stderr}");
 }

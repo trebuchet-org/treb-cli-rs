@@ -5,11 +5,11 @@
 //! accessed through Rust crate APIs with no subprocess calls to `forge`.
 
 pub mod anvil;
-pub mod createx;
 pub mod artifacts;
 pub mod broadcast;
 pub mod compiler;
 pub mod console;
+pub mod createx;
 pub mod events;
 pub mod pipeline;
 pub mod script;
@@ -18,25 +18,27 @@ pub mod version;
 
 // Re-export key public types for convenience.
 pub use anvil::{AnvilConfig, AnvilInstance};
-pub use createx::{createx_deployed_bytecode, deploy_createx, verify_createx, CREATEX_ADDRESS};
 pub use artifacts::{ArtifactIndex, ArtifactMatch};
-pub use broadcast::{read_all_broadcasts, read_latest_broadcast, BroadcastData, BroadcastTransaction};
-pub use compiler::{compile_files, compile_project, CompilationOutput};
+pub use broadcast::{
+    BroadcastData, BroadcastTransaction, read_all_broadcasts, read_latest_broadcast,
+};
+pub use compiler::{CompilationOutput, compile_files, compile_project};
 pub use console::decode_console_logs;
+pub use createx::{CREATEX_ADDRESS, createx_deployed_bytecode, deploy_createx, verify_createx};
+pub use pipeline::{
+    ConflictType, DuplicateConflict, DuplicateStrategy, PipelineConfig, PipelineContext,
+    PipelineResult, RecordedDeployment, RecordedTransaction, ResolvedDuplicates, RunPipeline,
+    SkippedDeployment, check_duplicate, generate_deployment_id, hydrate_deployment,
+    hydrate_safe_transactions, hydrate_transactions, resolve_duplicates, resolve_git_commit,
+};
 pub use script::{
-    build_script_config, build_script_config_with_senders, execute_script, ExecutionResult,
-    ScriptConfig,
+    ExecutionResult, ScriptConfig, build_script_config, build_script_config_with_senders,
+    execute_script,
 };
 pub use sender::{
-    default_test_signers, in_memory_signer, resolve_all_senders, resolve_sender, ResolvedSender,
+    ResolvedSender, default_test_signers, in_memory_signer, resolve_all_senders, resolve_sender,
 };
-pub use version::{detect_forge_version, ForgeVersion};
-pub use pipeline::{
-    check_duplicate, resolve_duplicates, generate_deployment_id, hydrate_deployment,
-    hydrate_safe_transactions, hydrate_transactions, resolve_git_commit, ConflictType,
-    DuplicateConflict, DuplicateStrategy, PipelineConfig, PipelineContext, PipelineResult,
-    RecordedDeployment, RecordedTransaction, ResolvedDuplicates, RunPipeline, SkippedDeployment,
-};
+pub use version::{ForgeVersion, detect_forge_version};
 
 // Re-export foundry-linking for downstream use (Phase 8 deployment recording pipeline).
 pub use foundry_linking;

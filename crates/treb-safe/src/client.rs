@@ -5,9 +5,7 @@ use std::time::Duration;
 use reqwest::Client;
 use treb_core::error::TrebError;
 
-use crate::types::{
-    ProposeRequest, SafeInfoResponse, SafeServiceMultisigResponse, SafeServiceTx,
-};
+use crate::types::{ProposeRequest, SafeInfoResponse, SafeServiceMultisigResponse, SafeServiceTx};
 
 /// HTTP client for the Safe Transaction Service API.
 pub struct SafeServiceClient {
@@ -44,10 +42,7 @@ impl SafeServiceClient {
         safe_address: &str,
         request: &ProposeRequest,
     ) -> Result<(), TrebError> {
-        let url = format!(
-            "{}/safes/{}/multisig-transactions/",
-            self.base_url, safe_address
-        );
+        let url = format!("{}/safes/{}/multisig-transactions/", self.base_url, safe_address);
         let resp = self
             .http
             .post(&url)
@@ -59,9 +54,7 @@ impl SafeServiceClient {
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            return Err(TrebError::Safe(format!(
-                "propose returned {status}: {body}"
-            )));
+            return Err(TrebError::Safe(format!("propose returned {status}: {body}")));
         }
         Ok(())
     }
@@ -75,16 +68,11 @@ impl SafeServiceClient {
         &self,
         safe_address: &str,
     ) -> Result<SafeServiceMultisigResponse, TrebError> {
-        let url = format!(
-            "{}/safes/{}/multisig-transactions/",
-            self.base_url, safe_address
-        );
-        let resp = self
-            .http
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| TrebError::Safe(format!("multisig transactions request failed: {e}")))?;
+        let url = format!("{}/safes/{}/multisig-transactions/", self.base_url, safe_address);
+        let resp =
+            self.http.get(&url).send().await.map_err(|e| {
+                TrebError::Safe(format!("multisig transactions request failed: {e}"))
+            })?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -113,19 +101,15 @@ impl SafeServiceClient {
             "{}/safes/{}/multisig-transactions/?executed=false",
             self.base_url, safe_address
         );
-        let resp = self
-            .http
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| TrebError::Safe(format!("pending transactions request failed: {e}")))?;
+        let resp =
+            self.http.get(&url).send().await.map_err(|e| {
+                TrebError::Safe(format!("pending transactions request failed: {e}"))
+            })?;
 
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            return Err(TrebError::Safe(format!(
-                "pending transactions returned {status}: {body}"
-            )));
+            return Err(TrebError::Safe(format!("pending transactions returned {status}: {body}")));
         }
 
         let body = resp.text().await.unwrap_or_default();
@@ -139,14 +123,8 @@ impl SafeServiceClient {
     /// Fetch a single multisig transaction by its Safe transaction hash.
     ///
     /// Endpoint: `GET /multisig-transactions/{safe_tx_hash}/`
-    pub async fn get_transaction(
-        &self,
-        safe_tx_hash: &str,
-    ) -> Result<SafeServiceTx, TrebError> {
-        let url = format!(
-            "{}/multisig-transactions/{}/",
-            self.base_url, safe_tx_hash
-        );
+    pub async fn get_transaction(&self, safe_tx_hash: &str) -> Result<SafeServiceTx, TrebError> {
+        let url = format!("{}/multisig-transactions/{}/", self.base_url, safe_tx_hash);
         let resp = self
             .http
             .get(&url)
@@ -157,15 +135,12 @@ impl SafeServiceClient {
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            return Err(TrebError::Safe(format!(
-                "get transaction returned {status}: {body}"
-            )));
+            return Err(TrebError::Safe(format!("get transaction returned {status}: {body}")));
         }
 
         let body = resp.text().await.unwrap_or_default();
-        serde_json::from_str(&body).map_err(|e| {
-            TrebError::Safe(format!("failed to parse transaction response: {e}"))
-        })
+        serde_json::from_str(&body)
+            .map_err(|e| TrebError::Safe(format!("failed to parse transaction response: {e}")))
     }
 
     // ── Nonce ────────────────────────────────────────────────────────────
@@ -173,10 +148,7 @@ impl SafeServiceClient {
     /// Retrieve the current nonce for a Safe.
     ///
     /// Endpoint: `GET /safes/{safe_address}/`
-    pub async fn get_nonce(
-        &self,
-        safe_address: &str,
-    ) -> Result<u64, TrebError> {
+    pub async fn get_nonce(&self, safe_address: &str) -> Result<u64, TrebError> {
         let url = format!("{}/safes/{}/", self.base_url, safe_address);
         let resp = self
             .http
@@ -188,15 +160,12 @@ impl SafeServiceClient {
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            return Err(TrebError::Safe(format!(
-                "safe info returned {status}: {body}"
-            )));
+            return Err(TrebError::Safe(format!("safe info returned {status}: {body}")));
         }
 
         let body = resp.text().await.unwrap_or_default();
-        let info: SafeInfoResponse = serde_json::from_str(&body).map_err(|e| {
-            TrebError::Safe(format!("failed to parse safe info response: {e}"))
-        })?;
+        let info: SafeInfoResponse = serde_json::from_str(&body)
+            .map_err(|e| TrebError::Safe(format!("failed to parse safe info response: {e}")))?;
         Ok(info.nonce)
     }
 }
@@ -214,10 +183,7 @@ mod tests {
     #[test]
     fn new_supported_chain() {
         let client = SafeServiceClient::new(1).expect("mainnet should be supported");
-        assert_eq!(
-            client.base_url(),
-            "https://safe-transaction-mainnet.safe.global/api/v1"
-        );
+        assert_eq!(client.base_url(), "https://safe-transaction-mainnet.safe.global/api/v1");
     }
 
     #[test]
@@ -227,7 +193,8 @@ mod tests {
 
     #[test]
     fn new_all_supported_chains() {
-        let chains = [1, 10, 56, 100, 137, 324, 8453, 42161, 42220, 43114, 59144, 534352, 11155111, 84532];
+        let chains =
+            [1, 10, 56, 100, 137, 324, 8453, 42161, 42220, 43114, 59144, 534352, 11155111, 84532];
         for chain_id in chains {
             assert!(
                 SafeServiceClient::new(chain_id).is_some(),
@@ -387,10 +354,7 @@ mod tests {
         assert_eq!(info.nonce, 15);
         assert_eq!(info.threshold, 2);
         assert_eq!(info.owners.len(), 3);
-        assert_eq!(
-            info.address,
-            "0x1234567890abcdef1234567890abcdef12345678"
-        );
+        assert_eq!(info.address, "0x1234567890abcdef1234567890abcdef12345678");
     }
 
     #[test]

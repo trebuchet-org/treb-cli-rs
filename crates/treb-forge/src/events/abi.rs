@@ -131,12 +131,8 @@ mod tests {
             label: "counter-v1".to_string(),
             entropy: "abc123".to_string(),
             salt: b256!("0000000000000000000000000000000000000000000000000000000000000001"),
-            bytecodeHash: b256!(
-                "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
-            ),
-            initCodeHash: b256!(
-                "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd"
-            ),
+            bytecodeHash: b256!("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"),
+            initCodeHash: b256!("abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd"),
             constructorArgs: Bytes::from(vec![0x01, 0x02, 0x03]),
             createStrategy: "create2".to_string(),
         };
@@ -163,10 +159,7 @@ mod tests {
         };
 
         assert_eq!(tx.senderId, "deployer");
-        assert_eq!(
-            tx.transaction.to,
-            address!("0000000000000000000000000000000000000001")
-        );
+        assert_eq!(tx.transaction.to, address!("0000000000000000000000000000000000000001"));
         assert_eq!(tx.transaction.value, U256::from(1000u64));
     }
 

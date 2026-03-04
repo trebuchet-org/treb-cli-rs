@@ -7,11 +7,13 @@
 use assert_cmd::cargo::cargo_bin_cmd;
 use chrono::Utc;
 use predicates::prelude::*;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 use tempfile::TempDir;
 use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
-use treb_registry::{ForkStateStore, DEPLOYMENTS_FILE, FORK_STATE_FILE};
+use treb_registry::{DEPLOYMENTS_FILE, FORK_STATE_FILE, ForkStateStore};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -212,11 +214,7 @@ fn fork_exit_restores_registry() {
     fs::write(treb_dir.join(DEPLOYMENTS_FILE), modified).unwrap();
 
     // Exit fork mode — should restore registry from snapshot.
-    treb()
-        .args(["fork", "exit", "--network", network])
-        .current_dir(root.path())
-        .assert()
-        .success();
+    treb().args(["fork", "exit", "--network", network]).current_dir(root.path()).assert().success();
 
     // Registry should be back to the original state.
     let restored = fs::read_to_string(treb_dir.join(DEPLOYMENTS_FILE)).unwrap();
@@ -226,10 +224,7 @@ fn fork_exit_restores_registry() {
     );
 
     // Snapshot directory should have been removed.
-    assert!(
-        !snapshot_dir.exists(),
-        "snapshot directory should be removed after fork exit"
-    );
+    assert!(!snapshot_dir.exists(), "snapshot directory should be removed after fork exit");
 
     // Fork state should no longer contain the "testnet" entry.
     let mut store2 = ForkStateStore::new(&treb_dir);
@@ -380,9 +375,9 @@ async fn signal_handling_sigterm_shuts_down_anvil_cleanly() {
     // Spawn the binary as a background process.
     let mut child = std::process::Command::new(&treb_bin)
         .args(["dev", "anvil", "start", "--network", network, "--port", &anvil_port.to_string()])
-    .current_dir(root.path())
-    .spawn()
-    .expect("failed to spawn `treb dev anvil start`");
+        .current_dir(root.path())
+        .spawn()
+        .expect("failed to spawn `treb dev anvil start`");
 
     let pid = child.id();
 
@@ -460,11 +455,8 @@ async fn signal_handling_sigterm_shuts_down_anvil_cleanly() {
     let mut store = ForkStateStore::new(&treb_dir);
     store.load().expect("failed to reload fork state after SIGTERM");
 
-    let has_stop_entry = store
-        .data()
-        .history
-        .iter()
-        .any(|h| h.action == "anvil-stop" && h.network == network);
+    let has_stop_entry =
+        store.data().history.iter().any(|h| h.action == "anvil-stop" && h.network == network);
 
     assert!(
         has_stop_entry,

@@ -4,11 +4,9 @@
 //! and records deployments in the registry. Falls back to receipt-only
 //! mode when `debug_traceTransaction` is unsupported by the RPC.
 
-use std::collections::HashMap;
-use std::env;
-use std::time::Duration;
+use std::{collections::HashMap, env, time::Duration};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use chrono::Utc;
 use serde::Serialize;
 use treb_core::types::{
@@ -53,10 +51,8 @@ async fn rpc_call(
         .await
         .with_context(|| format!("RPC request failed for {method}"))?;
 
-    let json: serde_json::Value = resp
-        .json()
-        .await
-        .with_context(|| format!("invalid JSON response for {method}"))?;
+    let json: serde_json::Value =
+        resp.json().await.with_context(|| format!("invalid JSON response for {method}"))?;
 
     if let Some(error) = json.get("error") {
         bail!("RPC error for {method}: {error}");
@@ -93,15 +89,11 @@ fn resolve_rpc_url(
     }
 
     // Look up in foundry.toml [rpc_endpoints].
-    let config =
-        treb_config::load_foundry_config(cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let config = treb_config::load_foundry_config(cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
     let endpoints = treb_config::rpc_endpoints(&config);
 
     let url = endpoints.get(&network_name).ok_or_else(|| {
-        anyhow::anyhow!(
-            "network '{}' not found in foundry.toml [rpc_endpoints]",
-            network_name
-        )
+        anyhow::anyhow!("network '{}' not found in foundry.toml [rpc_endpoints]", network_name)
     })?;
 
     // Bail if the URL has unresolved env vars.
@@ -138,11 +130,7 @@ fn walk_trace_calls(call: &serde_json::Value, creations: &mut Vec<TracedCreation
 
     if call_type.eq_ignore_ascii_case("CREATE") || call_type.eq_ignore_ascii_case("CREATE2") {
         if let Some(to) = call.get("to").and_then(|v| v.as_str()) {
-            let from = call
-                .get("from")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
+            let from = call.get("from").and_then(|v| v.as_str()).unwrap_or("").to_string();
             creations.push(TracedCreation {
                 address: to.to_string(),
                 from,
@@ -267,17 +255,8 @@ pub async fn run(
         bail!("transaction not found: {tx_hash}");
     }
 
-    let sender = tx_result
-        .get("from")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let nonce = parse_hex_u64(
-        tx_result
-            .get("nonce")
-            .and_then(|v| v.as_str())
-            .unwrap_or("0x0"),
-    );
+    let sender = tx_result.get("from").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let nonce = parse_hex_u64(tx_result.get("nonce").and_then(|v| v.as_str()).unwrap_or("0x0"));
 
     // ── Fetch receipt ───────────────────────────────────────────────────
     let receipt_result = rpc_call(
@@ -292,17 +271,10 @@ pub async fn run(
         bail!("transaction receipt not found (transaction may be pending): {tx_hash}");
     }
 
-    let block_number = parse_hex_u64(
-        receipt_result
-            .get("blockNumber")
-            .and_then(|v| v.as_str())
-            .unwrap_or("0x0"),
-    );
+    let block_number =
+        parse_hex_u64(receipt_result.get("blockNumber").and_then(|v| v.as_str()).unwrap_or("0x0"));
 
-    let receipt_status = receipt_result
-        .get("status")
-        .and_then(|v| v.as_str())
-        .unwrap_or("0x1");
+    let receipt_status = receipt_result.get("status").and_then(|v| v.as_str()).unwrap_or("0x1");
     if receipt_status == "0x0" {
         bail!("transaction reverted: {tx_hash}");
     }
@@ -389,9 +361,8 @@ pub async fn run(
             format!("{}_{i}", effective_label)
         };
 
-        let deployment_id = generate_deployment_id(
-            &effective_namespace, chain_id, &name, &dep_label
-        );
+        let deployment_id =
+            generate_deployment_id(&effective_namespace, chain_id, &name, &dep_label);
 
         // Duplicate detection
         if registry.get_deployment(&deployment_id).is_some() {
@@ -475,10 +446,7 @@ pub async fn run(
             method: create_type.clone(),
             result: {
                 let mut m = HashMap::new();
-                m.insert(
-                    "address".into(),
-                    serde_json::Value::String(d.address.clone()),
-                );
+                m.insert("address".into(), serde_json::Value::String(d.address.clone()));
                 m
             },
         })
@@ -499,13 +467,10 @@ pub async fn run(
         created_at: Utc::now(),
     };
 
-    registry
-        .insert_transaction(transaction)
-        .context("failed to record transaction")?;
+    registry.insert_transaction(transaction).context("failed to record transaction")?;
 
     // ── Display ─────────────────────────────────────────────────────────
-    let dep_jsons: Vec<RegisteredDeploymentJson> =
-        registered.into_iter().map(|(d, _)| d).collect();
+    let dep_jsons: Vec<RegisteredDeploymentJson> = registered.into_iter().map(|(d, _)| d).collect();
 
     if json {
         output::print_json(&RegisterOutputJson {
@@ -518,9 +483,7 @@ pub async fn run(
         })?;
     } else {
         if mode == "receipt" {
-            eprintln!(
-                "Note: debug_traceTransaction not available, using receipt-only mode"
-            );
+            eprintln!("Note: debug_traceTransaction not available, using receipt-only mode");
         }
 
         let mut table = output::build_table(&["Contract", "Address", "Namespace", "Chain"]);
@@ -607,12 +570,9 @@ needs_env = "https://rpc.example.com/${API_KEY}"
     #[test]
     fn rpc_url_network_as_url_passthrough() {
         let tmp = TempDir::new().unwrap();
-        let url = resolve_rpc_url(
-            None,
-            Some("https://direct-url.example.com".to_string()),
-            tmp.path(),
-        )
-        .unwrap();
+        let url =
+            resolve_rpc_url(None, Some("https://direct-url.example.com".to_string()), tmp.path())
+                .unwrap();
         assert_eq!(url, "https://direct-url.example.com");
     }
 
@@ -749,8 +709,7 @@ needs_env = "https://rpc.example.com/${API_KEY}"
 
     #[test]
     fn contract_name_extracted_from_artifact_colon() {
-        let result =
-            resolve_contract_name(None, Some("src/Counter.sol:Counter".to_string()));
+        let result = resolve_contract_name(None, Some("src/Counter.sol:Counter".to_string()));
         assert_eq!(result, Some("Counter".to_string()));
     }
 
@@ -798,10 +757,7 @@ needs_env = "https://rpc.example.com/${API_KEY}"
         let receipt = serde_json::json!({
             "contractAddress": "0xNewContract"
         });
-        assert_eq!(
-            receipt_contract_address(&receipt),
-            Some("0xNewContract".to_string())
-        );
+        assert_eq!(receipt_contract_address(&receipt), Some("0xNewContract".to_string()));
     }
 
     #[test]

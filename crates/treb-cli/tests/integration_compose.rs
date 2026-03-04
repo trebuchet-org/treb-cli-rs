@@ -12,31 +12,28 @@ mod framework;
 
 use std::path::{Path, PathBuf};
 
-use framework::context::TestContext;
-use framework::integration_test::{run_integration_test, IntegrationTest};
-use framework::normalizer::PathNormalizer;
+use framework::{
+    context::TestContext,
+    integration_test::{IntegrationTest, run_integration_test},
+    normalizer::PathNormalizer,
+};
 
 /// Path to the compose YAML fixture files.
 fn compose_fixtures_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("compose")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("compose")
 }
 
 /// Copy a compose YAML fixture file into the test's working directory.
 fn copy_compose_fixture(name: &str, ctx: &TestContext) {
     let src = compose_fixtures_dir().join(name);
     let dst = ctx.path().join(name);
-    std::fs::copy(&src, &dst)
-        .unwrap_or_else(|e| panic!("copy compose fixture {name}: {e}"));
+    std::fs::copy(&src, &dst).unwrap_or_else(|e| panic!("copy compose fixture {name}: {e}"));
 }
 
 /// Write inline YAML content as a compose file in the test's working directory.
 fn write_compose_fixture(name: &str, content: &str, ctx: &TestContext) {
     let dst = ctx.path().join(name);
-    std::fs::write(&dst, content)
-        .unwrap_or_else(|e| panic!("write compose fixture {name}: {e}"));
+    std::fs::write(&dst, content).unwrap_or_else(|e| panic!("write compose fixture {name}: {e}"));
 }
 
 // ── Dry-run tests (human-readable) ──────────────────────────────────────
@@ -191,11 +188,7 @@ fn compose_error_empty_components() {
 
     let test = IntegrationTest::new("compose_error_empty_components")
         .pre_setup_hook(|ctx| {
-            write_compose_fixture(
-                "empty-components.yaml",
-                "group: test\ncomponents: {}\n",
-                ctx,
-            );
+            write_compose_fixture("empty-components.yaml", "group: test\ncomponents: {}\n", ctx);
         })
         .test(&["compose", "empty-components.yaml", "--dry-run"])
         .expect_err(true)

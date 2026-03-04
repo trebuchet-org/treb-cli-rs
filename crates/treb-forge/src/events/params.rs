@@ -91,12 +91,7 @@ pub fn parse_custom_env_string(env_str: &str) -> Vec<ScriptParameter> {
         };
         let description = parts.next().unwrap_or("").trim().to_string();
 
-        params.push(ScriptParameter {
-            name,
-            param_type,
-            description,
-            optional,
-        });
+        params.push(ScriptParameter { name, param_type, description, optional });
     }
 
     params
@@ -242,15 +237,8 @@ mod tests {
         for (type_str, expected_type) in types {
             let env_str = format!("{{{type_str}}} param_{type_str} A {type_str} parameter");
             let params = parse_custom_env_string(&env_str);
-            assert_eq!(
-                params.len(),
-                1,
-                "failed to parse type: {type_str}"
-            );
-            assert_eq!(
-                params[0].param_type, expected_type,
-                "wrong type for: {type_str}"
-            );
+            assert_eq!(params.len(), 1, "failed to parse type: {type_str}");
+            assert_eq!(params[0].param_type, expected_type, "wrong type for: {type_str}");
             assert_eq!(params[0].name, format!("param_{type_str}"));
         }
     }

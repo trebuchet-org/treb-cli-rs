@@ -180,10 +180,7 @@ pub struct LocalConfig {
 
 impl Default for LocalConfig {
     fn default() -> Self {
-        Self {
-            namespace: "default".to_string(),
-            network: String::new(),
-        }
+        Self { namespace: "default".to_string(), network: String::new() }
     }
 }
 
@@ -357,10 +354,7 @@ mod tests {
     /// This test ensures the Rust struct serializes with identical JSON keys.
     #[test]
     fn local_config_field_names_match_go_schema() {
-        let cfg = LocalConfig {
-            namespace: "prod".to_string(),
-            network: "mainnet".to_string(),
-        };
+        let cfg = LocalConfig { namespace: "prod".to_string(), network: "mainnet".to_string() };
         let value = serde_json::to_value(&cfg).unwrap();
         let obj = value.as_object().unwrap();
 

@@ -4,8 +4,7 @@
 //! extracts treb-specific sender config from `[profile.*.treb.senders.*]`
 //! sections. Also provides RPC endpoint extraction.
 
-use std::collections::HashMap;
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
 
 use treb_core::error::{Result, TrebError};
 
@@ -146,10 +145,7 @@ derivation_path = "m/44'/60'/0'/0/0"
         let ledger = senders.get("ledger_signer").unwrap();
         assert_eq!(ledger.type_, Some(SenderType::Ledger));
         assert_eq!(ledger.address.as_deref(), Some("0xLedgerAddr"));
-        assert_eq!(
-            ledger.derivation_path.as_deref(),
-            Some("m/44'/60'/0'/0/0")
-        );
+        assert_eq!(ledger.derivation_path.as_deref(), Some("m/44'/60'/0'/0/0"));
     }
 
     #[test]
@@ -204,10 +200,7 @@ sepolia = "https://sepolia.example.com"
         );
         let config = load_foundry_config(tmp.path()).unwrap();
         let eps = rpc_endpoints(&config);
-        assert_eq!(
-            eps.get("mainnet").unwrap(),
-            "https://eth-mainnet.example.com"
-        );
+        assert_eq!(eps.get("mainnet").unwrap(), "https://eth-mainnet.example.com");
         assert_eq!(eps.get("sepolia").unwrap(), "https://sepolia.example.com");
     }
 }

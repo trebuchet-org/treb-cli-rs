@@ -3,11 +3,13 @@
 //! Converts [`ParsedEvent`] sequences into [`ExtractedDeployment`] and
 //! [`ExtractedCollision`] structs for downstream registry recording.
 
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{Address, B256, Bytes};
 use treb_core::types::enums::DeploymentMethod;
 
-use crate::artifacts::{ArtifactIndex, ArtifactMatch};
-use crate::events::decoder::{ParsedEvent, TrebEvent};
+use crate::{
+    artifacts::{ArtifactIndex, ArtifactMatch},
+    events::decoder::{ParsedEvent, TrebEvent},
+};
 
 /// A deployment extracted from a [`ContractDeployed`] event.
 #[derive(Debug)]
@@ -85,9 +87,7 @@ pub fn extract_deployments(
             if let ParsedEvent::Treb(boxed) = event {
                 if let TrebEvent::ContractDeployed(deployed) = boxed.as_ref() {
                     let artifact_match = artifacts.and_then(|idx| {
-                        idx.find_by_name(&deployed.deployment.artifact)
-                            .ok()
-                            .flatten()
+                        idx.find_by_name(&deployed.deployment.artifact).ok().flatten()
                     });
 
                     return Some(ExtractedDeployment {
@@ -140,11 +140,13 @@ pub fn extract_collisions(events: &[ParsedEvent]) -> Vec<ExtractedCollision> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{address, b256, LogData};
+    use alloy_primitives::{LogData, address, b256};
     use alloy_sol_types::SolEvent;
 
-    use crate::events::abi::{ContractDeployed, DeploymentDetails};
-    use crate::events::decoder::decode_events;
+    use crate::events::{
+        abi::{ContractDeployed, DeploymentDetails},
+        decoder::decode_events,
+    };
 
     /// Helper: create a raw Log from an event type's encoded log data.
     fn make_log(address: Address, log_data: LogData) -> alloy_primitives::Log {
@@ -163,9 +165,7 @@ mod tests {
                 artifact: "Counter".to_string(),
                 label: "counter-v1".to_string(),
                 entropy: "abc123".to_string(),
-                salt: b256!(
-                    "0000000000000000000000000000000000000000000000000000000000000001"
-                ),
+                salt: b256!("0000000000000000000000000000000000000000000000000000000000000001"),
                 bytecodeHash: b256!(
                     "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
                 ),
@@ -188,14 +188,8 @@ mod tests {
         assert_eq!(deployments.len(), 1);
 
         let d = &deployments[0];
-        assert_eq!(
-            d.address,
-            address!("5FbDB2315678afecb367f032d93F642f64180aa3")
-        );
-        assert_eq!(
-            d.deployer,
-            address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266")
-        );
+        assert_eq!(d.address, address!("5FbDB2315678afecb367f032d93F642f64180aa3"));
+        assert_eq!(d.deployer, address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"));
         assert_eq!(
             d.transaction_id,
             b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
@@ -228,9 +222,7 @@ mod tests {
                 artifact: "Token".to_string(),
                 label: "token-v1".to_string(),
                 entropy: String::new(),
-                salt: b256!(
-                    "2222222222222222222222222222222222222222222222222222222222222222"
-                ),
+                salt: b256!("2222222222222222222222222222222222222222222222222222222222222222"),
                 bytecodeHash: b256!(
                     "3333333333333333333333333333333333333333333333333333333333333333"
                 ),
@@ -248,10 +240,7 @@ mod tests {
         assert_eq!(collisions.len(), 1);
 
         let c = &collisions[0];
-        assert_eq!(
-            c.existing_address,
-            address!("e7f1725E7734CE288F8367e1Bb143E90bb3F0512")
-        );
+        assert_eq!(c.existing_address, address!("e7f1725E7734CE288F8367e1Bb143E90bb3F0512"));
         assert_eq!(c.contract_name, "Token");
         assert_eq!(c.label, "token-v1");
         assert_eq!(c.strategy, DeploymentMethod::Create2);
@@ -302,9 +291,8 @@ mod tests {
         // An unknown log
         let unknown_topic =
             b256!("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
-        let log3 =
-            alloy_primitives::Log::new(Address::ZERO, vec![unknown_topic], Bytes::new())
-                .expect("valid log");
+        let log3 = alloy_primitives::Log::new(Address::ZERO, vec![unknown_topic], Bytes::new())
+            .expect("valid log");
 
         let parsed = decode_events(&[log1, log2, log3]);
         assert_eq!(parsed.len(), 3);

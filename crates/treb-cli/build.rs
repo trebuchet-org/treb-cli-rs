@@ -1,7 +1,7 @@
 use std::process::Command;
 
 use clap::{Arg, ArgAction, Command as ClapCommand};
-use clap_complete::{generate_to, Shell};
+use clap_complete::{Shell, generate_to};
 
 fn build_cli() -> ClapCommand {
     ClapCommand::new("treb")
@@ -88,11 +88,7 @@ fn build_run() -> ClapCommand {
         )
         .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
         .arg(Arg::new("env").long("env").num_args(1).help("Set environment variables (KEY=VALUE)"))
-        .arg(
-            Arg::new("target-contract")
-                .long("target-contract")
-                .help("Target contract to run"),
-        )
+        .arg(Arg::new("target-contract").long("target-contract").help("Target contract to run"))
         .arg(
             Arg::new("non-interactive")
                 .long("non-interactive")
@@ -138,23 +134,21 @@ fn build_show() -> ClapCommand {
 }
 
 fn build_init() -> ClapCommand {
-    ClapCommand::new("init")
-        .about("Initialize a treb project")
-        .arg(
-            Arg::new("force")
-                .long("force")
-                .action(ArgAction::SetTrue)
-                .help("Overwrite local config even if already initialized"),
-        )
+    ClapCommand::new("init").about("Initialize a treb project").arg(
+        Arg::new("force")
+            .long("force")
+            .action(ArgAction::SetTrue)
+            .help("Overwrite local config even if already initialized"),
+    )
 }
 
 fn build_config() -> ClapCommand {
     ClapCommand::new("config")
         .about("Manage treb configuration")
         .subcommand(
-            ClapCommand::new("show")
-                .about("Display the resolved configuration")
-                .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON")),
+            ClapCommand::new("show").about("Display the resolved configuration").arg(
+                Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"),
+            ),
         )
         .subcommand(
             ClapCommand::new("set")
@@ -199,7 +193,9 @@ fn build_verify() -> ClapCommand {
                 .action(ArgAction::SetTrue)
                 .help("Watch verification status until confirmed"),
         )
-        .arg(Arg::new("retries").long("retries").default_value("5").help("Number of retry attempts"))
+        .arg(
+            Arg::new("retries").long("retries").default_value("5").help("Number of retry attempts"),
+        )
         .arg(
             Arg::new("delay")
                 .long("delay")
@@ -231,7 +227,11 @@ fn build_register() -> ClapCommand {
         .arg(Arg::new("rpc-url").long("rpc-url").help("Explicit RPC URL (overrides network)"))
         .arg(Arg::new("address").long("address").help("Filter to a specific deployed address"))
         .arg(Arg::new("contract").long("contract").help("Contract artifact name to match"))
-        .arg(Arg::new("contract-name").long("contract-name").help("Contract name to narrow matching"))
+        .arg(
+            Arg::new("contract-name")
+                .long("contract-name")
+                .help("Contract name to narrow matching"),
+        )
         .arg(Arg::new("label").long("label").help("Label for registered deployments"))
         .arg(Arg::new("namespace").long("namespace").help("Deployment namespace"))
         .arg(
@@ -278,8 +278,16 @@ fn build_gen_deploy() -> ClapCommand {
     ClapCommand::new("gen-deploy")
         .about("Generate deployment scripts from templates")
         .arg(Arg::new("artifact").help("Contract name or artifact identifier"))
-        .arg(Arg::new("strategy").long("strategy").help("Deployment strategy: create, create2, create3"))
-        .arg(Arg::new("proxy").long("proxy").help("Proxy pattern: erc1967, uups, transparent, beacon"))
+        .arg(
+            Arg::new("strategy")
+                .long("strategy")
+                .help("Deployment strategy: create, create2, create3"),
+        )
+        .arg(
+            Arg::new("proxy")
+                .long("proxy")
+                .help("Proxy pattern: erc1967, uups, transparent, beacon"),
+        )
         .arg(Arg::new("proxy-contract").long("proxy-contract").help("Custom proxy contract name"))
         .arg(Arg::new("output").long("output").help("Output file path"))
         .arg(
@@ -389,11 +397,7 @@ fn build_reset() -> ClapCommand {
                 .long("network")
                 .help("Filter reset to a specific network (by chain ID)"),
         )
-        .arg(
-            Arg::new("namespace")
-                .long("namespace")
-                .help("Filter reset to a specific namespace"),
-        )
+        .arg(Arg::new("namespace").long("namespace").help("Filter reset to a specific namespace"))
         .arg(
             Arg::new("yes")
                 .long("yes")
@@ -416,17 +420,17 @@ fn build_migrate() -> ClapCommand {
                         .action(ArgAction::SetTrue)
                         .help("Print v2 TOML to stdout without modifying any files"),
                 )
-                .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON")),
+                .arg(
+                    Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"),
+                ),
         )
         .subcommand(
-            ClapCommand::new("registry")
-                .about("Apply versioned registry schema migrations")
-                .arg(
-                    Arg::new("dry-run")
-                        .long("dry-run")
-                        .action(ArgAction::SetTrue)
-                        .help("List pending migrations without applying them"),
-                ),
+            ClapCommand::new("registry").about("Apply versioned registry schema migrations").arg(
+                Arg::new("dry-run")
+                    .long("dry-run")
+                    .action(ArgAction::SetTrue)
+                    .help("List pending migrations without applying them"),
+            ),
         )
 }
 
@@ -436,12 +440,7 @@ fn build_fork() -> ClapCommand {
         .subcommand(
             ClapCommand::new("enter")
                 .about("Enter fork mode for a network: snapshot registry and record fork state")
-                .arg(
-                    Arg::new("network")
-                        .long("network")
-                        .required(true)
-                        .help("Network name"),
-                )
+                .arg(Arg::new("network").long("network").required(true).help("Network name"))
                 .arg(Arg::new("rpc-url").long("rpc-url").help("Upstream RPC URL to fork"))
                 .arg(
                     Arg::new("fork-block-number")
@@ -452,7 +451,9 @@ fn build_fork() -> ClapCommand {
         .subcommand(
             ClapCommand::new("exit")
                 .about("Exit fork mode: restore registry from snapshot and remove fork state")
-                .arg(Arg::new("network").long("network").required(true).help("Network name to exit")),
+                .arg(
+                    Arg::new("network").long("network").required(true).help("Network name to exit"),
+                ),
         )
         .subcommand(
             ClapCommand::new("revert")
@@ -476,72 +477,65 @@ fn build_fork() -> ClapCommand {
                 ),
         )
         .subcommand(
-            ClapCommand::new("status")
-                .about("Show active fork status")
-                .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON")),
+            ClapCommand::new("status").about("Show active fork status").arg(
+                Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"),
+            ),
         )
         .subcommand(
             ClapCommand::new("history")
                 .about("Show fork history")
                 .arg(Arg::new("network").long("network").help("Filter by network name"))
-                .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON")),
+                .arg(
+                    Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"),
+                ),
         )
         .subcommand(
             ClapCommand::new("diff")
                 .about("Diff current registry vs snapshot")
                 .arg(
-                    Arg::new("network")
-                        .long("network")
-                        .required(true)
-                        .help("Network name to diff"),
+                    Arg::new("network").long("network").required(true).help("Network name to diff"),
                 )
-                .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON")),
-        )
-}
-
-fn build_dev() -> ClapCommand {
-    ClapCommand::new("dev")
-        .about("Start a local development environment")
-        .subcommand(
-            ClapCommand::new("anvil")
-                .about("Manage local Anvil development nodes")
-                .subcommand(
-                    ClapCommand::new("start")
-                        .about("Start a local Anvil node in the foreground")
-                        .arg(Arg::new("network").long("network").help("Network name"))
-                        .arg(Arg::new("port").long("port").help("Port to listen on (default: 8545)"))
-                        .arg(
-                            Arg::new("fork-block-number")
-                                .long("fork-block-number")
-                                .help("Block number to fork from"),
-                        ),
-                )
-                .subcommand(
-                    ClapCommand::new("stop")
-                        .about("Clean up stale Anvil entries in fork state")
-                        .arg(Arg::new("network").long("network").help("Network name to stop")),
-                )
-                .subcommand(
-                    ClapCommand::new("restart")
-                        .about("Restart an Anvil node")
-                        .arg(Arg::new("network").long("network").help("Network name to restart")),
-                )
-                .subcommand(
-                    ClapCommand::new("status")
-                        .about("Show Anvil node status")
-                        .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON")),
+                .arg(
+                    Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"),
                 ),
         )
 }
 
+fn build_dev() -> ClapCommand {
+    ClapCommand::new("dev").about("Start a local development environment").subcommand(
+        ClapCommand::new("anvil")
+            .about("Manage local Anvil development nodes")
+            .subcommand(
+                ClapCommand::new("start")
+                    .about("Start a local Anvil node in the foreground")
+                    .arg(Arg::new("network").long("network").help("Network name"))
+                    .arg(Arg::new("port").long("port").help("Port to listen on (default: 8545)"))
+                    .arg(
+                        Arg::new("fork-block-number")
+                            .long("fork-block-number")
+                            .help("Block number to fork from"),
+                    ),
+            )
+            .subcommand(
+                ClapCommand::new("stop")
+                    .about("Clean up stale Anvil entries in fork state")
+                    .arg(Arg::new("network").long("network").help("Network name to stop")),
+            )
+            .subcommand(
+                ClapCommand::new("restart")
+                    .about("Restart an Anvil node")
+                    .arg(Arg::new("network").long("network").help("Network name to restart")),
+            )
+            .subcommand(ClapCommand::new("status").about("Show Anvil node status").arg(
+                Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"),
+            )),
+    )
+}
+
 fn build_completions_cmd() -> ClapCommand {
-    ClapCommand::new("completions")
-        .about("Generate shell completion scripts")
-        .arg(
-            Arg::new("shell")
-                .required(true)
-                .help("Shell type (bash, zsh, fish, elvish, powershell)"),
-        )
+    ClapCommand::new("completions").about("Generate shell completion scripts").arg(
+        Arg::new("shell").required(true).help("Shell type (bash, zsh, fish, elvish, powershell)"),
+    )
 }
 
 fn main() {

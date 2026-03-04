@@ -276,23 +276,14 @@ mod tests {
         let mut senders = HashMap::new();
         senders.insert(
             "deployer".to_string(),
-            SenderConfig {
-                type_: Some(SenderType::PrivateKey),
-                ..Default::default()
-            },
+            SenderConfig { type_: Some(SenderType::PrivateKey), ..Default::default() },
         );
         let config = make_resolved(senders);
         let err = validate_config(&config).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("deployer"), "should mention sender name: {msg}");
-        assert!(
-            msg.contains("private_key"),
-            "should mention missing field: {msg}"
-        );
-        assert!(
-            msg.contains("fix"),
-            "should contain fix instructions: {msg}"
-        );
+        assert!(msg.contains("private_key"), "should mention missing field: {msg}");
+        assert!(msg.contains("fix"), "should contain fix instructions: {msg}");
     }
 
     #[test]
@@ -349,14 +340,8 @@ mod tests {
         let err = validate_config(&config).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("multisig"), "should mention sender name: {msg}");
-        assert!(
-            msg.contains("nonexistent"),
-            "should mention missing reference: {msg}"
-        );
-        assert!(
-            msg.contains("does not exist"),
-            "should explain the issue: {msg}"
-        );
+        assert!(msg.contains("nonexistent"), "should mention missing reference: {msg}");
+        assert!(msg.contains("does not exist"), "should explain the issue: {msg}");
     }
 
     #[test]
@@ -374,10 +359,7 @@ mod tests {
         let err = validate_config(&config).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("gov"), "should mention sender name: {msg}");
-        assert!(
-            msg.contains("governor"),
-            "should mention missing field: {msg}"
-        );
+        assert!(msg.contains("governor"), "should mention missing field: {msg}");
         assert!(msg.contains("fix"), "should contain fix instructions: {msg}");
     }
 
@@ -396,10 +378,7 @@ mod tests {
         let err = validate_config(&config).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("gov"), "should mention sender name: {msg}");
-        assert!(
-            msg.contains("proposer"),
-            "should mention missing field: {msg}"
-        );
+        assert!(msg.contains("proposer"), "should mention missing field: {msg}");
         assert!(msg.contains("fix"), "should contain fix instructions: {msg}");
     }
 
@@ -419,14 +398,8 @@ mod tests {
         let err = validate_config(&config).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("gov"), "should mention sender name: {msg}");
-        assert!(
-            msg.contains("ghost"),
-            "should mention missing reference: {msg}"
-        );
-        assert!(
-            msg.contains("does not exist"),
-            "should explain the issue: {msg}"
-        );
+        assert!(msg.contains("ghost"), "should mention missing reference: {msg}");
+        assert!(msg.contains("does not exist"), "should explain the issue: {msg}");
     }
 
     #[test]
@@ -448,10 +421,7 @@ mod tests {
         let mut senders = HashMap::new();
         senders.insert(
             "hw".to_string(),
-            SenderConfig {
-                type_: Some(SenderType::Ledger),
-                ..Default::default()
-            },
+            SenderConfig { type_: Some(SenderType::Ledger), ..Default::default() },
         );
         let config = make_resolved(senders);
         let warnings = validate_config(&config).unwrap();
@@ -477,10 +447,7 @@ mod tests {
         let mut senders = HashMap::new();
         senders.insert(
             "hw".to_string(),
-            SenderConfig {
-                type_: Some(SenderType::Trezor),
-                ..Default::default()
-            },
+            SenderConfig { type_: Some(SenderType::Trezor), ..Default::default() },
         );
         let config = make_resolved(senders);
         let warnings = validate_config(&config).unwrap();
@@ -498,29 +465,17 @@ mod tests {
         let mut senders = HashMap::new();
         senders.insert(
             "deployer".to_string(),
-            SenderConfig {
-                type_: Some(SenderType::PrivateKey),
-                ..Default::default()
-            },
+            SenderConfig { type_: Some(SenderType::PrivateKey), ..Default::default() },
         );
         let config = make_resolved(senders);
         let err = validate_config(&config).unwrap_err();
         let msg = err.to_string();
         // Should contain the config source.
-        assert!(
-            msg.contains("treb.toml (v2)"),
-            "error should mention config source: {msg}"
-        );
+        assert!(msg.contains("treb.toml (v2)"), "error should mention config source: {msg}");
         // Should contain the sender section.
-        assert!(
-            msg.contains("[senders.deployer]"),
-            "error should mention section: {msg}"
-        );
+        assert!(msg.contains("[senders.deployer]"), "error should mention section: {msg}");
         // Should contain fix instructions.
-        assert!(
-            msg.contains("Add"),
-            "error should contain fix instructions: {msg}"
-        );
+        assert!(msg.contains("Add"), "error should contain fix instructions: {msg}");
     }
 
     #[test]
@@ -528,10 +483,7 @@ mod tests {
         let mut senders = HashMap::new();
         senders.insert(
             "hw".to_string(),
-            SenderConfig {
-                type_: Some(SenderType::Ledger),
-                ..Default::default()
-            },
+            SenderConfig { type_: Some(SenderType::Ledger), ..Default::default() },
         );
         let config = make_resolved(senders);
         let warnings = validate_config(&config).unwrap();

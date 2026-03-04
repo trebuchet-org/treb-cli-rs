@@ -1,10 +1,10 @@
-pub mod workdir;
-pub mod runner;
 pub mod anvil_node;
-pub mod context;
-pub mod normalizer;
-pub mod golden;
-pub mod snapshot;
 pub mod cleanup;
-pub mod pool;
+pub mod context;
+pub mod golden;
 pub mod integration_test;
+pub mod normalizer;
+pub mod pool;
+pub mod runner;
+pub mod snapshot;
+pub mod workdir;

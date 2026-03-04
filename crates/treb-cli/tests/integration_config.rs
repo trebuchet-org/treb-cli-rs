@@ -2,9 +2,11 @@
 
 mod framework;
 
-use framework::context::TestContext;
-use framework::integration_test::{run_integration_test, IntegrationTest};
-use framework::normalizer::PathNormalizer;
+use framework::{
+    context::TestContext,
+    integration_test::{IntegrationTest, run_integration_test},
+    normalizer::PathNormalizer,
+};
 
 /// Default config show displays Namespace, Network (not set), senders table.
 #[test]
@@ -34,7 +36,8 @@ fn config_show_json() {
     run_integration_test(&test, &ctx);
 }
 
-/// Set network, then show reflects the updated value; config.local.json artifact confirms persistence.
+/// Set network, then show reflects the updated value; config.local.json artifact confirms
+/// persistence.
 #[test]
 fn config_set_show_round_trip() {
     let ctx = TestContext::new("project");

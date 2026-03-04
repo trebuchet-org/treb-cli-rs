@@ -45,11 +45,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let key = "TREB_TEST_DOTENV_OVERRIDE_67890";
         std::fs::write(tmp.path().join(".env"), format!("{key}=from_env\n")).unwrap();
-        std::fs::write(
-            tmp.path().join(".env.local"),
-            format!("{key}=from_local\n"),
-        )
-        .unwrap();
+        std::fs::write(tmp.path().join(".env.local"), format!("{key}=from_local\n")).unwrap();
 
         load_dotenv(tmp.path());
 

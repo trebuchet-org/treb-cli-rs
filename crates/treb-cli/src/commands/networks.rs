@@ -19,10 +19,7 @@ pub struct NetworkInfo {
 }
 
 /// Resolve the chain ID for a single RPC endpoint via `eth_chainId`.
-async fn resolve_chain_id(
-    client: &reqwest::Client,
-    url: &str,
-) -> (Option<u64>, String) {
+async fn resolve_chain_id(client: &reqwest::Client, url: &str) -> (Option<u64>, String) {
     let body = serde_json::json!({
         "jsonrpc": "2.0",
         "method": "eth_chainId",
@@ -69,8 +66,7 @@ pub async fn run(json: bool) -> anyhow::Result<()> {
         );
     }
 
-    let config = treb_config::load_foundry_config(&cwd)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let config = treb_config::load_foundry_config(&cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
     let endpoints = treb_config::rpc_endpoints(&config);
 
     if endpoints.is_empty() {
@@ -83,9 +79,7 @@ pub async fn run(json: bool) -> anyhow::Result<()> {
     let mut names: Vec<&String> = endpoints.keys().collect();
     names.sort();
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()?;
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(5)).build()?;
 
     // Resolve chain IDs concurrently
     let mut results: Vec<NetworkInfo> = Vec::with_capacity(names.len());
@@ -106,12 +100,7 @@ pub async fn run(json: bool) -> anyhow::Result<()> {
                 }
             } else {
                 let (chain_id, status) = resolve_chain_id(&client, &url).await;
-                NetworkInfo {
-                    name,
-                    rpc_url: url,
-                    chain_id,
-                    status,
-                }
+                NetworkInfo { name, rpc_url: url, chain_id, status }
             }
         }));
     }
@@ -137,18 +126,11 @@ pub async fn run(json: bool) -> anyhow::Result<()> {
         let mut table = output::build_table(&headers);
 
         for info in &results {
-            let chain_id_str = info
-                .chain_id
-                .map(|id| id.to_string())
-                .unwrap_or_else(|| "-".to_string());
+            let chain_id_str =
+                info.chain_id.map(|id| id.to_string()).unwrap_or_else(|| "-".to_string());
 
             if has_errors {
-                table.add_row(vec![
-                    &info.name,
-                    &info.rpc_url,
-                    &chain_id_str,
-                    &info.status,
-                ]);
+                table.add_row(vec![&info.name, &info.rpc_url, &chain_id_str, &info.status]);
             } else {
                 table.add_row(vec![&info.name, &info.rpc_url, &chain_id_str]);
             }

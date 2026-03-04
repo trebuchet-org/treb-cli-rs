@@ -10,8 +10,7 @@
 //! events, and then exercises the relevant treb command.
 
 use assert_cmd::cargo::cargo_bin_cmd;
-use std::fs;
-use std::path::Path;
+use std::{fs, path::Path};
 
 fn treb() -> assert_cmd::Command {
     cargo_bin_cmd!("treb-cli")
@@ -147,11 +146,8 @@ async fn setup_project() -> tempfile::TempDir {
 
     // Write the treb deploy script.
     fs::create_dir_all(tmp.path().join("script")).unwrap();
-    fs::write(
-        tmp.path().join("script").join("TrebDeploySimple.s.sol"),
-        TREB_DEPLOY_SCRIPT,
-    )
-    .unwrap();
+    fs::write(tmp.path().join("script").join("TrebDeploySimple.s.sol"), TREB_DEPLOY_SCRIPT)
+        .unwrap();
 
     // Write treb.toml with the Anvil deployer private key.
     fs::write(tmp.path().join("treb.toml"), TREB_TOML).unwrap();
@@ -159,11 +155,7 @@ async fn setup_project() -> tempfile::TempDir {
     // Run `treb init` to create the .treb/ directory.
     let tmp_path = tmp.path().to_path_buf();
     tokio::task::spawn_blocking(move || {
-        treb()
-            .arg("init")
-            .current_dir(&tmp_path)
-            .assert()
-            .success();
+        treb().arg("init").current_dir(&tmp_path).assert().success();
     })
     .await
     .expect("treb init should not panic");
@@ -207,11 +199,7 @@ async fn e2e_init_run_list() {
 
     let tmp_path = tmp.path().to_path_buf();
     let output = tokio::task::spawn_blocking(move || {
-        treb()
-            .args(["list", "--json"])
-            .current_dir(&tmp_path)
-            .output()
-            .unwrap()
+        treb().args(["list", "--json"]).current_dir(&tmp_path).output().unwrap()
     })
     .await
     .unwrap();
@@ -226,8 +214,7 @@ async fn e2e_init_run_list() {
     let address = arr[0]["address"].as_str().expect("deployment must have 'address'");
     assert!(address.starts_with("0x"), "address must be 0x-prefixed: {address}");
     assert_ne!(
-        address,
-        "0x0000000000000000000000000000000000000000",
+        address, "0x0000000000000000000000000000000000000000",
         "deployed address must be non-zero: {address}"
     );
 
@@ -249,11 +236,7 @@ async fn e2e_run_show() {
     // Retrieve the deployment ID via list.
     let tmp_path = tmp.path().to_path_buf();
     let list_output = tokio::task::spawn_blocking(move || {
-        treb()
-            .args(["list", "--json"])
-            .current_dir(&tmp_path)
-            .output()
-            .unwrap()
+        treb().args(["list", "--json"]).current_dir(&tmp_path).output().unwrap()
     })
     .await
     .unwrap();
@@ -267,11 +250,7 @@ async fn e2e_run_show() {
     let tmp_path = tmp.path().to_path_buf();
     let dep_id = deployment_id.clone();
     let output = tokio::task::spawn_blocking(move || {
-        treb()
-            .args(["show", &dep_id, "--json"])
-            .current_dir(&tmp_path)
-            .output()
-            .unwrap()
+        treb().args(["show", &dep_id, "--json"]).current_dir(&tmp_path).output().unwrap()
     })
     .await
     .unwrap();
@@ -303,11 +282,7 @@ async fn e2e_run_tag_list_with_filter() {
     // Retrieve the deployment ID.
     let tmp_path = tmp.path().to_path_buf();
     let list_output = tokio::task::spawn_blocking(move || {
-        treb()
-            .args(["list", "--json"])
-            .current_dir(&tmp_path)
-            .output()
-            .unwrap()
+        treb().args(["list", "--json"]).current_dir(&tmp_path).output().unwrap()
     })
     .await
     .unwrap();
@@ -320,11 +295,7 @@ async fn e2e_run_tag_list_with_filter() {
     let tmp_path = tmp.path().to_path_buf();
     let dep_id = deployment_id.clone();
     tokio::task::spawn_blocking(move || {
-        treb()
-            .args(["tag", &dep_id, "--add", "v1.0.0"])
-            .current_dir(&tmp_path)
-            .assert()
-            .success();
+        treb().args(["tag", &dep_id, "--add", "v1.0.0"]).current_dir(&tmp_path).assert().success();
     })
     .await
     .unwrap();
@@ -332,11 +303,7 @@ async fn e2e_run_tag_list_with_filter() {
     // List with tag filter — should return exactly one result.
     let tmp_path = tmp.path().to_path_buf();
     let output = tokio::task::spawn_blocking(move || {
-        treb()
-            .args(["list", "--tag", "v1.0.0", "--json"])
-            .current_dir(&tmp_path)
-            .output()
-            .unwrap()
+        treb().args(["list", "--tag", "v1.0.0", "--json"]).current_dir(&tmp_path).output().unwrap()
     })
     .await
     .unwrap();
@@ -370,11 +337,7 @@ async fn e2e_run_prune_dry_run_clean() {
 
     let tmp_path = tmp.path().to_path_buf();
     let output = tokio::task::spawn_blocking(move || {
-        treb()
-            .args(["prune", "--dry-run"])
-            .current_dir(&tmp_path)
-            .output()
-            .unwrap()
+        treb().args(["prune", "--dry-run"]).current_dir(&tmp_path).output().unwrap()
     })
     .await
     .unwrap();
@@ -405,11 +368,7 @@ async fn e2e_run_reset_list() {
     // Reset the registry without prompting.
     let tmp_path = tmp.path().to_path_buf();
     tokio::task::spawn_blocking(move || {
-        treb()
-            .args(["reset", "--yes"])
-            .current_dir(&tmp_path)
-            .assert()
-            .success();
+        treb().args(["reset", "--yes"]).current_dir(&tmp_path).assert().success();
     })
     .await
     .unwrap();
@@ -417,11 +376,7 @@ async fn e2e_run_reset_list() {
     // List should now return an empty array.
     let tmp_path = tmp.path().to_path_buf();
     let output = tokio::task::spawn_blocking(move || {
-        treb()
-            .args(["list", "--json"])
-            .current_dir(&tmp_path)
-            .output()
-            .unwrap()
+        treb().args(["list", "--json"]).current_dir(&tmp_path).output().unwrap()
     })
     .await
     .unwrap();
@@ -431,11 +386,7 @@ async fn e2e_run_reset_list() {
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("treb list --json must emit valid JSON");
     let arr = json.as_array().expect("JSON output must be an array");
-    assert!(
-        arr.is_empty(),
-        "registry should be empty after reset, but got {} entries",
-        arr.len()
-    );
+    assert!(arr.is_empty(), "registry should be empty after reset, but got {} entries", arr.len());
 
     drop(anvil);
 }
@@ -453,11 +404,7 @@ async fn e2e_list_no_color_has_no_ansi() {
 
     let tmp_path = tmp.path().to_path_buf();
     let output = tokio::task::spawn_blocking(move || {
-        treb()
-            .args(["--no-color", "list"])
-            .current_dir(&tmp_path)
-            .output()
-            .unwrap()
+        treb().args(["--no-color", "list"]).current_dir(&tmp_path).output().unwrap()
     })
     .await
     .unwrap();

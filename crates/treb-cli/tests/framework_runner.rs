@@ -2,8 +2,7 @@
 
 mod framework;
 
-use framework::runner::TrebRunner;
-use framework::workdir::TestWorkdir;
+use framework::{runner::TrebRunner, workdir::TestWorkdir};
 
 fn minimal_fixture() -> std::path::PathBuf {
     TestWorkdir::fixture_dir("minimal-project")
@@ -25,9 +24,7 @@ fn run_with_env_passes_env_vars() {
     let runner = TrebRunner::new(w.path());
 
     // Env vars shouldn't break the command — just verify it still works.
-    runner
-        .run_with_env(["version"], [("MY_TEST_VAR", "hello")])
-        .success();
+    runner.run_with_env(["version"], [("MY_TEST_VAR", "hello")]).success();
 }
 
 #[test]

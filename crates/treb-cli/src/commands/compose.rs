@@ -3,18 +3,22 @@
 //! YAML-based multi-step deployment orchestration that executes multiple
 //! Forge scripts in dependency order.
 
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use std::env;
-use std::hash::{DefaultHasher, Hash, Hasher};
-use std::io::{self, BufRead, IsTerminal, Write};
-use std::path::{Path, PathBuf};
+use std::{
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
+    env,
+    hash::{DefaultHasher, Hash, Hasher},
+    io::{self, BufRead, IsTerminal, Write},
+    path::{Path, PathBuf},
+};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
-use treb_config::{resolve_config, ResolveOpts};
-use treb_forge::pipeline::{resolve_git_commit, PipelineConfig, PipelineContext, RunPipeline};
-use treb_forge::script::build_script_config_with_senders;
-use treb_forge::sender::resolve_all_senders;
+use treb_config::{ResolveOpts, resolve_config};
+use treb_forge::{
+    pipeline::{PipelineConfig, PipelineContext, RunPipeline, resolve_git_commit},
+    script::build_script_config_with_senders,
+    sender::resolve_all_senders,
+};
 use treb_registry::Registry;
 
 use crate::output;
@@ -82,10 +86,7 @@ pub fn validate_compose_file(compose: &ComposeFile) -> anyhow::Result<()> {
     }
     for (name, component) in &compose.components {
         // Validate component name: alphanumeric, hyphens, underscores only
-        if !name
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
-        {
+        if !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
             bail!(
                 "invalid orchestration configuration: component '{}' has an invalid name: must contain only alphanumeric characters, hyphens, and underscores",
                 name
@@ -102,7 +103,10 @@ pub fn validate_compose_file(compose: &ComposeFile) -> anyhow::Result<()> {
         if let Some(deps) = &component.deps {
             for dep in deps {
                 if dep == name {
-                    bail!("invalid orchestration configuration: component '{}' cannot depend on itself", name);
+                    bail!(
+                        "invalid orchestration configuration: component '{}' cannot depend on itself",
+                        name
+                    );
                 }
                 if !compose.components.contains_key(dep) {
                     bail!(
@@ -189,20 +193,14 @@ pub fn build_execution_order(compose: &ComposeFile) -> anyhow::Result<Vec<String
         if let Some(deps) = &component.deps {
             *in_degree.entry(name.as_str()).or_insert(0) += deps.len();
             for dep in deps {
-                dependents
-                    .entry(dep.as_str())
-                    .or_default()
-                    .push(name.as_str());
+                dependents.entry(dep.as_str()).or_default().push(name.as_str());
             }
         }
     }
 
     // Seed queue with zero-degree nodes (alphabetically sorted via BTreeMap).
-    let mut queue: VecDeque<&str> = in_degree
-        .iter()
-        .filter(|&(_, deg)| *deg == 0)
-        .map(|(&name, _)| name)
-        .collect();
+    let mut queue: VecDeque<&str> =
+        in_degree.iter().filter(|&(_, deg)| *deg == 0).map(|(&name, _)| name).collect();
 
     let mut order: Vec<String> = Vec::with_capacity(compose.components.len());
 
@@ -210,11 +208,8 @@ pub fn build_execution_order(compose: &ComposeFile) -> anyhow::Result<Vec<String
         order.push(current.to_string());
 
         // Collect and sort dependents for deterministic ordering.
-        let mut next: Vec<&str> = dependents
-            .get(current)
-            .map(|v| v.as_slice())
-            .unwrap_or_default()
-            .to_vec();
+        let mut next: Vec<&str> =
+            dependents.get(current).map(|v| v.as_slice()).unwrap_or_default().to_vec();
         next.sort();
 
         for dep in next {
@@ -228,15 +223,9 @@ pub fn build_execution_order(compose: &ComposeFile) -> anyhow::Result<Vec<String
 
     if order.len() != compose.components.len() {
         // Find components still in the cycle (non-zero in-degree).
-        let cycle_members: Vec<&str> = in_degree
-            .iter()
-            .filter(|&(_, deg)| *deg > 0)
-            .map(|(&name, _)| name)
-            .collect();
-        bail!(
-            "circular dependency detected involving components: [{}]",
-            cycle_members.join(", ")
-        );
+        let cycle_members: Vec<&str> =
+            in_degree.iter().filter(|&(_, deg)| *deg > 0).map(|(&name, _)| name).collect();
+        bail!("circular dependency detected involving components: [{}]", cycle_members.join(", "));
     }
 
     Ok(order)
@@ -268,11 +257,7 @@ fn build_plan(
                 step: i + 1,
                 component: name.clone(),
                 script: component.script.clone(),
-                deps: component
-                    .deps
-                    .as_ref()
-                    .cloned()
-                    .unwrap_or_default(),
+                deps: component.deps.as_ref().cloned().unwrap_or_default(),
                 skipped: skip_set.contains(name),
             }
         })
@@ -430,12 +415,8 @@ fn display_compose_json(
     totals: ComposeTotals,
     success: bool,
 ) -> anyhow::Result<()> {
-    let output = ComposeOutputJson {
-        group: group.to_string(),
-        success,
-        components: results,
-        totals,
-    };
+    let output =
+        ComposeOutputJson { group: group.to_string(), success, components: results, totals };
     output::print_json(&output)?;
     Ok(())
 }
@@ -477,9 +458,7 @@ pub async fn run(
         if let Some(state) = load_compose_state()? {
             // Warn if compose file changed since the state was saved.
             if state.compose_hash != compose_hash {
-                eprintln!(
-                    "Warning: compose file has changed since the last run; resuming anyway"
-                );
+                eprintln!("Warning: compose file has changed since the last run; resuming anyway");
             }
             state.completed.into_iter().collect()
         } else {
@@ -511,10 +490,7 @@ pub async fn run(
         let is_tty = io::stdin().is_terminal();
         if is_tty {
             let executing_count = order.iter().filter(|n| !skip_set.contains(*n)).count();
-            eprintln!(
-                "About to broadcast {} component(s) to the network.",
-                executing_count
-            );
+            eprintln!("About to broadcast {} component(s) to the network.", executing_count);
             eprintln!("  Compose: {}", compose.group);
             if let Some(ref ns) = namespace {
                 eprintln!("  Namespace: {}", ns);
@@ -733,12 +709,7 @@ pub async fn run(
     }
 
     if let Some(ref failed) = failed_component {
-        bail!(
-            "compose failed: component '{}' failed ({}/{} completed)",
-            failed,
-            completed,
-            total
-        );
+        bail!("compose failed: component '{}' failed ({}/{} completed)", failed, completed, total);
     }
 
     Ok(())
@@ -1020,11 +991,8 @@ components:
     fn load_valid_file_succeeds() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("deploy.yaml");
-        std::fs::write(
-            &path,
-            "group: test\ncomponents:\n  a:\n    script: script/A.s.sol\n",
-        )
-        .unwrap();
+        std::fs::write(&path, "group: test\ncomponents:\n  a:\n    script: script/A.s.sol\n")
+            .unwrap();
         let compose = load_compose_file(path.to_str().unwrap()).unwrap();
         assert_eq!(compose.group, "test");
         assert_eq!(compose.components.len(), 1);
@@ -1055,9 +1023,7 @@ components:
 
     #[test]
     fn topo_single_component() {
-        let compose = make_compose(vec![
-            ("token", make_component("script/Token.s.sol", None)),
-        ]);
+        let compose = make_compose(vec![("token", make_component("script/Token.s.sol", None))]);
         let order = build_execution_order(&compose).unwrap();
         assert_eq!(order, vec!["token"]);
     }
@@ -1131,11 +1097,7 @@ components:
         ]);
         let err = build_execution_order(&compose).unwrap_err();
         let msg = err.to_string();
-        assert!(
-            msg.contains("circular dependency detected"),
-            "expected cycle error, got: {}",
-            msg
-        );
+        assert!(msg.contains("circular dependency detected"), "expected cycle error, got: {}", msg);
         // Should name at least one component
         assert!(
             msg.contains("a") || msg.contains("b"),
@@ -1153,11 +1115,7 @@ components:
         ]);
         let err = build_execution_order(&compose).unwrap_err();
         let msg = err.to_string();
-        assert!(
-            msg.contains("circular dependency detected"),
-            "expected cycle error, got: {}",
-            msg
-        );
+        assert!(msg.contains("circular dependency detected"), "expected cycle error, got: {}", msg);
     }
 
     #[test]
@@ -1229,31 +1187,19 @@ components:
         // Inject global env var
         let global = vec!["TREB_COMPOSE_TEST_KEY=global_value".to_string()];
         run_cmd::inject_env_vars(&global).unwrap();
-        assert_eq!(
-            env::var("TREB_COMPOSE_TEST_KEY").unwrap(),
-            "global_value"
-        );
+        assert_eq!(env::var("TREB_COMPOSE_TEST_KEY").unwrap(), "global_value");
 
         // Component env overrides it
         let mut comp_env = HashMap::new();
-        comp_env.insert(
-            "TREB_COMPOSE_TEST_KEY".to_string(),
-            "component_value".to_string(),
-        );
+        comp_env.insert("TREB_COMPOSE_TEST_KEY".to_string(), "component_value".to_string());
         for (key, value) in &comp_env {
             unsafe { env::set_var(key, value) };
         }
-        assert_eq!(
-            env::var("TREB_COMPOSE_TEST_KEY").unwrap(),
-            "component_value"
-        );
+        assert_eq!(env::var("TREB_COMPOSE_TEST_KEY").unwrap(), "component_value");
 
         // Re-injecting global restores original value
         run_cmd::inject_env_vars(&global).unwrap();
-        assert_eq!(
-            env::var("TREB_COMPOSE_TEST_KEY").unwrap(),
-            "global_value"
-        );
+        assert_eq!(env::var("TREB_COMPOSE_TEST_KEY").unwrap(), "global_value");
 
         // Cleanup
         unsafe { env::remove_var("TREB_COMPOSE_TEST_KEY") };
@@ -1631,15 +1577,13 @@ components:
     #[test]
     fn compose_json_is_valid_json() {
         // Verify the full output is valid JSON parseable by serde
-        let results = vec![
-            ComponentResultEntry {
-                component: "libs".to_string(),
-                status: ComponentStatus::Success,
-                deployments: 2,
-                transactions: 1,
-                error: None,
-            },
-        ];
+        let results = vec![ComponentResultEntry {
+            component: "libs".to_string(),
+            status: ComponentStatus::Success,
+            deployments: 2,
+            transactions: 1,
+            error: None,
+        }];
         let totals = compute_totals(&results);
         let output = ComposeOutputJson {
             group: "test".to_string(),

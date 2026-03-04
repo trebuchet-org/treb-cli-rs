@@ -4,8 +4,10 @@
 //! copying mutable files from a fixture directory.  Each test gets a fast,
 //! independent workspace.
 
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 /// The default fixture name used by integration tests.
 pub const DEFAULT_FIXTURE: &str = "project";
@@ -78,22 +80,15 @@ impl TestWorkdir {
         // Create .treb/ directory.
         fs::create_dir_all(root.join(".treb")).expect("failed to create .treb dir");
 
-        let skip_cleanup = std::env::var("TREB_TEST_SKIP_CLEANUP")
-            .map(|v| v == "1")
-            .unwrap_or(false);
+        let skip_cleanup =
+            std::env::var("TREB_TEST_SKIP_CLEANUP").map(|v| v == "1").unwrap_or(false);
 
         if skip_cleanup {
             let persisted = temp.keep();
             eprintln!("TREB_TEST_SKIP_CLEANUP: preserving temp dir at {}", persisted.display());
-            Self {
-                _temp: None,
-                path: persisted,
-            }
+            Self { _temp: None, path: persisted }
         } else {
-            Self {
-                path: root,
-                _temp: Some(temp),
-            }
+            Self { path: root, _temp: Some(temp) }
         }
     }
 
@@ -109,10 +104,7 @@ impl TestWorkdir {
 
     /// Returns the path to the fixture directory used by tests in this crate.
     pub fn fixture_dir(name: &str) -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests")
-            .join("fixtures")
-            .join(name)
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join(name)
     }
 }
 
@@ -156,4 +148,3 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     }
     Ok(())
 }
-

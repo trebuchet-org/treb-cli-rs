@@ -3,9 +3,11 @@
 mod framework;
 mod helpers;
 
-use framework::context::TestContext;
-use framework::integration_test::{run_integration_test, IntegrationTest};
-use framework::normalizer::PathNormalizer;
+use framework::{
+    context::TestContext,
+    integration_test::{IntegrationTest, run_integration_test},
+    normalizer::PathNormalizer,
+};
 
 /// Seed the registry and pre-add a "v3-release" tag to the FPMM:v3.0.0 deployment.
 /// Used by remove and duplicate-add tests that need a tag already present.
@@ -13,12 +15,9 @@ fn seed_registry_with_tag(project_root: &std::path::Path) {
     helpers::seed_registry(project_root);
     let dep_path = project_root.join(".treb/deployments.json");
     let data = std::fs::read_to_string(&dep_path).unwrap();
-    let mut map: serde_json::Map<String, serde_json::Value> =
-        serde_json::from_str(&data).unwrap();
+    let mut map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&data).unwrap();
     let dep = map.get_mut("mainnet/42220/FPMM:v3.0.0").unwrap();
-    dep.as_object_mut()
-        .unwrap()
-        .insert("tags".to_string(), serde_json::json!(["v3-release"]));
+    dep.as_object_mut().unwrap().insert("tags".to_string(), serde_json::json!(["v3-release"]));
     std::fs::write(&dep_path, serde_json::to_string_pretty(&map).unwrap()).unwrap();
 }
 
@@ -94,10 +93,7 @@ fn tag_add_json() {
     let test = IntegrationTest::new("tag_add_json")
         .setup(&["init"])
         .post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))
-        .test(&[
-            "tag", "--json", "--add", "v3-release",
-            "mainnet/42220/FPMM:v3.0.0",
-        ])
+        .test(&["tag", "--json", "--add", "v3-release", "mainnet/42220/FPMM:v3.0.0"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
@@ -128,10 +124,7 @@ fn tag_remove() {
     let test = IntegrationTest::new("tag_remove")
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_registry_with_tag(ctx.path()))
-        .test(&[
-            "tag", "--remove", "v3-release",
-            "mainnet/42220/FPMM:v3.0.0",
-        ])
+        .test(&["tag", "--remove", "v3-release", "mainnet/42220/FPMM:v3.0.0"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
@@ -146,10 +139,7 @@ fn tag_remove_json() {
     let test = IntegrationTest::new("tag_remove_json")
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_registry_with_tag(ctx.path()))
-        .test(&[
-            "tag", "--json", "--remove", "v3-release",
-            "mainnet/42220/FPMM:v3.0.0",
-        ])
+        .test(&["tag", "--json", "--remove", "v3-release", "mainnet/42220/FPMM:v3.0.0"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
@@ -164,10 +154,7 @@ fn tag_add_duplicate_error() {
     let test = IntegrationTest::new("tag_add_duplicate_error")
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_registry_with_tag(ctx.path()))
-        .test(&[
-            "tag", "--add", "v3-release",
-            "mainnet/42220/FPMM:v3.0.0",
-        ])
+        .test(&["tag", "--add", "v3-release", "mainnet/42220/FPMM:v3.0.0"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -183,10 +170,7 @@ fn tag_remove_nonexistent_error() {
     let test = IntegrationTest::new("tag_remove_nonexistent_error")
         .setup(&["init"])
         .post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))
-        .test(&[
-            "tag", "--remove", "v3-release",
-            "mainnet/42220/FPMM:v3.0.0",
-        ])
+        .test(&["tag", "--remove", "v3-release", "mainnet/42220/FPMM:v3.0.0"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 

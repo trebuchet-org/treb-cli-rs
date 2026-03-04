@@ -7,8 +7,10 @@ use std::collections::HashMap;
 
 use alloy_primitives::Address;
 
-use crate::events::decoder::{ParsedEvent, ProxyEvent};
-use crate::events::deployments::ExtractedDeployment;
+use crate::events::{
+    decoder::{ParsedEvent, ProxyEvent},
+    deployments::ExtractedDeployment,
+};
 
 /// The type of proxy contract detected from ERC-1967 events.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,13 +57,9 @@ pub fn detect_proxy_relationships(events: &[ParsedEvent]) -> HashMap<Address, Pr
     for event in events {
         if let ParsedEvent::Proxy(proxy_event) = event {
             match proxy_event {
-                ProxyEvent::Upgraded {
-                    proxy_address,
-                    implementation,
-                } => {
-                    let entry = relationships
-                        .entry(*proxy_address)
-                        .or_insert_with(|| ProxyRelationship {
+                ProxyEvent::Upgraded { proxy_address, implementation } => {
+                    let entry =
+                        relationships.entry(*proxy_address).or_insert_with(|| ProxyRelationship {
                             proxy_address: *proxy_address,
                             proxy_type: ProxyType::UUPS,
                             implementation: None,
@@ -71,14 +69,9 @@ pub fn detect_proxy_relationships(events: &[ParsedEvent]) -> HashMap<Address, Pr
                     entry.implementation = Some(*implementation);
                     // Don't overwrite Transparent if already detected.
                 }
-                ProxyEvent::AdminChanged {
-                    proxy_address,
-                    new_admin,
-                    ..
-                } => {
-                    let entry = relationships
-                        .entry(*proxy_address)
-                        .or_insert_with(|| ProxyRelationship {
+                ProxyEvent::AdminChanged { proxy_address, new_admin, .. } => {
+                    let entry =
+                        relationships.entry(*proxy_address).or_insert_with(|| ProxyRelationship {
                             proxy_address: *proxy_address,
                             proxy_type: ProxyType::Transparent,
                             implementation: None,
@@ -89,13 +82,9 @@ pub fn detect_proxy_relationships(events: &[ParsedEvent]) -> HashMap<Address, Pr
                     entry.proxy_type = ProxyType::Transparent;
                     entry.admin = Some(*new_admin);
                 }
-                ProxyEvent::BeaconUpgraded {
-                    proxy_address,
-                    beacon,
-                } => {
-                    let entry = relationships
-                        .entry(*proxy_address)
-                        .or_insert_with(|| ProxyRelationship {
+                ProxyEvent::BeaconUpgraded { proxy_address, beacon } => {
+                    let entry =
+                        relationships.entry(*proxy_address).or_insert_with(|| ProxyRelationship {
                             proxy_address: *proxy_address,
                             proxy_type: ProxyType::Beacon,
                             implementation: None,
@@ -120,22 +109,20 @@ pub fn link_proxy_to_deployment(
     proxy: &ProxyRelationship,
     deployments: &[ExtractedDeployment],
 ) -> Option<usize> {
-    deployments
-        .iter()
-        .position(|d| d.address == proxy.proxy_address)
+    deployments.iter().position(|d| d.address == proxy.proxy_address)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{address, Bytes, LogData, B256};
+    use alloy_primitives::{B256, Bytes, LogData, address};
     use alloy_sol_types::SolEvent;
 
-    use crate::events::abi::{
-        AdminChanged, BeaconUpgraded, ContractDeployed, DeploymentDetails, Upgraded,
+    use crate::events::{
+        abi::{AdminChanged, BeaconUpgraded, ContractDeployed, DeploymentDetails, Upgraded},
+        decoder::decode_events,
+        deployments::extract_deployments,
     };
-    use crate::events::decoder::decode_events;
-    use crate::events::deployments::extract_deployments;
 
     /// Helper: create a raw Log from an event type's encoded log data.
     fn make_log(address: Address, log_data: LogData) -> alloy_primitives::Log {
@@ -166,9 +153,7 @@ mod tests {
         let proxy_addr = address!("e7f1725E7734CE288F8367e1Bb143E90bb3F0512");
         let impl_addr = address!("9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0");
 
-        let upgraded = Upgraded {
-            implementation: impl_addr,
-        };
+        let upgraded = Upgraded { implementation: impl_addr };
         let log = make_log(proxy_addr, upgraded.encode_log_data());
         let parsed = decode_events(&[log]);
 
@@ -189,13 +174,8 @@ mod tests {
         let impl_addr = address!("9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0");
         let admin_addr = address!("70997970C51812dc3A010C7d01b50e0d17dc79C8");
 
-        let upgraded = Upgraded {
-            implementation: impl_addr,
-        };
-        let admin_changed = AdminChanged {
-            previousAdmin: Address::ZERO,
-            newAdmin: admin_addr,
-        };
+        let upgraded = Upgraded { implementation: impl_addr };
+        let admin_changed = AdminChanged { previousAdmin: Address::ZERO, newAdmin: admin_addr };
 
         let log1 = make_log(proxy_addr, upgraded.encode_log_data());
         let log2 = make_log(proxy_addr, admin_changed.encode_log_data());
@@ -216,9 +196,7 @@ mod tests {
         let proxy_addr = address!("e7f1725E7734CE288F8367e1Bb143E90bb3F0512");
         let beacon_addr = address!("9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0");
 
-        let beacon_upgraded = BeaconUpgraded {
-            beacon: beacon_addr,
-        };
+        let beacon_upgraded = BeaconUpgraded { beacon: beacon_addr };
         let log = make_log(proxy_addr, beacon_upgraded.encode_log_data());
         let parsed = decode_events(&[log]);
 
@@ -240,15 +218,11 @@ mod tests {
         let beacon_addr = address!("70997970C51812dc3A010C7d01b50e0d17dc79C8");
 
         // Proxy 1: UUPS (Upgraded only)
-        let upgraded1 = Upgraded {
-            implementation: impl1,
-        };
+        let upgraded1 = Upgraded { implementation: impl1 };
         let log1 = make_log(proxy1, upgraded1.encode_log_data());
 
         // Proxy 2: Beacon
-        let beacon_upgraded = BeaconUpgraded {
-            beacon: beacon_addr,
-        };
+        let beacon_upgraded = BeaconUpgraded { beacon: beacon_addr };
         let log2 = make_log(proxy2, beacon_upgraded.encode_log_data());
 
         let parsed = decode_events(&[log1, log2]);
@@ -274,9 +248,7 @@ mod tests {
 
         // Create deployment + proxy events
         let deployed = sample_deployed_event(proxy_addr, "my-proxy");
-        let upgraded = Upgraded {
-            implementation: impl_addr,
-        };
+        let upgraded = Upgraded { implementation: impl_addr };
 
         let log1 = make_log(Address::ZERO, deployed.encode_log_data());
         let log2 = make_log(proxy_addr, upgraded.encode_log_data());
@@ -334,13 +306,8 @@ mod tests {
         let admin_addr = address!("70997970C51812dc3A010C7d01b50e0d17dc79C8");
 
         // AdminChanged arrives before Upgraded (order shouldn't matter)
-        let admin_changed = AdminChanged {
-            previousAdmin: Address::ZERO,
-            newAdmin: admin_addr,
-        };
-        let upgraded = Upgraded {
-            implementation: impl_addr,
-        };
+        let admin_changed = AdminChanged { previousAdmin: Address::ZERO, newAdmin: admin_addr };
+        let upgraded = Upgraded { implementation: impl_addr };
 
         let log1 = make_log(proxy_addr, admin_changed.encode_log_data());
         let log2 = make_log(proxy_addr, upgraded.encode_log_data());

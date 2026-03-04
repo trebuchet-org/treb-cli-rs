@@ -4,15 +4,13 @@
 //! pipeline, ensuring well-defined boundaries between the orchestrator and
 //! its constituent steps.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
-use treb_core::types::deployment::Deployment;
-use treb_core::types::safe_transaction::SafeTransaction;
-use treb_core::types::transaction::Transaction;
+use treb_core::types::{
+    deployment::Deployment, safe_transaction::SafeTransaction, transaction::Transaction,
+};
 
-use crate::events::ExtractedCollision;
-use crate::sender::ResolvedSender;
+use crate::{events::ExtractedCollision, sender::ResolvedSender};
 
 // ---------------------------------------------------------------------------
 // PipelineConfig

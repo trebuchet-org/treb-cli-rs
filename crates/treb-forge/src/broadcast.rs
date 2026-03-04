@@ -59,20 +59,16 @@ pub fn read_latest_broadcast(
 ) -> treb_core::Result<BroadcastData> {
     let broadcast_path = config.broadcast.clone();
 
-    let reader = FoundryBroadcastReader::new(
-        contract_name.to_string(),
-        chain_id,
-        &broadcast_path,
-    )
-    .map_err(|e| {
-        TrebError::Forge(format!(
-            "failed to read broadcasts for '{}' (chain {}) in {}: {}",
-            contract_name,
-            chain_id,
-            broadcast_path.display(),
-            e
-        ))
-    })?;
+    let reader = FoundryBroadcastReader::new(contract_name.to_string(), chain_id, &broadcast_path)
+        .map_err(|e| {
+            TrebError::Forge(format!(
+                "failed to read broadcasts for '{}' (chain {}) in {}: {}",
+                contract_name,
+                chain_id,
+                broadcast_path.display(),
+                e
+            ))
+        })?;
 
     let sequence = reader.read_latest().map_err(|e| {
         TrebError::Forge(format!(
@@ -84,11 +80,7 @@ pub fn read_latest_broadcast(
         ))
     })?;
 
-    Ok(BroadcastData {
-        chain_id: sequence.chain,
-        timestamp: sequence.timestamp,
-        sequence,
-    })
+    Ok(BroadcastData { chain_id: sequence.chain, timestamp: sequence.timestamp, sequence })
 }
 
 /// Read all broadcasts for a contract on a given chain, sorted newest first.
@@ -102,20 +94,16 @@ pub fn read_all_broadcasts(
 ) -> treb_core::Result<Vec<BroadcastData>> {
     let broadcast_path = config.broadcast.clone();
 
-    let reader = FoundryBroadcastReader::new(
-        contract_name.to_string(),
-        chain_id,
-        &broadcast_path,
-    )
-    .map_err(|e| {
-        TrebError::Forge(format!(
-            "failed to read broadcasts for '{}' (chain {}) in {}: {}",
-            contract_name,
-            chain_id,
-            broadcast_path.display(),
-            e
-        ))
-    })?;
+    let reader = FoundryBroadcastReader::new(contract_name.to_string(), chain_id, &broadcast_path)
+        .map_err(|e| {
+            TrebError::Forge(format!(
+                "failed to read broadcasts for '{}' (chain {}) in {}: {}",
+                contract_name,
+                chain_id,
+                broadcast_path.display(),
+                e
+            ))
+        })?;
 
     let sequences = reader.read().map_err(|e| {
         TrebError::Forge(format!(
@@ -129,11 +117,7 @@ pub fn read_all_broadcasts(
 
     Ok(sequences
         .into_iter()
-        .map(|seq| BroadcastData {
-            chain_id: seq.chain,
-            timestamp: seq.timestamp,
-            sequence: seq,
-        })
+        .map(|seq| BroadcastData { chain_id: seq.chain, timestamp: seq.timestamp, sequence: seq })
         .collect())
 }
 
@@ -153,14 +137,8 @@ mod tests {
 
         match result {
             Err(TrebError::Forge(msg)) => {
-                assert!(
-                    msg.contains("Counter"),
-                    "error should mention contract name, got: {msg}"
-                );
-                assert!(
-                    msg.contains("31337"),
-                    "error should mention chain ID, got: {msg}"
-                );
+                assert!(msg.contains("Counter"), "error should mention contract name, got: {msg}");
+                assert!(msg.contains("31337"), "error should mention chain ID, got: {msg}");
                 assert!(
                     msg.contains("broadcast"),
                     "error should mention broadcast dir, got: {msg}"
@@ -183,10 +161,7 @@ mod tests {
 
         match result {
             Err(TrebError::Forge(msg)) => {
-                assert!(
-                    msg.contains("Deploy"),
-                    "error should mention contract name, got: {msg}"
-                );
+                assert!(msg.contains("Deploy"), "error should mention contract name, got: {msg}");
                 assert!(
                     msg.contains("broadcast"),
                     "error should mention broadcast dir, got: {msg}"

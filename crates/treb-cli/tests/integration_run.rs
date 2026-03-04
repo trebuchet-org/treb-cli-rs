@@ -6,11 +6,13 @@
 mod framework;
 mod helpers;
 
-use framework::context::TestContext;
-use framework::integration_test::{run_integration_test, IntegrationTest};
-use framework::normalizer::{
-    BlockNumberNormalizer, CompilerOutputNormalizer, DurationNormalizer, GasNormalizer,
-    PathNormalizer,
+use framework::{
+    context::TestContext,
+    integration_test::{IntegrationTest, run_integration_test},
+    normalizer::{
+        BlockNumberNormalizer, CompilerOutputNormalizer, DurationNormalizer, GasNormalizer,
+        PathNormalizer,
+    },
 };
 
 /// Basic deployment with broadcast against a live Anvil node.
@@ -19,10 +21,8 @@ use framework::normalizer::{
 /// (deployments.json + transactions.json).
 #[tokio::test(flavor = "multi_thread")]
 async fn run_basic() {
-    let ctx = TestContext::new("project")
-        .with_anvil("anvil-31337")
-        .await
-        .expect("failed to spawn anvil");
+    let ctx =
+        TestContext::new("project").with_anvil("anvil-31337").await.expect("failed to spawn anvil");
 
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
@@ -52,10 +52,8 @@ async fn run_basic() {
 /// Verifies `[DRY RUN]` banner appears and no output artifacts are written.
 #[tokio::test(flavor = "multi_thread")]
 async fn run_dry_run() {
-    let ctx = TestContext::new("project")
-        .with_anvil("anvil-31337")
-        .await
-        .expect("failed to spawn anvil");
+    let ctx =
+        TestContext::new("project").with_anvil("anvil-31337").await.expect("failed to spawn anvil");
 
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
@@ -84,10 +82,8 @@ async fn run_dry_run() {
 /// and `transactions` fields.
 #[tokio::test(flavor = "multi_thread")]
 async fn run_basic_json() {
-    let ctx = TestContext::new("project")
-        .with_anvil("anvil-31337")
-        .await
-        .expect("failed to spawn anvil");
+    let ctx =
+        TestContext::new("project").with_anvil("anvil-31337").await.expect("failed to spawn anvil");
 
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
@@ -116,10 +112,8 @@ async fn run_basic_json() {
 /// Verifies that `--debug` produces output beyond the basic deployment.
 #[tokio::test(flavor = "multi_thread")]
 async fn run_debug() {
-    let ctx = TestContext::new("project")
-        .with_anvil("anvil-31337")
-        .await
-        .expect("failed to spawn anvil");
+    let ctx =
+        TestContext::new("project").with_anvil("anvil-31337").await.expect("failed to spawn anvil");
 
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
@@ -150,10 +144,8 @@ async fn run_debug() {
 /// Verifies extra verbose context appears in golden output.
 #[tokio::test(flavor = "multi_thread")]
 async fn run_verbose() {
-    let ctx = TestContext::new("project")
-        .with_anvil("anvil-31337")
-        .await
-        .expect("failed to spawn anvil");
+    let ctx =
+        TestContext::new("project").with_anvil("anvil-31337").await.expect("failed to spawn anvil");
 
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
@@ -228,10 +220,8 @@ fn run_no_init() {
 /// Verifies the error message mentions the invalid function signature.
 #[tokio::test(flavor = "multi_thread")]
 async fn run_bad_signature() {
-    let ctx = TestContext::new("project")
-        .with_anvil("anvil-31337")
-        .await
-        .expect("failed to spawn anvil");
+    let ctx =
+        TestContext::new("project").with_anvil("anvil-31337").await.expect("failed to spawn anvil");
 
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 

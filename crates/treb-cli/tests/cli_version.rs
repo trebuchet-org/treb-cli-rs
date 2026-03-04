@@ -22,10 +22,8 @@ fn version_displays_expected_fields() {
 
 #[test]
 fn version_json_parses_with_expected_fields() {
-    let output = treb()
-        .args(["version", "--json"])
-        .output()
-        .expect("failed to run treb version --json");
+    let output =
+        treb().args(["version", "--json"]).output().expect("failed to run treb version --json");
 
     assert!(output.status.success());
 
@@ -35,12 +33,8 @@ fn version_json_parses_with_expected_fields() {
     let obj = json.as_object().expect("JSON output is not an object");
 
     for field in ["version", "git_commit", "build_date", "rust_version", "forge_version"] {
-        let val = obj
-            .get(field)
-            .unwrap_or_else(|| panic!("missing field: {field}"));
-        let s = val
-            .as_str()
-            .unwrap_or_else(|| panic!("field {field} is not a string"));
+        let val = obj.get(field).unwrap_or_else(|| panic!("missing field: {field}"));
+        let s = val.as_str().unwrap_or_else(|| panic!("field {field} is not a string"));
         assert!(!s.is_empty(), "field {field} is empty");
     }
 }

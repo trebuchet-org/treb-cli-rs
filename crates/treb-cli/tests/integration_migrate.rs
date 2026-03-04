@@ -6,9 +6,11 @@
 mod framework;
 mod helpers;
 
-use framework::context::TestContext;
-use framework::integration_test::{run_integration_test, IntegrationTest};
-use framework::normalizer::{EpochNormalizer, PathNormalizer};
+use framework::{
+    context::TestContext,
+    integration_test::{IntegrationTest, run_integration_test},
+    normalizer::{EpochNormalizer, PathNormalizer},
+};
 
 // ── Fixture helpers ──────────────────────────────────────────────────────
 
@@ -23,13 +25,11 @@ address = "0xDeployerAddr"
 "#;
 
 fn write_v1_treb_toml(ctx: &TestContext) {
-    std::fs::write(ctx.path().join("treb.toml"), V1_TREB_TOML)
-        .expect("write v1 treb.toml");
+    std::fs::write(ctx.path().join("treb.toml"), V1_TREB_TOML).expect("write v1 treb.toml");
 }
 
 fn write_v2_treb_toml(ctx: &TestContext) {
-    std::fs::write(ctx.path().join("treb.toml"), V2_TREB_TOML)
-        .expect("write v2 treb.toml");
+    std::fs::write(ctx.path().join("treb.toml"), V2_TREB_TOML).expect("write v2 treb.toml");
 }
 
 // ── Config migration tests ───────────────────────────────────────────────

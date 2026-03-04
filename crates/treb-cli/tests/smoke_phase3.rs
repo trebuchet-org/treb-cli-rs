@@ -3,20 +3,20 @@
 
 mod framework;
 
-use framework::context::TestContext;
-use framework::golden::GoldenFile;
-use framework::integration_test::{run_integration_test, IntegrationTest};
-use framework::normalizer::{Normalizer, NormalizerChain, ShortHexNormalizer};
-use framework::pool::ContextPool;
+use framework::{
+    context::TestContext,
+    golden::GoldenFile,
+    integration_test::{IntegrationTest, run_integration_test},
+    normalizer::{Normalizer, NormalizerChain, ShortHexNormalizer},
+    pool::ContextPool,
+};
 
-use alloy_primitives::{address, U256};
+use alloy_primitives::{U256, address};
 
 use std::path::PathBuf;
 
 fn golden_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("golden")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("golden")
 }
 
 // ---------------------------------------------------------------------------
@@ -26,9 +26,7 @@ fn golden_dir() -> PathBuf {
 /// Pool creates context, acquire/release cycle works, state is clean after release.
 #[tokio::test(flavor = "multi_thread")]
 async fn pool_acquire_release_clean_state() {
-    let pool = ContextPool::new(1, "minimal-project")
-        .await
-        .expect("pool creation");
+    let pool = ContextPool::new(1, "minimal-project").await.expect("pool creation");
 
     let test_addr = address!("1234567890123456789012345678901234567890");
 
@@ -42,12 +40,7 @@ async fn pool_acquire_release_clean_state() {
             .await
             .expect("set_balance");
 
-        let balance = node
-            .instance()
-            .api()
-            .balance(test_addr, None)
-            .await
-            .expect("balance");
+        let balance = node.instance().api().balance(test_addr, None).await.expect("balance");
         assert_eq!(balance, U256::from(999u64));
         // guard dropped here — cleanup runs
     }
@@ -57,17 +50,9 @@ async fn pool_acquire_release_clean_state() {
         let guard = pool.acquire().await;
         let node = guard.anvil("local").expect("local node");
 
-        let balance = node
-            .instance()
-            .api()
-            .balance(test_addr, None)
-            .await
-            .expect("balance after re-acquire");
-        assert_eq!(
-            balance,
-            U256::ZERO,
-            "balance should be zero after pool cleanup"
-        );
+        let balance =
+            node.instance().api().balance(test_addr, None).await.expect("balance after re-acquire");
+        assert_eq!(balance, U256::ZERO, "balance should be zero after pool cleanup");
     }
 }
 
@@ -89,7 +74,7 @@ fn golden_file_round_trip() {
 
     // Compare against golden file.
     let golden = GoldenFile::new(golden_dir());
-    golden.compare("golden_file_round_trip", "output", &normalized);
+    golden.compare("golden_file_round_trip", "commands", &normalized);
 }
 
 /// IntegrationTest + run_integration_test() works end-to-end with skip_golden.
@@ -97,9 +82,7 @@ fn golden_file_round_trip() {
 fn integration_test_struct_smoke() {
     let ctx = TestContext::new("minimal-project");
 
-    let test = IntegrationTest::new("smoke_version")
-        .test(&["version"])
-        .skip_golden(true);
+    let test = IntegrationTest::new("smoke_version").test(&["version"]).skip_golden(true);
 
     run_integration_test(&test, &ctx);
 }

@@ -19,10 +19,8 @@ pub fn build_table(headers: &[&str]) -> Table {
     table.set_content_arrangement(ContentArrangement::Dynamic);
     table.load_preset(comfy_table::presets::UTF8_FULL);
 
-    let header_cells: Vec<Cell> = headers
-        .iter()
-        .map(|h| Cell::new(h).add_attribute(Attribute::Bold))
-        .collect();
+    let header_cells: Vec<Cell> =
+        headers.iter().map(|h| Cell::new(h).add_attribute(Attribute::Bold)).collect();
     table.set_header(header_cells);
 
     table

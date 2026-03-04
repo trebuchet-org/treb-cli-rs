@@ -52,9 +52,7 @@ pub async fn revert_snapshots(
     ids: &HashMap<String, U256>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     for (name, node) in nodes {
-        let id = ids
-            .get(name)
-            .ok_or_else(|| format!("no snapshot ID found for node '{name}'"))?;
+        let id = ids.get(name).ok_or_else(|| format!("no snapshot ID found for node '{name}'"))?;
         revert_snapshot(node, *id).await?;
     }
     Ok(())
@@ -80,44 +78,23 @@ mod tests {
             .await
             .expect("set_balance");
 
-        let balance = node
-            .instance()
-            .api()
-            .balance(test_addr, None)
-            .await
-            .expect("balance");
+        let balance = node.instance().api().balance(test_addr, None).await.expect("balance");
         assert_eq!(balance, U256::from(999u64));
 
         // Revert to the snapshot.
-        revert_snapshot(&node, snap_id)
-            .await
-            .expect("revert_snapshot");
+        revert_snapshot(&node, snap_id).await.expect("revert_snapshot");
 
         // Balance should be zero again.
-        let balance_after = node
-            .instance()
-            .api()
-            .balance(test_addr, None)
-            .await
-            .expect("balance after revert");
-        assert_eq!(
-            balance_after,
-            U256::ZERO,
-            "balance should be zero after revert"
-        );
+        let balance_after =
+            node.instance().api().balance(test_addr, None).await.expect("balance after revert");
+        assert_eq!(balance_after, U256::ZERO, "balance should be zero after revert");
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn take_and_revert_snapshots_multi_node() {
         let mut nodes = HashMap::new();
-        nodes.insert(
-            "node_a".to_string(),
-            AnvilNode::spawn().await.expect("spawn node_a"),
-        );
-        nodes.insert(
-            "node_b".to_string(),
-            AnvilNode::spawn().await.expect("spawn node_b"),
-        );
+        nodes.insert("node_a".to_string(), AnvilNode::spawn().await.expect("spawn node_a"));
+        nodes.insert("node_b".to_string(), AnvilNode::spawn().await.expect("spawn node_b"));
 
         let test_addr = address!("1234567890123456789012345678901234567890");
 
@@ -135,18 +112,12 @@ mod tests {
         }
 
         // Revert all nodes.
-        revert_snapshots(&nodes, &snap_ids)
-            .await
-            .expect("revert_snapshots");
+        revert_snapshots(&nodes, &snap_ids).await.expect("revert_snapshots");
 
         // Verify state restored on both.
         for node in nodes.values() {
-            let balance = node
-                .instance()
-                .api()
-                .balance(test_addr, None)
-                .await
-                .expect("balance after revert");
+            let balance =
+                node.instance().api().balance(test_addr, None).await.expect("balance after revert");
             assert_eq!(balance, U256::ZERO, "balance should be zero after revert");
         }
     }

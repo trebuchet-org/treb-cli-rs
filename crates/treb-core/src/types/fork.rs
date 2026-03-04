@@ -227,9 +227,7 @@ mod tests {
     #[test]
     fn fork_state_serde_round_trip() {
         let mut state = ForkState::default();
-        state
-            .forks
-            .insert("mainnet".into(), sample_fork_entry());
+        state.forks.insert("mainnet".into(), sample_fork_entry());
         state.history.push(sample_history_entry());
 
         let json_str = serde_json::to_string_pretty(&state).unwrap();
@@ -240,9 +238,7 @@ mod tests {
     #[test]
     fn fork_state_top_level_keys_match_go_schema() {
         let mut state = ForkState::default();
-        state
-            .forks
-            .insert("mainnet".into(), sample_fork_entry());
+        state.forks.insert("mainnet".into(), sample_fork_entry());
         state.history.push(sample_history_entry());
 
         let json = serde_json::to_value(&state).unwrap();
@@ -265,9 +261,7 @@ mod tests {
     #[test]
     fn fork_state_json_round_trip_produces_identical_json() {
         let mut state = ForkState::default();
-        state
-            .forks
-            .insert("mainnet".into(), sample_fork_entry());
+        state.forks.insert("mainnet".into(), sample_fork_entry());
         state.history.push(sample_history_entry());
 
         let json1 = serde_json::to_value(&state).unwrap();

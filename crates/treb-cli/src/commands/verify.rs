@@ -1,9 +1,8 @@
 //! `treb verify` command implementation.
 
-use std::env;
-use std::time::Duration;
+use std::{env, time::Duration};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use chrono::Utc;
 use console::Term;
 use serde::Serialize;
@@ -11,9 +10,11 @@ use treb_core::types::{VerificationStatus, VerifierStatus};
 use treb_registry::Registry;
 use treb_verify::VerifyOpts;
 
-use crate::commands::resolve::resolve_deployment;
-use crate::output;
-use crate::ui::selector::{fuzzy_select_deployment_id, multiselect_deployments};
+use crate::{
+    commands::resolve::resolve_deployment,
+    output,
+    ui::selector::{fuzzy_select_deployment_id, multiselect_deployments},
+};
 
 /// JSON output for a single verification result.
 #[derive(Serialize)]
@@ -48,10 +49,7 @@ pub async fn run(
     match verifier {
         "etherscan" | "sourcify" | "blockscout" => {}
         other => {
-            bail!(
-                "unknown verifier '{}': expected one of etherscan, sourcify, blockscout",
-                other
-            );
+            bail!("unknown verifier '{}': expected one of etherscan, sourcify, blockscout", other);
         }
     }
 
@@ -73,7 +71,18 @@ pub async fn run(
     }
 
     if all {
-        return run_batch(verifier, verifier_url, verifier_api_key, force, watch, retries, delay, json, &cwd).await;
+        return run_batch(
+            verifier,
+            verifier_url,
+            verifier_api_key,
+            force,
+            watch,
+            retries,
+            delay,
+            json,
+            &cwd,
+        )
+        .await;
     }
 
     // --- Single deployment verification ---
@@ -285,7 +294,13 @@ async fn run_batch(
         let address = dep.address.clone();
         let chain_id = dep.chain_id;
 
-        eprintln!("[{}/{}] Verifying {} ({})...", i + 1, total, contract_name, output::truncate_address(&address));
+        eprintln!(
+            "[{}/{}] Verifying {} ({})...",
+            i + 1,
+            total,
+            contract_name,
+            output::truncate_address(&address)
+        );
 
         let opts = VerifyOpts {
             verifier: verifier.to_string(),
@@ -397,11 +412,7 @@ async fn run_batch(
         // Print summary table.
         let mut table = output::build_table(&["Contract", "Address", "Status", "URL/Reason"]);
         for r in &results {
-            let detail = if r.status == "VERIFIED" {
-                &r.explorer_url
-            } else {
-                &r.reason
-            };
+            let detail = if r.status == "VERIFIED" { &r.explorer_url } else { &r.reason };
             table.add_row(vec![
                 r.contract_name.as_str(),
                 &output::truncate_address(&r.address),

@@ -2,13 +2,13 @@
 
 use std::env;
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use serde::Serialize;
 use treb_registry::Registry;
 
-use crate::commands::resolve::resolve_deployment;
-use crate::output;
-use crate::ui::selector::fuzzy_select_deployment_id;
+use crate::{
+    commands::resolve::resolve_deployment, output, ui::selector::fuzzy_select_deployment_id,
+};
 
 /// JSON output for tag operations.
 #[derive(Serialize)]
@@ -135,11 +135,7 @@ fn remove_tag(
     let existing_tags = dep.tags.clone().unwrap_or_default();
 
     if !existing_tags.contains(&tag.to_string()) {
-        bail!(
-            "tag '{}' not found on deployment '{}'",
-            tag,
-            deployment_id
-        );
+        bail!("tag '{}' not found on deployment '{}'", tag, deployment_id);
     }
 
     let mut dep = dep.clone();
@@ -232,16 +228,14 @@ mod tests {
 
     #[test]
     fn show_tags_with_existing() {
-        let (_tmp, registry) =
-            setup_registry(Some(vec!["v1.0.0".into(), "stable".into()]));
+        let (_tmp, registry) = setup_registry(Some(vec!["v1.0.0".into(), "stable".into()]));
         let result = super::show_tags(&registry, "mainnet/42220/Counter:v1.0.0", false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn show_tags_json() {
-        let (_tmp, registry) =
-            setup_registry(Some(vec!["v1.0.0".into()]));
+        let (_tmp, registry) = setup_registry(Some(vec!["v1.0.0".into()]));
         let result = super::show_tags(&registry, "mainnet/42220/Counter:v1.0.0", true);
         assert!(result.is_ok());
     }
@@ -249,8 +243,7 @@ mod tests {
     #[test]
     fn add_tag_success() {
         let (_tmp, mut registry) = setup_registry(None);
-        let result =
-            super::add_tag(&mut registry, "mainnet/42220/Counter:v1.0.0", "v2.0.0", false);
+        let result = super::add_tag(&mut registry, "mainnet/42220/Counter:v1.0.0", "v2.0.0", false);
         assert!(result.is_ok());
 
         let dep = registry.get_deployment("mainnet/42220/Counter:v1.0.0").unwrap();
@@ -270,10 +263,8 @@ mod tests {
 
     #[test]
     fn add_tag_duplicate_error() {
-        let (_tmp, mut registry) =
-            setup_registry(Some(vec!["v2.0.0".into()]));
-        let result =
-            super::add_tag(&mut registry, "mainnet/42220/Counter:v1.0.0", "v2.0.0", false);
+        let (_tmp, mut registry) = setup_registry(Some(vec!["v2.0.0".into()]));
+        let result = super::add_tag(&mut registry, "mainnet/42220/Counter:v1.0.0", "v2.0.0", false);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("already exists"));
@@ -284,15 +275,13 @@ mod tests {
     #[test]
     fn add_tag_json() {
         let (_tmp, mut registry) = setup_registry(None);
-        let result =
-            super::add_tag(&mut registry, "mainnet/42220/Counter:v1.0.0", "v2.0.0", true);
+        let result = super::add_tag(&mut registry, "mainnet/42220/Counter:v1.0.0", "v2.0.0", true);
         assert!(result.is_ok());
     }
 
     #[test]
     fn remove_tag_success() {
-        let (_tmp, mut registry) =
-            setup_registry(Some(vec!["v1.0.0".into(), "stable".into()]));
+        let (_tmp, mut registry) = setup_registry(Some(vec!["v1.0.0".into(), "stable".into()]));
         let result =
             super::remove_tag(&mut registry, "mainnet/42220/Counter:v1.0.0", "v1.0.0", false);
         assert!(result.is_ok());
@@ -303,8 +292,7 @@ mod tests {
 
     #[test]
     fn remove_last_tag_sets_none() {
-        let (_tmp, mut registry) =
-            setup_registry(Some(vec!["v1.0.0".into()]));
+        let (_tmp, mut registry) = setup_registry(Some(vec!["v1.0.0".into()]));
         let result =
             super::remove_tag(&mut registry, "mainnet/42220/Counter:v1.0.0", "v1.0.0", false);
         assert!(result.is_ok());
@@ -315,10 +303,8 @@ mod tests {
 
     #[test]
     fn remove_tag_persisted_to_disk() {
-        let (tmp, mut registry) =
-            setup_registry(Some(vec!["v1.0.0".into(), "stable".into()]));
-        super::remove_tag(&mut registry, "mainnet/42220/Counter:v1.0.0", "v1.0.0", false)
-            .unwrap();
+        let (tmp, mut registry) = setup_registry(Some(vec!["v1.0.0".into(), "stable".into()]));
+        super::remove_tag(&mut registry, "mainnet/42220/Counter:v1.0.0", "v1.0.0", false).unwrap();
 
         // Re-open registry from disk
         let registry2 = Registry::open(tmp.path()).unwrap();
@@ -340,8 +326,7 @@ mod tests {
 
     #[test]
     fn remove_tag_json() {
-        let (_tmp, mut registry) =
-            setup_registry(Some(vec!["v1.0.0".into()]));
+        let (_tmp, mut registry) = setup_registry(Some(vec!["v1.0.0".into()]));
         let result =
             super::remove_tag(&mut registry, "mainnet/42220/Counter:v1.0.0", "v1.0.0", true);
         assert!(result.is_ok());

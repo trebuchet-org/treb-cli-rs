@@ -4,18 +4,16 @@
 //! extract deployments -> detect proxies -> link relationships) against
 //! realistic log fixtures stored as JSON files.
 
-use std::path::PathBuf;
-use std::sync::Once;
+use std::{path::PathBuf, sync::Once};
 
-use alloy_primitives::{address, b256, Address, Bytes, Log, LogData, B256};
+use alloy_primitives::{Address, B256, Bytes, Log, LogData, address, b256};
 use alloy_sol_types::SolEvent;
 use serde::{Deserialize, Serialize};
 use treb_core::types::enums::DeploymentMethod;
 use treb_forge::events::{
-    decode_events, detect_proxy_relationships, extract_collisions, extract_deployments,
-    link_proxy_to_deployment, AdminChanged, ContractCreation_0, ContractDeployed,
-    CreateXEvent, DeploymentCollision, DeploymentDetails, ParsedEvent, ProxyType, TrebEvent,
-    Upgraded,
+    AdminChanged, ContractCreation_0, ContractDeployed, CreateXEvent, DeploymentCollision,
+    DeploymentDetails, ParsedEvent, ProxyType, TrebEvent, Upgraded, decode_events,
+    detect_proxy_relationships, extract_collisions, extract_deployments, link_proxy_to_deployment,
 };
 
 // ---------------------------------------------------------------------------
@@ -40,10 +38,7 @@ struct Fixture {
 // ---------------------------------------------------------------------------
 
 fn fixtures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("events")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("events")
 }
 
 fn make_log(addr: Address, log_data: LogData) -> Log {
@@ -60,13 +55,8 @@ fn log_to_entry(log: &Log) -> LogEntry {
 
 fn entry_to_log(entry: &LogEntry) -> Log {
     let addr: Address = entry.address.parse().expect("valid address");
-    let topics: Vec<B256> = entry
-        .topics
-        .iter()
-        .map(|t| t.parse().expect("valid topic"))
-        .collect();
-    let data_bytes: Vec<u8> =
-        alloy_primitives::hex::decode(&entry.data).expect("valid hex data");
+    let topics: Vec<B256> = entry.topics.iter().map(|t| t.parse().expect("valid topic")).collect();
+    let data_bytes: Vec<u8> = alloy_primitives::hex::decode(&entry.data).expect("valid hex data");
     Log::new(addr, topics, Bytes::from(data_bytes)).expect("valid log")
 }
 
@@ -110,20 +100,14 @@ fn generate_simple_deploy() {
     let event = ContractDeployed {
         deployer: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
         location: address!("5FbDB2315678afecb367f032d93F642f64180aa3"),
-        transactionId: b256!(
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        ),
+        transactionId: b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
         deployment: DeploymentDetails {
             artifact: "Counter".to_string(),
             label: "counter-v1".to_string(),
             entropy: String::new(),
             salt: B256::ZERO,
-            bytecodeHash: b256!(
-                "1111111111111111111111111111111111111111111111111111111111111111"
-            ),
-            initCodeHash: b256!(
-                "2222222222222222222222222222222222222222222222222222222222222222"
-            ),
+            bytecodeHash: b256!("1111111111111111111111111111111111111111111111111111111111111111"),
+            initCodeHash: b256!("2222222222222222222222222222222222222222222222222222222222222222"),
             constructorArgs: Bytes::new(),
             createStrategy: "create".to_string(),
         },
@@ -147,30 +131,21 @@ fn generate_create2_deploy() {
     let deployed = ContractDeployed {
         deployer,
         location,
-        transactionId: b256!(
-            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-        ),
+        transactionId: b256!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
         deployment: DeploymentDetails {
             artifact: "Token".to_string(),
             label: "token-v1".to_string(),
             entropy: "deploy-salt-1".to_string(),
             salt,
-            bytecodeHash: b256!(
-                "3333333333333333333333333333333333333333333333333333333333333333"
-            ),
-            initCodeHash: b256!(
-                "4444444444444444444444444444444444444444444444444444444444444444"
-            ),
+            bytecodeHash: b256!("3333333333333333333333333333333333333333333333333333333333333333"),
+            initCodeHash: b256!("4444444444444444444444444444444444444444444444444444444444444444"),
             constructorArgs: Bytes::from(vec![0x00, 0x00, 0x00, 0x12]),
             createStrategy: "create2".to_string(),
         },
     };
     let log1 = make_log(Address::ZERO, deployed.encode_log_data());
 
-    let creation = ContractCreation_0 {
-        newContract: location,
-        salt,
-    };
+    let creation = ContractCreation_0 { newContract: location, salt };
     let log2 = make_log(Address::ZERO, creation.encode_log_data());
 
     write_fixture(
@@ -192,20 +167,14 @@ fn generate_proxy_deploy() {
     let impl_deployed = ContractDeployed {
         deployer,
         location: impl_addr,
-        transactionId: b256!(
-            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-        ),
+        transactionId: b256!("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"),
         deployment: DeploymentDetails {
             artifact: "MyLogic".to_string(),
             label: "logic-v1".to_string(),
             entropy: String::new(),
             salt: B256::ZERO,
-            bytecodeHash: b256!(
-                "5555555555555555555555555555555555555555555555555555555555555555"
-            ),
-            initCodeHash: b256!(
-                "6666666666666666666666666666666666666666666666666666666666666666"
-            ),
+            bytecodeHash: b256!("5555555555555555555555555555555555555555555555555555555555555555"),
+            initCodeHash: b256!("6666666666666666666666666666666666666666666666666666666666666666"),
             constructorArgs: Bytes::new(),
             createStrategy: "create".to_string(),
         },
@@ -216,20 +185,14 @@ fn generate_proxy_deploy() {
     let proxy_deployed = ContractDeployed {
         deployer,
         location: proxy_addr,
-        transactionId: b256!(
-            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-        ),
+        transactionId: b256!("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"),
         deployment: DeploymentDetails {
             artifact: "TransparentUpgradeableProxy".to_string(),
             label: "proxy-v1".to_string(),
             entropy: String::new(),
             salt: B256::ZERO,
-            bytecodeHash: b256!(
-                "7777777777777777777777777777777777777777777777777777777777777777"
-            ),
-            initCodeHash: b256!(
-                "8888888888888888888888888888888888888888888888888888888888888888"
-            ),
+            bytecodeHash: b256!("7777777777777777777777777777777777777777777777777777777777777777"),
+            initCodeHash: b256!("8888888888888888888888888888888888888888888888888888888888888888"),
             constructorArgs: Bytes::from(vec![0xaa, 0xbb]),
             createStrategy: "create".to_string(),
         },
@@ -237,16 +200,11 @@ fn generate_proxy_deploy() {
     let log2 = make_log(Address::ZERO, proxy_deployed.encode_log_data());
 
     // Upgraded event emitted from the proxy address
-    let upgraded = Upgraded {
-        implementation: impl_addr,
-    };
+    let upgraded = Upgraded { implementation: impl_addr };
     let log3 = make_log(proxy_addr, upgraded.encode_log_data());
 
     // AdminChanged event emitted from the proxy address
-    let admin_changed = AdminChanged {
-        previousAdmin: Address::ZERO,
-        newAdmin: admin_addr,
-    };
+    let admin_changed = AdminChanged { previousAdmin: Address::ZERO, newAdmin: admin_addr };
     let log4 = make_log(proxy_addr, admin_changed.encode_log_data());
 
     write_fixture(
@@ -275,9 +233,7 @@ fn generate_multi_deploy() {
     let d1 = ContractDeployed {
         deployer,
         location: addr1,
-        transactionId: b256!(
-            "1111111111111111111111111111111111111111111111111111111111111111"
-        ),
+        transactionId: b256!("1111111111111111111111111111111111111111111111111111111111111111"),
         deployment: DeploymentDetails {
             artifact: "Counter".to_string(),
             label: "counter".to_string(),
@@ -295,9 +251,7 @@ fn generate_multi_deploy() {
     let d2 = ContractDeployed {
         deployer,
         location: addr2,
-        transactionId: b256!(
-            "2222222222222222222222222222222222222222222222222222222222222222"
-        ),
+        transactionId: b256!("2222222222222222222222222222222222222222222222222222222222222222"),
         deployment: DeploymentDetails {
             artifact: "Token".to_string(),
             label: "token".to_string(),
@@ -315,9 +269,7 @@ fn generate_multi_deploy() {
     let d3 = ContractDeployed {
         deployer,
         location: addr3,
-        transactionId: b256!(
-            "3333333333333333333333333333333333333333333333333333333333333333"
-        ),
+        transactionId: b256!("3333333333333333333333333333333333333333333333333333333333333333"),
         deployment: DeploymentDetails {
             artifact: "MyProxy".to_string(),
             label: "proxy".to_string(),
@@ -332,14 +284,11 @@ fn generate_multi_deploy() {
     let log3 = make_log(Address::ZERO, d3.encode_log_data());
 
     // Upgraded event for addr3 (UUPS — no AdminChanged)
-    let upgraded = Upgraded {
-        implementation: impl_addr,
-    };
+    let upgraded = Upgraded { implementation: impl_addr };
     let log4 = make_log(addr3, upgraded.encode_log_data());
 
     // An unknown log (unrecognised topic)
-    let unknown_topic =
-        b256!("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+    let unknown_topic = b256!("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
     let log5 = Log::new(Address::ZERO, vec![unknown_topic], Bytes::new()).expect("valid log");
 
     write_fixture(
@@ -365,12 +314,8 @@ fn generate_collision() {
             label: "token-v2".to_string(),
             entropy: String::new(),
             salt: b256!("abcdef0000000000000000000000000000000000000000000000000000000001"),
-            bytecodeHash: b256!(
-                "9999999999999999999999999999999999999999999999999999999999999999"
-            ),
-            initCodeHash: b256!(
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab"
-            ),
+            bytecodeHash: b256!("9999999999999999999999999999999999999999999999999999999999999999"),
+            initCodeHash: b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab"),
             constructorArgs: Bytes::new(),
             createStrategy: "create2".to_string(),
         },
@@ -403,10 +348,7 @@ fn simple_deploy_round_trip() {
     match &events[0] {
         ParsedEvent::Treb(boxed) => match boxed.as_ref() {
             TrebEvent::ContractDeployed(d) => {
-                assert_eq!(
-                    d.location,
-                    address!("5FbDB2315678afecb367f032d93F642f64180aa3")
-                );
+                assert_eq!(d.location, address!("5FbDB2315678afecb367f032d93F642f64180aa3"));
                 assert_eq!(d.deployment.label, "counter-v1");
                 assert_eq!(d.deployment.artifact, "Counter");
                 assert_eq!(d.deployment.createStrategy, "create");
@@ -419,10 +361,7 @@ fn simple_deploy_round_trip() {
     // Extract
     let deployments = extract_deployments(&events, None);
     assert_eq!(deployments.len(), 1);
-    assert_eq!(
-        deployments[0].address,
-        address!("5FbDB2315678afecb367f032d93F642f64180aa3")
-    );
+    assert_eq!(deployments[0].address, address!("5FbDB2315678afecb367f032d93F642f64180aa3"));
     assert_eq!(deployments[0].label, "counter-v1");
     assert_eq!(deployments[0].contract_name, "Counter");
     assert_eq!(deployments[0].strategy, DeploymentMethod::Create);
@@ -456,10 +395,7 @@ fn create2_deploy_with_salt_decoded() {
     // Second: ContractCreation (with salt)
     match &events[1] {
         ParsedEvent::CreateX(CreateXEvent::ContractCreationWithSalt(c)) => {
-            assert_eq!(
-                c.newContract,
-                address!("Cf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9")
-            );
+            assert_eq!(c.newContract, address!("Cf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"));
             assert_eq!(
                 c.salt,
                 b256!("abcdef0000000000000000000000000000000000000000000000000000000001")
@@ -497,9 +433,7 @@ fn proxy_relationship_transparent_detection() {
     let relationships = detect_proxy_relationships(&events);
     assert_eq!(relationships.len(), 1);
 
-    let rel = relationships
-        .get(&proxy_addr)
-        .expect("proxy relationship should exist");
+    let rel = relationships.get(&proxy_addr).expect("proxy relationship should exist");
     assert_eq!(rel.proxy_type, ProxyType::Transparent);
     assert_eq!(rel.implementation, Some(impl_addr));
     assert_eq!(rel.admin, Some(admin_addr));
@@ -560,14 +494,9 @@ fn full_pipeline_end_to_end() {
     assert_eq!(relationships.len(), 1);
 
     let proxy_addr = address!("9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0");
-    let rel = relationships
-        .get(&proxy_addr)
-        .expect("proxy relationship should exist");
+    let rel = relationships.get(&proxy_addr).expect("proxy relationship should exist");
     assert_eq!(rel.proxy_type, ProxyType::UUPS);
-    assert_eq!(
-        rel.implementation,
-        Some(address!("Cf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"))
-    );
+    assert_eq!(rel.implementation, Some(address!("Cf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9")));
 
     // Step 5: Link proxy to deployment
     let idx = link_proxy_to_deployment(rel, &deployments);
@@ -613,13 +542,7 @@ fn collision_fixture_round_trip() {
 #[test]
 fn fixture_files_are_valid_json() {
     ensure_fixtures();
-    let names = [
-        "simple_deploy",
-        "create2_deploy",
-        "proxy_deploy",
-        "multi_deploy",
-        "collision",
-    ];
+    let names = ["simple_deploy", "create2_deploy", "proxy_deploy", "multi_deploy", "collision"];
     for name in &names {
         let fixture = load_fixture(name);
         assert!(!fixture.description.is_empty(), "{name} should have a description");

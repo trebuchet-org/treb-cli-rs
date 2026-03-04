@@ -13,11 +13,7 @@ const MINIMAL_FOUNDRY_TOML: &str = "[profile.default]\n";
 /// Helper: create a temp dir with foundry.toml and run `treb init`.
 fn init_project(tmp: &tempfile::TempDir) {
     fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
-    treb()
-        .arg("init")
-        .current_dir(tmp.path())
-        .assert()
-        .success();
+    treb().arg("init").current_dir(tmp.path()).assert().success();
 }
 
 // ── config show ──────────────────────────────────────────────────────────
@@ -97,11 +93,7 @@ fn config_set_updates_local_config() {
     assert_eq!(config["namespace"], "production");
 
     // Set network.
-    treb()
-        .args(["config", "set", "network", "mainnet"])
-        .current_dir(tmp.path())
-        .assert()
-        .success();
+    treb().args(["config", "set", "network", "mainnet"]).current_dir(tmp.path()).assert().success();
 
     let config_json = fs::read_to_string(tmp.path().join(".treb/config.local.json")).unwrap();
     let config: serde_json::Value = serde_json::from_str(&config_json).unwrap();
@@ -139,11 +131,7 @@ fn config_remove_resets_to_default() {
         .current_dir(tmp.path())
         .assert()
         .success();
-    treb()
-        .args(["config", "set", "network", "mainnet"])
-        .current_dir(tmp.path())
-        .assert()
-        .success();
+    treb().args(["config", "set", "network", "mainnet"]).current_dir(tmp.path()).assert().success();
 
     // Remove namespace — should reset to "default".
     treb()
@@ -159,11 +147,7 @@ fn config_remove_resets_to_default() {
     assert_eq!(config["network"], "mainnet"); // network unchanged
 
     // Remove network — should reset to "".
-    treb()
-        .args(["config", "remove", "network"])
-        .current_dir(tmp.path())
-        .assert()
-        .success();
+    treb().args(["config", "remove", "network"]).current_dir(tmp.path()).assert().success();
 
     let config_json = fs::read_to_string(tmp.path().join(".treb/config.local.json")).unwrap();
     let config: serde_json::Value = serde_json::from_str(&config_json).unwrap();

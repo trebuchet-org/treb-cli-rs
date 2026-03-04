@@ -1,4 +1,4 @@
-$ treb register --tx-hash 0x4674c314019d10397b9275c83fdeca4351175467140b1da7443f5a483a7585cb --network anvil-31337
+=== cmd 0: [register --tx-hash 0x4674c314019d10397b9275c83fdeca4351175467140b1da7443f5a483a7585cb --network anvil-31337] ===
 ┌──────────┬────────────────────────────────────────────┬───────────┬───────┐
 │ Contract ┆ Address                                    ┆ Namespace ┆ Chain │
 ╞══════════╪════════════════════════════════════════════╪═══════════╪═══════╡
@@ -6,34 +6,3 @@ $ treb register --tx-hash 0x4674c314019d10397b9275c83fdeca4351175467140b1da7443f
 └──────────┴────────────────────────────────────────────┴───────────┴───────┘
 
 1 deployment registered from transaction 0x4674...85cb
-
---- .treb/deployments.json ---
-{
-  "default/31337/Unknown": {
-    "id": "default/31337/Unknown",
-    "namespace": "default",
-    "chainId": 31337,
-    "contractName": "Unknown",
-    "label": "",
-    "address": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
-    "type": "UNKNOWN",
-    "transactionId": "tx-<ID>",
-    "deploymentStrategy": {
-      "method": "CREATE"
-    },
-    "proxyInfo": null,
-    "artifact": {
-      "path": "",
-      "compilerVersion": "",
-      "bytecodeHash": "",
-      "scriptPath": "",
-      "gitCommit": ""
-    },
-    "verification": {
-      "status": "UNVERIFIED"
-    },
-    "tags": null,
-    "createdAt": "<TIMESTAMP>",
-    "updatedAt": "<TIMESTAMP>"
-  }
-}

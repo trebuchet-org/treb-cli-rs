@@ -6,8 +6,7 @@
 use std::time::Duration;
 
 use alloy_primitives::{Address, Bytes, U256};
-use anvil::{AccountGenerator, NodeConfig, NodeHandle};
-use anvil::eth::EthApi;
+use anvil::{AccountGenerator, NodeConfig, NodeHandle, eth::EthApi};
 use tokio::task::AbortHandle;
 use treb_core::error::TrebError;
 
@@ -28,7 +27,7 @@ use treb_core::error::TrebError;
 ///
 /// let instance = AnvilConfig::new()
 ///     .chain_id(31337)
-///     .port(0)  // OS-assigned port
+///     .port(0) // OS-assigned port
 ///     .spawn()
 ///     .await?;
 /// # Ok(())
@@ -184,7 +183,8 @@ impl Drop for AnvilInstance {
         for handle in &self._abort_handles {
             handle.abort();
         }
-        // `_handle` (NodeHandle) is then dropped in field order, firing the graceful shutdown signal.
+        // `_handle` (NodeHandle) is then dropped in field order, firing the graceful shutdown
+        // signal.
     }
 }
 
@@ -232,10 +232,7 @@ impl AnvilInstance {
     ///
     /// Useful for injecting factory contracts (e.g. CreateX) at their canonical addresses.
     pub async fn set_code(&self, address: Address, code: Bytes) -> Result<(), TrebError> {
-        self.api
-            .anvil_set_code(address, code)
-            .await
-            .map_err(|e| TrebError::Fork(e.to_string()))
+        self.api.anvil_set_code(address, code).await.map_err(|e| TrebError::Fork(e.to_string()))
     }
 
     /// Get the bytecode stored at an address.

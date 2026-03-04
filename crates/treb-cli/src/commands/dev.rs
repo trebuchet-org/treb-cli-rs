@@ -1,15 +1,13 @@
 //! `treb dev` subcommands — manage local Anvil development nodes.
 
-use std::env;
-use std::path::Path;
+use std::{env, path::Path};
 
 use anyhow::Context;
 use chrono::Utc;
 use clap::Subcommand;
 use tokio::net::TcpStream;
 use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
-use treb_forge::anvil::AnvilConfig;
-use treb_forge::createx::deploy_createx;
+use treb_forge::{anvil::AnvilConfig, createx::deploy_createx};
 use treb_registry::ForkStateStore;
 
 const TREB_DIR: &str = ".treb";
@@ -131,9 +129,7 @@ pub async fn run_anvil_start(
 
     // Deploy CreateX factory.
     deploy_createx(&anvil).await.map_err(|e| anyhow::anyhow!("{e}"))?;
-    println!(
-        "CreateX factory deployed at 0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed"
-    );
+    println!("CreateX factory deployed at 0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed");
 
     // Update fork state with the actual rpc_url and port.
     if let (Some(net), Some(snapshot)) = (&network, fork_entry_snapshot) {
@@ -214,14 +210,14 @@ pub async fn run_anvil_stop(network: Option<String>) -> anyhow::Result<()> {
                         action: "anvil-stop".into(),
                         network: net.clone(),
                         timestamp: Utc::now(),
-                        details: Some("Cleaned up stale fork state entry (port unreachable)".into()),
+                        details: Some(
+                            "Cleaned up stale fork state entry (port unreachable)".into(),
+                        ),
                     })
                     .ok();
                 removed.push(net.clone());
             } else {
-                println!(
-                    "Network '{net}' is still reachable at port {port}; skipping."
-                );
+                println!("Network '{net}' is still reachable at port {port}; skipping.");
             }
         } else {
             println!("Network '{net}' is not in fork state; nothing to remove.");
@@ -287,10 +283,8 @@ pub async fn run_anvil_status(json: bool) -> anyhow::Result<()> {
     for entry in &forks {
         let running = is_port_reachable(entry.port).await;
         let status = if running { "running" } else { "stopped" };
-        let fork_block = entry
-            .fork_block_number
-            .map(|b| b.to_string())
-            .unwrap_or_else(|| "latest".into());
+        let fork_block =
+            entry.fork_block_number.map(|b| b.to_string()).unwrap_or_else(|| "latest".into());
 
         table.add_row(vec![
             entry.network.as_str(),
@@ -342,8 +336,7 @@ pub(crate) async fn is_port_reachable(port: u16) -> bool {
 /// Take an EVM snapshot via HTTP JSON-RPC and return the snapshot ID hex string.
 pub(crate) async fn take_evm_snapshot_http(rpc_url: &str) -> anyhow::Result<String> {
     use std::time::Duration;
-    let client =
-        reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
     let body = serde_json::json!({
         "jsonrpc": "2.0",
         "method": "evm_snapshot",
@@ -385,7 +378,7 @@ pub(crate) fn store_fork_state_snapshot(treb_dir: &Path, network: &str, snapshot
 async fn wait_for_shutdown_signal() {
     #[cfg(unix)]
     {
-        use tokio::signal::unix::{signal, SignalKind};
+        use tokio::signal::unix::{SignalKind, signal};
         let mut sigterm =
             signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
         tokio::select! {
@@ -405,9 +398,8 @@ async fn wait_for_shutdown_signal() {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use std::time::Duration;
     use clap::{Parser, Subcommand};
-    use std::fs;
+    use std::{fs, time::Duration};
     use tempfile::TempDir;
     use treb_core::types::fork::ForkEntry;
     use treb_forge::anvil::AnvilConfig;
@@ -444,7 +436,9 @@ mod tests {
     fn parse_dev_anvil_start_no_args() {
         let sub = parse_dev(&["anvil", "start"]).unwrap();
         match sub {
-            DevSubcommand::Anvil { subcommand: AnvilSubcommand::Start { network, port, fork_block_number } } => {
+            DevSubcommand::Anvil {
+                subcommand: AnvilSubcommand::Start { network, port, fork_block_number },
+            } => {
                 assert!(network.is_none());
                 assert!(port.is_none());
                 assert!(fork_block_number.is_none());
@@ -457,7 +451,9 @@ mod tests {
     fn parse_dev_anvil_start_with_network_and_port() {
         let sub = parse_dev(&["anvil", "start", "--network", "mainnet", "--port", "9000"]).unwrap();
         match sub {
-            DevSubcommand::Anvil { subcommand: AnvilSubcommand::Start { network, port, fork_block_number } } => {
+            DevSubcommand::Anvil {
+                subcommand: AnvilSubcommand::Start { network, port, fork_block_number },
+            } => {
                 assert_eq!(network.as_deref(), Some("mainnet"));
                 assert_eq!(port, Some(9000));
                 assert!(fork_block_number.is_none());
@@ -468,10 +464,11 @@ mod tests {
 
     #[test]
     fn parse_dev_anvil_start_with_fork_block() {
-        let sub =
-            parse_dev(&["anvil", "start", "--fork-block-number", "19000000"]).unwrap();
+        let sub = parse_dev(&["anvil", "start", "--fork-block-number", "19000000"]).unwrap();
         match sub {
-            DevSubcommand::Anvil { subcommand: AnvilSubcommand::Start { fork_block_number, .. } } => {
+            DevSubcommand::Anvil {
+                subcommand: AnvilSubcommand::Start { fork_block_number, .. },
+            } => {
                 assert_eq!(fork_block_number, Some(19_000_000));
             }
             _ => panic!("expected Dev::Anvil::Start"),
@@ -540,11 +537,7 @@ mod tests {
             chain_id: 31337,
             fork_url: String::new(), // no upstream fork for test
             fork_block_number: None,
-            snapshot_dir: treb_dir
-                .join("snapshots")
-                .join(network)
-                .to_string_lossy()
-                .into_owned(),
+            snapshot_dir: treb_dir.join("snapshots").join(network).to_string_lossy().into_owned(),
             started_at: now,
             env_var_name: String::new(),
             original_rpc: String::new(),

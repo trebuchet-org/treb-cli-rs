@@ -104,10 +104,7 @@ pub struct TimestampNormalizer;
 impl Normalizer for TimestampNormalizer {
     fn normalize(&self, input: &str) -> String {
         // ISO timestamps: 2024-08-09T14:30:45Z
-        let iso = Regex::new(
-            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z?(\+\d+:\d+)?",
-        )
-        .unwrap();
+        let iso = Regex::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z?(\+\d+:\d+)?").unwrap();
         let result = iso.replace_all(input, "<TIMESTAMP>");
 
         // Standard timestamps: 2024-08-09 14:30:45
@@ -184,18 +181,13 @@ pub struct SpinnerNormalizer;
 impl Normalizer for SpinnerNormalizer {
     fn normalize(&self, input: &str) -> String {
         // Normalize the "finished" line: variable spinner char and timing
-        let finished =
-            Regex::new(r"\[[^\]]+\] Solc [^\n\r]* finished in [0-9.]+s").unwrap();
+        let finished = Regex::new(r"\[[^\]]+\] Solc [^\n\r]* finished in [0-9.]+s").unwrap();
         let result = finished.replace_all(input, "[*] Solc finished");
 
         // Collapse consecutive "Compiling" spinner frames into a single normalized line
-        let compiling = Regex::new(
-            r"((?:\r)*\[[^\]]+\] Compiling[^\n\r]*\s*(?:\r?\n|\r))+"
-        )
-        .unwrap();
-        compiling
-            .replace_all(&result, "\r[⠃] Compiling...\n")
-            .into_owned()
+        let compiling =
+            Regex::new(r"((?:\r)*\[[^\]]+\] Compiling[^\n\r]*\s*(?:\r?\n|\r))+").unwrap();
+        compiling.replace_all(&result, "\r[⠃] Compiling...\n").into_owned()
     }
 }
 
@@ -220,10 +212,7 @@ pub struct TargetedHashNormalizer;
 
 impl Normalizer for TargetedHashNormalizer {
     fn normalize(&self, input: &str) -> String {
-        let re = Regex::new(
-            r"(Tx|Hash|Init Code Hash|Bytecode Hash): 0x[a-fA-F0-9]{64}",
-        )
-        .unwrap();
+        let re = Regex::new(r"(Tx|Hash|Init Code Hash|Bytecode Hash): 0x[a-fA-F0-9]{64}").unwrap();
         re.replace_all(input, "${1}: 0x<HASH>").into_owned()
     }
 }
@@ -301,9 +290,7 @@ pub struct LabelNormalizer {
 
 impl LabelNormalizer {
     pub fn new(label: impl Into<String>) -> Self {
-        Self {
-            label: label.into(),
-        }
+        Self { label: label.into() }
     }
 }
 
@@ -319,12 +306,10 @@ pub struct LegacySolidityNormalizer;
 
 impl Normalizer for LegacySolidityNormalizer {
     fn normalize(&self, input: &str) -> String {
-        let bytecode =
-            Regex::new(r#""bytecodeHash":\s*"0x[a-fA-F0-9]{64}""#).unwrap();
+        let bytecode = Regex::new(r#""bytecodeHash":\s*"0x[a-fA-F0-9]{64}""#).unwrap();
         let result = bytecode.replace_all(input, r#""bytecodeHash": "0x<BYTECODE_HASH>""#);
 
-        let init_code =
-            Regex::new(r#""initCodeHash":\s*"0x[a-fA-F0-9]{64}""#).unwrap();
+        let init_code = Regex::new(r#""initCodeHash":\s*"0x[a-fA-F0-9]{64}""#).unwrap();
         let result = init_code.replace_all(&result, r#""initCodeHash": "0x<INIT_CODE_HASH>""#);
 
         let gas = Regex::new(r"Gas:\s*\d+").unwrap();
@@ -388,17 +373,13 @@ pub struct CompilerOutputNormalizer;
 impl Normalizer for CompilerOutputNormalizer {
     fn normalize(&self, input: &str) -> String {
         // "Compiling N files with solc X.Y.Z" or "Compiling N file with Solc X.Y.Z"
-        let compiling = Regex::new(
-            r"(?i)Compiling \d+ files? with solc \d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?"
-        )
-        .unwrap();
+        let compiling =
+            Regex::new(r"(?i)Compiling \d+ files? with solc \d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?")
+                .unwrap();
         let result = compiling.replace_all(input, "Compiling <N> files with solc <SOLC_VERSION>");
 
         // "Solc X.Y.Z finished in ..."
-        let finished = Regex::new(
-            r"(?i)Solc \d+\.\d+\.\d+(-[a-zA-Z0-9.]+)? finished"
-        )
-        .unwrap();
+        let finished = Regex::new(r"(?i)Solc \d+\.\d+\.\d+(-[a-zA-Z0-9.]+)? finished").unwrap();
         finished.replace_all(&result, "Solc <SOLC_VERSION> finished").into_owned()
     }
 }
@@ -458,29 +439,22 @@ mod tests {
     fn address_normalizer_replaces_addresses() {
         let n = AddressNormalizer;
         let input = "deployed to 0x1234567890abcdef1234567890abcdef12345678 on chain 1";
-        assert_eq!(
-            n.normalize(input),
-            "deployed to 0x<ADDRESS> on chain 1"
-        );
+        assert_eq!(n.normalize(input), "deployed to 0x<ADDRESS> on chain 1");
     }
 
     #[test]
     fn hash_normalizer_replaces_hashes() {
         let n = HashNormalizer;
-        let input =
-            "tx 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef done";
+        let input = "tx 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef done";
         assert_eq!(n.normalize(input), "tx 0x<HASH> done");
     }
 
     #[test]
     fn hash_before_address_no_false_match() {
         // A 64-hex hash should NOT be partially matched as a 40-hex address
-        let chain = NormalizerChain::new(vec![
-            Box::new(HashNormalizer),
-            Box::new(AddressNormalizer),
-        ]);
-        let input =
-            "tx 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef addr 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let chain =
+            NormalizerChain::new(vec![Box::new(HashNormalizer), Box::new(AddressNormalizer)]);
+        let input = "tx 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef addr 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let result = chain.normalize(input);
         assert_eq!(result, "tx 0x<HASH> addr 0x<ADDRESS>\n");
     }
@@ -490,123 +464,76 @@ mod tests {
         let n = TimestampNormalizer;
 
         // Full ISO-8601 with timezone
-        assert_eq!(
-            n.normalize("at 2024-01-15T12:30:45Z done"),
-            "at <TIMESTAMP> done"
-        );
+        assert_eq!(n.normalize("at 2024-01-15T12:30:45Z done"), "at <TIMESTAMP> done");
 
         // With offset
-        assert_eq!(
-            n.normalize("at 2024-01-15T12:30:45+02:00 done"),
-            "at <TIMESTAMP> done"
-        );
+        assert_eq!(n.normalize("at 2024-01-15T12:30:45+02:00 done"), "at <TIMESTAMP> done");
 
         // With milliseconds
-        assert_eq!(
-            n.normalize("at 2024-01-15T12:30:45.123Z done"),
-            "at <TIMESTAMP> done"
-        );
+        assert_eq!(n.normalize("at 2024-01-15T12:30:45.123Z done"), "at <TIMESTAMP> done");
     }
 
     #[test]
     fn timestamp_normalizer_handles_relative_time() {
         let n = TimestampNormalizer;
-        assert_eq!(
-            n.normalize("deployed 5 minutes ago"),
-            "deployed <TIME_AGO>"
-        );
-        assert_eq!(
-            n.normalize("created 1 hour ago"),
-            "created <TIME_AGO>"
-        );
+        assert_eq!(n.normalize("deployed 5 minutes ago"), "deployed <TIME_AGO>");
+        assert_eq!(n.normalize("created 1 hour ago"), "created <TIME_AGO>");
     }
 
     #[test]
     fn timestamp_normalizer_handles_standard_datetime() {
         let n = TimestampNormalizer;
-        assert_eq!(
-            n.normalize("at 2024-08-09 14:30:45 done"),
-            "at <TIMESTAMP> done"
-        );
+        assert_eq!(n.normalize("at 2024-08-09 14:30:45 done"), "at <TIMESTAMP> done");
     }
 
     #[test]
     fn timestamp_normalizer_handles_unix_timestamps() {
         let n = TimestampNormalizer;
         // 10-digit unix timestamp
-        assert_eq!(
-            n.normalize("reset-1709567890 done"),
-            "reset-<UNIX_TIME> done"
-        );
+        assert_eq!(n.normalize("reset-1709567890 done"), "reset-<UNIX_TIME> done");
         // 13-digit unix timestamp (millis)
-        assert_eq!(
-            n.normalize("backup-1709567890123 done"),
-            "backup-<UNIX_TIME> done"
-        );
+        assert_eq!(n.normalize("backup-1709567890123 done"), "backup-<UNIX_TIME> done");
     }
 
     #[test]
     fn version_normalizer_v_prefixed_semver() {
         let n = VersionNormalizer;
-        assert_eq!(
-            n.normalize("treb v0.1.0 (forge v0.2.0)"),
-            "treb v<VERSION> (forge v<VERSION>)"
-        );
+        assert_eq!(n.normalize("treb v0.1.0 (forge v0.2.0)"), "treb v<VERSION> (forge v<VERSION>)");
         // Non-v-prefixed is NOT matched
-        assert_eq!(
-            n.normalize("forge 0.2.0"),
-            "forge 0.2.0"
-        );
+        assert_eq!(n.normalize("forge 0.2.0"), "forge 0.2.0");
     }
 
     #[test]
     fn version_normalizer_treb_short_version() {
         let n = VersionNormalizer;
-        assert_eq!(
-            n.normalize("treb abcdef0"),
-            "treb v<VERSION>"
-        );
+        assert_eq!(n.normalize("treb abcdef0"), "treb v<VERSION>");
         // Only matches standalone lines
-        assert_eq!(
-            n.normalize("treb abcdef0 extra"),
-            "treb abcdef0 extra"
-        );
+        assert_eq!(n.normalize("treb abcdef0 extra"), "treb abcdef0 extra");
     }
 
     #[test]
     fn version_normalizer_git_commit_suffix() {
         let n = VersionNormalizer;
         // Full version with prerelease and git describe suffix
-        assert_eq!(
-            n.normalize("v1.0.0-beta.1-95-g6a2e70e"),
-            "v<VERSION>"
-        );
+        assert_eq!(n.normalize("v1.0.0-beta.1-95-g6a2e70e"), "v<VERSION>");
         // Standalone git commit suffix (not part of semver)
-        assert_eq!(
-            n.normalize("built from -g6a2e70e"),
-            "built from -g<COMMIT>"
-        );
+        assert_eq!(n.normalize("built from -g6a2e70e"), "built from -g<COMMIT>");
     }
 
     #[test]
     fn version_normalizer_no_match() {
         let n = VersionNormalizer;
-        assert_eq!(
-            n.normalize("no version here"),
-            "no version here"
-        );
+        assert_eq!(n.normalize("no version here"), "no version here");
     }
 
     #[test]
     fn normalizer_chain_applies_in_sequence() {
         let chain = NormalizerChain::default_chain();
-        // Exercises: ColorNormalizer, TimestampNormalizer, VersionNormalizer, TargetedHashNormalizer
+        // Exercises: ColorNormalizer, TimestampNormalizer, VersionNormalizer,
+        // TargetedHashNormalizer
         let input = "\x1b[32mDeployed\x1b[0m at 2024-01-15T12:30:45Z v0.1.0\nTx: 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef\n";
         let result = chain.normalize(input);
-        assert_eq!(
-            result,
-            "Deployed at <TIMESTAMP> v<VERSION>\nTx: 0x<HASH>\n"
-        );
+        assert_eq!(result, "Deployed at <TIMESTAMP> v<VERSION>\nTx: 0x<HASH>\n");
     }
 
     #[test]
@@ -614,10 +541,7 @@ mod tests {
         let chain = NormalizerChain::new(vec![Box::new(ColorNormalizer)]);
 
         // CRLF → LF + trim + trailing newline
-        assert_eq!(
-            chain.normalize("  \r\nhello\r\n  "),
-            "hello\n"
-        );
+        assert_eq!(chain.normalize("  \r\nhello\r\n  "), "hello\n");
 
         // Empty input stays empty
         assert_eq!(chain.normalize(""), "");
@@ -633,14 +557,9 @@ mod tests {
         assert!(default.normalize(&format!("deployed to {addr}\n")).contains(addr));
 
         // But they work when explicitly included
-        let custom = NormalizerChain::new(vec![
-            Box::new(HashNormalizer),
-            Box::new(AddressNormalizer),
-        ]);
-        assert_eq!(
-            custom.normalize(&format!("deployed to {addr}")),
-            "deployed to 0x<ADDRESS>\n"
-        );
+        let custom =
+            NormalizerChain::new(vec![Box::new(HashNormalizer), Box::new(AddressNormalizer)]);
+        assert_eq!(custom.normalize(&format!("deployed to {addr}")), "deployed to 0x<ADDRESS>\n");
     }
 
     // --- SpinnerNormalizer ---
@@ -648,20 +567,14 @@ mod tests {
     #[test]
     fn spinner_normalizer_replaces_solc_finished() {
         let n = SpinnerNormalizer;
-        assert_eq!(
-            n.normalize("[⠆] Solc 0.8.21 finished in 1.23s"),
-            "[*] Solc finished"
-        );
+        assert_eq!(n.normalize("[⠆] Solc 0.8.21 finished in 1.23s"), "[*] Solc finished");
     }
 
     #[test]
     fn spinner_normalizer_collapses_compiling_lines() {
         let n = SpinnerNormalizer;
         let input = "\r[⠃] Compiling 5 files\n\r[⠆] Compiling 5 files\n\r[⠊] Compiling 5 files\n";
-        assert_eq!(
-            n.normalize(input),
-            "\r[⠃] Compiling...\n"
-        );
+        assert_eq!(n.normalize(input), "\r[⠃] Compiling...\n");
     }
 
     #[test]
@@ -694,22 +607,10 @@ mod tests {
         let n = TargetedHashNormalizer;
         let hash = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
 
-        assert_eq!(
-            n.normalize(&format!("Tx: {hash} confirmed")),
-            "Tx: 0x<HASH> confirmed"
-        );
-        assert_eq!(
-            n.normalize(&format!("Hash: {hash}")),
-            "Hash: 0x<HASH>"
-        );
-        assert_eq!(
-            n.normalize(&format!("Init Code Hash: {hash}")),
-            "Init Code Hash: 0x<HASH>"
-        );
-        assert_eq!(
-            n.normalize(&format!("Bytecode Hash: {hash}")),
-            "Bytecode Hash: 0x<HASH>"
-        );
+        assert_eq!(n.normalize(&format!("Tx: {hash} confirmed")), "Tx: 0x<HASH> confirmed");
+        assert_eq!(n.normalize(&format!("Hash: {hash}")), "Hash: 0x<HASH>");
+        assert_eq!(n.normalize(&format!("Init Code Hash: {hash}")), "Init Code Hash: 0x<HASH>");
+        assert_eq!(n.normalize(&format!("Bytecode Hash: {hash}")), "Bytecode Hash: 0x<HASH>");
     }
 
     #[test]
@@ -730,10 +631,7 @@ mod tests {
             n.normalize("Git Commit: abcdef1234567890abcdef1234567890abcdef12"),
             "Git Commit: <GIT_COMMIT>"
         );
-        assert_eq!(
-            n.normalize("commit: abcdef1"),
-            "commit: <COMMIT>"
-        );
+        assert_eq!(n.normalize("commit: abcdef1"), "commit: <COMMIT>");
     }
 
     #[test]
@@ -748,14 +646,8 @@ mod tests {
     #[test]
     fn line_clear_artifact_normalizer_removes_escape() {
         let n = LineClearArtifactNormalizer;
-        assert_eq!(
-            n.normalize("before\x1b[2Kafter"),
-            "beforeafter"
-        );
-        assert_eq!(
-            n.normalize("before\r\x1b[2Kafter"),
-            "beforeafter"
-        );
+        assert_eq!(n.normalize("before\x1b[2Kafter"), "beforeafter");
+        assert_eq!(n.normalize("before\r\x1b[2Kafter"), "beforeafter");
     }
 
     #[test]
@@ -788,10 +680,7 @@ mod tests {
         let n = RepositoryIdNormalizer;
         let hash = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
 
-        assert_eq!(
-            n.normalize(&format!("id: tx-0x{hash} done")),
-            "id: tx-<ID> done"
-        );
+        assert_eq!(n.normalize(&format!("id: tx-0x{hash} done")), "id: tx-<ID> done");
         assert_eq!(
             n.normalize(&format!("id: tx-internal-{hash} done")),
             "id: tx-internal-<ID> done"
@@ -808,36 +697,21 @@ mod tests {
     #[test]
     fn path_normalizer_replaces_paths() {
         let n = PathNormalizer::new(vec!["/tmp/abc123".into()]);
-        assert_eq!(
-            n.normalize("path /tmp/abc123/foo"),
-            "path <PROJECT_ROOT>/foo"
-        );
+        assert_eq!(n.normalize("path /tmp/abc123/foo"), "path <PROJECT_ROOT>/foo");
     }
 
     #[test]
     fn path_normalizer_longest_first() {
-        let n = PathNormalizer::new(vec![
-            "/tmp/foo".into(),
-            "/tmp/foo/bar".into(),
-        ]);
+        let n = PathNormalizer::new(vec!["/tmp/foo".into(), "/tmp/foo/bar".into()]);
         // The longer path should match first, avoiding partial replacement
-        assert_eq!(
-            n.normalize("path /tmp/foo/bar/baz"),
-            "path <PROJECT_ROOT>/baz"
-        );
+        assert_eq!(n.normalize("path /tmp/foo/bar/baz"), "path <PROJECT_ROOT>/baz");
     }
 
     #[test]
     fn short_hex_normalizer_replaces_short_hashes() {
         let n = ShortHexNormalizer;
-        assert_eq!(
-            n.normalize("commit abcdef0 done"),
-            "commit <SHORT_HASH> done"
-        );
-        assert_eq!(
-            n.normalize("hash abcdef0123 end"),
-            "hash <SHORT_HASH> end"
-        );
+        assert_eq!(n.normalize("commit abcdef0 done"), "commit <SHORT_HASH> done");
+        assert_eq!(n.normalize("hash abcdef0123 end"), "hash <SHORT_HASH> end");
     }
 
     // --- CompilerOutputNormalizer ---
@@ -859,10 +733,7 @@ mod tests {
     #[test]
     fn compiler_output_normalizer_no_match() {
         let n = CompilerOutputNormalizer;
-        assert_eq!(
-            n.normalize("deployed contract to mainnet"),
-            "deployed contract to mainnet"
-        );
+        assert_eq!(n.normalize("deployed contract to mainnet"), "deployed contract to mainnet");
     }
 
     #[test]
@@ -887,10 +758,7 @@ mod tests {
     #[test]
     fn gas_normalizer_no_match() {
         let n = GasNormalizer;
-        assert_eq!(
-            n.normalize("deployed contract to mainnet"),
-            "deployed contract to mainnet"
-        );
+        assert_eq!(n.normalize("deployed contract to mainnet"), "deployed contract to mainnet");
     }
 
     // --- BlockNumberNormalizer ---
@@ -906,10 +774,7 @@ mod tests {
     #[test]
     fn block_number_normalizer_no_match() {
         let n = BlockNumberNormalizer;
-        assert_eq!(
-            n.normalize("deployed contract to mainnet"),
-            "deployed contract to mainnet"
-        );
+        assert_eq!(n.normalize("deployed contract to mainnet"), "deployed contract to mainnet");
     }
 
     // --- DurationNormalizer ---
@@ -926,10 +791,7 @@ mod tests {
     #[test]
     fn duration_normalizer_no_match() {
         let n = DurationNormalizer;
-        assert_eq!(
-            n.normalize("deployed contract to mainnet"),
-            "deployed contract to mainnet"
-        );
+        assert_eq!(n.normalize("deployed contract to mainnet"), "deployed contract to mainnet");
     }
 
     // --- ForgeOutputNormalizer ---
@@ -996,10 +858,7 @@ mod tests {
             n.normalize(&format!(r#""initCodeHash": "{hash}""#)),
             r#""initCodeHash": "0x<INIT_CODE_HASH>""#
         );
-        assert_eq!(
-            n.normalize("Gas: 616952"),
-            "Gas: <GAS_AMOUNT>"
-        );
+        assert_eq!(n.normalize("Gas: 616952"), "Gas: <GAS_AMOUNT>");
     }
 
     #[test]

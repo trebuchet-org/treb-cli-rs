@@ -1,12 +1,11 @@
 //! `treb config` command implementation.
 
-use std::collections::HashMap;
-use std::env;
+use std::{collections::HashMap, env};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use serde::Serialize;
 use treb_config::{
-    load_local_config, resolve_config, save_local_config, LocalConfig, ResolveOpts, SenderConfig,
+    LocalConfig, ResolveOpts, SenderConfig, load_local_config, resolve_config, save_local_config,
 };
 
 use crate::output;
@@ -51,10 +50,7 @@ pub async fn show(json: bool) -> anyhow::Result<()> {
     if json {
         output::print_json(&output_data)?;
     } else {
-        let network_display = resolved
-            .network
-            .as_deref()
-            .unwrap_or("not set");
+        let network_display = resolved.network.as_deref().unwrap_or("not set");
 
         output::print_kv(&[
             ("Namespace", &resolved.namespace),
@@ -71,11 +67,7 @@ pub async fn show(json: bool) -> anyhow::Result<()> {
             roles.sort();
             for role in roles {
                 let sender = &resolved.senders[role];
-                let type_str = sender
-                    .type_
-                    .as_ref()
-                    .map(|t| t.to_string())
-                    .unwrap_or_default();
+                let type_str = sender.type_.as_ref().map(|t| t.to_string()).unwrap_or_default();
                 let addr = sender.address.as_deref().unwrap_or("");
                 table.add_row(vec![role.as_str(), &type_str, addr]);
             }

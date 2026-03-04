@@ -6,7 +6,7 @@
 
 use alloy_primitives::{Address, B256, U256};
 use alloy_signer::Signer;
-use alloy_sol_types::{sol, Eip712Domain, SolStruct};
+use alloy_sol_types::{Eip712Domain, SolStruct, sol};
 use foundry_wallets::WalletSigner;
 use treb_core::error::TrebError;
 
@@ -56,11 +56,7 @@ pub fn safe_domain(chain_id: u64, safe_address: Address) -> Eip712Domain {
 /// This produces the hash that must be signed by Safe owners to approve
 /// the transaction. It corresponds to `Safe.getTransactionHash()` in the
 /// Safe smart contract.
-pub fn compute_safe_tx_hash(
-    chain_id: u64,
-    safe_address: Address,
-    safe_tx: &SafeTx,
-) -> B256 {
+pub fn compute_safe_tx_hash(chain_id: u64, safe_address: Address, safe_tx: &SafeTx) -> B256 {
     let domain = safe_domain(chain_id, safe_address);
     safe_tx.eip712_signing_hash(&domain)
 }
@@ -73,10 +69,7 @@ pub fn compute_safe_tx_hash(
 ///
 /// Returns the 65-byte signature with `v ∈ {27, 28}` as required by the
 /// Safe Transaction Service.
-pub async fn sign_safe_tx(
-    signer: &WalletSigner,
-    safe_tx_hash: B256,
-) -> Result<Vec<u8>, TrebError> {
+pub async fn sign_safe_tx(signer: &WalletSigner, safe_tx_hash: B256) -> Result<Vec<u8>, TrebError> {
     let signature = signer
         .sign_hash(&safe_tx_hash)
         .await
@@ -97,7 +90,7 @@ pub async fn sign_safe_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{address, keccak256, Signature};
+    use alloy_primitives::{Signature, address, keccak256};
 
     // ── SafeTx type hash ──────────────────────────────────────────────────
 
@@ -137,8 +130,7 @@ mod tests {
 
         // The domain type hash for Safe:
         // keccak256("EIP712Domain(uint256 chainId,address verifyingContract)")
-        let domain_type_hash =
-            keccak256("EIP712Domain(uint256 chainId,address verifyingContract)");
+        let domain_type_hash = keccak256("EIP712Domain(uint256 chainId,address verifyingContract)");
 
         // The domain separator is:
         // keccak256(abi.encode(typeHash, chainId, verifyingContract))
@@ -211,10 +203,7 @@ mod tests {
             ..tx_zero.clone()
         };
 
-        let tx_with_nonce = SafeTx {
-            nonce: U256::from(42),
-            ..tx_zero.clone()
-        };
+        let tx_with_nonce = SafeTx { nonce: U256::from(42), ..tx_zero.clone() };
 
         let hash_zero = compute_safe_tx_hash(1, safe_address, &tx_zero);
         let hash_value = compute_safe_tx_hash(1, safe_address, &tx_with_value);
@@ -237,9 +226,7 @@ mod tests {
     async fn sign_and_recover_round_trip() {
         // Use Anvil's first account private key
         let key: B256 =
-            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-                .parse()
-                .unwrap();
+            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80".parse().unwrap();
         let signer = WalletSigner::from_private_key(&key).unwrap();
         let signer_addr = signer.address();
 
@@ -270,9 +257,7 @@ mod tests {
         // Recover the signer address from the signature
         let parity = v == 28;
         let sig = Signature::from_bytes_and_parity(&sig_bytes[..64], parity);
-        let recovered = sig
-            .recover_address_from_prehash(&hash)
-            .expect("recovery should succeed");
+        let recovered = sig.recover_address_from_prehash(&hash).expect("recovery should succeed");
         assert_eq!(recovered, signer_addr);
     }
 
@@ -280,9 +265,7 @@ mod tests {
     async fn sign_is_deterministic() {
         // RFC 6979 guarantees deterministic signatures
         let key: B256 =
-            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-                .parse()
-                .unwrap();
+            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80".parse().unwrap();
         let signer = WalletSigner::from_private_key(&key).unwrap();
 
         let hash = B256::from([0xab; 32]);

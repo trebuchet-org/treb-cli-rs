@@ -10,8 +10,8 @@ mod orchestrator;
 mod types;
 
 pub use duplicates::{
-    check_duplicate, resolve_duplicates, ConflictType, DuplicateConflict, DuplicateStrategy,
-    ResolvedDuplicates,
+    ConflictType, DuplicateConflict, DuplicateStrategy, ResolvedDuplicates, check_duplicate,
+    resolve_duplicates,
 };
 pub use hydration::{
     generate_deployment_id, hydrate_deployment, hydrate_governor_proposals,
@@ -68,9 +68,6 @@ mod tests {
             "resolve_git_commit() should return a non-empty string in a git repo"
         );
         // Short hash is typically 7 characters
-        assert!(
-            commit.len() >= 7,
-            "git short hash should be at least 7 characters, got: {commit}"
-        );
+        assert!(commit.len() >= 7, "git short hash should be at least 7 characters, got: {commit}");
     }
 }

@@ -35,11 +35,7 @@ pub fn detect_forge_version() -> ForgeVersion {
     let short = foundry_common::version::SHORT_VERSION;
 
     // Extract base semver (before first '-' or space).
-    let version = short
-        .split(['-', ' '])
-        .next()
-        .unwrap_or(short)
-        .to_string();
+    let version = short.split(['-', ' ']).next().unwrap_or(short).to_string();
 
     // Extract commit hash from within parentheses (first word after '(').
     let commit = short
@@ -66,19 +62,13 @@ mod tests {
 
     #[test]
     fn display_string_without_commit() {
-        let v = ForgeVersion {
-            version: "1.5.1".to_string(),
-            commit: None,
-        };
+        let v = ForgeVersion { version: "1.5.1".to_string(), commit: None };
         assert_eq!(v.display_string(), "forge v1.5.1");
     }
 
     #[test]
     fn display_string_with_commit() {
-        let v = ForgeVersion {
-            version: "1.5.1".to_string(),
-            commit: Some("abc1234".to_string()),
-        };
+        let v = ForgeVersion { version: "1.5.1".to_string(), commit: Some("abc1234".to_string()) };
         assert_eq!(v.display_string(), "forge v1.5.1 (abc1234)");
     }
 }

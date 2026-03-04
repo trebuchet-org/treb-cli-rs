@@ -1,15 +1,15 @@
 //! Lookup index: build, persist, and query deployment lookups by name,
 //! address, or tag.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
-use treb_core::types::Deployment;
-use treb_core::TrebError;
+use treb_core::{TrebError, types::Deployment};
 
-use crate::io::{read_json_file_or_default, with_file_lock, write_json_file};
-use crate::types::LookupIndex;
-use crate::LOOKUP_FILE;
+use crate::{
+    LOOKUP_FILE,
+    io::{read_json_file_or_default, with_file_lock, write_json_file},
+    types::LookupIndex,
+};
 
 /// Build a [`LookupIndex`] from a map of deployments.
 ///
@@ -22,11 +22,7 @@ pub fn build_lookup_index(deployments: &HashMap<String, Deployment>) -> LookupIn
     for deployment in deployments.values() {
         // by_name: lowercase contract_name → IDs
         let name_key = deployment.contract_name.to_lowercase();
-        index
-            .by_name
-            .entry(name_key)
-            .or_default()
-            .push(deployment.id.clone());
+        index.by_name.entry(name_key).or_default().push(deployment.id.clone());
 
         // by_address: lowercase address → ID (skip empty)
         if !deployment.address.is_empty() {
@@ -37,11 +33,7 @@ pub fn build_lookup_index(deployments: &HashMap<String, Deployment>) -> LookupIn
         // by_tag: each tag → IDs
         if let Some(tags) = &deployment.tags {
             for tag in tags {
-                index
-                    .by_tag
-                    .entry(tag.clone())
-                    .or_default()
-                    .push(deployment.id.clone());
+                index.by_tag.entry(tag.clone()).or_default().push(deployment.id.clone());
             }
         }
     }
@@ -78,9 +70,7 @@ pub struct LookupStore {
 impl LookupStore {
     /// Create a new store pointing at `<registry_dir>/lookup.json`.
     pub fn new(registry_dir: &std::path::Path) -> Self {
-        Self {
-            path: registry_dir.join(LOOKUP_FILE),
-        }
+        Self { path: registry_dir.join(LOOKUP_FILE) }
     }
 
     /// Load the lookup index from disk, returning a default (empty) index if
@@ -110,8 +100,7 @@ impl LookupStore {
 mod tests {
     use super::*;
 
-    use std::collections::HashMap;
-    use std::fs;
+    use std::{collections::HashMap, fs};
 
     use chrono::Utc;
     use tempfile::TempDir;
@@ -122,7 +111,12 @@ mod tests {
 
     /// Helper to create a minimal deployment with configurable fields for
     /// lookup testing.
-    fn make_deployment(id: &str, contract_name: &str, address: &str, tags: Option<Vec<String>>) -> Deployment {
+    fn make_deployment(
+        id: &str,
+        contract_name: &str,
+        address: &str,
+        tags: Option<Vec<String>>,
+    ) -> Deployment {
         let now = Utc::now();
         Deployment {
             id: id.to_string(),
@@ -181,9 +175,7 @@ mod tests {
 
         // All 3 have addresses
         assert_eq!(index.by_address.len(), 3);
-        assert!(index
-            .by_address
-            .contains_key("0x42eddd7dc046da254a93659ca9b02f294606833d"));
+        assert!(index.by_address.contains_key("0x42eddd7dc046da254a93659ca9b02f294606833d"));
 
         // No tags in the fixture
         assert!(index.by_tag.is_empty());
@@ -214,10 +206,7 @@ mod tests {
     #[test]
     fn build_skips_empty_address() {
         let mut deployments = HashMap::new();
-        deployments.insert(
-            "dep-1".to_string(),
-            make_deployment("dep-1", "Token", "", None),
-        );
+        deployments.insert("dep-1".to_string(), make_deployment("dep-1", "Token", "", None));
 
         let index = build_lookup_index(&deployments);
         assert!(index.by_address.is_empty());
@@ -237,10 +226,7 @@ mod tests {
     #[test]
     fn find_by_name_case_insensitive() {
         let mut deployments = HashMap::new();
-        deployments.insert(
-            "dep-1".to_string(),
-            make_deployment("dep-1", "MyToken", "0xAAA", None),
-        );
+        deployments.insert("dep-1".to_string(), make_deployment("dep-1", "MyToken", "0xAAA", None));
 
         let index = build_lookup_index(&deployments);
 
@@ -253,25 +239,14 @@ mod tests {
     #[test]
     fn find_by_address_case_insensitive() {
         let mut deployments = HashMap::new();
-        deployments.insert(
-            "dep-1".to_string(),
-            make_deployment("dep-1", "Token", "0xAbCdEf", None),
-        );
+        deployments
+            .insert("dep-1".to_string(), make_deployment("dep-1", "Token", "0xAbCdEf", None));
 
         let index = build_lookup_index(&deployments);
 
-        assert_eq!(
-            index.find_by_address("0xabcdef"),
-            Some(&"dep-1".to_string())
-        );
-        assert_eq!(
-            index.find_by_address("0xABCDEF"),
-            Some(&"dep-1".to_string())
-        );
-        assert_eq!(
-            index.find_by_address("0xAbCdEf"),
-            Some(&"dep-1".to_string())
-        );
+        assert_eq!(index.find_by_address("0xabcdef"), Some(&"dep-1".to_string()));
+        assert_eq!(index.find_by_address("0xABCDEF"), Some(&"dep-1".to_string()));
+        assert_eq!(index.find_by_address("0xAbCdEf"), Some(&"dep-1".to_string()));
         assert!(index.find_by_address("0x000").is_none());
     }
 
@@ -299,10 +274,7 @@ mod tests {
             "dep-1".to_string(),
             make_deployment("dep-1", "Token", "0xAAA", Some(vec!["core".into()])),
         );
-        deployments.insert(
-            "dep-2".to_string(),
-            make_deployment("dep-2", "Factory", "0xBBB", None),
-        );
+        deployments.insert("dep-2".to_string(), make_deployment("dep-2", "Factory", "0xBBB", None));
 
         // Rebuild writes to disk and returns index
         let built = store.rebuild(&deployments).unwrap();

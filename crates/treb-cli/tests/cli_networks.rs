@@ -64,10 +64,7 @@ fn networks_json_parses_with_expected_fields() {
     let arr = json.as_array().expect("JSON output is not an array");
     assert!(!arr.is_empty(), "JSON array is empty");
 
-    let names: Vec<&str> = arr
-        .iter()
-        .map(|v| v.get("name").unwrap().as_str().unwrap())
-        .collect();
+    let names: Vec<&str> = arr.iter().map(|v| v.get("name").unwrap().as_str().unwrap()).collect();
 
     assert!(names.contains(&"mainnet"));
     assert!(names.contains(&"sepolia"));

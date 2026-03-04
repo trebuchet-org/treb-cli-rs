@@ -140,10 +140,7 @@ fn service_chain_name(chain_id: u64) -> Option<&'static str> {
 ///
 /// ```
 /// use treb_safe::service_url;
-/// assert_eq!(
-///     service_url(1),
-///     Some("https://safe-transaction-mainnet.safe.global/api/v1".into()),
-/// );
+/// assert_eq!(service_url(1), Some("https://safe-transaction-mainnet.safe.global/api/v1".into()),);
 /// assert_eq!(service_url(999999), None);
 /// ```
 pub fn service_url(chain_id: u64) -> Option<String> {
@@ -292,10 +289,7 @@ mod tests {
         assert_eq!(tx0.transaction_hash.as_deref(), Some("0xdef456"));
         assert!(tx0.execution_date.is_some());
         assert_eq!(tx0.confirmations.len(), 1);
-        assert_eq!(
-            tx0.confirmations[0].owner,
-            "0x1111111111111111111111111111111111111111"
-        );
+        assert_eq!(tx0.confirmations[0].owner, "0x1111111111111111111111111111111111111111");
 
         let tx1 = &resp.results[1];
         assert_eq!(tx1.safe_tx_hash, "0xpending999");
@@ -346,10 +340,7 @@ mod tests {
 
     #[test]
     fn service_url_mainnet() {
-        assert_eq!(
-            service_url(1).unwrap(),
-            "https://safe-transaction-mainnet.safe.global/api/v1"
-        );
+        assert_eq!(service_url(1).unwrap(), "https://safe-transaction-mainnet.safe.global/api/v1");
     }
 
     #[test]
@@ -362,10 +353,7 @@ mod tests {
 
     #[test]
     fn service_url_base() {
-        assert_eq!(
-            service_url(8453).unwrap(),
-            "https://safe-transaction-base.safe.global/api/v1"
-        );
+        assert_eq!(service_url(8453).unwrap(), "https://safe-transaction-base.safe.global/api/v1");
     }
 
     #[test]
@@ -403,8 +391,7 @@ mod tests {
         for (chain_id, expected_name) in supported {
             let url = service_url(chain_id)
                 .unwrap_or_else(|| panic!("service_url({chain_id}) should return Some"));
-            let expected =
-                format!("https://safe-transaction-{expected_name}.safe.global/api/v1");
+            let expected = format!("https://safe-transaction-{expected_name}.safe.global/api/v1");
             assert_eq!(url, expected, "chain_id={chain_id}");
         }
     }

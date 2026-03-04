@@ -4,13 +4,12 @@
 //! `resolve_all_senders` → `build_script_config_with_senders` → `ScriptArgs`,
 //! validating that wallet keys and sender addresses are correctly wired.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use alloy_primitives::{Address, address};
 use treb_config::{ResolvedConfig, SenderConfig, SenderType};
 use treb_core::error::TrebError;
-use treb_forge::{build_script_config_with_senders, resolve_all_senders, ResolvedSender};
+use treb_forge::{ResolvedSender, build_script_config_with_senders, resolve_all_senders};
 
 /// Anvil account 0 private key (well-known test key).
 const ANVIL_KEY_0: &str = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
@@ -64,10 +63,7 @@ async fn private_key_sender_end_to_end_pipeline() {
     // Verify resolved sender is a Wallet with the correct address
     let deployer = resolved_senders.get("deployer").unwrap();
     assert_eq!(deployer.sender_address(), ANVIL_ADDR_0);
-    assert!(
-        matches!(deployer, ResolvedSender::Wallet(_)),
-        "deployer should be a Wallet variant"
-    );
+    assert!(matches!(deployer, ResolvedSender::Wallet(_)), "deployer should be a Wallet variant");
 
     // 3. Build ScriptConfig with sender integration
     let resolved = test_resolved_config(senders);
@@ -110,11 +106,7 @@ async fn multi_sender_config_resolves_correctly() {
     // Resolve all senders at once
     let resolved_senders = resolve_all_senders(&senders).await.unwrap();
 
-    assert_eq!(
-        resolved_senders.len(),
-        2,
-        "should resolve both deployer and admin"
-    );
+    assert_eq!(resolved_senders.len(), 2, "should resolve both deployer and admin");
 
     // Verify deployer is a Wallet
     let deployer = resolved_senders.get("deployer").unwrap();
@@ -124,10 +116,7 @@ async fn multi_sender_config_resolves_correctly() {
     // Verify admin is a Safe with the deployer as sub-signer
     let admin = resolved_senders.get("admin").unwrap();
     match admin {
-        ResolvedSender::Safe {
-            safe_address,
-            signer,
-        } => {
+        ResolvedSender::Safe { safe_address, signer } => {
             assert_eq!(
                 *safe_address,
                 safe_addr.parse::<Address>().unwrap(),
@@ -164,10 +153,7 @@ async fn multi_sender_config_resolves_correctly() {
 
 #[tokio::test]
 async fn error_invalid_private_key_returns_config_error_with_sender_name() {
-    let senders = HashMap::from([(
-        "deployer".to_string(),
-        pk_config("not-a-valid-hex-key", None),
-    )]);
+    let senders = HashMap::from([("deployer".to_string(), pk_config("not-a-valid-hex-key", None))]);
 
     let err = resolve_all_senders(&senders).await.unwrap_err();
 
@@ -177,10 +163,7 @@ async fn error_invalid_private_key_returns_config_error_with_sender_name() {
                 msg.contains("deployer"),
                 "error should mention the sender name 'deployer': {msg}"
             );
-            assert!(
-                msg.contains("invalid private key"),
-                "error should describe the issue: {msg}"
-            );
+            assert!(msg.contains("invalid private key"), "error should describe the issue: {msg}");
         }
         other => panic!("expected TrebError::Config, got {other:?}"),
     }
@@ -193,10 +176,8 @@ async fn error_invalid_private_key_returns_config_error_with_sender_name() {
 #[tokio::test]
 async fn error_address_mismatch_mentions_both_addresses() {
     let wrong_address = "0x0000000000000000000000000000000000000001";
-    let senders = HashMap::from([(
-        "deployer".to_string(),
-        pk_config(ANVIL_KEY_0, Some(wrong_address)),
-    )]);
+    let senders =
+        HashMap::from([("deployer".to_string(), pk_config(ANVIL_KEY_0, Some(wrong_address)))]);
 
     let err = resolve_all_senders(&senders).await.unwrap_err();
 
@@ -212,8 +193,7 @@ async fn error_address_mismatch_mentions_both_addresses() {
             );
             // The derived address is ANVIL_ADDR_0
             assert!(
-                msg.to_lowercase()
-                    .contains(&ANVIL_ADDR_0.to_string().to_lowercase()),
+                msg.to_lowercase().contains(&ANVIL_ADDR_0.to_string().to_lowercase()),
                 "error should mention the derived address: {msg}"
             );
         }
@@ -228,10 +208,8 @@ async fn error_address_mismatch_mentions_both_addresses() {
 #[tokio::test]
 async fn error_safe_referencing_nonexistent_sender() {
     let safe_addr = "0x0000000000000000000000000000000000000042";
-    let senders = HashMap::from([(
-        "admin".to_string(),
-        safe_config(safe_addr, "nonexistent-signer"),
-    )]);
+    let senders =
+        HashMap::from([("admin".to_string(), safe_config(safe_addr, "nonexistent-signer"))]);
 
     let err = resolve_all_senders(&senders).await.unwrap_err();
 
@@ -241,10 +219,7 @@ async fn error_safe_referencing_nonexistent_sender() {
                 msg.contains("nonexistent-signer"),
                 "error should mention the missing sender name: {msg}"
             );
-            assert!(
-                msg.contains("not found"),
-                "error should say 'not found': {msg}"
-            );
+            assert!(msg.contains("not found"), "error should say 'not found': {msg}");
         }
         other => panic!("expected TrebError::Config, got {other:?}"),
     }
@@ -257,24 +232,15 @@ async fn error_safe_referencing_nonexistent_sender() {
 #[tokio::test]
 async fn error_circular_reference_a_b_a_returns_error() {
     let senders = HashMap::from([
-        (
-            "a".to_string(),
-            safe_config("0x0000000000000000000000000000000000000001", "b"),
-        ),
-        (
-            "b".to_string(),
-            safe_config("0x0000000000000000000000000000000000000002", "a"),
-        ),
+        ("a".to_string(), safe_config("0x0000000000000000000000000000000000000001", "b")),
+        ("b".to_string(), safe_config("0x0000000000000000000000000000000000000002", "a")),
     ]);
 
     let err = resolve_all_senders(&senders).await.unwrap_err();
 
     match err {
         TrebError::Config(msg) => {
-            assert!(
-                msg.contains("circular"),
-                "error should mention 'circular': {msg}"
-            );
+            assert!(msg.contains("circular"), "error should mention 'circular': {msg}");
         }
         other => panic!("expected TrebError::Config, got {other:?}"),
     }

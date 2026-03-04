@@ -16,9 +16,11 @@ use treb_core::types::{
 };
 use treb_registry::Registry;
 
-use framework::context::TestContext;
-use framework::integration_test::{run_integration_test, IntegrationTest};
-use framework::normalizer::{EpochNormalizer, PathNormalizer};
+use framework::{
+    context::TestContext,
+    integration_test::{IntegrationTest, run_integration_test},
+    normalizer::{EpochNormalizer, PathNormalizer},
+};
 
 // ── Fixture builders ─────────────────────────────────────────────────────
 
@@ -106,17 +108,11 @@ fn seed_prune_registry(project_root: &std::path::Path) {
             TransactionStatus::Executed,
         ))
         .unwrap();
-    registry
-        .insert_deployment(make_deployment("dep-ok", "tx-ok", 1))
-        .unwrap();
+    registry.insert_deployment(make_deployment("dep-ok", "tx-ok", 1)).unwrap();
 
     // Broken deployment refs (deployment → missing transaction)
-    registry
-        .insert_deployment(make_deployment("dep-1", "tx-missing-1", 1))
-        .unwrap();
-    registry
-        .insert_deployment(make_deployment("dep-2", "tx-missing-2", 42220))
-        .unwrap();
+    registry.insert_deployment(make_deployment("dep-1", "tx-missing-1", 1)).unwrap();
+    registry.insert_deployment(make_deployment("dep-2", "tx-missing-2", 42220)).unwrap();
 
     // Broken transaction ref (transaction → missing deployment)
     registry
@@ -130,12 +126,7 @@ fn seed_prune_registry(project_root: &std::path::Path) {
 
     // Pending transaction (orphaned pending entry)
     registry
-        .insert_transaction(make_transaction(
-            "tx-pending",
-            vec![],
-            1,
-            TransactionStatus::Queued,
-        ))
+        .insert_transaction(make_transaction("tx-pending", vec![], 1, TransactionStatus::Queued))
         .unwrap();
 }
 

@@ -77,48 +77,44 @@ impl ArtifactIndex {
     ///
     /// Uses fuzzy matching with a 10% difference tolerance.
     pub fn find_by_creation_code(&self, code: &[u8]) -> Option<ArtifactMatch> {
-        self.inner
-            .find_by_creation_code(code)
-            .map(|(id, data)| {
-                let is_library = data
-                        .deployed_bytecode
-                        .as_ref()
-                        .and_then(|db| db.object.as_ref())
-                        .and_then(|obj| obj.as_bytes())
-                        .is_some_and(|bytes| is_library_bytecode_pattern(bytes));
-                ArtifactMatch {
-                    artifact_id: id.clone(),
-                    name: data.name.clone(),
-                    abi: data.abi.clone(),
-                    has_bytecode: data.bytecode.is_some(),
-                    has_deployed_bytecode: data.deployed_bytecode.is_some(),
-                    is_library,
-                }
-            })
+        self.inner.find_by_creation_code(code).map(|(id, data)| {
+            let is_library = data
+                .deployed_bytecode
+                .as_ref()
+                .and_then(|db| db.object.as_ref())
+                .and_then(|obj| obj.as_bytes())
+                .is_some_and(|bytes| is_library_bytecode_pattern(bytes));
+            ArtifactMatch {
+                artifact_id: id.clone(),
+                name: data.name.clone(),
+                abi: data.abi.clone(),
+                has_bytecode: data.bytecode.is_some(),
+                has_deployed_bytecode: data.deployed_bytecode.is_some(),
+                is_library,
+            }
+        })
     }
 
     /// Find a contract by deployed (runtime) bytecode.
     ///
     /// Uses fuzzy matching with a 15% difference tolerance.
     pub fn find_by_deployed_code(&self, code: &[u8]) -> Option<ArtifactMatch> {
-        self.inner
-            .find_by_deployed_code(code)
-            .map(|(id, data)| {
-                let is_library = data
-                        .deployed_bytecode
-                        .as_ref()
-                        .and_then(|db| db.object.as_ref())
-                        .and_then(|obj| obj.as_bytes())
-                        .is_some_and(|bytes| is_library_bytecode_pattern(bytes));
-                ArtifactMatch {
-                    artifact_id: id.clone(),
-                    name: data.name.clone(),
-                    abi: data.abi.clone(),
-                    has_bytecode: data.bytecode.is_some(),
-                    has_deployed_bytecode: data.deployed_bytecode.is_some(),
-                    is_library,
-                }
-            })
+        self.inner.find_by_deployed_code(code).map(|(id, data)| {
+            let is_library = data
+                .deployed_bytecode
+                .as_ref()
+                .and_then(|db| db.object.as_ref())
+                .and_then(|obj| obj.as_bytes())
+                .is_some_and(|bytes| is_library_bytecode_pattern(bytes));
+            ArtifactMatch {
+                artifact_id: id.clone(),
+                name: data.name.clone(),
+                abi: data.abi.clone(),
+                has_bytecode: data.bytecode.is_some(),
+                has_deployed_bytecode: data.deployed_bytecode.is_some(),
+                is_library,
+            }
+        })
     }
 
     /// Access the underlying `ContractsByArtifact` for foundry API interop.
@@ -152,10 +148,7 @@ mod tests {
 
         assert_eq!(artifact_match.name, "Counter");
         assert_eq!(artifact_match.artifact_id.name, "Counter");
-        assert_eq!(
-            artifact_match.artifact_id.source,
-            PathBuf::from("src/Counter.sol")
-        );
+        assert_eq!(artifact_match.artifact_id.source, PathBuf::from("src/Counter.sol"));
         assert!(artifact_match.has_bytecode);
         assert!(artifact_match.has_deployed_bytecode);
         assert!(!artifact_match.is_library);

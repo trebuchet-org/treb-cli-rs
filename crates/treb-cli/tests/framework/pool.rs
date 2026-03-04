@@ -4,17 +4,21 @@
 //! nodes and offers thread-safe [`acquire`](ContextPool::acquire)/release with
 //! automatic EVM snapshot revert and workspace cleanup.
 
-use std::collections::HashMap;
-use std::ops::Deref;
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::HashMap,
+    ops::Deref,
+    sync::{Arc, Mutex},
+};
 
 use alloy_primitives::U256;
 use tokio::sync::Semaphore;
 use treb_forge::anvil::AnvilConfig;
 
-use super::cleanup::clean_workspace;
-use super::context::TestContext;
-use super::snapshot::{revert_snapshots, take_snapshots};
+use super::{
+    cleanup::clean_workspace,
+    context::TestContext,
+    snapshot::{revert_snapshots, take_snapshots},
+};
 
 /// An entry in the pool: a test context paired with its current snapshot IDs.
 struct PoolEntry {
@@ -44,24 +48,13 @@ impl ContextPool {
 
         for _ in 0..size {
             let ctx = TestContext::new(fixture_name)
-                .with_anvil_mapped(
-                    "local",
-                    AnvilConfig::new().chain_id(31337).port(0),
-                    8545,
-                )
+                .with_anvil_mapped("local", AnvilConfig::new().chain_id(31337).port(0), 8545)
                 .await?
-                .with_anvil_mapped(
-                    "remote",
-                    AnvilConfig::new().chain_id(31338).port(0),
-                    9545,
-                )
+                .with_anvil_mapped("remote", AnvilConfig::new().chain_id(31338).port(0), 9545)
                 .await?;
 
             let snapshot_ids = take_snapshots(ctx.anvil_nodes()).await?;
-            entries.push(PoolEntry {
-                context: ctx,
-                snapshot_ids,
-            });
+            entries.push(PoolEntry { context: ctx, snapshot_ids });
         }
 
         Ok(Self {
@@ -137,11 +130,8 @@ impl Drop for PoolGuard {
                 let handle = tokio::runtime::Handle::current();
                 handle.block_on(async {
                     // 1. Revert EVM snapshots.
-                    let _ = revert_snapshots(
-                        entry.context.anvil_nodes(),
-                        &entry.snapshot_ids,
-                    )
-                    .await;
+                    let _ =
+                        revert_snapshots(entry.context.anvil_nodes(), &entry.snapshot_ids).await;
 
                     // 2. Clean workspace.
                     clean_workspace(entry.context.path());
@@ -167,9 +157,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn acquire_release_clean_state() {
-        let pool = ContextPool::new(1, "minimal-project")
-            .await
-            .expect("pool creation");
+        let pool = ContextPool::new(1, "minimal-project").await.expect("pool creation");
 
         let test_addr = address!("1234567890123456789012345678901234567890");
 
@@ -183,12 +171,7 @@ mod tests {
                 .await
                 .expect("set_balance");
 
-            let balance = node
-                .instance()
-                .api()
-                .balance(test_addr, None)
-                .await
-                .expect("balance");
+            let balance = node.instance().api().balance(test_addr, None).await.expect("balance");
             assert_eq!(balance, U256::from(999u64));
             // guard dropped here — cleanup runs
         }
@@ -204,11 +187,7 @@ mod tests {
                 .balance(test_addr, None)
                 .await
                 .expect("balance after re-acquire");
-            assert_eq!(
-                balance,
-                U256::ZERO,
-                "balance should be zero after pool cleanup"
-            );
+            assert_eq!(balance, U256::ZERO, "balance should be zero after pool cleanup");
         }
     }
 }

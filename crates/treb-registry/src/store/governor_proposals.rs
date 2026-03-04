@@ -1,13 +1,13 @@
 //! Persistent store for governor proposals backed by `governor-txs.json`.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
-use treb_core::types::GovernorProposal;
-use treb_core::TrebError;
+use treb_core::{TrebError, types::GovernorProposal};
 
-use crate::io::{read_json_file_or_default, with_file_lock, write_json_file};
-use crate::GOVERNOR_PROPOSALS_FILE;
+use crate::{
+    GOVERNOR_PROPOSALS_FILE,
+    io::{read_json_file_or_default, with_file_lock, write_json_file},
+};
 
 /// CRUD store for governor proposals, persisted as a
 /// `HashMap<String, GovernorProposal>` in `governor-txs.json` inside the
@@ -21,10 +21,7 @@ impl GovernorProposalStore {
     /// Create a new store pointing at `<registry_dir>/governor-txs.json`.
     /// Call [`load`](Self::load) to read existing data from disk.
     pub fn new(registry_dir: &std::path::Path) -> Self {
-        Self {
-            path: registry_dir.join(GOVERNOR_PROPOSALS_FILE),
-            data: HashMap::new(),
-        }
+        Self { path: registry_dir.join(GOVERNOR_PROPOSALS_FILE), data: HashMap::new() }
     }
 
     /// Load governor proposals from disk, replacing any in-memory data.
@@ -51,8 +48,7 @@ impl GovernorProposalStore {
                 proposal.proposal_id
             )));
         }
-        self.data
-            .insert(proposal.proposal_id.clone(), proposal);
+        self.data.insert(proposal.proposal_id.clone(), proposal);
         self.save()
     }
 
@@ -65,8 +61,7 @@ impl GovernorProposalStore {
                 proposal.proposal_id
             )));
         }
-        self.data
-            .insert(proposal.proposal_id.clone(), proposal);
+        self.data.insert(proposal.proposal_id.clone(), proposal);
         self.save()
     }
 
@@ -145,10 +140,7 @@ mod tests {
         let result = store.insert(proposal);
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("already exists"),
-            "expected 'already exists' in: {msg}"
-        );
+        assert!(msg.contains("already exists"), "expected 'already exists' in: {msg}");
     }
 
     #[test]
@@ -176,10 +168,7 @@ mod tests {
         let result = store.update(proposal);
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("not found"),
-            "expected 'not found' in: {msg}"
-        );
+        assert!(msg.contains("not found"), "expected 'not found' in: {msg}");
     }
 
     #[test]
@@ -202,15 +191,9 @@ mod tests {
         let mut store = GovernorProposalStore::new(dir.path());
 
         // Insert in ascending order
-        store
-            .insert(make_governor_proposal("prop-1", 10))
-            .unwrap();
-        store
-            .insert(make_governor_proposal("prop-2", 20))
-            .unwrap();
-        store
-            .insert(make_governor_proposal("prop-3", 30))
-            .unwrap();
+        store.insert(make_governor_proposal("prop-1", 10)).unwrap();
+        store.insert(make_governor_proposal("prop-2", 20)).unwrap();
+        store.insert(make_governor_proposal("prop-3", 30)).unwrap();
 
         let list = store.list();
         assert_eq!(list.len(), 3);
@@ -237,12 +220,8 @@ mod tests {
         // Insert proposals via first store instance
         {
             let mut store = GovernorProposalStore::new(dir.path());
-            store
-                .insert(make_governor_proposal("prop-1", 10))
-                .unwrap();
-            store
-                .insert(make_governor_proposal("prop-2", 20))
-                .unwrap();
+            store.insert(make_governor_proposal("prop-1", 10)).unwrap();
+            store.insert(make_governor_proposal("prop-2", 20)).unwrap();
         }
 
         // Load from disk via second store instance
@@ -260,13 +239,9 @@ mod tests {
         let mut store = GovernorProposalStore::new(dir.path());
 
         assert_eq!(store.count(), 0);
-        store
-            .insert(make_governor_proposal("prop-1", 10))
-            .unwrap();
+        store.insert(make_governor_proposal("prop-1", 10)).unwrap();
         assert_eq!(store.count(), 1);
-        store
-            .insert(make_governor_proposal("prop-2", 20))
-            .unwrap();
+        store.insert(make_governor_proposal("prop-2", 20)).unwrap();
         assert_eq!(store.count(), 2);
         store.remove("prop-1").unwrap();
         assert_eq!(store.count(), 1);

@@ -3,18 +3,20 @@
 //! Handles config format detection and v1→v2 conversion (`treb migrate config`)
 //! and versioned registry schema migrations (`treb migrate registry`).
 
-use std::collections::HashMap;
-use std::env;
-use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    collections::HashMap,
+    env,
+    path::Path,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use clap::Subcommand;
 use treb_config::{
-    detect_treb_config_format, extract_treb_senders_from_foundry, load_treb_config_v1,
-    serialize_treb_config_v2, AccountConfig, TrebConfigFormat,
+    AccountConfig, TrebConfigFormat, detect_treb_config_format, extract_treb_senders_from_foundry,
+    load_treb_config_v1, serialize_treb_config_v2,
 };
-use treb_registry::{run_migrations, REGISTRY_DIR, REGISTRY_VERSION};
+use treb_registry::{REGISTRY_DIR, REGISTRY_VERSION, run_migrations};
 
 use crate::output;
 
@@ -54,10 +56,7 @@ pub async fn run(subcommand: MigrateSubcommand) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
 
     if !cwd.join("foundry.toml").exists() {
-        bail!(
-            "no foundry.toml found in {}\n\nRun `forge init`, then `treb init`.",
-            cwd.display()
-        );
+        bail!("no foundry.toml found in {}\n\nRun `forge init`, then `treb init`.", cwd.display());
     }
 
     match subcommand {
@@ -75,8 +74,7 @@ async fn run_config(project_root: &Path, dry_run: bool, json: bool) -> anyhow::R
     match format {
         TrebConfigFormat::None => {
             // Check for deprecated foundry.toml senders as a migration path.
-            let foundry_senders =
-                extract_treb_senders_from_foundry(project_root, "default");
+            let foundry_senders = extract_treb_senders_from_foundry(project_root, "default");
             if foundry_senders.is_empty() {
                 bail!("no treb.toml found in {}", project_root.display());
             }
@@ -87,18 +85,10 @@ async fn run_config(project_root: &Path, dry_run: bool, json: bool) -> anyhow::R
                 namespace: Default::default(),
                 fork: Default::default(),
             };
-            let v2_toml =
-                serialize_treb_config_v2(&v2).context("failed to serialize v2 config")?;
+            let v2_toml = serialize_treb_config_v2(&v2).context("failed to serialize v2 config")?;
 
-            return write_or_print_v2(
-                project_root,
-                &treb_toml,
-                &v2_toml,
-                dry_run,
-                json,
-                false,
-            )
-            .await;
+            return write_or_print_v2(project_root, &treb_toml, &v2_toml, dry_run, json, false)
+                .await;
         }
         TrebConfigFormat::V2 => {
             if json {
@@ -151,10 +141,7 @@ async fn write_or_print_v2(
 
     // Write backup if treb.toml already exists.
     let backup_path = if treb_toml_existed && treb_toml.exists() {
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
+        let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
         let path = project_root.join(format!("treb.toml.bak-{ts}"));
         std::fs::copy(treb_toml, &path)
             .with_context(|| format!("failed to create backup at {}", path.display()))?;
@@ -188,8 +175,8 @@ async fn write_or_print_v2(
 /// Convert a v1 config to v2 format, optionally merging in foundry senders.
 ///
 /// Each namespace in the v1 config becomes:
-/// - An `accounts.*` entry for each sender (using `<namespace>_<role>` as the key
-///   when the sender doesn't already have a matching account).
+/// - An `accounts.*` entry for each sender (using `<namespace>_<role>` as the key when the sender
+///   doesn't already have a matching account).
 /// - A `namespace.*` entry mapping roles to account names.
 ///
 /// Any `foundry_senders` not already present in the accounts map are added
@@ -236,10 +223,7 @@ fn convert_v1_to_v2(
         }
         namespace.insert(
             ns_name.clone(),
-            NamespaceRoles {
-                profile: ns_config.profile.clone(),
-                senders: senders_map,
-            },
+            NamespaceRoles { profile: ns_config.profile.clone(), senders: senders_map },
         );
     }
 
@@ -248,25 +232,17 @@ fn convert_v1_to_v2(
         accounts.entry(name.clone()).or_insert_with(|| config.clone());
     }
 
-    TrebFileConfigV2 {
-        accounts,
-        namespace,
-        fork: Default::default(),
-    }
+    TrebFileConfigV2 { accounts, namespace, fork: Default::default() }
 }
 
 // ── run_registry ──────────────────────────────────────────────────────────────
 
 async fn run_registry(project_root: &Path, dry_run: bool) -> anyhow::Result<()> {
     if !project_root.join(".treb").exists() {
-        bail!(
-            "project not initialized — .treb/ directory not found\n\nRun `treb init` first."
-        );
+        bail!("project not initialized — .treb/ directory not found\n\nRun `treb init` first.");
     }
 
-    use treb_registry::io::read_json_file;
-    use treb_registry::types::RegistryMeta;
-    use treb_registry::REGISTRY_FILE;
+    use treb_registry::{REGISTRY_FILE, io::read_json_file, types::RegistryMeta};
 
     let registry_dir = project_root.join(REGISTRY_DIR);
     let meta_path = registry_dir.join(REGISTRY_FILE);
@@ -335,11 +311,8 @@ private_key = "0xDeployerKey"
 
     /// Helper: write a v2 treb.toml fixture.
     fn write_v2_treb_toml(dir: &Path) {
-        std::fs::write(
-            dir.join("treb.toml"),
-            "[accounts.deployer]\ntype = \"private_key\"\n",
-        )
-        .unwrap();
+        std::fs::write(dir.join("treb.toml"), "[accounts.deployer]\ntype = \"private_key\"\n")
+            .unwrap();
     }
 
     // ── serialize_v2 round-trip (using treb_config::serialize_treb_config_v2) ──
@@ -363,16 +336,9 @@ private_key = "0xDeployerKey"
         let mut namespace = HashMap::new();
         namespace.insert(
             "default".to_string(),
-            NamespaceRoles {
-                profile: Some("default".to_string()),
-                senders,
-            },
+            NamespaceRoles { profile: Some("default".to_string()), senders },
         );
-        let config = TrebFileConfigV2 {
-            accounts,
-            namespace,
-            fork: Default::default(),
-        };
+        let config = TrebFileConfigV2 { accounts, namespace, fork: Default::default() };
 
         let toml_str = serialize_treb_config_v2(&config).unwrap();
         let reparsed: treb_config::TrebFileConfigV2 = toml::from_str(&toml_str).unwrap();
@@ -384,8 +350,8 @@ private_key = "0xDeployerKey"
 
     #[test]
     fn golden_v1_to_v2_conversion() {
-        use treb_config::{NamespaceConfigV1, TrebFileConfigV1};
         use std::collections::HashMap;
+        use treb_config::{NamespaceConfigV1, TrebFileConfigV1};
 
         let mut senders = HashMap::new();
         senders.insert(
@@ -400,11 +366,7 @@ private_key = "0xDeployerKey"
         let mut ns = HashMap::new();
         ns.insert(
             "default".to_string(),
-            NamespaceConfigV1 {
-                profile: Some("default".to_string()),
-                slow: None,
-                senders,
-            },
+            NamespaceConfigV1 { profile: Some("default".to_string()), slow: None, senders },
         );
         let v1 = TrebFileConfigV1 { slow: None, ns };
 
@@ -449,11 +411,7 @@ private_key = "0xDeployerKey"
         let backups: Vec<_> = std::fs::read_dir(dir.path())
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.file_name()
-                    .to_string_lossy()
-                    .starts_with("treb.toml.bak-")
-            })
+            .filter(|e| e.file_name().to_string_lossy().starts_with("treb.toml.bak-"))
             .collect();
         assert!(backups.is_empty(), "dry-run should not create backup files");
     }
@@ -477,11 +435,7 @@ private_key = "0xDeployerKey"
         let backups: Vec<_> = std::fs::read_dir(dir.path())
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.file_name()
-                    .to_string_lossy()
-                    .starts_with("treb.toml.bak-")
-            })
+            .filter(|e| e.file_name().to_string_lossy().starts_with("treb.toml.bak-"))
             .collect();
         assert!(backups.is_empty(), "already-v2 should not create backup");
     }
@@ -508,11 +462,7 @@ private_key = "0xDeployerKey"
         let backups: Vec<_> = std::fs::read_dir(dir.path())
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.file_name()
-                    .to_string_lossy()
-                    .starts_with("treb.toml.bak-")
-            })
+            .filter(|e| e.file_name().to_string_lossy().starts_with("treb.toml.bak-"))
             .collect();
         assert_eq!(backups.len(), 1, "exactly one backup should be created");
         let backup_content = std::fs::read_to_string(backups[0].path()).unwrap();
@@ -555,10 +505,7 @@ derivation_path = "m/44'/60'/0'/0/0"
             v2.accounts.contains_key("ledger_signer"),
             "ledger_signer from foundry.toml should be migrated"
         );
-        assert_eq!(
-            v2.accounts["ledger_signer"].type_,
-            Some(SenderType::Ledger)
-        );
+        assert_eq!(v2.accounts["ledger_signer"].type_, Some(SenderType::Ledger));
     }
 
     // ── run_migrations ────────────────────────────────────────────────────────
@@ -578,9 +525,9 @@ derivation_path = "m/44'/60'/0'/0/0"
 
     #[test]
     fn run_migrations_newer_version_returns_error() {
-        use treb_registry::io::write_json_file;
-        use treb_registry::types::RegistryMeta;
-        use treb_registry::{REGISTRY_DIR, REGISTRY_FILE};
+        use treb_registry::{
+            REGISTRY_DIR, REGISTRY_FILE, io::write_json_file, types::RegistryMeta,
+        };
 
         let dir = TempDir::new().unwrap();
         let registry_dir = dir.path().join(REGISTRY_DIR);

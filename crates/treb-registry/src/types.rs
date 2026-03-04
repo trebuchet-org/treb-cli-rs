@@ -32,11 +32,7 @@ impl RegistryMeta {
     /// Create a new `RegistryMeta` at the current [`REGISTRY_VERSION`](crate::REGISTRY_VERSION).
     pub fn new() -> Self {
         let now = Utc::now();
-        Self {
-            version: crate::REGISTRY_VERSION,
-            created_at: now,
-            updated_at: now,
-        }
+        Self { version: crate::REGISTRY_VERSION, created_at: now, updated_at: now }
     }
 }
 
@@ -57,7 +53,6 @@ pub struct LookupIndex {
     /// Maps tag → list of deployment IDs.
     pub by_tag: HashMap<String, Vec<String>>,
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -110,15 +105,9 @@ mod tests {
     #[test]
     fn lookup_index_serde_round_trip() {
         let mut index = LookupIndex::default();
-        index
-            .by_name
-            .insert("mytoken".to_string(), vec!["dep-1".to_string()]);
-        index
-            .by_address
-            .insert("0xabc".to_string(), "dep-1".to_string());
-        index
-            .by_tag
-            .insert("core".to_string(), vec!["dep-1".to_string()]);
+        index.by_name.insert("mytoken".to_string(), vec!["dep-1".to_string()]);
+        index.by_address.insert("0xabc".to_string(), "dep-1".to_string());
+        index.by_tag.insert("core".to_string(), vec!["dep-1".to_string()]);
 
         let json = serde_json::to_string_pretty(&index).unwrap();
         let deserialized: LookupIndex = serde_json::from_str(&json).unwrap();

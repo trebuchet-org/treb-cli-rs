@@ -9,18 +9,20 @@ use std::collections::HashMap;
 use alloy_primitives::B256;
 use chrono::Utc;
 
-use treb_core::types::deployment::{
-    ArtifactInfo, Deployment, DeploymentStrategy, ProxyInfo, VerificationInfo,
-};
-use treb_core::types::enums::{DeploymentType, ProposalStatus, TransactionStatus, VerificationStatus};
-use treb_core::types::governor_proposal::GovernorProposal;
 pub use treb_core::types::ids::generate_deployment_id;
-use treb_core::types::safe_transaction::SafeTransaction;
-use treb_core::types::transaction::Transaction;
+use treb_core::types::{
+    deployment::{ArtifactInfo, Deployment, DeploymentStrategy, ProxyInfo, VerificationInfo},
+    enums::{DeploymentType, ProposalStatus, TransactionStatus, VerificationStatus},
+    governor_proposal::GovernorProposal,
+    safe_transaction::SafeTransaction,
+    transaction::Transaction,
+};
 
-use crate::events::abi::{GovernorProposalCreated, SafeTransactionQueued, TransactionSimulated};
-use crate::events::deployments::ExtractedDeployment;
-use crate::events::proxy::{ProxyRelationship, ProxyType};
+use crate::events::{
+    abi::{GovernorProposalCreated, SafeTransactionQueued, TransactionSimulated},
+    deployments::ExtractedDeployment,
+    proxy::{ProxyRelationship, ProxyType},
+};
 
 use super::PipelineContext;
 
@@ -28,11 +30,7 @@ use super::PipelineContext;
 ///
 /// Returns an empty string when all bytes are zero.
 fn b256_to_hex(value: B256) -> String {
-    if value == B256::ZERO {
-        String::new()
-    } else {
-        format!("{:#x}", value)
-    }
+    if value == B256::ZERO { String::new() } else { format!("{:#x}", value) }
 }
 
 /// Convert a forge-domain [`ExtractedDeployment`] into a core-domain [`Deployment`].
@@ -49,13 +47,11 @@ pub fn hydrate_deployment(
     let namespace = &context.config.namespace;
     let chain_id = context.config.chain_id;
 
-    let id = generate_deployment_id(namespace, chain_id, &extracted.contract_name, &extracted.label);
+    let id =
+        generate_deployment_id(namespace, chain_id, &extracted.contract_name, &extracted.label);
 
-    let deployment_type = if proxy.is_some() {
-        DeploymentType::Proxy
-    } else {
-        DeploymentType::Singleton
-    };
+    let deployment_type =
+        if proxy.is_some() { DeploymentType::Proxy } else { DeploymentType::Singleton };
 
     let deployment_strategy = DeploymentStrategy {
         method: extracted.strategy.clone(),
@@ -79,14 +75,8 @@ pub fn hydrate_deployment(
         };
         ProxyInfo {
             proxy_type: proxy_type_str.to_string(),
-            implementation: p
-                .implementation
-                .map(|addr| addr.to_checksum(None))
-                .unwrap_or_default(),
-            admin: p
-                .admin
-                .map(|addr| addr.to_checksum(None))
-                .unwrap_or_default(),
+            implementation: p.implementation.map(|addr| addr.to_checksum(None)).unwrap_or_default(),
+            admin: p.admin.map(|addr| addr.to_checksum(None)).unwrap_or_default(),
             history: Vec::new(),
         }
     });
@@ -191,11 +181,8 @@ pub fn hydrate_safe_transactions(
     events
         .iter()
         .map(|event| {
-            let tx_ids: Vec<String> = event
-                .transactionIds
-                .iter()
-                .map(|id| format!("tx-{:#x}", id))
-                .collect();
+            let tx_ids: Vec<String> =
+                event.transactionIds.iter().map(|id| format!("tx-{:#x}", id)).collect();
 
             SafeTransaction {
                 safe_tx_hash: format!("{:#x}", event.safeTxHash),
@@ -263,11 +250,8 @@ pub fn hydrate_governor_proposals(
     events
         .iter()
         .map(|event| {
-            let tx_ids: Vec<String> = event
-                .transactionIds
-                .iter()
-                .map(|id| format!("tx-{:#x}", id))
-                .collect();
+            let tx_ids: Vec<String> =
+                event.transactionIds.iter().map(|id| format!("tx-{:#x}", id)).collect();
 
             GovernorProposal {
                 proposal_id: format!("{}", event.proposalId),
@@ -289,12 +273,11 @@ pub fn hydrate_governor_proposals(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{address, b256, Bytes};
+    use alloy_primitives::{Bytes, address, b256};
     use std::path::PathBuf;
     use treb_core::types::enums::DeploymentMethod;
 
-    use crate::events::proxy::ProxyRelationship;
-    use crate::pipeline::PipelineConfig;
+    use crate::{events::proxy::ProxyRelationship, pipeline::PipelineConfig};
 
     fn test_context() -> PipelineContext {
         PipelineContext {
@@ -342,9 +325,7 @@ mod tests {
             contract_name: "Token".to_string(),
             label: "token-v1".to_string(),
             strategy: DeploymentMethod::Create2,
-            salt: b256!(
-                "0000000000000000000000000000000000000000000000000000000000000001"
-            ),
+            salt: b256!("0000000000000000000000000000000000000000000000000000000000000001"),
             bytecode_hash: b256!(
                 "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd"
             ),
@@ -380,10 +361,7 @@ mod tests {
         assert_eq!(deployment.label, "counter-v1");
 
         // Address is checksummed
-        assert_eq!(
-            deployment.address,
-            "0x5FbDB2315678afecb367f032d93F642f64180aa3"
-        );
+        assert_eq!(deployment.address, "0x5FbDB2315678afecb367f032d93F642f64180aa3");
 
         // Type is Singleton (no proxy)
         assert_eq!(deployment.deployment_type, DeploymentType::Singleton);
@@ -473,14 +451,8 @@ mod tests {
         // Proxy info populated
         let proxy_info = deployment.proxy_info.as_ref().expect("proxy_info should be Some");
         assert_eq!(proxy_info.proxy_type, "Transparent");
-        assert_eq!(
-            proxy_info.implementation,
-            "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
-        );
-        assert_eq!(
-            proxy_info.admin,
-            "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
-        );
+        assert_eq!(proxy_info.implementation, "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0");
+        assert_eq!(proxy_info.admin, "0x70997970C51812dc3A010C7d01b50e0d17dc79C8");
         assert!(proxy_info.history.is_empty());
     }
 
@@ -538,10 +510,7 @@ mod tests {
         let value = b256!("0000000000000000000000000000000000000000000000000000000000000001");
         let hex = b256_to_hex(value);
         assert!(hex.starts_with("0x"), "should start with 0x prefix");
-        assert_eq!(
-            hex,
-            "0x0000000000000000000000000000000000000000000000000000000000000001"
-        );
+        assert_eq!(hex, "0x0000000000000000000000000000000000000000000000000000000000000001");
     }
 
     // -----------------------------------------------------------------------
@@ -641,10 +610,8 @@ mod tests {
         let ctx = test_context();
         let safe_tx_hash =
             b256!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
-        let tx_id_1 =
-            b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-        let tx_id_2 =
-            b256!("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+        let tx_id_1 = b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let tx_id_2 = b256!("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
 
         let events = vec![SafeTransactionQueued {
             safeTxHash: safe_tx_hash,
@@ -661,18 +628,12 @@ mod tests {
             stx.safe_tx_hash,
             "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         );
-        assert_eq!(
-            stx.safe_address,
-            "0x5FbDB2315678afecb367f032d93F642f64180aa3"
-        );
+        assert_eq!(stx.safe_address, "0x5FbDB2315678afecb367f032d93F642f64180aa3");
         assert_eq!(stx.chain_id, 1);
         assert_eq!(stx.status, TransactionStatus::Queued);
         assert_eq!(stx.nonce, 0);
         assert!(stx.transactions.is_empty());
-        assert_eq!(
-            stx.proposed_by,
-            "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
-        );
+        assert_eq!(stx.proposed_by, "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
         assert!(stx.confirmations.is_empty());
         assert!(stx.executed_at.is_none());
         assert!(stx.execution_tx_hash.is_empty());
@@ -752,10 +713,7 @@ mod tests {
             status: TransactionStatus::Queued,
             nonce: 0,
             transactions: Vec::new(),
-            transaction_ids: vec![
-                format!("tx-{:#x}", tx_id_1),
-                format!("tx-{:#x}", tx_id_2),
-            ],
+            transaction_ids: vec![format!("tx-{:#x}", tx_id_1), format!("tx-{:#x}", tx_id_2)],
             proposed_by: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
             proposed_at: chrono::Utc::now(),
             confirmations: Vec::new(),
@@ -909,7 +867,9 @@ mod tests {
             proposalId: U256::from(1u64),
             governor: address!("0000000000000000000000000000000000000099"),
             proposer: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
-            transactionIds: vec![b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")],
+            transactionIds: vec![b256!(
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            )],
         }];
 
         let proposals = hydrate_governor_proposals(&events, &ctx);
@@ -949,13 +909,17 @@ mod tests {
                 proposalId: U256::from(100u64),
                 governor: address!("0000000000000000000000000000000000000099"),
                 proposer: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
-                transactionIds: vec![b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")],
+                transactionIds: vec![b256!(
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                )],
             },
             GovernorProposalCreated {
                 proposalId: U256::from(200u64),
                 governor: address!("0000000000000000000000000000000000000099"),
                 proposer: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
-                transactionIds: vec![b256!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")],
+                transactionIds: vec![b256!(
+                    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                )],
             },
         ];
 

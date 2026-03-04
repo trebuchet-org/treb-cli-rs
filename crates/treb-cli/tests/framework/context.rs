@@ -3,13 +3,17 @@
 //! Combines [`TestWorkdir`], [`TrebRunner`], and optional [`AnvilNode`] instances
 //! into a single convenient handle for writing integration tests.
 
-use std::collections::HashMap;
-use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    ffi::OsStr,
+    path::{Path, PathBuf},
+};
 
-use super::anvil_node::AnvilNode;
-use super::runner::TrebRunner;
-use super::workdir::{port_rewrite_foundry_toml, port_rewrite_foundry_toml_single, TestWorkdir};
+use super::{
+    anvil_node::AnvilNode,
+    runner::TrebRunner,
+    workdir::{TestWorkdir, port_rewrite_foundry_toml, port_rewrite_foundry_toml_single},
+};
 
 /// A complete test environment composing workdir, runner, and optional Anvil nodes.
 pub struct TestContext {
@@ -28,11 +32,7 @@ impl TestContext {
         let workdir = TestWorkdir::new(&fixture_dir);
         let runner = TrebRunner::new(workdir.path());
 
-        Self {
-            workdir,
-            runner,
-            anvil_nodes: HashMap::new(),
-        }
+        Self { workdir, runner, anvil_nodes: HashMap::new() }
     }
 
     /// Spawn a named Anvil node and rewrite `foundry.toml` ports to reach it.
@@ -40,10 +40,7 @@ impl TestContext {
     /// The node is stored under `name` and can be retrieved with [`anvil`].
     /// All default RPC ports (8545, 9545) in `foundry.toml` are rewritten to
     /// point at the new node's port.
-    pub async fn with_anvil(
-        mut self,
-        name: &str,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn with_anvil(mut self, name: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let node = AnvilNode::spawn().await?;
         port_rewrite_foundry_toml_single(self.workdir.path(), node.port())?;
         self.anvil_nodes.insert(name.to_string(), node);
@@ -60,11 +57,7 @@ impl TestContext {
     }
 
     /// Run `treb <args>` with additional environment variables.
-    pub fn run_with_env<I, S, E, K, V>(
-        &self,
-        args: I,
-        env_vars: E,
-    ) -> assert_cmd::assert::Assert
+    pub fn run_with_env<I, S, E, K, V>(&self, args: I, env_vars: E) -> assert_cmd::assert::Assert
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,

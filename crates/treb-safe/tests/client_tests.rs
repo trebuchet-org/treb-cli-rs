@@ -3,46 +3,36 @@
 //! Tests SafeServiceClient creation, ProposeRequest serialization,
 //! and EIP-712 hash computation against known vectors.
 
-use alloy_primitives::{address, Address, B256, U256};
-use treb_safe::types::{ProposeRequest, SafeServiceMultisigResponse};
-use treb_safe::{compute_safe_tx_hash, safe_domain, SafeServiceClient, SafeTx};
+use alloy_primitives::{Address, B256, U256, address};
+use treb_safe::{
+    SafeServiceClient, SafeTx, compute_safe_tx_hash, safe_domain,
+    types::{ProposeRequest, SafeServiceMultisigResponse},
+};
 
 // ── Client creation: supported chains ────────────────────────────────────
 
 #[test]
 fn client_creation_mainnet() {
     let client = SafeServiceClient::new(1).expect("mainnet should be supported");
-    assert_eq!(
-        client.base_url(),
-        "https://safe-transaction-mainnet.safe.global/api/v1"
-    );
+    assert_eq!(client.base_url(), "https://safe-transaction-mainnet.safe.global/api/v1");
 }
 
 #[test]
 fn client_creation_polygon() {
     let client = SafeServiceClient::new(137).expect("polygon should be supported");
-    assert_eq!(
-        client.base_url(),
-        "https://safe-transaction-polygon.safe.global/api/v1"
-    );
+    assert_eq!(client.base_url(), "https://safe-transaction-polygon.safe.global/api/v1");
 }
 
 #[test]
 fn client_creation_base() {
     let client = SafeServiceClient::new(8453).expect("base should be supported");
-    assert_eq!(
-        client.base_url(),
-        "https://safe-transaction-base.safe.global/api/v1"
-    );
+    assert_eq!(client.base_url(), "https://safe-transaction-base.safe.global/api/v1");
 }
 
 #[test]
 fn client_creation_sepolia() {
     let client = SafeServiceClient::new(11155111).expect("sepolia should be supported");
-    assert_eq!(
-        client.base_url(),
-        "https://safe-transaction-sepolia.safe.global/api/v1"
-    );
+    assert_eq!(client.base_url(), "https://safe-transaction-sepolia.safe.global/api/v1");
 }
 
 #[test]
@@ -67,13 +57,8 @@ fn client_creation_all_supported_chains() {
     for (chain_id, expected_name) in supported_chains {
         let client = SafeServiceClient::new(chain_id)
             .unwrap_or_else(|| panic!("chain {chain_id} ({expected_name}) should be supported"));
-        let expected_url =
-            format!("https://safe-transaction-{expected_name}.safe.global/api/v1");
-        assert_eq!(
-            client.base_url(),
-            expected_url,
-            "wrong URL for chain {chain_id}"
-        );
+        let expected_url = format!("https://safe-transaction-{expected_name}.safe.global/api/v1");
+        assert_eq!(client.base_url(), expected_url, "wrong URL for chain {chain_id}");
     }
 }
 
@@ -125,10 +110,7 @@ fn propose_request_serializes_camel_case() {
     assert!(obj.contains_key("gasPrice"), "missing gasPrice");
     assert!(obj.contains_key("gasToken"), "missing gasToken");
     assert!(obj.contains_key("refundReceiver"), "missing refundReceiver");
-    assert!(
-        obj.contains_key("contractTransactionHash"),
-        "missing contractTransactionHash"
-    );
+    assert!(obj.contains_key("contractTransactionHash"), "missing contractTransactionHash");
 
     // Verify no snake_case keys
     assert!(!obj.contains_key("safe_tx_gas"));
@@ -192,10 +174,7 @@ fn propose_request_round_trip_serialization() {
     assert_eq!(deserialized.data, original.data);
     assert_eq!(deserialized.nonce, original.nonce);
     assert_eq!(deserialized.sender, original.sender);
-    assert_eq!(
-        deserialized.contract_transaction_hash,
-        original.contract_transaction_hash
-    );
+    assert_eq!(deserialized.contract_transaction_hash, original.contract_transaction_hash);
     assert_eq!(deserialized.origin, original.origin);
 }
 
@@ -217,10 +196,9 @@ fn propose_request_fixture_deserializes() {
 
 #[test]
 fn safe_service_response_fixture_deserializes() {
-    let fixture = std::fs::read_to_string(
-        "../treb-cli/tests/fixtures/safe/safe-service-response.json",
-    )
-    .unwrap();
+    let fixture =
+        std::fs::read_to_string("../treb-cli/tests/fixtures/safe/safe-service-response.json")
+            .unwrap();
     let resp: SafeServiceMultisigResponse = serde_json::from_str(&fixture).unwrap();
 
     assert_eq!(resp.count, 2);
@@ -285,10 +263,7 @@ fn eip712_hash_differs_by_chain_id() {
 
     let hash_mainnet = compute_safe_tx_hash(1, safe_address, &safe_tx);
     let hash_polygon = compute_safe_tx_hash(137, safe_address, &safe_tx);
-    assert_ne!(
-        hash_mainnet, hash_polygon,
-        "different chains must produce different hashes"
-    );
+    assert_ne!(hash_mainnet, hash_polygon, "different chains must produce different hashes");
 }
 
 #[test]
@@ -311,10 +286,7 @@ fn eip712_hash_differs_by_safe_address() {
 
     let hash_a = compute_safe_tx_hash(1, addr_a, &safe_tx);
     let hash_b = compute_safe_tx_hash(1, addr_b, &safe_tx);
-    assert_ne!(
-        hash_a, hash_b,
-        "different safe addresses must produce different hashes"
-    );
+    assert_ne!(hash_a, hash_b, "different safe addresses must produce different hashes");
 }
 
 #[test]
@@ -333,10 +305,7 @@ fn eip712_hash_differs_by_nonce() {
         nonce: U256::ZERO,
     };
 
-    let tx_nonce_42 = SafeTx {
-        nonce: U256::from(42),
-        ..tx_nonce_0.clone()
-    };
+    let tx_nonce_42 = SafeTx { nonce: U256::from(42), ..tx_nonce_0.clone() };
 
     let hash_0 = compute_safe_tx_hash(1, safe_address, &tx_nonce_0);
     let hash_42 = compute_safe_tx_hash(1, safe_address, &tx_nonce_42);
@@ -359,10 +328,8 @@ fn eip712_hash_differs_by_value() {
         nonce: U256::ZERO,
     };
 
-    let tx_with_value = SafeTx {
-        value: U256::from(1_000_000_000_000_000_000u64),
-        ..tx_zero.clone()
-    };
+    let tx_with_value =
+        SafeTx { value: U256::from(1_000_000_000_000_000_000u64), ..tx_zero.clone() };
 
     let hash_zero = compute_safe_tx_hash(1, safe_address, &tx_zero);
     let hash_value = compute_safe_tx_hash(1, safe_address, &tx_with_value);
@@ -418,15 +385,9 @@ fn eip712_hash_with_data_differs_from_without() {
         nonce: U256::ZERO,
     };
 
-    let tx_with_data = SafeTx {
-        data: vec![0x60, 0x80, 0x60, 0x40].into(),
-        ..tx_no_data.clone()
-    };
+    let tx_with_data = SafeTx { data: vec![0x60, 0x80, 0x60, 0x40].into(), ..tx_no_data.clone() };
 
     let hash_no_data = compute_safe_tx_hash(1, safe_address, &tx_no_data);
     let hash_with_data = compute_safe_tx_hash(1, safe_address, &tx_with_data);
-    assert_ne!(
-        hash_no_data, hash_with_data,
-        "data field should affect the hash"
-    );
+    assert_ne!(hash_no_data, hash_with_data, "data field should affect the hash");
 }

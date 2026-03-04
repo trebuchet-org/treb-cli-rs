@@ -5,8 +5,7 @@
 
 use anyhow::bail;
 use treb_core::types::Deployment;
-use treb_registry::Registry;
-use treb_registry::types::LookupIndex;
+use treb_registry::{Registry, types::LookupIndex};
 
 /// Resolve a user-supplied deployment query to a single deployment ID.
 ///
@@ -35,7 +34,9 @@ pub fn resolve_deployment<'a>(
                 return Ok(d);
             }
         }
-        bail!("no deployment found with address '{query}'\n\nRun `treb list` to see available deployments.");
+        bail!(
+            "no deployment found with address '{query}'\n\nRun `treb list` to see available deployments."
+        );
     }
 
     // 3. Name:label (contains `:`)
@@ -48,7 +49,9 @@ pub fn resolve_deployment<'a>(
                 .collect();
             return resolve_candidates(&matches, query);
         }
-        bail!("no deployment found matching '{query}'\n\nRun `treb list` to see available deployments.");
+        bail!(
+            "no deployment found matching '{query}'\n\nRun `treb list` to see available deployments."
+        );
     }
 
     // 4. Namespace/name (contains `/` but not a full ID which would have matched in step 1)
@@ -66,14 +69,14 @@ pub fn resolve_deployment<'a>(
 
     // 5. Contract name (case-insensitive)
     if let Some(ids) = lookup.find_by_name(query) {
-        let matches: Vec<&Deployment> = ids
-            .iter()
-            .filter_map(|id| registry.get_deployment(id))
-            .collect();
+        let matches: Vec<&Deployment> =
+            ids.iter().filter_map(|id| registry.get_deployment(id)).collect();
         return resolve_candidates(&matches, query);
     }
 
-    bail!("no deployment found matching '{query}'\n\nRun `treb list` to see available deployments.");
+    bail!(
+        "no deployment found matching '{query}'\n\nRun `treb list` to see available deployments."
+    );
 }
 
 /// Given a list of candidate deployments, return exactly one or error.
@@ -82,10 +85,15 @@ fn resolve_candidates<'a>(
     query: &str,
 ) -> anyhow::Result<&'a Deployment> {
     match candidates.len() {
-        0 => bail!("no deployment found matching '{query}'\n\nRun `treb list` to see available deployments."),
+        0 => bail!(
+            "no deployment found matching '{query}'\n\nRun `treb list` to see available deployments."
+        ),
         1 => Ok(candidates[0]),
         _ => {
-            let mut msg = format!("ambiguous deployment query '{query}' matches {} deployments:\n", candidates.len());
+            let mut msg = format!(
+                "ambiguous deployment query '{query}' matches {} deployments:\n",
+                candidates.len()
+            );
             for d in candidates {
                 msg.push_str(&format!("  - {}\n", d.id));
             }
@@ -203,11 +211,8 @@ mod tests {
     fn resolve_by_address() {
         let (_tmp, registry) = setup_registry();
         let lookup = registry.load_lookup_index().unwrap();
-        let result = resolve_deployment(
-            "0x42eDa75c4AC3fCf6eA20D091Ad1Ff79e9c52833D",
-            &registry,
-            &lookup,
-        );
+        let result =
+            resolve_deployment("0x42eDa75c4AC3fCf6eA20D091Ad1Ff79e9c52833D", &registry, &lookup);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().id, "mainnet/42220/FPMM:v3.0.0");
     }
@@ -216,11 +221,8 @@ mod tests {
     fn resolve_by_address_case_insensitive() {
         let (_tmp, registry) = setup_registry();
         let lookup = registry.load_lookup_index().unwrap();
-        let result = resolve_deployment(
-            "0x42EDA75C4AC3FCF6EA20D091AD1FF79E9C52833D",
-            &registry,
-            &lookup,
-        );
+        let result =
+            resolve_deployment("0x42EDA75C4AC3FCF6EA20D091AD1FF79E9C52833D", &registry, &lookup);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().id, "mainnet/42220/FPMM:v3.0.0");
     }
@@ -395,11 +397,8 @@ mod tests {
     fn resolve_by_address_with_no_label_id() {
         let (_tmp, registry) = setup_registry_mixed_ids();
         let lookup = registry.load_lookup_index().unwrap();
-        let result = resolve_deployment(
-            "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-            &registry,
-            &lookup,
-        );
+        let result =
+            resolve_deployment("0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", &registry, &lookup);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().id, "default/31337/Counter");
     }

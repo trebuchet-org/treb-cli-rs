@@ -29,7 +29,5 @@ pub fn seed_registry(project_root: &Path) {
     // Rebuild the lookup index using the registry API.
     let registry =
         treb_registry::Registry::open(project_root).expect("registry should open after seeding");
-    registry
-        .rebuild_lookup_index()
-        .expect("lookup index rebuild should succeed");
+    registry.rebuild_lookup_index().expect("lookup index rebuild should succeed");
 }

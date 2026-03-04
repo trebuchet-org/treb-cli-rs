@@ -2,7 +2,7 @@
 
 use std::env;
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use treb_core::types::Deployment;
 use treb_registry::Registry;
 
@@ -314,9 +314,7 @@ mod tests {
         filters.deployment_type = Some("SINGLETON".into());
         let result = filter_deployments(&refs, &filters);
         assert_eq!(result.len(), 2);
-        assert!(result
-            .iter()
-            .all(|d| d.deployment_type == DeploymentType::Singleton));
+        assert!(result.iter().all(|d| d.deployment_type == DeploymentType::Singleton));
     }
 
     #[test]
@@ -358,9 +356,7 @@ mod tests {
         filters.contract = Some("fpmm".into());
         let result = filter_deployments(&refs, &filters);
         assert_eq!(result.len(), 2);
-        assert!(result
-            .iter()
-            .all(|d| d.contract_name.eq_ignore_ascii_case("fpmm")));
+        assert!(result.iter().all(|d| d.contract_name.eq_ignore_ascii_case("fpmm")));
     }
 
     #[test]

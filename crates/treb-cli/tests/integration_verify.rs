@@ -16,9 +16,11 @@ use treb_core::types::{
 };
 use treb_registry::Registry;
 
-use framework::context::TestContext;
-use framework::integration_test::{run_integration_test, IntegrationTest};
-use framework::normalizer::PathNormalizer;
+use framework::{
+    context::TestContext,
+    integration_test::{IntegrationTest, run_integration_test},
+    normalizer::PathNormalizer,
+};
 
 // ── Fixture builders ─────────────────────────────────────────────────────
 
@@ -89,15 +91,9 @@ fn seed_verified_registry(project_root: &std::path::Path) {
     let mut registry = Registry::open(project_root).expect("registry should open");
 
     registry
-        .insert_transaction(make_transaction(
-            "tx-1",
-            vec!["dep-verified".to_string()],
-            1,
-        ))
+        .insert_transaction(make_transaction("tx-1", vec!["dep-verified".to_string()], 1))
         .unwrap();
-    registry
-        .insert_deployment(make_verified_deployment("dep-verified", "tx-1", 1))
-        .unwrap();
+    registry.insert_deployment(make_verified_deployment("dep-verified", "tx-1", 1)).unwrap();
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────

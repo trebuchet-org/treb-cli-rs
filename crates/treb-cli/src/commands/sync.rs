@@ -3,11 +3,12 @@ use std::collections::HashMap;
 use alloy_chains::Chain;
 use anyhow::Context;
 use serde::Serialize;
-use treb_core::types::enums::TransactionStatus;
-use treb_core::types::safe_transaction::Confirmation;
+use treb_core::types::{enums::TransactionStatus, safe_transaction::Confirmation};
 use treb_registry::Registry;
-use treb_safe::SafeServiceClient;
-use treb_safe::types::{SafeServiceMultisigResponse, SafeServiceTx};
+use treb_safe::{
+    SafeServiceClient,
+    types::{SafeServiceMultisigResponse, SafeServiceTx},
+};
 
 use crate::output;
 
@@ -33,9 +34,8 @@ fn resolve_chain_id(network: &str) -> anyhow::Result<u64> {
     }
 
     // Try resolving as a named chain via alloy-chains
-    let chain: Chain = network
-        .parse()
-        .map_err(|_| anyhow::anyhow!("unknown network: {network}"))?;
+    let chain: Chain =
+        network.parse().map_err(|_| anyhow::anyhow!("unknown network: {network}"))?;
     Ok(chain.id())
 }
 
@@ -57,13 +57,10 @@ pub async fn run(
         );
     }
     if !cwd.join(".treb").exists() {
-        anyhow::bail!(
-            "no .treb/ registry found. Run `treb init` to initialize."
-        );
+        anyhow::bail!("no .treb/ registry found. Run `treb init` to initialize.");
     }
 
-    let mut registry = Registry::open(&cwd)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut registry = Registry::open(&cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     // Resolve --network filter to chain_id
     let chain_filter: Option<u64> = match &network {
@@ -121,24 +118,22 @@ pub async fn run(
     for ((safe_address, chain_id), local_hashes) in &groups {
         let client = match clients.get(chain_id) {
             Some(c) => c,
-            None => {
-                match SafeServiceClient::new(*chain_id) {
-                    Some(c) => {
-                        clients.insert(*chain_id, c);
-                        clients.get(chain_id).unwrap()
-                    }
-                    None => {
-                        let msg = format!(
-                            "unsupported chain {chain_id} for Safe Transaction Service (safe {safe_address})"
-                        );
-                        errors.push(msg.clone());
-                        if !json {
-                            eprintln!("warning: {msg}");
-                        }
-                        continue;
-                    }
+            None => match SafeServiceClient::new(*chain_id) {
+                Some(c) => {
+                    clients.insert(*chain_id, c);
+                    clients.get(chain_id).unwrap()
                 }
-            }
+                None => {
+                    let msg = format!(
+                        "unsupported chain {chain_id} for Safe Transaction Service (safe {safe_address})"
+                    );
+                    errors.push(msg.clone());
+                    if !json {
+                        eprintln!("warning: {msg}");
+                    }
+                    continue;
+                }
+            },
         };
 
         if debug {
@@ -154,10 +149,7 @@ pub async fn run(
             match client.get_multisig_transactions(safe_address).await {
                 Ok(resp) => {
                     if debug {
-                        eprintln!(
-                            "[debug] received {} results",
-                            resp.results.len()
-                        );
+                        eprintln!("[debug] received {} results", resp.results.len());
                     }
                     resp
                 }
@@ -175,11 +167,8 @@ pub async fn run(
             };
 
         // Index service results by safeTxHash for fast lookup
-        let service_map: HashMap<&str, &SafeServiceTx> = service_resp
-            .results
-            .iter()
-            .map(|tx| (tx.safe_tx_hash.as_str(), tx))
-            .collect();
+        let service_map: HashMap<&str, &SafeServiceTx> =
+            service_resp.results.iter().map(|tx| (tx.safe_tx_hash.as_str(), tx)).collect();
 
         for local_hash in local_hashes {
             if let Some(service_tx) = service_map.get(local_hash.as_str()) {
@@ -207,47 +196,37 @@ pub async fn run(
                 if service_tx.is_executed && updated_stx.status != TransactionStatus::Executed {
                     updated_stx.status = TransactionStatus::Executed;
                     updated_stx.executed_at = service_tx.execution_date;
-                    updated_stx.execution_tx_hash = service_tx
-                        .transaction_hash
-                        .clone()
-                        .unwrap_or_default();
+                    updated_stx.execution_tx_hash =
+                        service_tx.transaction_hash.clone().unwrap_or_default();
                     newly_executed_count += 1;
                 }
 
                 // Persist updated safe transaction
                 registry
                     .update_safe_transaction(updated_stx.clone())
-                    .with_context(|| {
-                        format!("failed to update safe transaction {local_hash}")
-                    })?;
+                    .with_context(|| format!("failed to update safe transaction {local_hash}"))?;
                 updated_count += 1;
 
                 // Update linked Transaction records when safe tx becomes Executed
-                if !was_executed
-                    && updated_stx.status == TransactionStatus::Executed
-                {
+                if !was_executed && updated_stx.status == TransactionStatus::Executed {
                     for tx_id in &updated_stx.transaction_ids {
                         if let Some(tx) = registry.get_transaction(tx_id) {
                             let mut tx = tx.clone();
                             if tx.status != TransactionStatus::Executed {
                                 tx.status = TransactionStatus::Executed;
                                 tx.hash = updated_stx.execution_tx_hash.clone();
-                                registry
-                                    .update_transaction(tx)
-                                    .with_context(|| {
-                                        format!("failed to update transaction {tx_id}")
-                                    })?;
+                                registry.update_transaction(tx).with_context(|| {
+                                    format!("failed to update transaction {tx_id}")
+                                })?;
                             }
                         }
                     }
                 }
             } else if clean {
                 // Safe transaction not found on the service — remove it
-                registry
-                    .remove_safe_transaction(local_hash)
-                    .with_context(|| {
-                        format!("failed to remove stale safe transaction {local_hash}")
-                    })?;
+                registry.remove_safe_transaction(local_hash).with_context(|| {
+                    format!("failed to remove stale safe transaction {local_hash}")
+                })?;
                 removed_count += 1;
             }
         }
@@ -417,7 +396,8 @@ mod tests {
     #[test]
     fn safe_service_client_supported_chains() {
         // Verify SafeServiceClient can be constructed for all chains sync needs
-        let chains = [1, 10, 56, 100, 137, 324, 8453, 42161, 42220, 43114, 59144, 534352, 11155111, 84532];
+        let chains =
+            [1, 10, 56, 100, 137, 324, 8453, 42161, 42220, 43114, 59144, 534352, 11155111, 84532];
         for chain_id in chains {
             assert!(
                 SafeServiceClient::new(chain_id).is_some(),
@@ -434,10 +414,7 @@ mod tests {
     #[test]
     fn safe_service_client_base_url_format() {
         let client = SafeServiceClient::new(1).unwrap();
-        assert_eq!(
-            client.base_url(),
-            "https://safe-transaction-mainnet.safe.global/api/v1"
-        );
+        assert_eq!(client.base_url(), "https://safe-transaction-mainnet.safe.global/api/v1");
     }
 
     // ── Registry integration tests ──────────────────────────────────────

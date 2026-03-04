@@ -4,15 +4,16 @@
 //! constructor parameters from its ABI, and generates a Solidity
 //! deployment script using Handlebars templates.
 
-use std::env;
-use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::{
+    env, fs,
+    path::{Component, Path, PathBuf},
+};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use handlebars::Handlebars;
 use serde::Serialize;
 
-use treb_forge::{compile_project, ArtifactIndex};
+use treb_forge::{ArtifactIndex, compile_project};
 
 // ── Valid flag values ────────────────────────────────────────────────────
 
@@ -659,11 +660,8 @@ fn relative_import_path(from_file: &Path, to_file: &Path) -> String {
     let from_components: Vec<_> = from_dir.components().collect();
     let to_components: Vec<_> = to_file.components().collect();
 
-    let common_len = from_components
-        .iter()
-        .zip(to_components.iter())
-        .take_while(|(a, b)| a == b)
-        .count();
+    let common_len =
+        from_components.iter().zip(to_components.iter()).take_while(|(a, b)| a == b).count();
 
     let mut parts: Vec<&str> = Vec::new();
 
@@ -678,11 +676,7 @@ fn relative_import_path(from_file: &Path, to_file: &Path) -> String {
     }
 
     let joined = parts.join("/");
-    if joined.starts_with("..") {
-        joined
-    } else {
-        format!("./{joined}")
-    }
+    if joined.starts_with("..") { joined } else { format!("./{joined}") }
 }
 
 // ── Command entry point ──────────────────────────────────────────────────
@@ -720,17 +714,14 @@ pub async fn run(
 
     // ── Compile project ──────────────────────────────────────────────────
     let cwd = env::current_dir().context("failed to determine current directory")?;
-    let foundry_config = treb_config::load_foundry_config(&cwd)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let foundry_config =
+        treb_config::load_foundry_config(&cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let compilation = compile_project(&foundry_config)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let compilation = compile_project(&foundry_config).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     // Collect available names before consuming compilation output.
-    let available_names: Vec<String> = compilation
-        .artifact_ids()
-        .map(|id| id.name.clone())
-        .collect();
+    let available_names: Vec<String> =
+        compilation.artifact_ids().map(|id| id.name.clone()).collect();
 
     let artifact_index = ArtifactIndex::from_compile_output(compilation);
 
@@ -741,17 +732,11 @@ pub async fn run(
         .ok_or_else(|| {
             let mut msg = format!("contract '{}' not found in compilation output.", artifact);
             // List available contracts to help the user.
-            let mut unique_names: Vec<&str> = available_names
-                .iter()
-                .map(|s| s.as_str())
-                .collect();
+            let mut unique_names: Vec<&str> = available_names.iter().map(|s| s.as_str()).collect();
             unique_names.sort();
             unique_names.dedup();
             if !unique_names.is_empty() {
-                msg.push_str(&format!(
-                    "\n\nAvailable contracts: {}",
-                    unique_names.join(", ")
-                ));
+                msg.push_str(&format!("\n\nAvailable contracts: {}", unique_names.join(", ")));
             }
             anyhow::anyhow!(msg)
         })?;
@@ -802,21 +787,14 @@ pub async fn run(
     // ── Determine output path ────────────────────────────────────────────
     let output_path = output
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(format!("script/Deploy{}.s.sol", context.contract_name))
-        });
+        .unwrap_or_else(|| PathBuf::from(format!("script/Deploy{}.s.sol", context.contract_name)));
 
     // ── Build render context ─────────────────────────────────────────────
-    let import_path =
-        relative_import_path(&output_path, Path::new(&context.artifact_path));
+    let import_path = relative_import_path(&output_path, Path::new(&context.artifact_path));
 
     let has_constructor_params = !context.constructor_params.is_empty();
-    let constructor_args = context
-        .constructor_params
-        .iter()
-        .map(|p| p.name.clone())
-        .collect::<Vec<_>>()
-        .join(", ");
+    let constructor_args =
+        context.constructor_params.iter().map(|p| p.name.clone()).collect::<Vec<_>>().join(", ");
 
     let render_params: Vec<RenderParam> = context
         .constructor_params
@@ -830,12 +808,7 @@ pub async fn run(
 
     let proxy_contract_name = match &context.proxy_contract {
         Some(name) => name.clone(),
-        None => context
-            .proxy
-            .as_deref()
-            .map(default_proxy_contract)
-            .unwrap_or("")
-            .to_string(),
+        None => context.proxy.as_deref().map(default_proxy_contract).unwrap_or("").to_string(),
     };
 
     let render_ctx = RenderContext {
@@ -876,9 +849,8 @@ pub async fn run(
         None => context.strategy.clone(),
     };
 
-    let code = hbs
-        .render(&template_name, &render_ctx)
-        .context("failed to render deployment script")?;
+    let code =
+        hbs.render(&template_name, &render_ctx).context("failed to render deployment script")?;
 
     // ── Output ───────────────────────────────────────────────────────────
     if json {
@@ -893,18 +865,13 @@ pub async fn run(
     } else {
         if let Some(parent) = output_path.parent() {
             if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent).with_context(|| {
-                    format!("failed to create directory: {}", parent.display())
-                })?;
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create directory: {}", parent.display()))?;
             }
         }
-        fs::write(&output_path, &code).with_context(|| {
-            format!("failed to write deploy script: {}", output_path.display())
-        })?;
-        eprintln!(
-            "Generated deploy script: {}",
-            output_path.display()
-        );
+        fs::write(&output_path, &code)
+            .with_context(|| format!("failed to write deploy script: {}", output_path.display()))?;
+        eprintln!("Generated deploy script: {}", output_path.display());
     }
 
     Ok(())
@@ -1288,13 +1255,11 @@ mod tests {
             import_path: "../src/Counter.sol".to_string(),
             is_library: false,
             has_constructor_params: true,
-            constructor_params: vec![
-                RenderParam {
-                    name: "initialCount".to_string(),
-                    solidity_type: "uint256".to_string(),
-                    placeholder: "0".to_string(),
-                },
-            ],
+            constructor_params: vec![RenderParam {
+                name: "initialCount".to_string(),
+                solidity_type: "uint256".to_string(),
+                placeholder: "0".to_string(),
+            }],
             constructor_args: "initialCount".to_string(),
             ..Default::default()
         };
@@ -1426,13 +1391,11 @@ mod tests {
             contract_name: "Counter".to_string(),
             import_path: "../src/Counter.sol".to_string(),
             has_constructor_params: true,
-            constructor_params: vec![
-                RenderParam {
-                    name: "initialCount".to_string(),
-                    solidity_type: "uint256".to_string(),
-                    placeholder: "0".to_string(),
-                },
-            ],
+            constructor_params: vec![RenderParam {
+                name: "initialCount".to_string(),
+                solidity_type: "uint256".to_string(),
+                placeholder: "0".to_string(),
+            }],
             constructor_args: "initialCount".to_string(),
             is_create: true,
             proxy_contract: "ERC1967Proxy".to_string(),
@@ -1448,7 +1411,9 @@ mod tests {
         assert!(code.contains("Counter.initialize.selector"));
         assert!(code.contains("ERC1967Proxy proxy = new ERC1967Proxy("));
         assert!(code.contains("address(implementation),"));
-        assert!(code.contains("console.log(\"Counter implementation deployed at:\", address(implementation));"));
+        assert!(code.contains(
+            "console.log(\"Counter implementation deployed at:\", address(implementation));"
+        ));
         assert!(code.contains("console.log(\"ERC1967Proxy deployed at:\", address(proxy));"));
     }
 
@@ -1537,7 +1502,9 @@ mod tests {
         };
 
         let code = render_proxy("proxy_uups", UUPS_PROXY_TEMPLATE, &ctx);
-        assert!(code.contains("// NOTE: Token must inherit UUPSUpgradeable and override _authorizeUpgrade."));
+        assert!(code.contains(
+            "// NOTE: Token must inherit UUPSUpgradeable and override _authorizeUpgrade."
+        ));
         assert!(code.contains("Deploy implementation (must inherit UUPSUpgradeable)"));
         assert!(code.contains("Token implementation = new Token();"));
         assert!(code.contains("Deploy UUPS proxy (uses ERC1967Proxy)"));
@@ -1551,13 +1518,11 @@ mod tests {
             contract_name: "Counter".to_string(),
             import_path: "../src/Counter.sol".to_string(),
             has_constructor_params: true,
-            constructor_params: vec![
-                RenderParam {
-                    name: "owner".to_string(),
-                    solidity_type: "address".to_string(),
-                    placeholder: "address(0)".to_string(),
-                },
-            ],
+            constructor_params: vec![RenderParam {
+                name: "owner".to_string(),
+                solidity_type: "address".to_string(),
+                placeholder: "address(0)".to_string(),
+            }],
             constructor_args: "owner".to_string(),
             is_create2: true,
             proxy_contract: "ERC1967Proxy".to_string(),
@@ -1588,7 +1553,9 @@ mod tests {
         assert!(code.contains("Token implementation = new Token();"));
         assert!(code.contains("address proxyAdmin = msg.sender;"));
         assert!(code.contains("// TODO: Set the proxy admin address"));
-        assert!(code.contains("TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy("));
+        assert!(
+            code.contains("TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy(")
+        );
         assert!(code.contains("proxyAdmin,"));
     }
 
@@ -1598,13 +1565,11 @@ mod tests {
             contract_name: "Counter".to_string(),
             import_path: "../src/Counter.sol".to_string(),
             has_constructor_params: true,
-            constructor_params: vec![
-                RenderParam {
-                    name: "initialCount".to_string(),
-                    solidity_type: "uint256".to_string(),
-                    placeholder: "0".to_string(),
-                },
-            ],
+            constructor_params: vec![RenderParam {
+                name: "initialCount".to_string(),
+                solidity_type: "uint256".to_string(),
+                placeholder: "0".to_string(),
+            }],
             constructor_args: "initialCount".to_string(),
             is_create2: true,
             proxy_contract: "TransparentUpgradeableProxy".to_string(),
@@ -1615,7 +1580,9 @@ mod tests {
         assert!(code.contains("bytes32 salt = bytes32(0);"));
         assert!(code.contains("uint256 initialCount = 0;"));
         assert!(code.contains("Counter implementation = new Counter{salt: salt}(initialCount);"));
-        assert!(code.contains("TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy("));
+        assert!(
+            code.contains("TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy(")
+        );
         assert!(code.contains("proxyAdmin,"));
     }
 
@@ -1650,7 +1617,9 @@ mod tests {
 
         let code = render_proxy("proxy_beacon", BEACON_PROXY_TEMPLATE, &ctx);
         assert!(code.contains("import { UpgradeableBeacon } from \"@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol\";"));
-        assert!(code.contains("import { BeaconProxy } from \"@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol\";"));
+        assert!(code.contains(
+            "import { BeaconProxy } from \"@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol\";"
+        ));
         assert!(code.contains("Token implementation = new Token();"));
         assert!(code.contains("address beaconOwner = msg.sender;"));
         assert!(code.contains("// TODO: Set the beacon owner address"));
@@ -1669,13 +1638,11 @@ mod tests {
             contract_name: "Counter".to_string(),
             import_path: "../src/Counter.sol".to_string(),
             has_constructor_params: true,
-            constructor_params: vec![
-                RenderParam {
-                    name: "owner".to_string(),
-                    solidity_type: "address".to_string(),
-                    placeholder: "address(0)".to_string(),
-                },
-            ],
+            constructor_params: vec![RenderParam {
+                name: "owner".to_string(),
+                solidity_type: "address".to_string(),
+                placeholder: "address(0)".to_string(),
+            }],
             constructor_args: "owner".to_string(),
             is_create2: true,
             proxy_contract: "BeaconProxy".to_string(),
@@ -1735,13 +1702,11 @@ mod tests {
             contract_name: "Counter".to_string(),
             import_path: "../src/Counter.sol".to_string(),
             has_constructor_params: true,
-            constructor_params: vec![
-                RenderParam {
-                    name: "initialCount".to_string(),
-                    solidity_type: "uint256".to_string(),
-                    placeholder: "0".to_string(),
-                },
-            ],
+            constructor_params: vec![RenderParam {
+                name: "initialCount".to_string(),
+                solidity_type: "uint256".to_string(),
+                placeholder: "0".to_string(),
+            }],
             constructor_args: "initialCount".to_string(),
             is_create2: true,
             proxy_contract: "ERC1967Proxy".to_string(),
@@ -1774,7 +1739,9 @@ mod tests {
         assert!(code.contains("Token implementation = Token(implAddr);"));
         // Transparent proxy
         assert!(code.contains("address proxyAdmin = msg.sender;"));
-        assert!(code.contains("TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy("));
+        assert!(
+            code.contains("TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy(")
+        );
         assert!(code.contains("proxyAdmin,"));
     }
 

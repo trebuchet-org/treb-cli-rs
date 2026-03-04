@@ -53,11 +53,7 @@ fn init_is_idempotent() {
     fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
 
     // First init.
-    treb()
-        .arg("init")
-        .current_dir(tmp.path())
-        .assert()
-        .success();
+    treb().arg("init").current_dir(tmp.path()).assert().success();
 
     // Modify config to detect overwrites.
     let config = r#"{"namespace":"production","network":"mainnet"}"#;
@@ -83,22 +79,14 @@ fn init_force_resets_local_config() {
     fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
 
     // First init.
-    treb()
-        .arg("init")
-        .current_dir(tmp.path())
-        .assert()
-        .success();
+    treb().arg("init").current_dir(tmp.path()).assert().success();
 
     // Modify config.
     let config = r#"{"namespace":"production","network":"mainnet"}"#;
     fs::write(tmp.path().join(".treb/config.local.json"), config).unwrap();
 
     // Init with --force should reset config.
-    treb()
-        .args(["init", "--force"])
-        .current_dir(tmp.path())
-        .assert()
-        .success();
+    treb().args(["init", "--force"]).current_dir(tmp.path()).assert().success();
 
     // Config should be reset to defaults.
     let config_json = fs::read_to_string(tmp.path().join(".treb/config.local.json")).unwrap();

@@ -2,13 +2,13 @@
 
 use std::env;
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use treb_core::types::Deployment;
 use treb_registry::Registry;
 
-use crate::commands::resolve::resolve_deployment;
-use crate::output;
-use crate::ui::selector::fuzzy_select_deployment_id;
+use crate::{
+    commands::resolve::resolve_deployment, output, ui::selector::fuzzy_select_deployment_id,
+};
 
 pub async fn run(deployment_query: Option<String>, json: bool) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
@@ -65,10 +65,7 @@ fn print_deployment_details(d: &Deployment) {
 
     // On-Chain
     println!("\n── On-Chain ──");
-    output::print_kv(&[
-        ("Chain ID", &d.chain_id.to_string()),
-        ("Address", &d.address),
-    ]);
+    output::print_kv(&[("Chain ID", &d.chain_id.to_string()), ("Address", &d.address)]);
 
     // Transaction
     println!("\n── Transaction ──");

@@ -17,19 +17,12 @@ use crate::{TrebConfigFormat, TrebFileConfigV2};
 /// expanded for `${VAR_NAME}` environment variable references.
 pub fn load_treb_config_v2(path: &Path) -> Result<TrebFileConfigV2> {
     if !path.exists() {
-        return Err(TrebError::Config(format!(
-            "treb.toml not found: {}",
-            path.display()
-        )));
+        return Err(TrebError::Config(format!("treb.toml not found: {}", path.display())));
     }
 
     let contents = std::fs::read_to_string(path)?;
-    let mut config: TrebFileConfigV2 = toml::from_str(&contents).map_err(|e| {
-        TrebError::Config(format!(
-            "invalid TOML in {}: {e}",
-            path.display()
-        ))
-    })?;
+    let mut config: TrebFileConfigV2 = toml::from_str(&contents)
+        .map_err(|e| TrebError::Config(format!("invalid TOML in {}: {e}", path.display())))?;
 
     // Expand environment variables in all account config string fields.
     for account in config.accounts.values_mut() {
@@ -149,8 +142,8 @@ mod tests {
 
     #[test]
     fn serialize_v2_round_trips_with_load() {
-        use std::collections::HashMap;
         use crate::{AccountConfig, ForkConfig, NamespaceRoles, SenderType, TrebFileConfigV2};
+        use std::collections::HashMap;
 
         let mut accounts = HashMap::new();
         accounts.insert(
@@ -166,16 +159,9 @@ mod tests {
         let mut namespace = HashMap::new();
         namespace.insert(
             "default".to_string(),
-            NamespaceRoles {
-                profile: Some("default".to_string()),
-                senders,
-            },
+            NamespaceRoles { profile: Some("default".to_string()), senders },
         );
-        let config = TrebFileConfigV2 {
-            accounts,
-            namespace,
-            fork: ForkConfig::default(),
-        };
+        let config = TrebFileConfigV2 { accounts, namespace, fork: ForkConfig::default() };
 
         let toml_str = serialize_treb_config_v2(&config).unwrap();
         let tmp = TempDir::new().unwrap();
@@ -243,42 +229,21 @@ setup = "script/ForkSetup.s.sol"
 
         // Verify account count and types.
         assert_eq!(config.accounts.len(), 4);
-        assert_eq!(
-            config.accounts["deployer"].type_,
-            Some(SenderType::PrivateKey)
-        );
-        assert_eq!(
-            config.accounts["ledger_signer"].type_,
-            Some(SenderType::Ledger)
-        );
+        assert_eq!(config.accounts["deployer"].type_, Some(SenderType::PrivateKey));
+        assert_eq!(config.accounts["ledger_signer"].type_, Some(SenderType::Ledger));
         assert_eq!(config.accounts["multisig"].type_, Some(SenderType::Safe));
-        assert_eq!(
-            config.accounts["governor"].type_,
-            Some(SenderType::OZGovernor)
-        );
+        assert_eq!(config.accounts["governor"].type_, Some(SenderType::OZGovernor));
 
         // Verify namespace count.
         assert_eq!(config.namespace.len(), 2);
-        assert_eq!(
-            config.namespace["default"].profile,
-            Some("default".to_string())
-        );
-        assert_eq!(
-            config.namespace["production"].profile,
-            Some("optimized".to_string())
-        );
+        assert_eq!(config.namespace["default"].profile, Some("default".to_string()));
+        assert_eq!(config.namespace["production"].profile, Some("optimized".to_string()));
 
         // Verify fork config.
-        assert_eq!(
-            config.fork.setup,
-            Some("script/ForkSetup.s.sol".to_string())
-        );
+        assert_eq!(config.fork.setup, Some("script/ForkSetup.s.sol".to_string()));
 
         // Verify static private key (no env var expansion needed).
-        assert_eq!(
-            config.accounts["deployer"].private_key,
-            Some("0xStaticKey".to_string())
-        );
+        assert_eq!(config.accounts["deployer"].private_key, Some("0xStaticKey".to_string()));
     }
 
     #[test]
@@ -294,10 +259,7 @@ setup = "script/ForkSetup.s.sol"
 
         unsafe { std::env::set_var("TREB_TEST_EXPAND_KEY", "0xExpandedKey") };
         let config = load_treb_config_v2(&path).unwrap();
-        assert_eq!(
-            config.accounts["deployer"].private_key,
-            Some("0xExpandedKey".to_string())
-        );
+        assert_eq!(config.accounts["deployer"].private_key, Some("0xExpandedKey".to_string()));
         unsafe { std::env::remove_var("TREB_TEST_EXPAND_KEY") };
     }
 
@@ -314,20 +276,14 @@ setup = "script/ForkSetup.s.sol"
 
         unsafe { std::env::remove_var("TREB_TEST_UNSET_KEY") };
         let config = load_treb_config_v2(&path).unwrap();
-        assert_eq!(
-            config.accounts["deployer"].private_key,
-            Some(String::new())
-        );
+        assert_eq!(config.accounts["deployer"].private_key, Some(String::new()));
     }
 
     #[test]
     fn parse_v2_missing_file_errors() {
         let err = load_treb_config_v2(Path::new("/nonexistent/treb.toml")).unwrap_err();
         let msg = err.to_string();
-        assert!(
-            msg.contains("treb.toml not found"),
-            "expected 'treb.toml not found', got: {msg}"
-        );
+        assert!(msg.contains("treb.toml not found"), "expected 'treb.toml not found', got: {msg}");
     }
 
     #[test]
@@ -338,14 +294,8 @@ setup = "script/ForkSetup.s.sol"
 
         let err = load_treb_config_v2(&path).unwrap_err();
         let msg = err.to_string();
-        assert!(
-            msg.contains("invalid TOML"),
-            "expected 'invalid TOML', got: {msg}"
-        );
-        assert!(
-            msg.contains("treb.toml"),
-            "expected file path in error, got: {msg}"
-        );
+        assert!(msg.contains("invalid TOML"), "expected 'invalid TOML', got: {msg}");
+        assert!(msg.contains("treb.toml"), "expected file path in error, got: {msg}");
     }
 
     // ---- detect_treb_config_format ----
@@ -365,11 +315,8 @@ setup = "script/ForkSetup.s.sol"
     #[test]
     fn detect_format_v1() {
         let tmp = TempDir::new().unwrap();
-        std::fs::write(
-            tmp.path().join("treb.toml"),
-            "[ns.default]\nprofile = \"default\"\n",
-        )
-        .unwrap();
+        std::fs::write(tmp.path().join("treb.toml"), "[ns.default]\nprofile = \"default\"\n")
+            .unwrap();
 
         assert_eq!(detect_treb_config_format(tmp.path()), TrebConfigFormat::V1);
     }
@@ -377,10 +324,7 @@ setup = "script/ForkSetup.s.sol"
     #[test]
     fn detect_format_none() {
         let tmp = TempDir::new().unwrap();
-        assert_eq!(
-            detect_treb_config_format(tmp.path()),
-            TrebConfigFormat::None
-        );
+        assert_eq!(detect_treb_config_format(tmp.path()), TrebConfigFormat::None);
     }
 
     // ---- expand_env_vars ----
@@ -456,23 +400,11 @@ governance = "governor"
         assert_eq!(config.namespace["default"].senders["deployer"], "deployer");
 
         // Production namespace maps deployer to ledger_signer, admin to multisig.
-        assert_eq!(
-            config.namespace["production"].senders["deployer"],
-            "ledger_signer"
-        );
-        assert_eq!(
-            config.namespace["production"].senders["admin"],
-            "multisig"
-        );
+        assert_eq!(config.namespace["production"].senders["deployer"], "ledger_signer");
+        assert_eq!(config.namespace["production"].senders["admin"], "multisig");
 
         // production.ntt overrides deployer back to deployer, adds governance.
-        assert_eq!(
-            config.namespace["production.ntt"].senders["deployer"],
-            "deployer"
-        );
-        assert_eq!(
-            config.namespace["production.ntt"].senders["governance"],
-            "governor"
-        );
+        assert_eq!(config.namespace["production.ntt"].senders["deployer"], "deployer");
+        assert_eq!(config.namespace["production.ntt"].senders["governance"], "governor");
     }
 }

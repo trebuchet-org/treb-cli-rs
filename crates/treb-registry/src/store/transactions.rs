@@ -1,13 +1,13 @@
 //! Persistent store for transactions backed by `transactions.json`.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
-use treb_core::types::Transaction;
-use treb_core::TrebError;
+use treb_core::{TrebError, types::Transaction};
 
-use crate::io::{read_json_file_or_default, with_file_lock, write_json_file};
-use crate::TRANSACTIONS_FILE;
+use crate::{
+    TRANSACTIONS_FILE,
+    io::{read_json_file_or_default, with_file_lock, write_json_file},
+};
 
 /// CRUD store for transactions, persisted as a `HashMap<String, Transaction>` in
 /// `transactions.json` inside the registry directory.
@@ -20,10 +20,7 @@ impl TransactionStore {
     /// Create a new store pointing at `<registry_dir>/transactions.json`.
     /// Call [`load`](Self::load) to read existing data from disk.
     pub fn new(registry_dir: &std::path::Path) -> Self {
-        Self {
-            path: registry_dir.join(TRANSACTIONS_FILE),
-            data: HashMap::new(),
-        }
+        Self { path: registry_dir.join(TRANSACTIONS_FILE), data: HashMap::new() }
     }
 
     /// Load transactions from disk, replacing any in-memory data.
@@ -58,10 +55,7 @@ impl TransactionStore {
     /// Returns an error if the ID is not found.
     pub fn update(&mut self, transaction: Transaction) -> Result<(), TrebError> {
         if !self.data.contains_key(&transaction.id) {
-            return Err(TrebError::Registry(format!(
-                "transaction not found: {}",
-                transaction.id
-            )));
+            return Err(TrebError::Registry(format!("transaction not found: {}", transaction.id)));
         }
         self.data.insert(transaction.id.clone(), transaction);
         self.save()
@@ -93,9 +87,9 @@ impl TransactionStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
     use std::fs;
     use tempfile::TempDir;
-    use chrono::Utc;
     use treb_core::types::TransactionStatus;
 
     /// Helper to create a minimal transaction with the given ID and created_at offset in seconds.
@@ -144,10 +138,7 @@ mod tests {
         let result = store.insert(tx);
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("already exists"),
-            "expected 'already exists' in: {msg}"
-        );
+        assert!(msg.contains("already exists"), "expected 'already exists' in: {msg}");
     }
 
     #[test]
@@ -175,10 +166,7 @@ mod tests {
         let result = store.update(tx);
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("not found"),
-            "expected 'not found' in: {msg}"
-        );
+        assert!(msg.contains("not found"), "expected 'not found' in: {msg}");
     }
 
     #[test]

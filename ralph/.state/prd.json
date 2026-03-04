@@ -15,7 +15,7 @@
         "cargo test and cargo clippy pass"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -30,7 +30,7 @@
         "cargo test and cargo clippy pass"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -45,7 +45,7 @@
         "cargo test and cargo clippy pass"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -61,7 +61,7 @@
         "cargo test and cargo clippy pass"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -76,7 +76,7 @@
         "cargo test and cargo clippy pass"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on P5-US-001 through P5-US-004"
     },
     {
@@ -90,7 +90,7 @@
         "cargo test and cargo clippy pass"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Independent of normalizer changes"
     },
     {
@@ -106,7 +106,7 @@
         "cargo test and cargo clippy pass"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on P5-US-005"
     },
     {
@@ -120,7 +120,7 @@
         "cargo test and cargo clippy pass"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on P5-US-005"
     },
     {
@@ -135,7 +135,7 @@
         "cargo fmt --check passes"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on P5-US-001 through P5-US-008"
     }
   ]

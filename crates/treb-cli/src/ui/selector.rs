@@ -67,13 +67,12 @@ pub fn fuzzy_select_network(networks: &[String]) -> Result<Option<&str>> {
         ));
     }
 
-    let selection =
-        dialoguer::FuzzySelect::with_theme(&dialoguer::theme::ColorfulTheme::default())
-            .with_prompt("Select network")
-            .items(networks)
-            .default(0)
-            .interact_on_opt(&Term::stdout())
-            .map_err(|e| TrebError::Cli(format!("selector error: {e}")))?;
+    let selection = dialoguer::FuzzySelect::with_theme(&dialoguer::theme::ColorfulTheme::default())
+        .with_prompt("Select network")
+        .items(networks)
+        .default(0)
+        .interact_on_opt(&Term::stdout())
+        .map_err(|e| TrebError::Cli(format!("selector error: {e}")))?;
 
     Ok(selection.and_then(|i| networks.get(i).map(|s| s.as_str())))
 }

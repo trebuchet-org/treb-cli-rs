@@ -3,17 +3,21 @@
 //! Applies forward-only migrations in version order, creating a timestamped
 //! backup before each step for safe rollback.
 
-use std::fs;
-use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    fs,
+    path::Path,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use serde::Serialize;
 use treb_core::TrebError;
 
-use crate::io::{read_json_file, write_json_file};
-use crate::store::fork_state::snapshot_registry;
-use crate::types::RegistryMeta;
-use crate::{REGISTRY_FILE, REGISTRY_VERSION};
+use crate::{
+    REGISTRY_FILE, REGISTRY_VERSION,
+    io::{read_json_file, write_json_file},
+    store::fork_state::snapshot_registry,
+    types::RegistryMeta,
+};
 
 // ── MigrationReport ───────────────────────────────────────────────────────────
 
@@ -97,9 +101,8 @@ fn migrate_v1_to_v2(registry_dir: &Path) -> Result<(), TrebError> {
                 snapshots_dir.display()
             ))
         })? {
-            let entry = entry.map_err(|e| {
-                TrebError::Registry(format!("failed to read snapshot entry: {e}"))
-            })?;
+            let entry = entry
+                .map_err(|e| TrebError::Registry(format!("failed to read snapshot entry: {e}")))?;
             let path = entry.path();
             if path.is_dir() {
                 for &(old, new) in FILE_RENAMES {
@@ -146,12 +149,8 @@ pub fn run_migrations(registry_dir: &Path) -> Result<MigrationReport, TrebError>
     for &(target_version, migration_fn) in MIGRATIONS {
         if target_version > version {
             // Create backup before mutating.
-            let ts = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis();
-            let backup_dir =
-                registry_dir.join(format!("backups/migrate-v{target_version}-{ts}"));
+            let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
+            let backup_dir = registry_dir.join(format!("backups/migrate-v{target_version}-{ts}"));
             snapshot_registry(registry_dir, &backup_dir).map_err(|e| {
                 TrebError::Registry(format!(
                     "failed to create migration backup at {}: {e}",
@@ -175,10 +174,7 @@ pub fn run_migrations(registry_dir: &Path) -> Result<MigrationReport, TrebError>
         }
     }
 
-    Ok(MigrationReport {
-        applied,
-        current_version: version,
-    })
+    Ok(MigrationReport { applied, current_version: version })
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -188,7 +184,7 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    use crate::{Registry, REGISTRY_DIR};
+    use crate::{REGISTRY_DIR, Registry};
 
     fn init_registry_dir(dir: &Path) -> std::path::PathBuf {
         Registry::init(dir).unwrap();
@@ -269,10 +265,7 @@ mod tests {
 
     #[test]
     fn migration_report_serializes_to_camel_case_json() {
-        let report = MigrationReport {
-            applied: vec![1],
-            current_version: 1,
-        };
+        let report = MigrationReport { applied: vec![1], current_version: 1 };
         let json = serde_json::to_value(&report).unwrap();
         let obj = json.as_object().unwrap();
         assert!(obj.contains_key("applied"), "should have 'applied' key");
@@ -289,11 +282,7 @@ mod tests {
 
         // Create old-format files.
         std::fs::write(registry_dir.join("safe_txs.json"), r#"{"h1":{}}"#).unwrap();
-        std::fs::write(
-            registry_dir.join("governor_proposals.json"),
-            r#"{"p1":{}}"#,
-        )
-        .unwrap();
+        std::fs::write(registry_dir.join("governor_proposals.json"), r#"{"p1":{}}"#).unwrap();
         std::fs::write(registry_dir.join("fork-state.json"), r#"{"forks":{}}"#).unwrap();
 
         migrate_v1_to_v2(&registry_dir).unwrap();

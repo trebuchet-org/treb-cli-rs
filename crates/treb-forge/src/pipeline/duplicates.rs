@@ -4,8 +4,7 @@
 //! conflicts by deployment ID (exact match) and by address + chain_id.
 //! The caller chooses a [`DuplicateStrategy`] to handle any detected conflicts.
 
-use treb_core::types::deployment::Deployment;
-use treb_core::TrebError;
+use treb_core::{TrebError, types::deployment::Deployment};
 use treb_registry::Registry;
 
 use super::SkippedDeployment;
@@ -74,10 +73,7 @@ pub struct ResolvedDuplicates {
 ///
 /// Checks by ID first (takes precedence), then by address + chain_id.
 /// Returns `None` when no conflict is found.
-pub fn check_duplicate(
-    candidate: &Deployment,
-    registry: &Registry,
-) -> Option<DuplicateConflict> {
+pub fn check_duplicate(candidate: &Deployment, registry: &Registry) -> Option<DuplicateConflict> {
     // SameId takes precedence.
     if registry.get_deployment(&candidate.id).is_some() {
         return Some(DuplicateConflict {
@@ -130,19 +126,15 @@ pub fn resolve_duplicates(
             Some(conflict) => match strategy {
                 DuplicateStrategy::Skip => {
                     let reason = match conflict.conflict_type {
-                        ConflictType::SameId => format!(
-                            "Deployment with ID '{}' already exists",
-                            conflict.existing_id
-                        ),
+                        ConflictType::SameId => {
+                            format!("Deployment with ID '{}' already exists", conflict.existing_id)
+                        }
                         ConflictType::SameAddress => format!(
                             "Address {} on chain {} already registered as '{}'",
                             candidate.address, candidate.chain_id, conflict.existing_id
                         ),
                     };
-                    skipped.push(SkippedDeployment {
-                        deployment: candidate,
-                        reason,
-                    });
+                    skipped.push(SkippedDeployment { deployment: candidate, reason });
                 }
                 DuplicateStrategy::Error => {
                     let msg = match conflict.conflict_type {
@@ -164,11 +156,7 @@ pub fn resolve_duplicates(
         }
     }
 
-    Ok(ResolvedDuplicates {
-        to_insert,
-        to_update,
-        skipped,
-    })
+    Ok(ResolvedDuplicates { to_insert, to_update, skipped })
 }
 
 #[cfg(test)]
@@ -179,8 +167,10 @@ mod tests {
 
     use chrono::Utc;
     use tempfile::TempDir;
-    use treb_core::types::deployment::{ArtifactInfo, DeploymentStrategy, VerificationInfo};
-    use treb_core::types::enums::{DeploymentMethod, DeploymentType, VerificationStatus};
+    use treb_core::types::{
+        deployment::{ArtifactInfo, DeploymentStrategy, VerificationInfo},
+        enums::{DeploymentMethod, DeploymentType, VerificationStatus},
+    };
 
     /// Build a minimal Deployment with configurable id, address, and chain_id.
     fn make_deployment(id: &str, address: &str, chain_id: u64) -> Deployment {
@@ -237,9 +227,8 @@ mod tests {
 
     #[test]
     fn no_duplicates_all_candidates_pass_through() {
-        let (_dir, registry) = registry_with(vec![
-            make_deployment("existing/1/Token:v1", "0xAAA", 1),
-        ]);
+        let (_dir, registry) =
+            registry_with(vec![make_deployment("existing/1/Token:v1", "0xAAA", 1)]);
 
         // Candidate has different ID and different address
         let candidate = make_deployment("production/1/Counter:v1", "0xBBB", 1);
@@ -248,9 +237,8 @@ mod tests {
 
     #[test]
     fn duplicate_by_id_correctly_detected() {
-        let (_dir, registry) = registry_with(vec![
-            make_deployment("production/1/Counter:v1", "0xAAA", 1),
-        ]);
+        let (_dir, registry) =
+            registry_with(vec![make_deployment("production/1/Counter:v1", "0xAAA", 1)]);
 
         let candidate = make_deployment("production/1/Counter:v1", "0xBBB", 1);
         let conflict = check_duplicate(&candidate, &registry).expect("should detect conflict");
@@ -260,9 +248,8 @@ mod tests {
 
     #[test]
     fn duplicate_by_address_chain_correctly_detected() {
-        let (_dir, registry) = registry_with(vec![
-            make_deployment("existing/1/Token:v1", "0xAAA", 1),
-        ]);
+        let (_dir, registry) =
+            registry_with(vec![make_deployment("existing/1/Token:v1", "0xAAA", 1)]);
 
         // Different ID but same address + chain_id
         let candidate = make_deployment("production/1/Counter:v1", "0xAAA", 1);
@@ -273,9 +260,8 @@ mod tests {
 
     #[test]
     fn same_id_takes_precedence_over_same_address() {
-        let (_dir, registry) = registry_with(vec![
-            make_deployment("production/1/Counter:v1", "0xAAA", 1),
-        ]);
+        let (_dir, registry) =
+            registry_with(vec![make_deployment("production/1/Counter:v1", "0xAAA", 1)]);
 
         // Both same ID and same address
         let candidate = make_deployment("production/1/Counter:v1", "0xAAA", 1);
@@ -289,9 +275,8 @@ mod tests {
 
     #[test]
     fn same_address_different_chain_not_a_conflict() {
-        let (_dir, registry) = registry_with(vec![
-            make_deployment("existing/1/Token:v1", "0xAAA", 1),
-        ]);
+        let (_dir, registry) =
+            registry_with(vec![make_deployment("existing/1/Token:v1", "0xAAA", 1)]);
 
         // Same address but different chain_id
         let candidate = make_deployment("production/42/Counter:v1", "0xAAA", 42);
@@ -320,9 +305,8 @@ mod tests {
 
     #[test]
     fn resolve_skip_strategy_skips_with_reason() {
-        let (_dir, registry) = registry_with(vec![
-            make_deployment("production/1/Counter:v1", "0xAAA", 1),
-        ]);
+        let (_dir, registry) =
+            registry_with(vec![make_deployment("production/1/Counter:v1", "0xAAA", 1)]);
 
         let candidates = vec![
             make_deployment("production/1/Counter:v1", "0xBBB", 1), // same ID
@@ -343,9 +327,8 @@ mod tests {
 
     #[test]
     fn resolve_error_strategy_returns_error_on_conflict() {
-        let (_dir, registry) = registry_with(vec![
-            make_deployment("production/1/Counter:v1", "0xAAA", 1),
-        ]);
+        let (_dir, registry) =
+            registry_with(vec![make_deployment("production/1/Counter:v1", "0xAAA", 1)]);
 
         let candidates = vec![
             make_deployment("production/1/Counter:v1", "0xBBB", 1), // conflict
@@ -363,9 +346,8 @@ mod tests {
 
     #[test]
     fn resolve_update_strategy_marks_for_update() {
-        let (_dir, registry) = registry_with(vec![
-            make_deployment("production/1/Counter:v1", "0xAAA", 1),
-        ]);
+        let (_dir, registry) =
+            registry_with(vec![make_deployment("production/1/Counter:v1", "0xAAA", 1)]);
 
         let candidates = vec![
             make_deployment("production/1/Counter:v1", "0xBBB", 1), // conflict → update

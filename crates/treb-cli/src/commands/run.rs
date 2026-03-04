@@ -1,24 +1,26 @@
 //! `treb run` command implementation.
 
-use std::collections::HashMap;
-use std::env;
-use std::io::{self, BufRead, IsTerminal, Write};
-use std::path::PathBuf;
-use std::time::Duration;
+use std::{
+    collections::HashMap,
+    env,
+    io::{self, BufRead, IsTerminal, Write},
+    path::PathBuf,
+    time::Duration,
+};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use serde::Serialize;
-use treb_config::{resolve_config, ResolveOpts};
-use treb_forge::pipeline::{PipelineConfig, PipelineContext, PipelineResult, RunPipeline};
-use treb_forge::pipeline::resolve_git_commit;
-use treb_forge::script::build_script_config_with_senders;
-use treb_forge::sender::resolve_all_senders;
+use treb_config::{ResolveOpts, resolve_config};
+use treb_forge::{
+    pipeline::{PipelineConfig, PipelineContext, PipelineResult, RunPipeline, resolve_git_commit},
+    script::build_script_config_with_senders,
+    sender::resolve_all_senders,
+};
 use treb_registry::Registry;
 
 use console::Term;
 
-use crate::output;
-use crate::ui::selector::fuzzy_select_network;
+use crate::{output, ui::selector::fuzzy_select_network};
 
 const FOUNDRY_TOML: &str = "foundry.toml";
 const TREB_DIR: &str = ".treb";
@@ -29,18 +31,12 @@ const TREB_DIR: &str = ".treb";
 /// first `=` only, so `KEY=value=with=equals` parses correctly.
 pub fn parse_env_var(s: &str) -> anyhow::Result<(&str, &str)> {
     let Some(eq_pos) = s.find('=') else {
-        bail!(
-            "invalid --env value '{}': expected KEY=VALUE format (missing '=')",
-            s
-        );
+        bail!("invalid --env value '{}': expected KEY=VALUE format (missing '=')", s);
     };
     let key = &s[..eq_pos];
     let value = &s[eq_pos + 1..];
     if key.is_empty() {
-        bail!(
-            "invalid --env value '{}': key cannot be empty",
-            s
-        );
+        bail!("invalid --env value '{}': key cannot be empty", s);
     }
     Ok((key, value))
 }
@@ -116,10 +112,7 @@ async fn fetch_chain_id(rpc_url: &str) -> anyhow::Result<u64> {
         .await
         .context("invalid eth_chainId response")?;
 
-    let hex = resp
-        .get("result")
-        .and_then(|r| r.as_str())
-        .unwrap_or("0x0");
+    let hex = resp.get("result").and_then(|r| r.as_str()).unwrap_or("0x0");
     let stripped = hex.strip_prefix("0x").or_else(|| hex.strip_prefix("0X")).unwrap_or(hex);
     Ok(u64::from_str_radix(stripped, 16).unwrap_or(0))
 }
@@ -158,9 +151,7 @@ pub async fn run(
         let endpoints = treb_config::rpc_endpoints(&foundry_cfg);
         let mut names: Vec<String> = endpoints.keys().cloned().collect();
         names.sort();
-        fuzzy_select_network(&names)
-            .map_err(|e| anyhow::anyhow!("{e}"))?
-            .map(|s| s.to_string())
+        fuzzy_select_network(&names).map_err(|e| anyhow::anyhow!("{e}"))?.map(|s| s.to_string())
     } else {
         network
     };
@@ -179,9 +170,8 @@ pub async fn run(
     let effective_rpc_url = rpc_url.or_else(|| resolved.network.clone());
 
     // ── Sender resolution ────────────────────────────────────────────────
-    let mut resolved_senders = resolve_all_senders(&resolved.senders)
-        .await
-        .context("failed to resolve senders")?;
+    let mut resolved_senders =
+        resolve_all_senders(&resolved.senders).await.context("failed to resolve senders")?;
 
     // ── Verbose context output ───────────────────────────────────────────
     if verbose && !json {
@@ -196,9 +186,8 @@ pub async fn run(
     }
 
     // ── Build ScriptConfig with all CLI flags ────────────────────────────
-    let mut script_config =
-        build_script_config_with_senders(&resolved, script, &resolved_senders)
-            .context("failed to build script configuration")?;
+    let mut script_config = build_script_config_with_senders(&resolved, script, &resolved_senders)
+        .context("failed to build script configuration")?;
 
     script_config
         .sig(sig)
@@ -223,11 +212,7 @@ pub async fn run(
     // ── Resolve chain ID from RPC ──────────────────────────────────────
     let chain_id = if let Some(ref network_or_url) = effective_rpc_url {
         let actual_url = resolve_rpc_url_for_chain_id(network_or_url, &cwd);
-        if let Some(url) = actual_url {
-            fetch_chain_id(&url).await.unwrap_or(0)
-        } else {
-            0
-        }
+        if let Some(url) = actual_url { fetch_chain_id(&url).await.unwrap_or(0) } else { 0 }
     } else {
         0
     };
@@ -287,10 +272,7 @@ pub async fn run(
     }
 
     let pipeline = RunPipeline::new(pipeline_context).with_script_config(script_config);
-    let result = pipeline
-        .execute(&mut registry)
-        .await
-        .context("pipeline execution failed")?;
+    let result = pipeline.execute(&mut registry).await.context("pipeline execution failed")?;
 
     if !json {
         eprintln!("Execution complete.");
@@ -420,13 +402,7 @@ fn display_result_human(result: &PipelineResult) {
 
     // Deployment table
     if !result.deployments.is_empty() {
-        let mut table = output::build_table(&[
-            "Contract",
-            "Address",
-            "Type",
-            "Namespace",
-            "Chain",
-        ]);
+        let mut table = output::build_table(&["Contract", "Address", "Type", "Namespace", "Chain"]);
 
         for rd in &result.deployments {
             let d = &rd.deployment;
@@ -447,10 +423,7 @@ fn display_result_human(result: &PipelineResult) {
     if !result.skipped.is_empty() {
         println!("Skipped:");
         for s in &result.skipped {
-            println!(
-                "  {} ({}) — {}",
-                s.deployment.contract_name, s.deployment.address, s.reason
-            );
+            println!("  {} ({}) — {}", s.deployment.contract_name, s.deployment.address, s.reason);
         }
         println!();
     }
@@ -480,17 +453,10 @@ fn display_result_human(result: &PipelineResult) {
             ));
         }
         if tx_count > 0 {
-            parts.push(format!(
-                "{} transaction{}",
-                tx_count,
-                if tx_count == 1 { "" } else { "s" }
-            ));
+            parts.push(format!("{} transaction{}", tx_count, if tx_count == 1 { "" } else { "s" }));
         }
         if skip_count > 0 {
-            parts.push(format!(
-                "{} skipped",
-                skip_count
-            ));
+            parts.push(format!("{} skipped", skip_count));
         }
         println!("{}", parts.join(", "));
     }
@@ -538,10 +504,7 @@ mod tests {
 
     #[test]
     fn inject_env_vars_sets_vars() {
-        let vars = vec![
-            "TREB_TEST_ENV_A=hello".to_string(),
-            "TREB_TEST_ENV_B=world".to_string(),
-        ];
+        let vars = vec!["TREB_TEST_ENV_A=hello".to_string(), "TREB_TEST_ENV_B=world".to_string()];
         inject_env_vars(&vars).unwrap();
 
         assert_eq!(env::var("TREB_TEST_ENV_A").unwrap(), "hello");

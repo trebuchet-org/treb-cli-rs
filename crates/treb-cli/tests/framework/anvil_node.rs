@@ -21,7 +21,9 @@ impl AnvilNode {
     ///
     /// Note: if no port is set in the config, Anvil may bind to a fixed port.
     /// For test isolation, ensure `.port(0)` is set.
-    pub async fn spawn_with_config(config: AnvilConfig) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn spawn_with_config(
+        config: AnvilConfig,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let instance = config.spawn().await?;
         Ok(Self { instance })
     }

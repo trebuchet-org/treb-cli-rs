@@ -27,11 +27,7 @@ pub fn generate_deployment_id(
 /// Returns `ContractName` when `label` is empty,
 /// `ContractName:label` when non-empty.
 pub fn contract_display_name(contract_name: &str, label: &str) -> String {
-    if label.is_empty() {
-        contract_name.to_string()
-    } else {
-        format!("{contract_name}:{label}")
-    }
+    if label.is_empty() { contract_name.to_string() } else { format!("{contract_name}:{label}") }
 }
 
 /// A deployment identifier, typically in the form `namespace/chainId/ContractName:Label`.

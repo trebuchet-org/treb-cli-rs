@@ -9,19 +9,19 @@ mod helpers;
 
 use std::path::PathBuf;
 
-use framework::context::TestContext;
-use framework::golden::GoldenFile;
-use framework::integration_test::{run_integration_test, IntegrationTest};
-use framework::normalizer::{
-    BlockNumberNormalizer, CompilerOutputNormalizer, DurationNormalizer, GasNormalizer,
-    Normalizer, NormalizerChain, PathNormalizer,
+use framework::{
+    context::TestContext,
+    golden::GoldenFile,
+    integration_test::{IntegrationTest, run_integration_test},
+    normalizer::{
+        BlockNumberNormalizer, CompilerOutputNormalizer, DurationNormalizer, GasNormalizer,
+        Normalizer, NormalizerChain, PathNormalizer,
+    },
 };
 
 /// Returns the golden file directory for this crate's tests.
 fn golden_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("golden")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("golden")
 }
 
 /// Deploy a minimal contract directly on Anvil via `eth_sendTransaction` and
@@ -69,17 +69,15 @@ async fn deploy_contract_on_anvil(rpc_url: &str) -> String {
     resp["result"]
         .as_str()
         .unwrap_or_else(|| {
-            panic!(
-                "eth_sendTransaction failed: {}",
-                serde_json::to_string_pretty(&resp).unwrap()
-            )
+            panic!("eth_sendTransaction failed: {}", serde_json::to_string_pretty(&resp).unwrap())
         })
         .to_string()
 }
 
-/// Collect output from a register command, normalize, and compare against golden file.
+/// Collect output from a register command, normalize, and compare against golden files.
 ///
-/// Mimics `run_integration_test` output format for consistency.
+/// Mimics `run_integration_test` output format for consistency:
+/// command output → `commands.golden`, each artifact → `{stem}.golden`.
 fn run_register_golden_test(
     ctx: &TestContext,
     test_name: &str,
@@ -92,34 +90,43 @@ fn run_register_golden_test(
     let stderr = String::from_utf8_lossy(&assertion.get_output().stderr).to_string();
     assertion.success();
 
-    let mut output = format!("$ treb {}\n", args.join(" "));
+    let mut output = format!("=== cmd 0: [{}] ===\n", args.join(" "));
     if !stdout.is_empty() {
         output.push_str(&stdout);
     }
     if !stderr.is_empty() {
         output.push_str(&stderr);
     }
+    output.push('\n');
 
-    // Read output artifacts
+    // Build normalizer closure
+    let default_chain = NormalizerChain::default_chain();
+    let normalize = |text: &str| -> String {
+        let mut normalized = default_chain.normalize(text);
+        for n in &extra_normalizers {
+            normalized = n.normalize(&normalized);
+        }
+        normalized
+    };
+
+    let golden = GoldenFile::new(golden_dir());
+
+    // Command output → commands.golden
+    golden.compare_with_normalizer(test_name, "commands", &output, &normalize);
+
+    // Each artifact → {stem}.golden (missing files silently skipped)
     for artifact_path in output_artifacts {
         let full_path = ctx.path().join(artifact_path);
         if full_path.exists() {
             let content = std::fs::read_to_string(&full_path)
                 .unwrap_or_else(|e| panic!("failed to read artifact {artifact_path}: {e}"));
-            output.push_str(&format!("\n--- {artifact_path} ---\n{content}"));
+            let stem = std::path::Path::new(artifact_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(artifact_path);
+            golden.compare_with_normalizer(test_name, stem, &content, &normalize);
         }
     }
-
-    // Normalize
-    let default_chain = NormalizerChain::default_chain();
-    let mut normalized = default_chain.normalize(&output);
-    for n in &extra_normalizers {
-        normalized = n.normalize(&normalized);
-    }
-
-    // Compare golden
-    let golden = GoldenFile::new(golden_dir());
-    golden.compare(test_name, "output", &normalized);
 }
 
 // ── Happy-path tests ────────────────────────────────────────────────────
@@ -131,10 +138,8 @@ fn run_register_golden_test(
 /// artifact.
 #[tokio::test(flavor = "multi_thread")]
 async fn register_basic() {
-    let ctx = TestContext::new("project")
-        .with_anvil("anvil-31337")
-        .await
-        .expect("failed to spawn anvil");
+    let ctx =
+        TestContext::new("project").with_anvil("anvil-31337").await.expect("failed to spawn anvil");
 
     // Setup: init project
     ctx.run(&["init"]).success();
@@ -148,13 +153,7 @@ async fn register_basic() {
     run_register_golden_test(
         &ctx,
         "register_basic",
-        &[
-            "register",
-            "--tx-hash",
-            &tx_hash,
-            "--network",
-            "anvil-31337",
-        ],
+        &["register", "--tx-hash", &tx_hash, "--network", "anvil-31337"],
         &[".treb/deployments.json"],
         vec![
             Box::new(path_normalizer),
@@ -172,10 +171,8 @@ async fn register_basic() {
 /// `tx_hash`, `chain_id`, `mode`, `deployments`, `transaction_id` fields.
 #[tokio::test(flavor = "multi_thread")]
 async fn register_json() {
-    let ctx = TestContext::new("project")
-        .with_anvil("anvil-31337")
-        .await
-        .expect("failed to spawn anvil");
+    let ctx =
+        TestContext::new("project").with_anvil("anvil-31337").await.expect("failed to spawn anvil");
 
     // Setup: init project
     ctx.run(&["init"]).success();
@@ -189,14 +186,7 @@ async fn register_json() {
     run_register_golden_test(
         &ctx,
         "register_json",
-        &[
-            "register",
-            "--tx-hash",
-            &tx_hash,
-            "--network",
-            "anvil-31337",
-            "--json",
-        ],
+        &["register", "--tx-hash", &tx_hash, "--network", "anvil-31337", "--json"],
         &[],
         vec![
             Box::new(path_normalizer),
@@ -220,13 +210,7 @@ fn register_error_bad_prefix() {
 
     let test = IntegrationTest::new("register_error_bad_prefix")
         .setup(&["init"])
-        .test(&[
-            "register",
-            "--tx-hash",
-            "abc123",
-            "--rpc-url",
-            "http://localhost:8545",
-        ])
+        .test(&["register", "--tx-hash", "abc123", "--rpc-url", "http://localhost:8545"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -259,10 +243,8 @@ fn register_error_no_init() {
 /// Verifies the error mentions "not found".
 #[tokio::test(flavor = "multi_thread")]
 async fn register_error_tx_not_found() {
-    let ctx = TestContext::new("project")
-        .with_anvil("anvil-31337")
-        .await
-        .expect("failed to spawn anvil");
+    let ctx =
+        TestContext::new("project").with_anvil("anvil-31337").await.expect("failed to spawn anvil");
 
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 

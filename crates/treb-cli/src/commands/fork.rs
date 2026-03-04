@@ -1,19 +1,21 @@
 //! `treb fork` subcommands — enter/exit fork mode, status, history, diff, revert, restart.
 
-use std::collections::BTreeSet;
-use std::env;
-use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::{
+    collections::BTreeSet,
+    env,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use chrono::Utc;
 use clap::Subcommand;
 use tokio::net::TcpStream;
 use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
 use treb_forge::createx::createx_deployed_bytecode;
 use treb_registry::{
-    remove_snapshot, restore_registry, snapshot_registry, ForkStateStore, DEPLOYMENTS_FILE,
-    TRANSACTIONS_FILE,
+    DEPLOYMENTS_FILE, ForkStateStore, TRANSACTIONS_FILE, remove_snapshot, restore_registry,
+    snapshot_registry,
 };
 
 const TREB_DIR: &str = ".treb";
@@ -226,9 +228,7 @@ pub async fn run_exit(network: String) -> anyhow::Result<()> {
     }
 
     // Remove active fork entry
-    let entry = store
-        .remove_active_fork(&network)
-        .context("failed to remove fork entry")?;
+    let entry = store.remove_active_fork(&network).context("failed to remove fork entry")?;
 
     // Restore registry from snapshot
     let snapshot_dir = PathBuf::from(&entry.snapshot_dir);
@@ -281,8 +281,7 @@ pub async fn run_revert(network: String, all: bool) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let client =
-        reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
 
     for net in &networks {
         let entry = store
@@ -302,9 +301,7 @@ pub async fn run_revert(network: String, all: bool) -> anyhow::Result<()> {
         if let Some(last_snapshot) = entry.snapshots.last() {
             let reverted = evm_revert_http(&client, &entry.rpc_url, &last_snapshot.snapshot_id)
                 .await
-                .with_context(|| {
-                    format!("failed to revert EVM state for network '{net}'")
-                })?;
+                .with_context(|| format!("failed to revert EVM state for network '{net}'"))?;
             if !reverted {
                 bail!(
                     "EVM revert failed for network '{}' (snapshot ID: {})",
@@ -322,9 +319,7 @@ pub async fn run_revert(network: String, all: bool) -> anyhow::Result<()> {
         // Take a new EVM snapshot for the next revert.
         let new_snapshot_id = evm_snapshot_http(&client, &entry.rpc_url)
             .await
-            .with_context(|| {
-                format!("failed to take new EVM snapshot for network '{net}'")
-            })?;
+            .with_context(|| format!("failed to take new EVM snapshot for network '{net}'"))?;
 
         // Restore registry files from the snapshot directory.
         let snapshot_dir = PathBuf::from(&entry.snapshot_dir);
@@ -365,10 +360,7 @@ pub async fn run_revert(network: String, all: bool) -> anyhow::Result<()> {
 /// Calls `anvil_reset` to reinitialize the Anvil instance with the same fork URL
 /// (optionally at a different block number), re-deploys the CreateX factory,
 /// takes a new EVM snapshot, restores the registry, and adds a restart history entry.
-pub async fn run_restart(
-    network: String,
-    fork_block_number: Option<u64>,
-) -> anyhow::Result<()> {
+pub async fn run_restart(network: String, fork_block_number: Option<u64>) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     let treb_dir = cwd.join(TREB_DIR);
 
@@ -388,8 +380,7 @@ pub async fn run_restart(
         );
     }
 
-    let client =
-        reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
 
     // Determine the block to reset to.
     let blk = fork_block_number.or(entry.fork_block_number);
@@ -399,7 +390,11 @@ pub async fn run_restart(
         .await
         .with_context(|| format!("failed to reset Anvil for network '{network}'"))?;
 
-    println!("Anvil reset to {} (block: {}).", entry.fork_url, blk.map_or("latest".into(), |b| b.to_string()));
+    println!(
+        "Anvil reset to {} (block: {}).",
+        entry.fork_url,
+        blk.map_or("latest".into(), |b| b.to_string())
+    );
 
     // Re-deploy the CreateX factory.
     deploy_createx_http(&client, &entry.rpc_url)
@@ -495,10 +490,8 @@ pub async fn run_status(json: bool) -> anyhow::Result<()> {
     for entry in &forks {
         let running = is_port_reachable(entry.port).await;
         let status = if running { "running" } else { "stopped" };
-        let fork_block = entry
-            .fork_block_number
-            .map(|b| b.to_string())
-            .unwrap_or_else(|| "latest".into());
+        let fork_block =
+            entry.fork_block_number.map(|b| b.to_string()).unwrap_or_else(|| "latest".into());
 
         table.add_row(vec![
             entry.network.as_str(),
@@ -539,15 +532,13 @@ pub async fn run_history(network: Option<String>, json: bool) -> anyhow::Result<
     }
 
     if history.is_empty() {
-        let filter_msg = network
-            .as_deref()
-            .map_or_else(String::new, |n| format!(" for network '{n}'"));
+        let filter_msg =
+            network.as_deref().map_or_else(String::new, |n| format!(" for network '{n}'"));
         println!("No fork history{filter_msg}.");
         return Ok(());
     }
 
-    let mut table =
-        crate::output::build_table(&["Timestamp", "Action", "Network", "Details"]);
+    let mut table = crate::output::build_table(&["Timestamp", "Action", "Network", "Details"]);
 
     for entry in &history {
         table.add_row(vec![
@@ -733,8 +724,7 @@ async fn json_rpc_call(
         .send()
         .await
         .with_context(|| format!("failed to connect to {url}"))?;
-    let json: serde_json::Value =
-        resp.json().await.context("failed to parse JSON-RPC response")?;
+    let json: serde_json::Value = resp.json().await.context("failed to parse JSON-RPC response")?;
     if let Some(err) = json.get("error") {
         bail!("JSON-RPC error from {url}: {err}");
     }
@@ -748,8 +738,7 @@ pub(crate) async fn evm_snapshot_http(
     client: &reqwest::Client,
     rpc_url: &str,
 ) -> anyhow::Result<String> {
-    let result =
-        json_rpc_call(client, rpc_url, "evm_snapshot", serde_json::Value::Null).await?;
+    let result = json_rpc_call(client, rpc_url, "evm_snapshot", serde_json::Value::Null).await?;
     result
         .as_str()
         .map(|s| s.to_string())
@@ -762,16 +751,9 @@ async fn evm_revert_http(
     rpc_url: &str,
     snapshot_id: &str,
 ) -> anyhow::Result<bool> {
-    let result = json_rpc_call(
-        client,
-        rpc_url,
-        "evm_revert",
-        serde_json::json!([snapshot_id]),
-    )
-    .await?;
-    result
-        .as_bool()
-        .ok_or_else(|| anyhow::anyhow!("unexpected evm_revert result type: {result}"))
+    let result =
+        json_rpc_call(client, rpc_url, "evm_revert", serde_json::json!([snapshot_id])).await?;
+    result.as_bool().ok_or_else(|| anyhow::anyhow!("unexpected evm_revert result type: {result}"))
 }
 
 /// Reset Anvil to a fresh fork state using `anvil_reset`.
@@ -786,31 +768,18 @@ async fn anvil_reset_http(
     } else {
         serde_json::json!({ "jsonRpcUrl": fork_url })
     };
-    json_rpc_call(
-        client,
-        rpc_url,
-        "anvil_reset",
-        serde_json::json!([{ "forking": forking }]),
-    )
-    .await?;
+    json_rpc_call(client, rpc_url, "anvil_reset", serde_json::json!([{ "forking": forking }]))
+        .await?;
     Ok(())
 }
 
 /// Deploy the CreateX factory bytecode at its canonical address via `anvil_setCode`.
-async fn deploy_createx_http(
-    client: &reqwest::Client,
-    rpc_url: &str,
-) -> anyhow::Result<()> {
+async fn deploy_createx_http(client: &reqwest::Client, rpc_url: &str) -> anyhow::Result<()> {
     let bytecode_bytes = createx_deployed_bytecode();
     let hex: String = bytecode_bytes.iter().map(|b| format!("{b:02x}")).collect();
     let hex_str = format!("0x{hex}");
-    json_rpc_call(
-        client,
-        rpc_url,
-        "anvil_setCode",
-        serde_json::json!([CREATEX_ADDRESS, hex_str]),
-    )
-    .await?;
+    json_rpc_call(client, rpc_url, "anvil_setCode", serde_json::json!([CREATEX_ADDRESS, hex_str]))
+        .await?;
     Ok(())
 }
 
@@ -837,11 +806,10 @@ mod tests {
     use super::ForkSubcommand;
     use chrono::Utc;
     use clap::{Parser, Subcommand};
-    use std::fs;
-    use std::path::PathBuf;
+    use std::{fs, path::PathBuf};
     use tempfile::TempDir;
     use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
-    use treb_registry::{restore_registry, snapshot_registry, ForkStateStore, DEPLOYMENTS_FILE};
+    use treb_registry::{DEPLOYMENTS_FILE, ForkStateStore, restore_registry, snapshot_registry};
 
     // ── Minimal test CLI for clap parsing ─────────────────────────────────
 
@@ -965,11 +933,7 @@ mod tests {
             chain_id: 1,
             fork_url: "https://eth.example.com".into(),
             fork_block_number: None,
-            snapshot_dir: treb_dir
-                .join("snapshots")
-                .join(network)
-                .to_string_lossy()
-                .into_owned(),
+            snapshot_dir: treb_dir.join("snapshots").join(network).to_string_lossy().into_owned(),
             started_at: now,
             env_var_name: String::new(),
             original_rpc: String::new(),
@@ -1157,24 +1121,20 @@ mod tests {
         fs::write(snapshot_dir.join(DEPLOYMENTS_FILE), deployments_json).unwrap();
 
         // Simulate a new deployment added to the current registry.
-        let current_json = r#"{"Counter_1": {"address": "0xaaa"}, "Token_2": {"address": "0xbbb"}}"#;
+        let current_json =
+            r#"{"Counter_1": {"address": "0xaaa"}, "Token_2": {"address": "0xbbb"}}"#;
         fs::write(treb_dir.join(DEPLOYMENTS_FILE), current_json).unwrap();
 
         // Diff
         let current_map = super::load_json_map(&treb_dir.join(DEPLOYMENTS_FILE)).unwrap();
         let snapshot_map = super::load_json_map(&snapshot_dir.join(DEPLOYMENTS_FILE)).unwrap();
 
-        let added: Vec<_> = current_map
-            .keys()
-            .filter(|k| !snapshot_map.contains_key(*k))
-            .collect();
+        let added: Vec<_> = current_map.keys().filter(|k| !snapshot_map.contains_key(*k)).collect();
         assert_eq!(added.len(), 1);
         assert_eq!(added[0], "Token_2");
 
-        let removed: Vec<_> = snapshot_map
-            .keys()
-            .filter(|k| !current_map.contains_key(*k))
-            .collect();
+        let removed: Vec<_> =
+            snapshot_map.keys().filter(|k| !current_map.contains_key(*k)).collect();
         assert!(removed.is_empty());
     }
 

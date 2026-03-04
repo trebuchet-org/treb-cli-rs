@@ -1,10 +1,9 @@
 //! `treb init` command implementation.
 
-use std::env;
-use std::path::Path;
+use std::{env, path::Path};
 
-use anyhow::{bail, Context};
-use treb_config::{save_local_config, LocalConfig};
+use anyhow::{Context, bail};
+use treb_config::{LocalConfig, save_local_config};
 use treb_registry::Registry;
 
 const FOUNDRY_TOML: &str = "foundry.toml";

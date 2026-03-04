@@ -16,11 +16,7 @@ const MINIMAL_FOUNDRY_TOML: &str = "[profile.default]\n";
 /// Helper: create a temp dir with foundry.toml and run `treb init`.
 fn init_project(tmp: &tempfile::TempDir) {
     fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
-    treb()
-        .arg("init")
-        .current_dir(tmp.path())
-        .assert()
-        .success();
+    treb().arg("init").current_dir(tmp.path()).assert().success();
 }
 
 // ── Safe sender detection from config ────────────────────────────────────
@@ -47,24 +43,15 @@ fn config_show_json_includes_safe_sender() {
     let senders = json["senders"].as_object().expect("senders should be an object");
 
     // The deployer role should map to the multisig account
-    assert!(
-        senders.contains_key("deployer"),
-        "senders should contain 'deployer' role"
-    );
+    assert!(senders.contains_key("deployer"), "senders should contain 'deployer' role");
 
     let deployer = &senders["deployer"];
-    assert_eq!(
-        deployer["type"], "safe",
-        "deployer should be of type 'safe'"
-    );
+    assert_eq!(deployer["type"], "safe", "deployer should be of type 'safe'");
     assert_eq!(
         deployer["safe"], "0x1234567890123456789012345678901234567890",
         "should have correct safe address"
     );
-    assert_eq!(
-        deployer["signer"], "deployer",
-        "safe sender should reference 'deployer' as signer"
-    );
+    assert_eq!(deployer["signer"], "deployer", "safe sender should reference 'deployer' as signer");
 }
 
 #[test]
@@ -106,16 +93,10 @@ fn config_show_json_includes_governor_sender() {
         serde_json::from_slice(&output.stdout).expect("output is not valid JSON");
     let senders = json["senders"].as_object().expect("senders should be an object");
 
-    assert!(
-        senders.contains_key("deployer"),
-        "senders should contain 'deployer' role"
-    );
+    assert!(senders.contains_key("deployer"), "senders should contain 'deployer' role");
 
     let deployer = &senders["deployer"];
-    assert_eq!(
-        deployer["type"], "oz_governor",
-        "deployer should be of type 'oz_governor'"
-    );
+    assert_eq!(deployer["type"], "oz_governor", "deployer should be of type 'oz_governor'");
     assert_eq!(
         deployer["governor"], "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "should have correct governor address"
@@ -171,10 +152,7 @@ fn dry_run_with_safe_sender_shows_safe_type_in_config() {
         !stderr.contains("unknown sender type"),
         "should not fail on sender type parsing: {stderr}"
     );
-    assert!(
-        !stderr.contains("missing required"),
-        "should not fail on missing fields: {stderr}"
-    );
+    assert!(!stderr.contains("missing required"), "should not fail on missing fields: {stderr}");
 }
 
 // ── Dry-run proposal output: Governor sender ─────────────────────────────
@@ -198,10 +176,7 @@ fn dry_run_with_governor_sender_shows_governor_type_in_config() {
         !stderr.contains("unknown sender type"),
         "should not fail on sender type parsing: {stderr}"
     );
-    assert!(
-        !stderr.contains("missing required"),
-        "should not fail on missing fields: {stderr}"
-    );
+    assert!(!stderr.contains("missing required"), "should not fail on missing fields: {stderr}");
 }
 
 // ── Sync with fixture registry ───────────────────────────────────────────
@@ -221,10 +196,7 @@ fn sync_without_init_fails() {
 
 #[test]
 fn sync_help_shows_expected_flags() {
-    let output = treb()
-        .args(["sync", "--help"])
-        .output()
-        .expect("failed to run treb sync --help");
+    let output = treb().args(["sync", "--help"]).output().expect("failed to run treb sync --help");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("--network"), "help should show --network");
@@ -238,11 +210,7 @@ fn sync_with_empty_registry_succeeds() {
     init_project(&tmp);
 
     // Sync with no safe transactions in registry should succeed gracefully
-    treb()
-        .args(["sync", "--json"])
-        .current_dir(tmp.path())
-        .assert()
-        .success();
+    treb().args(["sync", "--json"]).current_dir(tmp.path()).assert().success();
 
     // Verify JSON output
     let output = treb()

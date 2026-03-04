@@ -31,9 +31,7 @@ async fn port_is_reachable() {
     let node = AnvilNode::spawn().await.expect("spawn failed");
 
     let addr = format!("127.0.0.1:{}", node.port());
-    tokio::net::TcpStream::connect(&addr)
-        .await
-        .expect("RPC port should be reachable");
+    tokio::net::TcpStream::connect(&addr).await.expect("RPC port should be reachable");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -44,9 +42,7 @@ async fn dropping_node_frees_port() {
 
         // Verify reachable while alive
         let addr = format!("127.0.0.1:{p}");
-        tokio::net::TcpStream::connect(&addr)
-            .await
-            .expect("port should be in use");
+        tokio::net::TcpStream::connect(&addr).await.expect("port should be in use");
         p
         // node dropped here
     };

@@ -9,9 +9,11 @@
 
 mod framework;
 
-use framework::context::TestContext;
-use framework::integration_test::{run_integration_test, IntegrationTest};
-use framework::normalizer::{CompilerOutputNormalizer, PathNormalizer};
+use framework::{
+    context::TestContext,
+    integration_test::{IntegrationTest, run_integration_test},
+    normalizer::{CompilerOutputNormalizer, PathNormalizer},
+};
 
 /// CREATE strategy — contract with constructor (Counter).
 ///

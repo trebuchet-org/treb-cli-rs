@@ -4,34 +4,39 @@
 //! deployment extraction, proxy detection, hydration, duplicate detection,
 //! and registry recording into a single `execute` call.
 
-use std::collections::HashMap;
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
 
 use alloy_primitives::{Address, B256, U256};
 use alloy_signer::Signer;
 use foundry_config::Config;
 use treb_core::error::TrebError;
 use treb_registry::Registry;
-use treb_safe::types::ProposeRequest;
-use treb_safe::{SafeServiceClient, SafeTx, compute_safe_tx_hash, sign_safe_tx};
-
-use crate::artifacts::ArtifactIndex;
-use crate::compiler::compile_project;
-use crate::events::abi::SimulatedTransaction;
-use crate::events::decoder::{ParsedEvent, TrebEvent};
-use crate::events::{
-    GovernorProposalCreated, SafeTransactionQueued, TransactionSimulated, decode_events,
-    detect_proxy_relationships, extract_collisions, extract_deployments,
+use treb_safe::{
+    SafeServiceClient, SafeTx, compute_safe_tx_hash, sign_safe_tx, types::ProposeRequest,
 };
-use crate::script::{ScriptConfig, execute_script};
 
-use super::duplicates::{DuplicateStrategy, resolve_duplicates};
-use super::hydration::{
-    hydrate_deployment, hydrate_governor_proposals, hydrate_safe_transactions,
-    hydrate_transactions, populate_safe_context,
+use crate::{
+    artifacts::ArtifactIndex,
+    compiler::compile_project,
+    events::{
+        GovernorProposalCreated, SafeTransactionQueued, TransactionSimulated,
+        abi::SimulatedTransaction,
+        decode_events,
+        decoder::{ParsedEvent, TrebEvent},
+        detect_proxy_relationships, extract_collisions, extract_deployments,
+    },
+    script::{ScriptConfig, execute_script},
 };
-use super::types::{PipelineResult, RecordedDeployment, RecordedTransaction};
-use super::PipelineContext;
+
+use super::{
+    PipelineContext,
+    duplicates::{DuplicateStrategy, resolve_duplicates},
+    hydration::{
+        hydrate_deployment, hydrate_governor_proposals, hydrate_safe_transactions,
+        hydrate_transactions, populate_safe_context,
+    },
+    types::{PipelineResult, RecordedDeployment, RecordedTransaction},
+};
 
 /// Orchestrator for the deployment recording pipeline.
 ///
@@ -49,10 +54,7 @@ pub struct RunPipeline {
 impl RunPipeline {
     /// Create a new pipeline orchestrator with the given execution context.
     pub fn new(context: PipelineContext) -> Self {
-        Self {
-            context,
-            script_config: None,
-        }
+        Self { context, script_config: None }
     }
 
     /// Set a pre-built ScriptConfig for this pipeline.
@@ -143,17 +145,10 @@ impl RunPipeline {
         let governor_proposals = hydrate_governor_proposals(&governor_events, &self.context);
 
         // 9. Safe sender: populate safe_context and propose to Safe Service
-        let is_safe_sender = self
-            .context
-            .deployer_sender
-            .as_ref()
-            .is_some_and(|s| s.is_safe());
+        let is_safe_sender = self.context.deployer_sender.as_ref().is_some_and(|s| s.is_safe());
 
-        let is_governor_sender = self
-            .context
-            .deployer_sender
-            .as_ref()
-            .is_some_and(|s| s.is_governor());
+        let is_governor_sender =
+            self.context.deployer_sender.as_ref().is_some_and(|s| s.is_governor());
 
         if is_safe_sender {
             // Populate safe_context on Transaction records linked to Safe batches
@@ -161,18 +156,12 @@ impl RunPipeline {
 
             // Propose to Safe Transaction Service (skip in dry-run)
             if !self.context.config.dry_run {
-                propose_safe_transactions(
-                    &self.context,
-                    &safe_tx_events,
-                    &tx_events,
-                )
-                .await?;
+                propose_safe_transactions(&self.context, &safe_tx_events, &tx_events).await?;
             }
         }
 
         // 10. Duplicate detection
-        let resolved =
-            resolve_duplicates(hydrated_deployments, registry, DuplicateStrategy::Skip)?;
+        let resolved = resolve_duplicates(hydrated_deployments, registry, DuplicateStrategy::Skip)?;
         let skipped = resolved.skipped;
 
         // 11. Record to registry (or build dry-run result)
@@ -183,19 +172,15 @@ impl RunPipeline {
             // Insert new deployments
             for dep in resolved.to_insert {
                 registry.insert_deployment(dep.clone())?;
-                recorded_deployments.push(RecordedDeployment {
-                    deployment: dep,
-                    safe_transaction: None,
-                });
+                recorded_deployments
+                    .push(RecordedDeployment { deployment: dep, safe_transaction: None });
             }
 
             // Update existing deployments
             for dep in resolved.to_update {
                 registry.update_deployment(dep.clone())?;
-                recorded_deployments.push(RecordedDeployment {
-                    deployment: dep,
-                    safe_transaction: None,
-                });
+                recorded_deployments
+                    .push(RecordedDeployment { deployment: dep, safe_transaction: None });
             }
 
             // Insert transactions (with safe_context populated for Safe sender)
@@ -218,10 +203,8 @@ impl RunPipeline {
         } else {
             // Dry-run: populate result without writing to registry
             for dep in resolved.to_insert.into_iter().chain(resolved.to_update) {
-                recorded_deployments.push(RecordedDeployment {
-                    deployment: dep,
-                    safe_transaction: None,
-                });
+                recorded_deployments
+                    .push(RecordedDeployment { deployment: dep, safe_transaction: None });
             }
             for tx in transactions {
                 recorded_transactions.push(RecordedTransaction { transaction: tx });
@@ -368,16 +351,14 @@ async fn propose_safe_transactions(
         .as_ref()
         .ok_or_else(|| TrebError::Safe("deployer sender not set".to_string()))?;
 
-    let safe_address = deployer.safe_address().ok_or_else(|| {
-        TrebError::Safe("deployer is not a Safe sender".to_string())
-    })?;
+    let safe_address = deployer
+        .safe_address()
+        .ok_or_else(|| TrebError::Safe("deployer is not a Safe sender".to_string()))?;
 
     let signer = deployer
         .sub_signer()
         .wallet_signer()
-        .ok_or_else(|| {
-            TrebError::Safe("Safe sender's sub-signer is not a wallet".to_string())
-        })?;
+        .ok_or_else(|| TrebError::Safe("Safe sender's sub-signer is not a wallet".to_string()))?;
 
     let chain_id = context.config.chain_id;
 
@@ -413,9 +394,7 @@ async fn propose_safe_transactions(
                     effective_nonce,
                 );
 
-                client
-                    .propose_transaction(&safe_addr_str, &propose_req)
-                    .await?;
+                client.propose_transaction(&safe_addr_str, &propose_req).await?;
             }
         }
         // Multi-transaction batches require MultiSend encoding — deferred to future work
@@ -431,8 +410,8 @@ async fn propose_safe_transactions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{Bytes, address, b256};
     use crate::events::abi;
+    use alloy_primitives::{Bytes, address, b256};
 
     fn sample_sim_tx(to: Address, value: U256, data: &[u8], tx_id: B256) -> SimulatedTransaction {
         SimulatedTransaction {
@@ -440,11 +419,7 @@ mod tests {
             senderId: "deployer".to_string(),
             sender: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
             returnData: Bytes::new(),
-            transaction: abi::Transaction {
-                to,
-                data: Bytes::from(data.to_vec()),
-                value,
-            },
+            transaction: abi::Transaction { to, data: Bytes::from(data.to_vec()), value },
         }
     }
 
@@ -582,16 +557,9 @@ mod tests {
 
         let events = vec![
             // A TransactionSimulated event (should be skipped)
-            ParsedEvent::Treb(Box::new(TrebEvent::TransactionSimulated(
-                TransactionSimulated {
-                    transactions: vec![sample_sim_tx(
-                        Address::ZERO,
-                        U256::ZERO,
-                        &[],
-                        B256::ZERO,
-                    )],
-                },
-            ))),
+            ParsedEvent::Treb(Box::new(TrebEvent::TransactionSimulated(TransactionSimulated {
+                transactions: vec![sample_sim_tx(Address::ZERO, U256::ZERO, &[], B256::ZERO)],
+            }))),
             // A GovernorProposalCreated event (should be extracted)
             ParsedEvent::Treb(Box::new(TrebEvent::GovernorProposalCreated(
                 GovernorProposalCreated {

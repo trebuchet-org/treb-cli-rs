@@ -38,19 +38,9 @@ pub enum CreateXEvent {
 /// A decoded ERC-1967 proxy event, including the emitting contract address.
 #[derive(Debug, Clone)]
 pub enum ProxyEvent {
-    Upgraded {
-        proxy_address: Address,
-        implementation: Address,
-    },
-    AdminChanged {
-        proxy_address: Address,
-        previous_admin: Address,
-        new_admin: Address,
-    },
-    BeaconUpgraded {
-        proxy_address: Address,
-        beacon: Address,
-    },
+    Upgraded { proxy_address: Address, implementation: Address },
+    AdminChanged { proxy_address: Address, previous_admin: Address, new_admin: Address },
+    BeaconUpgraded { proxy_address: Address, beacon: Address },
 }
 
 /// A parsed event from forge script execution.
@@ -123,9 +113,7 @@ pub fn decode_events(logs: &[Log]) -> Vec<ParsedEvent> {
             if sig == ContractCreation_1::SIGNATURE_HASH {
                 return decode_or_skip(log, "ContractCreation(without salt)", |l| {
                     ContractCreation_1::decode_log_data(&l.data)
-                        .map(|e| {
-                            ParsedEvent::CreateX(CreateXEvent::ContractCreationWithoutSalt(e))
-                        })
+                        .map(|e| ParsedEvent::CreateX(CreateXEvent::ContractCreationWithoutSalt(e)))
                 });
             }
             if sig == Create3ProxyContractCreation::SIGNATURE_HASH {
@@ -192,7 +180,7 @@ fn decode_or_skip(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{address, b256, Bytes, LogData, B256, U256};
+    use alloy_primitives::{B256, Bytes, LogData, U256, address, b256};
     use alloy_sol_types::SolEvent;
 
     use crate::events::abi::{DeploymentDetails, SimulatedTransaction, Transaction};
@@ -207,22 +195,15 @@ mod tests {
     fn decode_contract_deployed_with_all_fields() {
         let deployer = address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
         let location = address!("5FbDB2315678afecb367f032d93F642f64180aa3");
-        let tx_id =
-            b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let tx_id = b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 
         let details = DeploymentDetails {
             artifact: "Counter".to_string(),
             label: "counter-v1".to_string(),
             entropy: "abc123".to_string(),
-            salt: b256!(
-                "0000000000000000000000000000000000000000000000000000000000000001"
-            ),
-            bytecodeHash: b256!(
-                "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
-            ),
-            initCodeHash: b256!(
-                "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd"
-            ),
+            salt: b256!("0000000000000000000000000000000000000000000000000000000000000001"),
+            bytecodeHash: b256!("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"),
+            initCodeHash: b256!("abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd"),
             constructorArgs: Bytes::from(vec![0x01, 0x02, 0x03]),
             createStrategy: "create2".to_string(),
         };
@@ -287,16 +268,13 @@ mod tests {
         let log1 = make_log(Address::ZERO, deployed.encode_log_data());
 
         // 2. Upgraded proxy event (emitted from proxy_addr)
-        let upgraded = Upgraded {
-            implementation: impl_addr,
-        };
+        let upgraded = Upgraded { implementation: impl_addr };
         let log2 = make_log(proxy_addr, upgraded.encode_log_data());
 
         // 3. Unknown log (random topic)
         let unknown_topic =
             b256!("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
-        let log3 = Log::new(Address::ZERO, vec![unknown_topic], Bytes::new())
-            .expect("valid log");
+        let log3 = Log::new(Address::ZERO, vec![unknown_topic], Bytes::new()).expect("valid log");
 
         let parsed = decode_events(&[log1, log2, log3]);
         assert_eq!(parsed.len(), 3);
@@ -308,20 +286,14 @@ mod tests {
         );
 
         match &parsed[1] {
-            ParsedEvent::Proxy(ProxyEvent::Upgraded {
-                proxy_address,
-                implementation,
-            }) => {
+            ParsedEvent::Proxy(ProxyEvent::Upgraded { proxy_address, implementation }) => {
                 assert_eq!(*proxy_address, proxy_addr);
                 assert_eq!(*implementation, impl_addr);
             }
             other => panic!("expected Upgraded proxy event, got {other:?}"),
         }
 
-        assert!(
-            matches!(&parsed[2], ParsedEvent::Unknown(_)),
-            "third should be Unknown"
-        );
+        assert!(matches!(&parsed[2], ParsedEvent::Unknown(_)), "third should be Unknown");
     }
 
     #[test]
@@ -329,10 +301,7 @@ mod tests {
         let new_contract = address!("5FbDB2315678afecb367f032d93F642f64180aa3");
         let salt = b256!("1111111111111111111111111111111111111111111111111111111111111111");
 
-        let event = ContractCreation_0 {
-            newContract: new_contract,
-            salt,
-        };
+        let event = ContractCreation_0 { newContract: new_contract, salt };
         let log = make_log(Address::ZERO, event.encode_log_data());
 
         let parsed = decode_events(&[log]);
@@ -353,10 +322,7 @@ mod tests {
         let prev_admin = address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
         let new_admin = address!("70997970C51812dc3A010C7d01b50e0d17dc79C8");
 
-        let event = AdminChanged {
-            previousAdmin: prev_admin,
-            newAdmin: new_admin,
-        };
+        let event = AdminChanged { previousAdmin: prev_admin, newAdmin: new_admin };
         let log = make_log(proxy_addr, event.encode_log_data());
 
         let parsed = decode_events(&[log]);
@@ -388,10 +354,7 @@ mod tests {
         assert_eq!(parsed.len(), 1);
 
         match &parsed[0] {
-            ParsedEvent::Proxy(ProxyEvent::BeaconUpgraded {
-                proxy_address,
-                beacon: b,
-            }) => {
+            ParsedEvent::Proxy(ProxyEvent::BeaconUpgraded { proxy_address, beacon: b }) => {
                 assert_eq!(*proxy_address, proxy_addr);
                 assert_eq!(*b, beacon);
             }

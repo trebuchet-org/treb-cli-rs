@@ -24,9 +24,7 @@ impl CompilationOutput {
     }
 
     /// Returns an iterator over all artifact IDs produced by the compilation.
-    pub fn artifact_ids(
-        &self,
-    ) -> impl Iterator<Item = ArtifactId> + '_ {
+    pub fn artifact_ids(&self) -> impl Iterator<Item = ArtifactId> + '_ {
         self.output.artifact_ids().map(|(id, _)| id)
     }
 
@@ -51,44 +49,31 @@ impl CompilationOutput {
 /// Validates that the project has input files before compiling.
 /// Returns `TrebError::Forge` if no input files are found or compilation fails.
 pub fn compile_project(config: &Config) -> treb_core::Result<CompilationOutput> {
-    let project = config
-        .project()
-        .map_err(|e| TrebError::Forge(format!("failed to create project: {e}")))?;
+    let project =
+        config.project().map_err(|e| TrebError::Forge(format!("failed to create project: {e}")))?;
 
     if !project.paths.has_input_files() {
-        return Err(TrebError::Forge(
-            "no input files found in project".to_string(),
-        ));
+        return Err(TrebError::Forge("no input files found in project".to_string()));
     }
 
     let project_root = project.root().to_path_buf();
 
-    let output = project
-        .compile()
-        .map_err(|e| TrebError::Forge(format!("compilation failed: {e}")))?;
+    let output =
+        project.compile().map_err(|e| TrebError::Forge(format!("compilation failed: {e}")))?;
 
-    Ok(CompilationOutput {
-        output,
-        project_root,
-    })
+    Ok(CompilationOutput { output, project_root })
 }
 
 /// Compile specific Solidity files using the given foundry `Config`.
 ///
 /// Returns `TrebError::Forge` if no files are provided or compilation fails.
-pub fn compile_files(
-    config: &Config,
-    files: Vec<PathBuf>,
-) -> treb_core::Result<CompilationOutput> {
+pub fn compile_files(config: &Config, files: Vec<PathBuf>) -> treb_core::Result<CompilationOutput> {
     if files.is_empty() {
-        return Err(TrebError::Forge(
-            "no input files provided".to_string(),
-        ));
+        return Err(TrebError::Forge("no input files provided".to_string()));
     }
 
-    let project = config
-        .project()
-        .map_err(|e| TrebError::Forge(format!("failed to create project: {e}")))?;
+    let project =
+        config.project().map_err(|e| TrebError::Forge(format!("failed to create project: {e}")))?;
 
     let project_root = project.root().to_path_buf();
 
@@ -96,10 +81,7 @@ pub fn compile_files(
         .compile_files(files)
         .map_err(|e| TrebError::Forge(format!("compilation failed: {e}")))?;
 
-    Ok(CompilationOutput {
-        output,
-        project_root,
-    })
+    Ok(CompilationOutput { output, project_root })
 }
 
 #[cfg(test)]

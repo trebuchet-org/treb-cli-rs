@@ -116,7 +116,8 @@ enum Commands {
     /// network, namespace, tags, verification status, and transaction details.
     /// Omit the deployment argument to select interactively with a fuzzy search.
     Show {
-        /// Deployment identifier (full ID, name, address, name:label, or namespace/name); omit to select interactively
+        /// Deployment identifier (full ID, name, address, name:label, or namespace/name); omit to
+        /// select interactively
         deployment: Option<String>,
         /// Output as JSON
         #[arg(long)]
@@ -184,7 +185,8 @@ enum Commands {
     /// record. Tags can be used to filter results with `treb list --tag`.
     /// Omit the deployment argument to select interactively.
     Tag {
-        /// Deployment identifier (full ID, name, address, name:label, or namespace/name); omit to select interactively
+        /// Deployment identifier (full ID, name, address, name:label, or namespace/name); omit to
+        /// select interactively
         deployment: Option<String>,
         /// Add a tag to the deployment
         #[arg(long, conflicts_with = "remove")]
@@ -460,12 +462,23 @@ async fn main() -> anyhow::Result<()> {
             )
             .await?
         }
-        Commands::List { network, namespace, r#type, tag, contract, label, fork, no_fork, json } => {
-            commands::list::run(network, namespace, r#type, tag, contract, label, fork, no_fork, json).await?
+        Commands::List {
+            network,
+            namespace,
+            r#type,
+            tag,
+            contract,
+            label,
+            fork,
+            no_fork,
+            json,
+        } => {
+            commands::list::run(
+                network, namespace, r#type, tag, contract, label, fork, no_fork, json,
+            )
+            .await?
         }
-        Commands::Show { deployment, json } => {
-            commands::show::run(deployment, json).await?
-        }
+        Commands::Show { deployment, json } => commands::show::run(deployment, json).await?,
         Commands::Init { force } => commands::init::run(force).await?,
         Commands::Config { subcommand } => match subcommand {
             ConfigSubcommand::Show { json } => commands::config::show(json).await?,
@@ -585,9 +598,8 @@ async fn main() -> anyhow::Result<()> {
         Commands::Fork { subcommand } => commands::fork::run(subcommand).await?,
         Commands::Dev { subcommand } => commands::dev::run(subcommand).await?,
         Commands::Completions { shell } => {
-            use clap_complete::{generate, Shell};
-            use std::io;
-            use std::str::FromStr;
+            use clap_complete::{Shell, generate};
+            use std::{io, str::FromStr};
 
             let shell = Shell::from_str(&shell).map_err(|_| {
                 anyhow::anyhow!(

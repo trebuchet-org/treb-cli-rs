@@ -25,12 +25,8 @@ pub fn load_local_config(project_root: &Path) -> Result<LocalConfig> {
     }
 
     let contents = std::fs::read_to_string(&path)?;
-    serde_json::from_str(&contents).map_err(|e| {
-        TrebError::Config(format!(
-            "invalid JSON in {}: {e}",
-            path.display()
-        ))
-    })
+    serde_json::from_str(&contents)
+        .map_err(|e| TrebError::Config(format!("invalid JSON in {}: {e}", path.display())))
 }
 
 /// Saves the local config to `<project_root>/.treb/config.local.json`.
@@ -42,9 +38,8 @@ pub fn save_local_config(project_root: &Path, config: &LocalConfig) -> Result<()
     std::fs::create_dir_all(&dir)?;
 
     let path = dir.join(LOCAL_FILE);
-    let mut json = serde_json::to_string_pretty(config).map_err(|e| {
-        TrebError::Config(format!("failed to serialize local config: {e}"))
-    })?;
+    let mut json = serde_json::to_string_pretty(config)
+        .map_err(|e| TrebError::Config(format!("failed to serialize local config: {e}")))?;
     json.push('\n');
 
     std::fs::write(&path, json)?;
@@ -59,10 +54,8 @@ mod tests {
     #[test]
     fn round_trip_save_then_load() {
         let tmp = TempDir::new().unwrap();
-        let config = LocalConfig {
-            namespace: "production".to_string(),
-            network: "mainnet".to_string(),
-        };
+        let config =
+            LocalConfig { namespace: "production".to_string(), network: "mainnet".to_string() };
 
         save_local_config(tmp.path(), &config).unwrap();
         let loaded = load_local_config(tmp.path()).unwrap();

@@ -1,14 +1,14 @@
 //! Persistent store for deployments backed by `deployments.json`.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use chrono::Utc;
-use treb_core::types::Deployment;
-use treb_core::TrebError;
+use treb_core::{TrebError, types::Deployment};
 
-use crate::io::{read_json_file_or_default, with_file_lock, write_json_file};
-use crate::DEPLOYMENTS_FILE;
+use crate::{
+    DEPLOYMENTS_FILE,
+    io::{read_json_file_or_default, with_file_lock, write_json_file},
+};
 
 /// CRUD store for deployments, persisted as a `HashMap<String, Deployment>` in
 /// `deployments.json` inside the registry directory.
@@ -21,10 +21,7 @@ impl DeploymentStore {
     /// Create a new store pointing at `<registry_dir>/deployments.json`.
     /// Call [`load`](Self::load) to read existing data from disk.
     pub fn new(registry_dir: &std::path::Path) -> Self {
-        Self {
-            path: registry_dir.join(DEPLOYMENTS_FILE),
-            data: HashMap::new(),
-        }
+        Self { path: registry_dir.join(DEPLOYMENTS_FILE), data: HashMap::new() }
     }
 
     /// Load deployments from disk, replacing any in-memory data.
@@ -59,10 +56,7 @@ impl DeploymentStore {
     /// Returns an error if the ID is not found.
     pub fn update(&mut self, mut deployment: Deployment) -> Result<(), TrebError> {
         if !self.data.contains_key(&deployment.id) {
-            return Err(TrebError::Registry(format!(
-                "deployment not found: {}",
-                deployment.id
-            )));
+            return Err(TrebError::Registry(format!("deployment not found: {}", deployment.id)));
         }
         deployment.updated_at = Utc::now();
         self.data.insert(deployment.id.clone(), deployment);
@@ -175,10 +169,7 @@ mod tests {
         let result = store.insert(dep);
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("already exists"),
-            "expected 'already exists' in: {msg}"
-        );
+        assert!(msg.contains("already exists"), "expected 'already exists' in: {msg}");
     }
 
     #[test]
@@ -211,10 +202,7 @@ mod tests {
         let result = store.update(dep);
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("not found"),
-            "expected 'not found' in: {msg}"
-        );
+        assert!(msg.contains("not found"), "expected 'not found' in: {msg}");
     }
 
     #[test]
@@ -260,9 +248,8 @@ mod tests {
 
     #[test]
     fn golden_file_round_trip() {
-        let fixture_path =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../treb-core/tests/fixtures/deployments_map.json");
+        let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../treb-core/tests/fixtures/deployments_map.json");
         let fixture_json = fs::read_to_string(&fixture_path)
             .unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", fixture_path.display()));
         let fixture_value: serde_json::Value =

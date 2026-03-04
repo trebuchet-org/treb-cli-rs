@@ -3,9 +3,11 @@
 mod framework;
 mod helpers;
 
-use framework::context::TestContext;
-use framework::integration_test::{run_integration_test, IntegrationTest};
-use framework::normalizer::PathNormalizer;
+use framework::{
+    context::TestContext,
+    integration_test::{IntegrationTest, run_integration_test},
+    normalizer::PathNormalizer,
+};
 
 /// Show by full deployment ID displays all section headers.
 #[test]
@@ -46,10 +48,7 @@ fn show_proxy() {
     let test = IntegrationTest::new("show_proxy")
         .setup(&["init"])
         .post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))
-        .test(&[
-            "show",
-            "mainnet/42220/TransparentUpgradeableProxy:FPMMFactory",
-        ])
+        .test(&["show", "mainnet/42220/TransparentUpgradeableProxy:FPMMFactory"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);

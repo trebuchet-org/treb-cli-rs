@@ -9,8 +9,10 @@
 
 use std::time::Duration;
 
-use treb_forge::anvil::AnvilConfig;
-use treb_forge::createx::{deploy_createx, verify_createx};
+use treb_forge::{
+    anvil::AnvilConfig,
+    createx::{deploy_createx, verify_createx},
+};
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 

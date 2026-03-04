@@ -6,16 +6,22 @@
 
 use std::path::PathBuf;
 
-use alloy_primitives::{address, b256, Address, Bytes, B256};
+use alloy_primitives::{Address, B256, Bytes, address, b256};
 use tempfile::TempDir;
-use treb_core::types::enums::{DeploymentMethod, DeploymentType, TransactionStatus, VerificationStatus};
-use treb_forge::events::abi::{SafeTransactionQueued, SimulatedTransaction, TransactionSimulated};
-use treb_forge::events::deployments::{ExtractedCollision, ExtractedDeployment};
-use treb_forge::events::proxy::{ProxyRelationship, ProxyType};
-use treb_forge::pipeline::{
-    check_duplicate, hydrate_deployment, hydrate_safe_transactions, hydrate_transactions,
-    resolve_duplicates, DuplicateStrategy, PipelineConfig, PipelineContext, PipelineResult,
-    RecordedDeployment, RecordedTransaction, SkippedDeployment,
+use treb_core::types::enums::{
+    DeploymentMethod, DeploymentType, TransactionStatus, VerificationStatus,
+};
+use treb_forge::{
+    events::{
+        abi::{SafeTransactionQueued, SimulatedTransaction, TransactionSimulated},
+        deployments::{ExtractedCollision, ExtractedDeployment},
+        proxy::{ProxyRelationship, ProxyType},
+    },
+    pipeline::{
+        DuplicateStrategy, PipelineConfig, PipelineContext, PipelineResult, RecordedDeployment,
+        RecordedTransaction, SkippedDeployment, check_duplicate, hydrate_deployment,
+        hydrate_safe_transactions, hydrate_transactions, resolve_duplicates,
+    },
 };
 use treb_registry::Registry;
 
@@ -44,7 +50,12 @@ fn init_registry() -> (TempDir, Registry) {
     (dir, registry)
 }
 
-fn make_extracted_create(name: &str, label: &str, addr: Address, tx_id: B256) -> ExtractedDeployment {
+fn make_extracted_create(
+    name: &str,
+    label: &str,
+    addr: Address,
+    tx_id: B256,
+) -> ExtractedDeployment {
     ExtractedDeployment {
         address: addr,
         deployer: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
@@ -61,7 +72,12 @@ fn make_extracted_create(name: &str, label: &str, addr: Address, tx_id: B256) ->
     }
 }
 
-fn make_extracted_create2(name: &str, label: &str, addr: Address, tx_id: B256) -> ExtractedDeployment {
+fn make_extracted_create2(
+    name: &str,
+    label: &str,
+    addr: Address,
+    tx_id: B256,
+) -> ExtractedDeployment {
     ExtractedDeployment {
         address: addr,
         deployer: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
@@ -140,7 +156,8 @@ fn single_deployment_hydration_and_recording() {
     assert_eq!(deployment.deployment_type, DeploymentType::Singleton);
 
     // Duplicate check — no conflicts
-    let resolved = resolve_duplicates(vec![deployment.clone()], &registry, DuplicateStrategy::Skip).unwrap();
+    let resolved =
+        resolve_duplicates(vec![deployment.clone()], &registry, DuplicateStrategy::Skip).unwrap();
     assert_eq!(resolved.to_insert.len(), 1);
     assert!(resolved.skipped.is_empty());
 
@@ -193,7 +210,8 @@ fn proxy_deployment_hydration_and_recording() {
     assert!(proxy_info.history.is_empty());
 
     // Record to registry and verify
-    let resolved = resolve_duplicates(vec![deployment.clone()], &registry, DuplicateStrategy::Skip).unwrap();
+    let resolved =
+        resolve_duplicates(vec![deployment.clone()], &registry, DuplicateStrategy::Skip).unwrap();
     assert_eq!(resolved.to_insert.len(), 1);
 
     registry.insert_deployment(deployment).unwrap();
@@ -311,12 +329,8 @@ fn duplicate_skip_produces_skipped_entries() {
     );
     let new_dep = hydrate_deployment(&extracted_new, None, &ctx);
 
-    let resolved = resolve_duplicates(
-        vec![duplicate, new_dep],
-        &registry,
-        DuplicateStrategy::Skip,
-    )
-    .unwrap();
+    let resolved =
+        resolve_duplicates(vec![duplicate, new_dep], &registry, DuplicateStrategy::Skip).unwrap();
 
     // The duplicate should be skipped
     assert_eq!(resolved.skipped.len(), 1);
@@ -337,13 +351,7 @@ fn duplicate_skip_produces_skipped_entries() {
     }
 
     // Build the result
-    let result = build_pipeline_result(
-        vec![],
-        vec![],
-        vec![],
-        resolved.skipped,
-        false,
-    );
+    let result = build_pipeline_result(vec![], vec![], vec![], resolved.skipped, false);
     assert_eq!(result.skipped.len(), 1);
     assert!(result.success);
 
@@ -385,12 +393,7 @@ fn duplicate_address_detection_same_chain() {
     assert_eq!(conflict.existing_id, "production/1/OldToken:old-v1");
 
     // resolve_duplicates with Skip strategy
-    let resolved = resolve_duplicates(
-        vec![new_dep],
-        &registry,
-        DuplicateStrategy::Skip,
-    )
-    .unwrap();
+    let resolved = resolve_duplicates(vec![new_dep], &registry, DuplicateStrategy::Skip).unwrap();
 
     assert_eq!(resolved.skipped.len(), 1);
     assert!(resolved.skipped[0].reason.contains("already registered"));
@@ -416,13 +419,16 @@ fn dry_run_leaves_registry_unchanged() {
     let deployment = hydrate_deployment(&extracted, None, &ctx);
 
     // Duplicate check (pass — empty registry)
-    let resolved = resolve_duplicates(vec![deployment.clone()], &registry, DuplicateStrategy::Skip).unwrap();
+    let resolved =
+        resolve_duplicates(vec![deployment.clone()], &registry, DuplicateStrategy::Skip).unwrap();
     assert_eq!(resolved.to_insert.len(), 1);
 
     // Hydrate a transaction
     let tx_events = vec![TransactionSimulated {
         transactions: vec![SimulatedTransaction {
-            transactionId: b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            transactionId: b256!(
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            ),
             senderId: "deployer".to_string(),
             sender: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
             returnData: Bytes::new(),
@@ -439,15 +445,10 @@ fn dry_run_leaves_registry_unchanged() {
     let recorded_deps: Vec<RecordedDeployment> = resolved
         .to_insert
         .into_iter()
-        .map(|d| RecordedDeployment {
-            deployment: d,
-            safe_transaction: None,
-        })
+        .map(|d| RecordedDeployment { deployment: d, safe_transaction: None })
         .collect();
-    let recorded_txs: Vec<RecordedTransaction> = transactions
-        .into_iter()
-        .map(|t| RecordedTransaction { transaction: t })
-        .collect();
+    let recorded_txs: Vec<RecordedTransaction> =
+        transactions.into_iter().map(|t| RecordedTransaction { transaction: t }).collect();
 
     let result = build_pipeline_result(recorded_deps, recorded_txs, vec![], vec![], true);
 
@@ -456,10 +457,7 @@ fn dry_run_leaves_registry_unchanged() {
     assert!(result.success);
     assert_eq!(result.deployments.len(), 1);
     assert_eq!(result.transactions.len(), 1);
-    assert_eq!(
-        result.deployments[0].deployment.id,
-        "production/1/Counter:counter-v1"
-    );
+    assert_eq!(result.deployments[0].deployment.id, "production/1/Counter:counter-v1");
 
     // Registry should be completely empty — dry-run did NOT write
     assert_eq!(registry.deployment_count(), 0);
@@ -581,8 +579,12 @@ fn collision_events_reported_in_pipeline_result() {
             label: "token-v1".to_string(),
             strategy: DeploymentMethod::Create2,
             salt: b256!("2222222222222222222222222222222222222222222222222222222222222222"),
-            bytecode_hash: b256!("3333333333333333333333333333333333333333333333333333333333333333"),
-            init_code_hash: b256!("4444444444444444444444444444444444444444444444444444444444444444"),
+            bytecode_hash: b256!(
+                "3333333333333333333333333333333333333333333333333333333333333333"
+            ),
+            init_code_hash: b256!(
+                "4444444444444444444444444444444444444444444444444444444444444444"
+            ),
         },
         ExtractedCollision {
             existing_address: address!("9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"),
@@ -596,7 +598,8 @@ fn collision_events_reported_in_pipeline_result() {
     ];
 
     // Record the successful deployment
-    let resolved = resolve_duplicates(vec![deployment.clone()], &registry, DuplicateStrategy::Skip).unwrap();
+    let resolved =
+        resolve_duplicates(vec![deployment.clone()], &registry, DuplicateStrategy::Skip).unwrap();
     for dep in &resolved.to_insert {
         registry.insert_deployment(dep.clone()).unwrap();
     }
@@ -604,10 +607,7 @@ fn collision_events_reported_in_pipeline_result() {
     let recorded_deps: Vec<RecordedDeployment> = resolved
         .to_insert
         .into_iter()
-        .map(|d| RecordedDeployment {
-            deployment: d,
-            safe_transaction: None,
-        })
+        .map(|d| RecordedDeployment { deployment: d, safe_transaction: None })
         .collect();
 
     // Build result with collisions
@@ -679,10 +679,7 @@ fn safe_transaction_hydration_and_recording() {
         .get_safe_transaction("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
         .unwrap();
     assert_eq!(stored.status, TransactionStatus::Queued);
-    assert_eq!(
-        stored.safe_address,
-        "0x1234567890123456789012345678901234567890"
-    );
+    assert_eq!(stored.safe_address, "0x1234567890123456789012345678901234567890");
 }
 
 // ---------------------------------------------------------------------------

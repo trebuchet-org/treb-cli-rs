@@ -10,8 +10,7 @@ use std::path::Path;
 
 use treb_core::error::{Result, TrebError};
 
-use crate::trebfile::expand_sender_config_env_vars;
-use crate::{ResolvedSenders, TrebFileConfigV1};
+use crate::{ResolvedSenders, TrebFileConfigV1, trebfile::expand_sender_config_env_vars};
 
 /// Loads and parses a treb.toml v1 config file.
 ///
@@ -20,19 +19,12 @@ use crate::{ResolvedSenders, TrebFileConfigV1};
 /// expanded for `${VAR_NAME}` environment variable references.
 pub fn load_treb_config_v1(path: &Path) -> Result<TrebFileConfigV1> {
     if !path.exists() {
-        return Err(TrebError::Config(format!(
-            "treb.toml not found: {}",
-            path.display()
-        )));
+        return Err(TrebError::Config(format!("treb.toml not found: {}", path.display())));
     }
 
     let contents = std::fs::read_to_string(path)?;
-    let mut config: TrebFileConfigV1 = toml::from_str(&contents).map_err(|e| {
-        TrebError::Config(format!(
-            "invalid TOML in {}: {e}",
-            path.display()
-        ))
-    })?;
+    let mut config: TrebFileConfigV1 = toml::from_str(&contents)
+        .map_err(|e| TrebError::Config(format!("invalid TOML in {}: {e}", path.display())))?;
 
     // Expand environment variables in all sender config string fields.
     for ns_config in config.ns.values_mut() {
@@ -50,8 +42,8 @@ pub fn load_treb_config_v1(path: &Path) -> Result<TrebFileConfigV1> {
 /// 1. Start with senders from `ns.default`
 /// 2. Override/extend with senders from `ns.<namespace>` (namespace wins)
 /// 3. Profile: namespace-specific profile overrides default profile
-/// 4. Slow flag: namespace-specific slow overrides default slow, which
-///    overrides the top-level slow flag; defaults to `false`
+/// 4. Slow flag: namespace-specific slow overrides default slow, which overrides the top-level slow
+///    flag; defaults to `false`
 pub fn convert_v1_to_resolved(v1: &TrebFileConfigV1, namespace: &str) -> ResolvedSenders {
     let mut resolved = ResolvedSenders::default();
 
@@ -144,28 +136,16 @@ derivation_path = "m/44'/60'/0'/0/1"
         let default_ns = &config.ns["default"];
         assert_eq!(default_ns.profile, Some("default".to_string()));
         assert_eq!(default_ns.senders.len(), 2);
-        assert_eq!(
-            default_ns.senders["deployer"].type_,
-            Some(SenderType::PrivateKey)
-        );
-        assert_eq!(
-            default_ns.senders["deployer"].address,
-            Some("0xDefaultDeployer".to_string())
-        );
-        assert_eq!(
-            default_ns.senders["admin"].type_,
-            Some(SenderType::Ledger)
-        );
+        assert_eq!(default_ns.senders["deployer"].type_, Some(SenderType::PrivateKey));
+        assert_eq!(default_ns.senders["deployer"].address, Some("0xDefaultDeployer".to_string()));
+        assert_eq!(default_ns.senders["admin"].type_, Some(SenderType::Ledger));
 
         // Live namespace.
         let live_ns = &config.ns["live"];
         assert_eq!(live_ns.profile, Some("optimized".to_string()));
         assert_eq!(live_ns.slow, Some(false));
         assert_eq!(live_ns.senders.len(), 1);
-        assert_eq!(
-            live_ns.senders["deployer"].type_,
-            Some(SenderType::Ledger)
-        );
+        assert_eq!(live_ns.senders["deployer"].type_, Some(SenderType::Ledger));
         assert_eq!(
             live_ns.senders["deployer"].derivation_path,
             Some("m/44'/60'/0'/0/1".to_string())
@@ -199,10 +179,7 @@ private_key = "${TREB_TEST_V1_KEY}"
     fn parse_v1_missing_file_errors() {
         let err = load_treb_config_v1(Path::new("/nonexistent/treb.toml")).unwrap_err();
         let msg = err.to_string();
-        assert!(
-            msg.contains("treb.toml not found"),
-            "expected 'treb.toml not found', got: {msg}"
-        );
+        assert!(msg.contains("treb.toml not found"), "expected 'treb.toml not found', got: {msg}");
     }
 
     #[test]
@@ -213,19 +190,13 @@ private_key = "${TREB_TEST_V1_KEY}"
 
         let err = load_treb_config_v1(&path).unwrap_err();
         let msg = err.to_string();
-        assert!(
-            msg.contains("invalid TOML"),
-            "expected 'invalid TOML', got: {msg}"
-        );
+        assert!(msg.contains("invalid TOML"), "expected 'invalid TOML', got: {msg}");
     }
 
     // ---- convert_v1_to_resolved ----
 
     fn make_test_v1() -> TrebFileConfigV1 {
-        let mut v1 = TrebFileConfigV1 {
-            slow: Some(true),
-            ns: Default::default(),
-        };
+        let mut v1 = TrebFileConfigV1 { slow: Some(true), ns: Default::default() };
 
         // ns.default: deployer (private_key) + admin (ledger), profile="default"
         let mut default_ns = crate::NamespaceConfigV1 {
@@ -281,14 +252,8 @@ private_key = "${TREB_TEST_V1_KEY}"
         // slow: top-level is true, ns.default.slow is None → inherits true
         assert!(resolved.slow);
         assert_eq!(resolved.senders.len(), 2);
-        assert_eq!(
-            resolved.senders["deployer"].type_,
-            Some(SenderType::PrivateKey)
-        );
-        assert_eq!(
-            resolved.senders["admin"].type_,
-            Some(SenderType::Ledger)
-        );
+        assert_eq!(resolved.senders["deployer"].type_, Some(SenderType::PrivateKey));
+        assert_eq!(resolved.senders["admin"].type_, Some(SenderType::Ledger));
     }
 
     #[test]
@@ -306,37 +271,22 @@ private_key = "${TREB_TEST_V1_KEY}"
         assert_eq!(resolved.senders.len(), 2);
 
         // deployer is now ledger (from live), not private_key (from default).
-        assert_eq!(
-            resolved.senders["deployer"].type_,
-            Some(SenderType::Ledger)
-        );
-        assert_eq!(
-            resolved.senders["deployer"].address,
-            Some("0xLiveDeployer".to_string())
-        );
+        assert_eq!(resolved.senders["deployer"].type_, Some(SenderType::Ledger));
+        assert_eq!(resolved.senders["deployer"].address, Some("0xLiveDeployer".to_string()));
         assert_eq!(
             resolved.senders["deployer"].derivation_path,
             Some("m/44'/60'/0'/0/1".to_string())
         );
 
         // admin inherited from default, unchanged.
-        assert_eq!(
-            resolved.senders["admin"].type_,
-            Some(SenderType::Ledger)
-        );
-        assert_eq!(
-            resolved.senders["admin"].address,
-            Some("0xDefaultAdmin".to_string())
-        );
+        assert_eq!(resolved.senders["admin"].type_, Some(SenderType::Ledger));
+        assert_eq!(resolved.senders["admin"].address, Some("0xDefaultAdmin".to_string()));
     }
 
     #[test]
     fn convert_v1_slow_flag_precedence() {
         // Test: ns.default.slow overrides top-level slow.
-        let mut v1 = TrebFileConfigV1 {
-            slow: Some(true),
-            ns: Default::default(),
-        };
+        let mut v1 = TrebFileConfigV1 { slow: Some(true), ns: Default::default() };
         v1.ns.insert(
             "default".to_string(),
             crate::NamespaceConfigV1 {
@@ -364,10 +314,7 @@ private_key = "${TREB_TEST_V1_KEY}"
 
     #[test]
     fn convert_v1_no_default_namespace() {
-        let mut v1 = TrebFileConfigV1 {
-            slow: Some(true),
-            ns: Default::default(),
-        };
+        let mut v1 = TrebFileConfigV1 { slow: Some(true), ns: Default::default() };
         v1.ns.insert(
             "live".to_string(),
             crate::NamespaceConfigV1 {
