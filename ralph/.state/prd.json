@@ -1,129 +1,72 @@
 {
   "project": "treb-cli-rs",
-  "branchName": "ralph/phase-03-integration-test-framework-pool-snapshots-golden-files",
-  "description": "Extend the integration test framework with a pool of pre-warmed TestContext instances, EVM snapshot/revert for clean chain state between tests, a golden-file comparison pipeline with pluggable normalizers, and a declarative IntegrationTest struct for multi-step CLI test scenarios.",
+  "branchName": "ralph/phase-04-test-fixture-project",
+  "description": "Create a self-contained Foundry project fixture at tests/fixtures/project/ that serves as the canonical test workspace for all integration tests, mirroring the Go CLI's test/testdata/project/ directory with the same Solidity contracts, compiler settings, and config structure.",
   "userStories": [
     {
-      "id": "P3-US-001",
-      "title": "Normalizer Trait and Built-in Normalizers",
-      "description": "As a test author, I want a Normalizer trait and built-in normalizers that strip non-deterministic content (ANSI codes, addresses, hashes, timestamps, versions, etc.) from CLI output so that golden file comparisons are stable across environments and runs.",
+      "id": "P4-US-001",
+      "title": "Fixture Project Skeleton and Configuration Files",
+      "description": "As a test author, I want a tests/fixtures/project/ directory with all configuration files (foundry.toml, treb.toml, .env.example, remappings.txt, .gitignore, script/deploy/.gitkeep) so that integration tests have a canonical project skeleton to operate on.",
       "acceptanceCriteria": [
-        "Normalizer trait is defined with normalize(&self, input: &str) -> String",
-        "All 9 normalizers are implemented: ColorNormalizer, AddressNormalizer, HashNormalizer, TimestampNormalizer, VersionNormalizer, GitCommitNormalizer, RepositoryIdNormalizer, SpinnerNormalizer, ForgeWarningNormalizer",
-        "NormalizerChain::default() returns a chain with all built-in normalizers, color first, then hash before address",
-        "Unit test: ColorNormalizer strips ANSI escape codes",
-        "Unit test: AddressNormalizer replaces 40-hex-char addresses, HashNormalizer replaces 64-hex-char hashes without matching addresses",
-        "Unit test: TimestampNormalizer handles ISO-8601 and relative time strings",
-        "Unit test: NormalizerChain applies normalizers in sequence",
-        "Module registered in framework/mod.rs, regex added to dev-dependencies",
+        "tests/fixtures/project/ directory exists with foundry.toml, treb.toml, .env.example, remappings.txt, .gitignore",
+        "foundry.toml has bytecode_hash = \"none\" and cbor_metadata = false",
+        "foundry.toml has anvil-31337 and anvil-31338 RPC endpoints using ports 8545 and 9545",
+        "treb.toml has [accounts.anvil] with Anvil's well-known private key (0xac0974...)",
+        "script/deploy/.gitkeep exists",
+        "remappings.txt has entries for forge-std/ and @openzeppelin/contracts/",
         "cargo check --workspace passes"
       ],
       "priority": 1,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P3-US-002",
-      "title": "Golden File Comparison",
-      "description": "As a test author, I want a GoldenFile struct that compares normalized CLI output against baseline files in tests/golden/ and supports auto-updating baselines via UPDATE_GOLDEN=1 so that I can validate CLI output without manual file management.",
+      "id": "P4-US-002",
+      "title": "Solidity Source Contracts",
+      "description": "As a test author, I want all 7 Solidity source contracts (Counter, SampleToken, StringUtils, StringUtilsV2, UpgradeableCounter, MessageStorageV07, MessageStorageV08) matching the Go CLI's fixtures so that integration tests cover all key deployment patterns.",
       "acceptanceCriteria": [
-        "GoldenFile::compare() reads from tests/golden/{test_name}/{case_name}.golden",
-        "Matching content passes silently; mismatched content panics with a unified diff",
-        "Missing golden file without UPDATE_GOLDEN=1 panics with instructive message",
-        "UPDATE_GOLDEN=1 writes actual content to golden file and creates parent directories",
-        "compare_normalized() applies normalizer chain before comparison",
-        "Unit test: round-trip — write golden file via UPDATE_GOLDEN, then compare succeeds",
-        "Unit test: mismatch produces a readable diff message",
-        "similar crate added to dev-dependencies, module registered in framework/mod.rs",
+        "All 7 Solidity source files exist in tests/fixtures/project/src/",
+        "Counter.sol has setNumber() and increment() functions with pragma =0.8.30",
+        "SampleToken.sol has a constructor taking (string, string, uint256) with pragma ^0.8.30",
+        "StringUtils.sol and StringUtilsV2.sol provide concat, length, toUpperCase, equal external functions with pragma ^0.7.0 || ^0.8.0",
+        "UpgradeableCounter.sol has initialize(), increment(), getCount(), owner(), transferOwnership() with pragma =0.8.30",
+        "MessageStorageV07.sol imports StringUtils (pragma =0.7.6) and MessageStorageV08.sol imports StringUtilsV2 (pragma =0.8.30)",
         "cargo check --workspace passes"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P3-US-003",
-      "title": "EVM Snapshot Utilities for Pool Release",
-      "description": "As a test framework developer, I want snapshot/revert helper functions wrapping AnvilNode's snapshot/revert APIs so that the pool can restore clean chain state on context release.",
+      "id": "P4-US-003",
+      "title": "Library Stubs and Compilation Verification",
+      "description": "As a test author, I want minimal vendored library stubs for forge-std and openzeppelin-contracts plus a Deploy.s.sol script and a compilation test so that the fixture compiles without external dependency installation.",
       "acceptanceCriteria": [
-        "take_snapshot(node) returns a U256 snapshot ID from an AnvilNode",
-        "revert_snapshot(node, id) reverts to a given snapshot ID and errors if revert returns false",
-        "take_snapshots(nodes) snapshots all nodes in a HashMap<String, AnvilNode>",
-        "revert_snapshots(nodes, ids) reverts all nodes to their saved IDs",
-        "Async test: snapshot → modify state → revert → state is restored",
-        "Module registered in framework/mod.rs",
+        "lib/forge-std/src/Script.sol exists with Vm interface, console library, and Script base contract",
+        "lib/openzeppelin-contracts/ contains minimal proxy contract stubs (ERC1967Proxy, TransparentUpgradeableProxy, BeaconProxy, UpgradeableBeacon)",
+        "script/Deploy.s.sol deploys Counter using forge-std Script base",
+        "fixture_compile.rs test exists with #[ignore] attribute and passes when forge is available",
+        "Library stubs are minimal — only declarations needed for compilation, no real logic",
         "cargo check --workspace passes"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P3-US-004",
-      "title": "Workspace Cleanup Utility",
-      "description": "As a test framework developer, I want a clean_workspace() function that resets a TestWorkdir to a pristine state by removing build artifacts and treb state so that the next test in the pool gets a clean workspace.",
+      "id": "P4-US-004",
+      "title": "Wire Fixture into Test Framework and Smoke Test",
+      "description": "As a test author, I want the test framework to recognize the project fixture as the primary integration test fixture with smoke tests verifying workdir structure, port rewriting, and config copying so that the full test pipeline is validated.",
       "acceptanceCriteria": [
-        "clean_workspace() removes .treb/, broadcast/, cache/, out/ directories",
-        "clean_workspace() cleans script/deploy/ but preserves .gitkeep",
-        ".treb/ is recreated as an empty directory after removal",
-        "Missing directories are silently skipped (best-effort cleanup)",
-        "Test: create dummy files in .treb/ and out/, call clean_workspace(), verify they're gone",
-        "Test: verify foundry.toml and src/ are NOT removed",
-        "cargo check --workspace passes"
+        "DEFAULT_FIXTURE constant is defined as \"project\" in workdir.rs",
+        "fixture_workdir_structure test passes: all expected files are present in the temp workspace",
+        "fixture_foundry_toml_port_rewrite test passes: port rewriting works correctly for both anvil-31337 and anvil-31338 endpoints",
+        "fixture_treb_toml_present test passes: treb.toml is copied and contains expected account config",
+        "Symlinked items (lib/, remappings.txt, .gitignore) resolve correctly in the temp workspace",
+        "All tests pass with cargo test --workspace"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "P3-US-005",
-      "title": "ContextPool with Acquire/Release",
-      "description": "As a test author, I want a ContextPool that pre-creates N TestContext instances with Anvil nodes and provides thread-safe acquire/release with automatic EVM snapshot revert and workspace cleanup so that parallel tests share amortized Anvil startup cost with clean state.",
-      "acceptanceCriteria": [
-        "ContextPool::new(2, \"minimal-project\") creates 2 contexts with 2 Anvil nodes each (chain IDs 31337 and 31338)",
-        "ContextPool::acquire() returns a PoolGuard that derefs to TestContext",
-        "When all contexts are in use, acquire() blocks until one is released",
-        "Dropping PoolGuard reverts EVM snapshots, cleans workspace, takes fresh snapshots, and returns context to pool",
-        "default_size() reads RAYON_NUM_THREADS or falls back to CPU count via num_cpus",
-        "Async test: acquire context, drop guard, acquire again — second acquire has clean chain state",
-        "cargo check --workspace passes"
-      ],
-      "priority": 5,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "P3-US-006",
-      "title": "IntegrationTest Struct and Runner",
-      "description": "As a test author, I want a declarative IntegrationTest struct with builder methods and run_integration_test()/run_integration_tests() entry points so that I can define multi-step CLI test scenarios that execute commands in order and compare output against golden files.",
-      "acceptanceCriteria": [
-        "IntegrationTest struct has all required fields: name, pre_setup, setup_cmds, post_setup, test_cmds, post_test, expect_err, extra_normalizers, output_artifacts, skip_golden",
-        "Builder methods allow ergonomic construction (e.g., IntegrationTest::new(\"test\").setup(&[\"init\"]).test(&[\"list\"]))",
-        "run_integration_test() executes commands in order: pre_setup → setup → post_setup → test → post_test",
-        "expect_err: true asserts non-zero exit status for test commands",
-        "Output artifacts are read from workdir and included in golden output when files exist",
-        "skip_golden: true skips golden file comparison; extra_normalizers are appended to default chain",
-        "Unit test: construct IntegrationTest with builder, verify field values",
-        "run_integration_tests() runs all tests in sequence",
-        "cargo check --workspace passes"
-      ],
-      "priority": 6,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "P3-US-007",
-      "title": "Pool + Golden File Smoke Test",
-      "description": "As a developer, I want an end-to-end smoke test that exercises the full Phase 3 pipeline — pool acquire/release, golden file comparison, and IntegrationTest struct — so that the framework is validated as a whole before downstream phases depend on it.",
-      "acceptanceCriteria": [
-        "pool_acquire_release_clean_state test passes: pool creates context, acquire/release cycle works, state is clean after release",
-        "golden_file_round_trip test passes: treb version output matches golden file after normalization",
-        "integration_test_struct_smoke test passes: IntegrationTest + run_integration_test() works end-to-end with skip_golden: true",
-        "All tests pass with cargo test --workspace",
-        "Golden file(s) are committed to tests/golden/"
-      ],
-      "priority": 7,
-      "passes": true,
+      "passes": false,
       "notes": ""
     }
   ]

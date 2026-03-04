@@ -1,0 +1,19 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+script = "script"
+optimizer_runs = 0
+fs_permissions = [{ access = "read-write", path = "./" }]
+bytecode_hash = "none"
+cbor_metadata = false
+
+[lint]
+lint_on_build = false
+
+[rpc_endpoints]
+anvil-31337 = "http://localhost:8545"
+anvil-31338 = "http://localhost:9545"
+
+[etherscan]
+sepolia = { key = "${ETHERSCAN_API_KEY}" }
