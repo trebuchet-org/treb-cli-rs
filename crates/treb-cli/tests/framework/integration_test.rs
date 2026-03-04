@@ -198,8 +198,8 @@ pub fn run_integration_test(test: &IntegrationTest, ctx: &TestContext) {
         let golden = GoldenFile::new(golden_dir());
 
         // 6a. Command output → commands.golden
-        let normalized_output = normalize(&output);
-        golden.compare(&test.name, "commands", &normalized_output);
+        // Both actual output and golden file content are normalized before diffing.
+        golden.compare_with_normalizer(&test.name, "commands", &output, &normalize);
 
         // 6b. Each artifact → {stem}.golden (missing files silently skipped)
         for artifact_path in &test.output_artifacts {
@@ -207,12 +207,11 @@ pub fn run_integration_test(test: &IntegrationTest, ctx: &TestContext) {
             if full_path.exists() {
                 let content = std::fs::read_to_string(&full_path)
                     .unwrap_or_else(|e| panic!("failed to read artifact {artifact_path}: {e}"));
-                let normalized_content = normalize(&content);
                 let stem = std::path::Path::new(artifact_path)
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or(artifact_path);
-                golden.compare(&test.name, stem, &normalized_content);
+                golden.compare_with_normalizer(&test.name, stem, &content, &normalize);
             }
         }
     }
