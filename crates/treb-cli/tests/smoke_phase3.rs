@@ -6,25 +6,12 @@ mod framework;
 use framework::context::TestContext;
 use framework::golden::GoldenFile;
 use framework::integration_test::{run_integration_test, IntegrationTest};
-use framework::normalizer::{Normalizer, NormalizerChain};
+use framework::normalizer::{Normalizer, NormalizerChain, ShortHexNormalizer};
 use framework::pool::ContextPool;
 
 use alloy_primitives::{address, U256};
-use regex::Regex;
 
 use std::path::PathBuf;
-
-/// Normalizer for short hex hashes (7-10 chars) that appear in version output
-/// but aren't caught by the default GitCommitNormalizer (which requires specific
-/// prefixes like `@` or `commit `).
-struct ShortHexNormalizer;
-
-impl Normalizer for ShortHexNormalizer {
-    fn normalize(&self, input: &str) -> String {
-        let re = Regex::new(r"\b[0-9a-f]{7,10}\b").unwrap();
-        re.replace_all(input, "<SHORT_HASH>").into_owned()
-    }
-}
 
 fn golden_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

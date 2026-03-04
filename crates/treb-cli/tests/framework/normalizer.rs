@@ -176,6 +176,42 @@ impl Normalizer for ForgeWarningNormalizer {
     }
 }
 
+/// Replaces absolute paths with `<PROJECT_ROOT>` for stable golden files.
+/// Paths are sorted longest-first to avoid partial matches.
+pub struct PathNormalizer {
+    paths: Vec<String>,
+}
+
+impl PathNormalizer {
+    pub fn new(paths: Vec<String>) -> Self {
+        let mut paths = paths;
+        paths.sort_by(|a, b| b.len().cmp(&a.len())); // longest first
+        Self { paths }
+    }
+}
+
+impl Normalizer for PathNormalizer {
+    fn normalize(&self, input: &str) -> String {
+        let mut result = input.to_string();
+        for path in &self.paths {
+            result = result.replace(path, "<PROJECT_ROOT>");
+        }
+        result
+    }
+}
+
+/// Replaces short hex strings (7–10 chars) that appear in version output
+/// but aren't caught by `GitCommitNormalizer` (which requires specific
+/// prefixes like `@` or `commit `).
+pub struct ShortHexNormalizer;
+
+impl Normalizer for ShortHexNormalizer {
+    fn normalize(&self, input: &str) -> String {
+        let re = Regex::new(r"\b[0-9a-f]{7,10}\b").unwrap();
+        re.replace_all(input, "<SHORT_HASH>").into_owned()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -275,6 +311,41 @@ mod tests {
         assert_eq!(
             result,
             "Deployed to <ADDRESS> at <TIMESTAMP> v<VERSION>"
+        );
+    }
+
+    #[test]
+    fn path_normalizer_replaces_paths() {
+        let n = PathNormalizer::new(vec!["/tmp/abc123".into()]);
+        assert_eq!(
+            n.normalize("path /tmp/abc123/foo"),
+            "path <PROJECT_ROOT>/foo"
+        );
+    }
+
+    #[test]
+    fn path_normalizer_longest_first() {
+        let n = PathNormalizer::new(vec![
+            "/tmp/foo".into(),
+            "/tmp/foo/bar".into(),
+        ]);
+        // The longer path should match first, avoiding partial replacement
+        assert_eq!(
+            n.normalize("path /tmp/foo/bar/baz"),
+            "path <PROJECT_ROOT>/baz"
+        );
+    }
+
+    #[test]
+    fn short_hex_normalizer_replaces_short_hashes() {
+        let n = ShortHexNormalizer;
+        assert_eq!(
+            n.normalize("commit abcdef0 done"),
+            "commit <SHORT_HASH> done"
+        );
+        assert_eq!(
+            n.normalize("hash abcdef0123 end"),
+            "hash <SHORT_HASH> end"
         );
     }
 }
