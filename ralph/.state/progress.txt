@@ -9,6 +9,9 @@ Started: Tue Mar  4 2026
 - `UPDATE_GOLDEN=1 cargo test` regenerates golden files from actual output
 - New normalizers should NOT be added to default_chain() — use as extras via `.extra_normalizer()`
 - Forge-specific normalizers: `CompilerOutputNormalizer`, `GasNormalizer`, `BlockNumberNormalizer`, `DurationNormalizer`
+- Anvil-backed golden file tests use `#[tokio::test(flavor = "multi_thread")]` with `TestContext::new("project").with_anvil("anvil-31337").await`
+- Fixture Deploy.s.sol must emit `ContractDeployed` and `TransactionSimulated` events for `treb run` to detect deployments
+- `treb run` does NOT auto-detect raw CREATE ops — it only finds deployments via treb-specific events
 ---
 
 ## 2026-03-04 - P7-US-001
@@ -24,4 +27,20 @@ Started: Tue Mar  4 2026
   - Regex `(?i)` flag handles case-insensitive matching for forge output variations (Solc vs solc)
   - Gas/block patterns use `(?i)(prefix)\s*:\s*\d+` → `${1}: <PLACEHOLDER>` to preserve the original prefix casing
   - Duration pattern `\d+(?:\.\d+)?(?:µs|ms|s|m)\b` covers all common forge timing formats
+---
+
+## 2026-03-04 - P7-US-002
+- Created `crates/treb-cli/tests/integration_run.rs` with 3 async golden file tests:
+  - `run_basic`: Anvil-backed deployment with broadcast, verifies deployment table + registry artifacts
+  - `run_dry_run`: Anvil-backed dry-run, verifies `[DRY RUN]` banner and no registry writes
+  - `run_basic_json`: Anvil-backed JSON output, verifies JSON structure with `success`, `dry_run`, `deployments`, `transactions` fields
+- Updated `crates/treb-cli/tests/fixtures/project/script/Deploy.s.sol` to emit `ContractDeployed` and `TransactionSimulated` events (required for `treb run` to detect deployments)
+- Generated 3 golden files: `run_basic/output.golden`, `run_dry_run/output.golden`, `run_basic_json/output.golden`
+- All tests use `PathNormalizer` + `CompilerOutputNormalizer` + `GasNormalizer` + `BlockNumberNormalizer` + `DurationNormalizer` as extras
+- Files changed: `integration_run.rs`, `Deploy.s.sol`, 3 golden files
+- **Learnings for future iterations:**
+  - The fixture's `Deploy.s.sol` originally did NOT emit treb events — `treb run` relies on `ContractDeployed` event emission, not raw CREATE trace detection
+  - Updated Deploy.s.sol to emit events like the `e2e_workflow.rs` `TrebDeploySimple` script; existing Phase 6 tests are unaffected since they use `seed_registry()` not `treb run`
+  - `output_artifact()` only includes file content if the file exists (conditional append)
+  - Chain ID shows as `0` in output for Anvil-backed runs — may need investigation in P7-US-004
 ---

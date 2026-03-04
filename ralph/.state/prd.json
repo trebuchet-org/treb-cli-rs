@@ -26,7 +26,7 @@
       "id": "P7-US-002",
       "title": "Run Command Golden File Tests — Basic Deployment and Dry-Run",
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
