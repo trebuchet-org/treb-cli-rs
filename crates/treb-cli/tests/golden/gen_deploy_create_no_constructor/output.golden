@@ -1,0 +1,21 @@
+$ treb gen-deploy SimpleContract --strategy create --output script/DeploySimpleContract.s.sol
+Generated deploy script: script/DeploySimpleContract.s.sol
+
+--- script/DeploySimpleContract.s.sol ---
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^<VERSION>;
+
+import {Script, console} from "forge-std/Script.sol";
+import { SimpleContract } from "../src/SimpleContract.sol";
+
+contract DeploySimpleContract is Script {
+    function run() public {
+        vm.startBroadcast();
+
+        SimpleContract deployed = new SimpleContract();
+
+        console.log("SimpleContract deployed at:", address(deployed));
+
+        vm.stopBroadcast();
+    }
+}

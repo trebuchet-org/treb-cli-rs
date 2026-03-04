@@ -1,126 +1,28 @@
-# Ralph Progress Log — Phase 07
-Started: Tue Mar  4 2026
+# Ralph Progress Log
+Started: Wed Mar  4 04:28:24 AM CET 2026
+---
 
 ## Codebase Patterns
-- Integration tests use `mod framework;` and `mod helpers;` to import shared test infrastructure
-- Golden file tests follow: `TestContext::new("project")` → `IntegrationTest::new(name)` → `run_integration_test(&test, &ctx)`
-- `seed_registry(ctx.path())` in a `post_setup_hook` seeds registry with 3 fixture deployments
-- `PathNormalizer::new(vec![ctx.path().display().to_string()])` normalizes temp dir paths to `<PROJECT_ROOT>`
-- `UPDATE_GOLDEN=1 cargo test` regenerates golden files from actual output
-- New normalizers should NOT be added to default_chain() — use as extras via `.extra_normalizer()`
-- Forge-specific normalizers: `CompilerOutputNormalizer`, `GasNormalizer`, `BlockNumberNormalizer`, `DurationNormalizer`
-- Anvil-backed golden file tests use `#[tokio::test(flavor = "multi_thread")]` with `TestContext::new("project").with_anvil("anvil-31337").await`
-- `effective_rpc_url` in run.rs is the network NAME (e.g., "anvil-31337"), not the actual URL — resolve via `treb_config::load_foundry_config` + `rpc_endpoints` for RPC calls
-- Fixture Deploy.s.sol must emit `ContractDeployed` and `TransactionSimulated` events for `treb run` to detect deployments
-- `treb run` does NOT auto-detect raw CREATE ops — it only finds deployments via treb-specific events
-- Error-path tests (no Anvil needed) use sync `#[test]`; Anvil-backed tests use `#[tokio::test(flavor = "multi_thread")]`
-- `pre_setup_hook` removes `.treb/` + `foundry.toml` to simulate uninitialized projects for error tests
-- `treb run --broadcast` does NOT send real Ethereum transactions to Anvil — it simulates in-process via forge pipeline; use `eth_sendTransaction` directly for real on-chain txs
-- For `treb register` tests, deploy contracts directly on Anvil via `reqwest` + `eth_sendTransaction` RPC call, then register by tx hash
-- Happy-path register tests need dynamic tx hash → use `GoldenFile` directly instead of `IntegrationTest` builder
+- gen-deploy tests use `gen-deploy-project` fixture (Counter w/ constructor, SimpleContract w/o constructor, MathLib library)
+- gen-deploy does NOT require `treb init` — only needs `foundry.toml` for compilation
+- Use `CompilerOutputNormalizer` for gen-deploy tests (forge compilation may produce stderr output)
+- `output_artifact("script/DeployFoo.s.sol")` captures generated Solidity in golden output
+- gen-deploy writes "Generated deploy script: {path}" to stderr on success; --json goes to stdout
 ---
 
-## 2026-03-04 - P7-US-001
-- Added 4 new normalizers to `crates/treb-cli/tests/framework/normalizer.rs`:
-  - CompilerOutputNormalizer: normalizes `Compiling N files with solc X.Y.Z` and `Solc X.Y.Z finished` lines
-  - GasNormalizer: normalizes gas values (`gas: NNN`, `Gas used: NNN`, `gasUsed: NNN`)
-  - BlockNumberNormalizer: normalizes block numbers (`block: N`, `blockNumber: N`, `Block Number: N`)
-  - DurationNormalizer: normalizes duration strings (`1.23s`, `456ms`, `2µs`)
-- 8 new unit tests added (2 per normalizer: match case + no-match case), CompilerOutputNormalizer has 3 tests
-- NOT added to default_chain() — designed as extras for forge-output-heavy tests
-- Files changed: `crates/treb-cli/tests/framework/normalizer.rs`
+## 2026-03-04 - P8-US-001
+- Implemented 6 golden-file integration tests for `treb gen-deploy` strategy variants
+- Tests: gen_deploy_create, gen_deploy_create_no_constructor, gen_deploy_create_library, gen_deploy_create2, gen_deploy_create3, gen_deploy_json
+- Files changed:
+  - NEW: crates/treb-cli/tests/integration_gen_deploy.rs
+  - NEW: crates/treb-cli/tests/golden/gen_deploy_create/output.golden
+  - NEW: crates/treb-cli/tests/golden/gen_deploy_create_no_constructor/output.golden
+  - NEW: crates/treb-cli/tests/golden/gen_deploy_create_library/output.golden
+  - NEW: crates/treb-cli/tests/golden/gen_deploy_create2/output.golden
+  - NEW: crates/treb-cli/tests/golden/gen_deploy_create3/output.golden
+  - NEW: crates/treb-cli/tests/golden/gen_deploy_json/output.golden
 - **Learnings for future iterations:**
-  - Regex `(?i)` flag handles case-insensitive matching for forge output variations (Solc vs solc)
-  - Gas/block patterns use `(?i)(prefix)\s*:\s*\d+` → `${1}: <PLACEHOLDER>` to preserve the original prefix casing
-  - Duration pattern `\d+(?:\.\d+)?(?:µs|ms|s|m)\b` covers all common forge timing formats
----
-
-## 2026-03-04 - P7-US-002
-- Created `crates/treb-cli/tests/integration_run.rs` with 3 async golden file tests:
-  - `run_basic`: Anvil-backed deployment with broadcast, verifies deployment table + registry artifacts
-  - `run_dry_run`: Anvil-backed dry-run, verifies `[DRY RUN]` banner and no registry writes
-  - `run_basic_json`: Anvil-backed JSON output, verifies JSON structure with `success`, `dry_run`, `deployments`, `transactions` fields
-- Updated `crates/treb-cli/tests/fixtures/project/script/Deploy.s.sol` to emit `ContractDeployed` and `TransactionSimulated` events (required for `treb run` to detect deployments)
-- Generated 3 golden files: `run_basic/output.golden`, `run_dry_run/output.golden`, `run_basic_json/output.golden`
-- All tests use `PathNormalizer` + `CompilerOutputNormalizer` + `GasNormalizer` + `BlockNumberNormalizer` + `DurationNormalizer` as extras
-- Files changed: `integration_run.rs`, `Deploy.s.sol`, 3 golden files
-- **Learnings for future iterations:**
-  - The fixture's `Deploy.s.sol` originally did NOT emit treb events — `treb run` relies on `ContractDeployed` event emission, not raw CREATE trace detection
-  - Updated Deploy.s.sol to emit events like the `e2e_workflow.rs` `TrebDeploySimple` script; existing Phase 6 tests are unaffected since they use `seed_registry()` not `treb run`
-  - `output_artifact()` only includes file content if the file exists (conditional append)
-  - Chain ID shows as `0` in output for Anvil-backed runs — may need investigation in P7-US-004
----
-
-## 2026-03-04 - P7-US-003
-- Added 5 new tests to `crates/treb-cli/tests/integration_run.rs` (8 total):
-  - `run_debug`: Anvil-backed, tests `--debug` flag. Forge debugger requires TTY so no extra trace output in headless mode, but confirms the flag passes through without error.
-  - `run_verbose`: Anvil-backed, tests `--verbose` flag. Golden output includes `Config source`, `Namespace`, `RPC`, `Sender [role]`, and `Result: N deployment(s)...` lines.
-  - `run_missing_script`: Sync (no Anvil), tests missing script error path. Error surfaces as forge pipeline failure since the script file doesn't exist.
-  - `run_no_init`: Sync (no Anvil), tests uninitialized project. `pre_setup_hook` removes `.treb/` and `foundry.toml`. Error mentions `foundry.toml`.
-  - `run_bad_signature`: Anvil-backed, tests invalid `--sig "nonexistent()"`. Error mentions `Function 'nonexistent()' is not implemented`.
-- Generated 5 golden files: `run_debug/`, `run_verbose/`, `run_missing_script/`, `run_no_init/`, `run_bad_signature/`
-- Files changed: `integration_run.rs`, 5 golden files
-- **Learnings for future iterations:**
-  - `--debug` flag in Forge enables interactive TUI debugger — in headless subprocess (no TTY), it passes through silently with no extra output
-  - `--verbose` adds pre-execution context (Config source, Namespace, RPC, Sender addresses) and post-execution summary (Result: N deployment(s), N transaction(s), N skipped) on stderr
-  - Error-path tests that don't need Anvil should use sync `#[test]` (not `#[tokio::test]`) per PRD requirement
-  - Missing script errors manifest as "forge preprocessing failed" connection errors when no Anvil is running, since forge tries RPC before compilation
-  - `pre_setup_hook` runs before setup commands — use it to delete `.treb/` and `foundry.toml` to simulate uninitialized state
----
-
-## 2026-03-04 - P7-US-004
-- Fixed chain_id=0 bug in `treb run` — chain ID was defaulting to 0 because PipelineConfig.chain_id was never resolved
-- Added `resolve_rpc_url_for_chain_id()` helper to resolve network names to actual RPC URLs via foundry.toml
-- Added `fetch_chain_id()` helper to query `eth_chainId` from the RPC endpoint before pipeline execution
-- Regenerated 5 golden files to reflect correct chain ID (31337 for Anvil)
-- Reviewed all 8 golden files for output correctness — other output areas (table format, summary lines, error messages, JSON structure) were correct as-is
-- Files changed: `crates/treb-cli/src/commands/run.rs`, 5 golden files (`run_basic`, `run_basic_json`, `run_debug`, `run_dry_run`, `run_verbose`)
-- **Learnings for future iterations:**
-  - `effective_rpc_url` in run.rs is the network NAME (e.g., "anvil-31337"), not the actual URL — must resolve via `treb_config::load_foundry_config` + `rpc_endpoints` to get the actual URL for RPC calls
-  - `PipelineConfig.chain_id` defaults to 0 and is used throughout hydration (deployment IDs, transactions) — always set it before pipeline execution
-  - Transaction `hash` field is intentionally empty ("") because `TransactionSimulated` events don't carry blockchain tx hashes — status is SIMULATED, not EXECUTED
-  - Multiple `rpc_call`/`json_rpc_call` implementations exist across commands (register.rs, fork.rs, networks.rs) — could be consolidated in future refactoring
----
-
-## 2026-03-04 - P7-US-005
-- Created `crates/treb-cli/tests/integration_register.rs` with 5 tests:
-  - `register_basic`: Anvil-backed async test. Deploys minimal contract directly on Anvil via `eth_sendTransaction`, then registers via `treb register --tx-hash`. Verifies table output (Contract/Address/Namespace/Chain) and `deployments.json` artifact.
-  - `register_json`: Same setup, adds `--json`. Verifies JSON structure with `success`, `tx_hash`, `chain_id`, `mode`, `deployments`, `transaction_id` fields.
-  - `register_error_bad_prefix`: Sync (no Anvil), tests `--tx-hash abc123` without `0x` prefix. Error mentions "starting with 0x".
-  - `register_error_no_init`: Sync (no Anvil), `pre_setup_hook` removes `.treb/` and `foundry.toml`. Error mentions "foundry.toml".
-  - `register_error_tx_not_found`: Anvil-backed, uses fabricated nonexistent hash. Error mentions "not found".
-- Helper `deploy_contract_on_anvil(rpc_url)` sends `eth_sendTransaction` with minimal creation bytecode to Anvil's default account, returns real on-chain tx hash.
-- Helper `run_register_golden_test()` mimics `run_integration_test()` output format with dynamic command args and golden file comparison.
-- Generated 5 golden files under `tests/golden/register_*/output.golden`
-- Files changed: `integration_register.rs`, 5 golden files
-- **Learnings for future iterations:**
-  - `treb run --broadcast` does NOT broadcast real Ethereum txs to Anvil — the forge pipeline simulates in-process. The `transactions.json` status is always SIMULATED with `hash: ""`
-  - To get a real on-chain tx for `treb register`, deploy directly via `eth_sendTransaction` RPC call to Anvil's default account (`0xf39F...92266`)
-  - Anvil auto-mines, so `eth_sendTransaction` returns the tx hash immediately after mining
-  - `treb register` uses `debug_traceTransaction` with callTracer to find CREATE operations — works with direct contract creation txs
-  - Truncated hashes (e.g., `0x4674...85cb`) and tx IDs (e.g., `tx-4674c314`) are deterministic for the same bytecode+sender+nonce on fresh Anvil
-  - The `register` command doesn't have `--non-interactive` flag (only `run` and `compose` have it)
----
-
-## 2026-03-04 - P7-US-006
-- Verified all `output_artifact` golden files for registry JSON correctness (no code changes needed)
-- **deployments.json** review:
-  - All fields use camelCase: `id`, `namespace`, `chainId`, `contractName`, `label`, `address`, `type`, `transactionId`, `deploymentStrategy`, `proxyInfo`, `artifact`, `verification`, `tags`, `createdAt`, `updatedAt`
-  - All required fields present in both `run_basic` and `register_basic` golden artifacts
-  - `type` field uses `#[serde(rename = "type")]` (not `deploymentType`) — intentional for Go version compatibility
-  - Map structure correct (key = deployment ID, value = deployment object)
-  - `skip_serializing_if` correctly omits empty optional fields (salt, factory, etc.)
-- **transactions.json** review:
-  - All fields use camelCase: `id`, `chainId`, `hash`, `status`, `sender`, `nonce`, `deployments`, `operations`, `environment`, `createdAt`
-  - `blockNumber` correctly omitted when 0 (via `skip_serializing_if = "is_zero_u64"`)
-  - Map structure correct (key = tx ID, value = transaction object)
-- **Cross-reference verified**: `deployments` array values in transactions.json (`"default/31337/Counter:Counter"`) match deployment keys in deployments.json
-- **DateTime<Utc>** uses chrono default serde = RFC 3339 / ISO-8601 (normalized to `<TIMESTAMP>` in golden files)
-- All 1000+ tests pass across workspace, cargo clippy clean with no warnings
-- Files changed: none (verification-only story)
-- **Learnings for future iterations:**
-  - `deployment_type` serializes as `"type"` (not `"deploymentType"`) via `#[serde(rename = "type")]` — same pattern used for `proxy_type` in ProxyInfo
-  - Transaction `hash` field serializes as `"hash"` (not `"txHash"`) — single-word fields don't need camelCase conversion
-  - `deployments` field in Transaction serializes as `"deployments"` (not `"deploymentIds"`) — contains full deployment ID strings, not just IDs
-  - CLI `--json` output uses snake_case (e.g., `contract_name`, `chain_id`, `dry_run`) while registry files use camelCase — two different serialization conventions
+  - `gen-deploy-project` fixture already has all needed contracts (Counter, SimpleContract, MathLib)
+  - VersionNormalizer in default chain replaces `^0.8.13` with `^<VERSION>` in golden output
+  - No anvil needed for gen-deploy — pure compilation + template rendering
 ---

@@ -1,20 +1,21 @@
 {
   "project": "treb-cli-rs",
-  "branchName": "ralph/phase-07-command-parity-run-register",
-  "description": "Golden-file-backed integration tests for `treb run` and `treb register` commands using live Anvil nodes, with forge output normalizers for stable golden file comparisons and registry artifact verification.",
+  "branchName": "ralph/phase-08-command-parity-gen-deploy-compose",
+  "description": "Add golden-file integration tests for treb gen-deploy and treb compose commands, fix any output format discrepancies found during golden file creation, and ensure template parity with the Go CLI.",
   "userStories": [
     {
-      "id": "P7-US-001",
-      "title": "Forge Output Normalizers for Golden Pipeline",
-      "description": "As a developer, I want normalizers for non-deterministic forge compiler and execution output so that golden files are stable across environments and foundry version updates.",
+      "id": "P8-US-001",
+      "title": "Gen-Deploy Golden File Tests — Strategy Variants",
+      "description": "As a developer, I want golden-file integration tests for treb gen-deploy covering CREATE, CREATE2, CREATE3 strategies and JSON output so that generated Solidity scripts are locked down against regressions.",
       "acceptanceCriteria": [
-        "CompilerOutputNormalizer normalizes solc compilation progress lines (e.g., 'Compiling N files with solc X.Y.Z' → 'Compiling <N> files with solc <SOLC_VERSION>')",
-        "GasNormalizer normalizes gas values in output (e.g., 'gas: 12345' → 'gas: <GAS>')",
-        "BlockNumberNormalizer normalizes block numbers in output (e.g., 'block: 1' → 'block: <BLOCK>')",
-        "DurationNormalizer normalizes timing/duration strings (e.g., '1.23s', '456ms' → '<DURATION>')",
-        "Each normalizer has at least 2 unit tests (match case and no-match case)",
-        "New normalizers are NOT added to default chain — used as extras only",
-        "Existing normalizer unit tests still pass",
+        "integration_gen_deploy.rs contains 6 #[test] functions (create, create_no_constructor, create_library, create2, create3, json)",
+        "gen_deploy_create golden output captures CLI stdout/stderr and the generated DeployCounter.s.sol content via output_artifact",
+        "gen_deploy_create_no_constructor golden output shows a script without constructor args",
+        "gen_deploy_create_library golden output shows library deployment pattern",
+        "gen_deploy_create2 golden output contains salt-based deployment code",
+        "gen_deploy_create3 golden output contains ICreateX.deployCreate3() call",
+        "gen_deploy_json golden output is valid JSON with contract_name, strategy, proxy, output_path, code keys",
+        "PathNormalizer replaces workdir paths with <PROJECT_ROOT>",
         "cargo test --workspace passes",
         "cargo clippy --workspace passes with no warnings"
       ],
@@ -23,39 +24,76 @@
       "notes": ""
     },
     {
-      "id": "P7-US-002",
-      "title": "Run Command Golden File Tests — Basic Deployment and Dry-Run",
+      "id": "P8-US-002",
+      "title": "Gen-Deploy Golden File Tests — Proxy Variants and Error Paths",
+      "description": "As a developer, I want golden-file integration tests for treb gen-deploy proxy templates (ERC1967, UUPS, Transparent, Beacon), strategy+proxy combinations, custom proxy override, and error paths so that all gen-deploy code paths have golden-file coverage.",
+      "acceptanceCriteria": [
+        "10 additional test functions added to integration_gen_deploy.rs (16 total across US-001 and US-002)",
+        "All 4 proxy variants (erc1967, uups, transparent, beacon) have golden tests with generated Solidity source captured via output_artifact",
+        "gen_deploy_create2_uups golden output shows both CREATE2 and UUPS patterns",
+        "gen_deploy_custom_proxy_contract golden output contains MyCustomProxy and a TODO import comment",
+        "All 4 error-path tests use expect_err(true) and verify specific error messages",
+        "cargo test --workspace passes",
+        "cargo clippy --workspace passes with no warnings"
+      ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P7-US-003",
-      "title": "Run Command Golden File Tests — Debug and Error Paths",
+      "id": "P8-US-003",
+      "title": "Gen-Deploy Output Format Fixes",
+      "description": "As a developer, I want the generated Solidity scripts from gen-deploy to match the Go CLI's output in license identifiers, pragma versions, imports, function signatures, constructor scaffolding, and structural comments so that .s.sol files are interchangeable between CLIs.",
+      "acceptanceCriteria": [
+        "All golden files from P8-US-001 and P8-US-002 have been reviewed for template correctness",
+        "Generated Solidity matches Go CLI output for: license identifier, pragma, imports, contract name, function signatures, constructor scaffolding",
+        "Proxy templates use correct OpenZeppelin import paths matching Go",
+        "placeholder_for_type returns the same defaults as Go for all Solidity types",
+        "Any template differences found are fixed in gen_deploy.rs",
+        "All golden files are regenerated after fixes",
+        "cargo test --workspace passes",
+        "cargo clippy --workspace passes with no warnings"
+      ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P7-US-004",
-      "title": "Run Command Output Format Fixes",
+      "id": "P8-US-004",
+      "title": "Compose Golden File Tests — Dry-Run, Validation, and JSON",
+      "description": "As a developer, I want golden-file integration tests for treb compose covering dry-run plans, dependency ordering, cycle detection, validation errors, and JSON output so that compose output format is locked down against regressions.",
+      "acceptanceCriteria": [
+        "integration_compose.rs contains 12 #[test] functions",
+        "Dry-run golden files show the Execution plan header, step numbers, and component names",
+        "compose_dry_run_chain golden output shows components in dependency order",
+        "compose_dry_run_diamond golden output shows base as step 1 and top as step 4",
+        "Both JSON dry-run tests produce valid JSON arrays with step, component, script, deps fields",
+        "All 6 error-path tests use expect_err(true) with specific error messages",
+        "File paths in golden output are normalized with PathNormalizer",
+        "cargo test --workspace passes",
+        "cargo clippy --workspace passes with no warnings"
+      ],
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P7-US-005",
-      "title": "Register Command Golden File Tests",
+      "id": "P8-US-005",
+      "title": "Compose Output Format Fixes and Final Cleanup",
+      "description": "As a developer, I want compose dry-run plan formatting and JSON output schema to match the Go CLI's output so that compose output is consistent across both CLIs, and all golden files across phases 5-8 pass cleanly.",
+      "acceptanceCriteria": [
+        "All golden files from P8-US-004 have been reviewed for output correctness",
+        "Dry-run plan format (header, step numbering, dep display) matches Go CLI output",
+        "JSON dry-run output schema matches Go's array structure with correct field names",
+        "Error messages match Go CLI's format for all validation failure cases",
+        "Any formatting differences found are fixed in compose.rs",
+        "All golden files are regenerated after fixes",
+        "cargo test --workspace passes (all phases 5-8)",
+        "cargo clippy --workspace passes with no warnings"
+      ],
       "priority": 5,
-      "passes": true,
+      "passes": false,
       "notes": ""
-    },
-    {
-      "id": "P7-US-006",
-      "title": "Registry Artifact Verification and Final Cleanup",
-      "priority": 6,
-      "passes": true,
-      "notes": "Verification-only story. All registry artifacts are structurally correct: camelCase field names, all required fields present, deployment ID cross-references valid. No code changes needed."
     }
   ]
 }
