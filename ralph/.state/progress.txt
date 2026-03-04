@@ -24,3 +24,18 @@ Started: Wed Mar  4 01:58:35 AM CET 2026
   - The default normalizer chain handles VERSION, DATE, GIT_COMMIT etc.; ShortHexNormalizer covers 7-10 char hex (e.g., short git hashes in parentheses)
   - `TestContext::new("project")` uses the "project" fixture (full foundry project with src/script/lib)
 ---
+
+## 2026-03-04 - P5-US-003
+- Created `integration_init.rs` with four golden-file integration tests: `init_fresh`, `init_idempotent`, `init_force`, `init_no_foundry_toml`
+- All tests use `IntegrationTest` + `run_integration_test` + `TestContext::new("project")`
+- `PathNormalizer` applied to replace workdir absolute paths with `<PROJECT_ROOT>`
+- Golden files at `tests/golden/init_{fresh,idempotent,force,no_foundry_toml}/output.golden`
+- `init_fresh` and `init_force` include `.treb/config.local.json` and/or `.treb/registry.json` as output artifacts
+- `init_no_foundry_toml` uses `expect_err(true)` for error case
+- Files changed: `crates/treb-cli/tests/integration_init.rs`, `crates/treb-cli/tests/golden/init_*/output.golden`
+- **Learnings for future iterations:**
+  - `TestWorkdir::new()` creates `.treb/` automatically — use `pre_setup_hook` to remove it when testing `treb init` fresh
+  - `pre_setup_hook` receives a `&TestContext` — use `ctx.treb_dir()` and `ctx.path()` to access workdir paths
+  - For error tests, `bail!()` output goes to stderr and is captured in golden output as `Error: ...`
+  - `output_artifact()` paths are relative to workdir; content is appended with `--- path ---` header
+---
