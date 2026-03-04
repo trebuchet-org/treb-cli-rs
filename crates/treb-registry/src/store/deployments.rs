@@ -79,10 +79,10 @@ impl DeploymentStore {
         Ok(deployment)
     }
 
-    /// List all deployments sorted by `created_at` (ascending).
+    /// List all deployments sorted by `created_at` (ascending), then by `id`.
     pub fn list(&self) -> Vec<&Deployment> {
         let mut entries: Vec<&Deployment> = self.data.values().collect();
-        entries.sort_by_key(|d| d.created_at);
+        entries.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
         entries
     }
 

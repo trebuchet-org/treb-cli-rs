@@ -1,0 +1,2 @@
+$ treb list --namespace nonexistent
+No deployments found.

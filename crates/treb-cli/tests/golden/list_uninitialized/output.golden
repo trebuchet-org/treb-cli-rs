@@ -1,0 +1,4 @@
+$ treb list
+Error: project not initialized — .treb/ directory not found in <PROJECT_ROOT>
+
+Run `treb init` first.
