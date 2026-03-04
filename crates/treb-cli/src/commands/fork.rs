@@ -447,6 +447,8 @@ pub async fn run_status(json: bool) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     let treb_dir = cwd.join(TREB_DIR);
 
+    ensure_treb_dir(&treb_dir)?;
+
     let mut store = ForkStateStore::new(&treb_dir);
     store.load().context("failed to load fork state")?;
 

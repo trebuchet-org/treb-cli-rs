@@ -1,0 +1,12 @@
+$ treb fork status --json
+[
+  {
+    "network": "mainnet",
+    "rpcUrl": "http://localhost:18545",
+    "port": 18545,
+    "chainId": 1,
+    "forkBlockNumber": null,
+    "startedAt": "<TIMESTAMP>",
+    "status": "stopped"
+  }
+]

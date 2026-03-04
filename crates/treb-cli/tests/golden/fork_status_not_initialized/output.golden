@@ -1,0 +1,4 @@
+$ treb fork status
+Error: project not initialized — .treb/ directory not found
+
+Run `treb init` first.
