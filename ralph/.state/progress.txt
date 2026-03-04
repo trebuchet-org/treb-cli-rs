@@ -1,167 +1,27 @@
-# Ralph Progress Log — Phase 06
+# Ralph Progress Log — Phase 07
 Started: Tue Mar  4 2026
 
 ## Codebase Patterns
 - Integration tests use `mod framework;` and `mod helpers;` to import shared test infrastructure
 - Golden file tests follow: `TestContext::new("project")` → `IntegrationTest::new(name)` → `run_integration_test(&test, &ctx)`
-- `seed_registry(ctx.path())` in a `post_setup_hook` seeds registry with 3 fixture deployments (FPMM, FPMMFactory, TransparentUpgradeableProxy)
+- `seed_registry(ctx.path())` in a `post_setup_hook` seeds registry with 3 fixture deployments
 - `PathNormalizer::new(vec![ctx.path().display().to_string()])` normalizes temp dir paths to `<PROJECT_ROOT>`
-- Setup commands with `treb init` create `.treb/` directory before seed_registry can write deployments
 - `UPDATE_GOLDEN=1 cargo test` regenerates golden files from actual output
-- `DeploymentStore::list()` sorts by `(created_at, id)` — secondary sort by ID ensures deterministic order when timestamps are equal
-- `deployments.json` uses `HashMap<String, Deployment>` — key order is non-deterministic; avoid using it as an `output_artifact` directly; instead use a `post_test_hook` to extract deterministic subsets
+- New normalizers should NOT be added to default_chain() — use as extras via `.extra_normalizer()`
+- Forge-specific normalizers: `CompilerOutputNormalizer`, `GasNormalizer`, `BlockNumberNormalizer`, `DurationNormalizer`
 ---
 
-## 2026-03-04 - P5-US-001
-- Added PathNormalizer (replaces absolute paths with `<PROJECT_ROOT>`, longest-first sorting) and ShortHexNormalizer (replaces 7-10 char hex strings with `<SHORT_HASH>`) to framework normalizer.rs
-- Removed local ShortHexNormalizer from smoke_phase3.rs, now imports from framework
-- Added unit tests for both new normalizers
-- Files changed: `crates/treb-cli/tests/framework/normalizer.rs`, `crates/treb-cli/tests/smoke_phase3.rs`
+## 2026-03-04 - P7-US-001
+- Added 4 new normalizers to `crates/treb-cli/tests/framework/normalizer.rs`:
+  - CompilerOutputNormalizer: normalizes `Compiling N files with solc X.Y.Z` and `Solc X.Y.Z finished` lines
+  - GasNormalizer: normalizes gas values (`gas: NNN`, `Gas used: NNN`, `gasUsed: NNN`)
+  - BlockNumberNormalizer: normalizes block numbers (`block: N`, `blockNumber: N`, `Block Number: N`)
+  - DurationNormalizer: normalizes duration strings (`1.23s`, `456ms`, `2µs`)
+- 8 new unit tests added (2 per normalizer: match case + no-match case), CompilerOutputNormalizer has 3 tests
+- NOT added to default_chain() — designed as extras for forge-output-heavy tests
+- Files changed: `crates/treb-cli/tests/framework/normalizer.rs`
 - **Learnings for future iterations:**
-  - Phase-05 branch must be created from phase-04 (not main) since it depends on the test framework built in phases 2-4
-  - The `regex` crate is already available in test deps — no Cargo.toml changes needed for normalizers
----
-
-## 2026-03-04 - P5-US-002
-- Created `integration_version.rs` with two golden-file integration tests: `version_human` and `version_json`
-- Both tests use `IntegrationTest` + `run_integration_test` + `TestContext::new("project")`
-- `ShortHexNormalizer` applied as extra normalizer for short hex strings (git commit hashes)
-- Golden files generated at `tests/golden/version_human/output.golden` and `tests/golden/version_json/output.golden`
-- Files changed: `crates/treb-cli/tests/integration_version.rs`, `crates/treb-cli/tests/golden/version_human/output.golden`, `crates/treb-cli/tests/golden/version_json/output.golden`
-- **Learnings for future iterations:**
-  - Each integration test file needs `mod framework;` at the top (same as smoke_phase3.rs)
-  - Golden files are auto-generated with `UPDATE_GOLDEN=1 cargo test --test <test_name>`
-  - The default normalizer chain handles VERSION, DATE, GIT_COMMIT etc.; ShortHexNormalizer covers 7-10 char hex (e.g., short git hashes in parentheses)
-  - `TestContext::new("project")` uses the "project" fixture (full foundry project with src/script/lib)
----
-
-## 2026-03-04 - P5-US-003
-- Created `integration_init.rs` with four golden-file integration tests: `init_fresh`, `init_idempotent`, `init_force`, `init_no_foundry_toml`
-- All tests use `IntegrationTest` + `run_integration_test` + `TestContext::new("project")`
-- `PathNormalizer` applied to replace workdir absolute paths with `<PROJECT_ROOT>`
-- Golden files at `tests/golden/init_{fresh,idempotent,force,no_foundry_toml}/output.golden`
-- `init_fresh` and `init_force` include `.treb/config.local.json` and/or `.treb/registry.json` as output artifacts
-- `init_no_foundry_toml` uses `expect_err(true)` for error case
-- Files changed: `crates/treb-cli/tests/integration_init.rs`, `crates/treb-cli/tests/golden/init_*/output.golden`
-- **Learnings for future iterations:**
-  - `TestWorkdir::new()` creates `.treb/` automatically — use `pre_setup_hook` to remove it when testing `treb init` fresh
-  - `pre_setup_hook` receives a `&TestContext` — use `ctx.treb_dir()` and `ctx.path()` to access workdir paths
-  - For error tests, `bail!()` output goes to stderr and is captured in golden output as `Error: ...`
-  - `output_artifact()` paths are relative to workdir; content is appended with `--- path ---` header
----
-
-## 2026-03-04 - P5-US-004
-- Created `integration_networks.rs` with four golden-file integration tests: `networks_unresolved_env_vars`, `networks_unresolved_json`, `networks_no_foundry_toml`, `networks_no_endpoints`
-- All tests use `IntegrationTest` + `run_integration_test` + `TestContext::new("project")`
-- Uses `pre_setup_hook` to write custom `foundry.toml` content for each scenario (env var endpoints, no endpoints, or remove foundry.toml)
-- Golden files at `tests/golden/networks_{unresolved_env_vars,unresolved_json,no_foundry_toml,no_endpoints}/output.golden`
-- No test requires a live RPC or Anvil node — unresolved env var endpoints avoid HTTP calls
-- Files changed: `crates/treb-cli/tests/integration_networks.rs`, `crates/treb-cli/tests/golden/networks_*/output.golden`
-- **Learnings for future iterations:**
-  - For commands that don't need `.treb/` init (like `networks`), no setup commands are needed — just `pre_setup_hook` to customize foundry.toml
-  - Using `${ENV_VAR}` in RPC endpoints avoids any real HTTP calls, making tests fast and deterministic
-  - The `networks` command output is deterministic (sorted alphabetically by name) so golden files are stable
----
-
-## 2026-03-04 - P5-US-005
-- Created `integration_config.rs` with six golden-file integration tests: `config_show_default`, `config_show_json`, `config_set_show_round_trip`, `config_remove_show_round_trip`, `config_show_uninitialized`, `config_set_invalid_key`
-- All tests use `IntegrationTest` + `run_integration_test` + `TestContext::new("project")`
-- `PathNormalizer` applied to replace workdir absolute paths with `<PROJECT_ROOT>` in all tests
-- `config_set_show_round_trip` uses `output_artifact(".treb/config.local.json")` to verify persistence
-- Error tests use `expect_err(true)`: uninitialized mentions `treb init`, invalid key lists valid keys (namespace, network)
-- Golden files at `tests/golden/config_{show_default,show_json,set_show_round_trip,remove_show_round_trip,show_uninitialized,set_invalid_key}/output.golden`
-- Files changed: `crates/treb-cli/tests/integration_config.rs`, `crates/treb-cli/tests/golden/config_*/output.golden`
-- **Learnings for future iterations:**
-  - `config set namespace <value>` + `config show` will fail if the namespace doesn't exist in treb.toml — the resolver validates namespaces. Only set `network` for round-trip tests, or ensure the namespace is defined.
-  - The `config show` command resolves config from multiple sources (local, treb.toml, foundry.toml); the "project" fixture has a treb.toml with "default" namespace and an "anvil" sender
-  - `setup()` can be chained multiple times for multi-step setup (e.g., init → set → remove)
----
-
-## 2026-03-04 - P6-US-001
-- Implemented `seed_registry` helper in `crates/treb-cli/tests/helpers/mod.rs`
-- Function reads `deployments_map.json` fixture, writes to `.treb/deployments.json`, rebuilds lookup index
-- Files changed: `crates/treb-cli/tests/helpers/mod.rs` (new)
-- **Learnings for future iterations:**
-  - `treb-registry` is a regular dependency of `treb-cli`, so it's available in integration tests without adding to `[dev-dependencies]`
-  - The `seed_registry` helper takes `&Path` (project root) rather than `&TestContext` for flexibility — use `ctx.path()` in hooks
-  - `env!("CARGO_MANIFEST_DIR")` resolves to the crate root at compile time, giving a stable path to fixtures
----
-
-## 2026-03-04 - P6-US-002
-- Created `integration_list.rs` with 9 golden-file integration tests: list_table, list_json, list_empty, list_ls_alias, list_filter_namespace, list_filter_namespace_no_match, list_filter_contract, list_filter_type, list_uninitialized
-- All tests use `IntegrationTest` + `run_integration_test` + `TestContext::new("project")` + `PathNormalizer`
-- Tests needing deployments use `post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))`
-- Fixed non-deterministic sort in `DeploymentStore::list()` by adding secondary sort key (ID) when `created_at` is equal
-- Golden files at `tests/golden/list_*/output.golden`
-- Files changed: `crates/treb-cli/tests/integration_list.rs` (new), `crates/treb-registry/src/store/deployments.rs`, 9 golden files
-- **Learnings for future iterations:**
-  - Fixture deployments all share the same `created_at` timestamp — `DeploymentStore::list()` sorts by `(created_at, id)` for deterministic ordering
-  - The `ls` alias test uses `test(&["ls"])` — identical output to `list`
-  - `list_filter_namespace_no_match` returns "No deployments found." (not an error) because the command succeeds with empty results
-  - All fixture deployments are in namespace "mainnet", chain 42220, so namespace filter "mainnet" returns all 3
----
-
-## 2026-03-04 - P6-US-003
-- Created `integration_show.rs` with 7 golden-file integration tests: show_full_id, show_json, show_proxy, show_non_proxy, show_by_contract_name, show_nonexistent, show_uninitialized
-- All tests use `IntegrationTest` + `run_integration_test` + `TestContext::new("project")` + `PathNormalizer`
-- Tests needing deployments use `post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))`
-- show_proxy uses the `TransparentUpgradeableProxy:FPMMFactory` fixture (PROXY type with UUPS proxyInfo)
-- show_non_proxy uses `FPMMFactory:v3.0.0` (SINGLETON, no proxyInfo — confirms Proxy Info section absent)
-- show_by_contract_name resolves `FPMMFactory` by unique contract name (resolution strategy #5)
-- Error tests: show_nonexistent (full ID format, "no deployment found"), show_uninitialized (no .treb/, "treb init")
-- Golden files at `tests/golden/show_*/output.golden`
-- Files changed: `crates/treb-cli/tests/integration_show.rs` (new), 7 golden files
-- **Learnings for future iterations:**
-  - The `show` command has a 5-strategy resolution cascade (full ID → address → name:label → namespace/name → contract name)
-  - For proxy tests, use `TransparentUpgradeableProxy:FPMMFactory` — the only fixture deployment with `proxyInfo` set
-  - For unique contract name resolution, use `FPMMFactory` — `FPMM` is ambiguous (shared across proxy fixture label)
-  - The `show` command's `print_kv` aligns keys right-padded per section — each section independently calculates max key width
----
-
-## 2026-03-04 - P6-US-004
-- Created `integration_tag.rs` with 5 golden-file integration tests: tag_show_empty, tag_show_json_empty, tag_add, tag_add_json, tag_add_then_show
-- All tests use `IntegrationTest` + `run_integration_test` + `TestContext::new("project")` + `PathNormalizer`
-- Tests needing deployments use `post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))`
-- tag_add uses `post_test_hook` to extract tags into deterministic `tag_check.json` artifact (avoids HashMap ordering flakiness in deployments.json)
-- tag_add_then_show chains two `.test()` calls: add then show, verifying persistence
-- Golden files at `tests/golden/tag_*/output.golden`
-- Files changed: `crates/treb-cli/tests/integration_tag.rs` (new), 5 golden files
-- **Learnings for future iterations:**
-  - `deployments.json` serializes a HashMap so key order is non-deterministic across runs — never use it as `output_artifact` directly
-  - Use `post_test_hook` to extract specific fields into a small deterministic JSON file for artifact comparison
-  - Tag CLI syntax: `treb tag <deployment>` (show), `treb tag --add <tag> <deployment>` (add), `treb tag --json ...` (JSON output)
-  - All fixture deployments have `tags: null` so tag show on any of them gives "No tags" output
----
-
-## 2026-03-04 - P6-US-005
-- Added 5 new tests to `integration_tag.rs`: tag_remove, tag_remove_json, tag_add_duplicate_error, tag_remove_nonexistent_error, tag_uninitialized (10 total tag tests)
-- Created `seed_registry_with_tag()` local helper that seeds registry then pre-adds a "v3-release" tag to FPMM:v3.0.0 deployment
-- tag_remove and tag_remove_json use pre-seeded tag so golden files only show the remove operation
-- tag_add_duplicate_error uses pre-seeded tag + `expect_err(true)` — error contains "already exists"
-- tag_remove_nonexistent_error uses regular seed (no tags) + `expect_err(true)` — error contains "not found"
-- tag_uninitialized uses `pre_setup_hook` to remove `.treb/` (auto-created by TestWorkdir) — error mentions "treb init"
-- Golden files at `tests/golden/tag_{remove,remove_json,add_duplicate_error,remove_nonexistent_error,uninitialized}/output.golden`
-- Files changed: `crates/treb-cli/tests/integration_tag.rs`, 5 golden files
-- **Learnings for future iterations:**
-  - `expect_err` applies to ALL test commands in the chain — can't mix success+failure in test commands; use `setup()` or `post_setup_hook` for prerequisite steps that must succeed
-  - For tests needing pre-existing state (like a tag already added), modify deployments.json directly in post_setup_hook rather than chaining CLI commands
-  - TestWorkdir auto-creates `.treb/` — uninitialized tests must use `pre_setup_hook` to `remove_dir_all(ctx.treb_dir())` (same pattern as list/show/config uninitialized tests)
----
-
-## 2026-03-04 - P6-US-006
-- Reviewed all 26 golden files (list: 9, show: 7, tag: 10) — all correct, no output format discrepancies
-- Fixed 13 clippy warnings across 8 files:
-  - `treb-core/src/types/fork.rs`: derive Default instead of manual impl
-  - `treb-registry/src/store/governor_proposals.rs`: sort_by_key with Reverse
-  - `treb-forge/src/pipeline/orchestrator.rs`: is_some_and instead of map_or(false, ..)
-  - `treb-cli/src/ui/selector.rs`: elide unnecessary lifetime
-  - `treb-cli/src/ui/color.rs`: #[allow(dead_code)] for palette constants
-  - `treb-cli/src/commands/fork.rs`: is_none_or instead of map_or(true, ..)
-  - `treb-cli/src/commands/gen_deploy.rs`: repeat_n instead of repeat().take()
-  - `treb-cli/src/commands/reset.rs`: is_none_or instead of map_or(true, ..) (5 occurrences)
-- **Learnings for future iterations:**
-  - Prefer `is_some_and`/`is_none_or` over `map_or(false/true, ..)` — clippy flags the latter as `unnecessary_map_or`
-  - Prefer `repeat_n(val, n)` over `repeat(val).take(n)` — clippy flags the latter as `manual_repeat_n`
-  - Prefer `sort_by_key` over `sort_by` when comparing a single field
-  - Color palette constants are defined but unused — use `#[allow(dead_code)]` rather than prefixing with `_` for public API constants
+  - Regex `(?i)` flag handles case-insensitive matching for forge output variations (Solc vs solc)
+  - Gas/block patterns use `(?i)(prefix)\s*:\s*\d+` → `${1}: <PLACEHOLDER>` to preserve the original prefix casing
+  - Duration pattern `\d+(?:\.\d+)?(?:µs|ms|s|m)\b` covers all common forge timing formats
 ---

@@ -1,110 +1,60 @@
 {
   "project": "treb-cli-rs",
-  "branchName": "ralph/phase-06-command-parity-list-show-tag",
-  "description": "Golden-file-backed integration tests for the list, show, and tag registry query commands using the IntegrationTest + TestContext framework",
+  "branchName": "ralph/phase-07-command-parity-run-register",
+  "description": "Golden-file-backed integration tests for `treb run` and `treb register` commands using live Anvil nodes, with forge output normalizers for stable golden file comparisons and registry artifact verification.",
   "userStories": [
     {
-      "id": "P6-US-001",
-      "title": "Registry Seeding Helper for Golden File Tests",
-      "description": "As a developer, I want a shared seed_registry helper function that injects deployments_map.json fixture data into a TestContext's .treb/ directory and rebuilds the lookup index, so that all list/show/tag golden file tests can reuse the same registry seeding pattern via post_setup_hook.",
+      "id": "P7-US-001",
+      "title": "Forge Output Normalizers for Golden Pipeline",
+      "description": "As a developer, I want normalizers for non-deterministic forge compiler and execution output so that golden files are stable across environments and foundry version updates.",
       "acceptanceCriteria": [
-        "helpers/mod.rs exists in crates/treb-cli/tests/ and exports seed_registry function",
-        "seed_registry reads deployments_map.json from treb-core/tests/fixtures/, writes it to .treb/deployments.json, and rebuilds the lookup index",
-        "The helper is importable from integration test files via mod helpers",
-        "cargo test --workspace passes"
+        "CompilerOutputNormalizer normalizes solc compilation progress lines (e.g., 'Compiling N files with solc X.Y.Z' → 'Compiling <N> files with solc <SOLC_VERSION>')",
+        "GasNormalizer normalizes gas values in output (e.g., 'gas: 12345' → 'gas: <GAS>')",
+        "BlockNumberNormalizer normalizes block numbers in output (e.g., 'block: 1' → 'block: <BLOCK>')",
+        "DurationNormalizer normalizes timing/duration strings (e.g., '1.23s', '456ms' → '<DURATION>')",
+        "Each normalizer has at least 2 unit tests (match case and no-match case)",
+        "New normalizers are NOT added to default chain — used as extras only",
+        "Existing normalizer unit tests still pass",
+        "cargo test --workspace passes",
+        "cargo clippy --workspace passes with no warnings"
       ],
       "priority": 1,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "P6-US-002",
-      "title": "List Command Golden File Tests",
-      "description": "As a developer, I want golden-file integration tests for treb list covering table output, JSON output, empty registry, ls alias, namespace/contract/type filters, and error paths, so that the list command's output format is locked down and regressions are caught automatically.",
-      "acceptanceCriteria": [
-        "integration_list.rs contains 9 #[test] functions: list_table, list_json, list_empty, list_ls_alias, list_filter_namespace, list_filter_namespace_no_match, list_filter_contract, list_filter_type, list_uninitialized",
-        "All tests use IntegrationTest + run_integration_test + TestContext::new(\"project\")",
-        "Tests that need deployments use post_setup_hook with seed_registry",
-        "list_table golden output contains a table with columns: Name, Label, Namespace, Chain, Type, Address, Verification",
-        "list_json golden output is a valid JSON array with 3 elements",
-        "list_empty golden output contains 'No deployments found'",
-        "list_filter_* tests show filtered subsets matching the expected filter results",
-        "list_uninitialized uses expect_err(true) and error mentions foundry.toml or treb init",
-        "PathNormalizer replaces workdir paths with <PROJECT_ROOT>",
-        "All tests pass with cargo test --workspace"
-      ],
+      "id": "P7-US-002",
+      "title": "Run Command Golden File Tests — Basic Deployment and Dry-Run",
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P6-US-003",
-      "title": "Show Command Golden File Tests",
-      "description": "As a developer, I want golden-file integration tests for treb show covering detail view by full ID, JSON output, proxy vs non-proxy display, resolution by contract name, and error paths, so that the show command's output format is locked down and regressions are caught automatically.",
-      "acceptanceCriteria": [
-        "integration_show.rs contains 7 #[test] functions: show_full_id, show_json, show_proxy, show_non_proxy, show_by_contract_name, show_nonexistent, show_uninitialized",
-        "All tests use IntegrationTest + run_integration_test + TestContext::new(\"project\")",
-        "show_full_id golden output contains section headers: Identity, On-Chain, Transaction, Artifact, Verification, Timestamps",
-        "show_json golden output is a valid JSON object with id, contractName, chainId, address fields",
-        "show_proxy golden output includes Proxy Info section with UUPS and implementation address",
-        "show_non_proxy golden output does NOT include Proxy Info section",
-        "show_nonexistent uses expect_err(true) and error contains 'no deployment found'",
-        "show_uninitialized uses expect_err(true) and error mentions foundry.toml or treb init",
-        "PathNormalizer replaces workdir paths with <PROJECT_ROOT>",
-        "All tests pass with cargo test --workspace"
-      ],
+      "id": "P7-US-003",
+      "title": "Run Command Golden File Tests — Debug and Error Paths",
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P6-US-004",
-      "title": "Tag Command Golden File Tests — Show and Add",
-      "description": "As a developer, I want golden-file integration tests for treb tag show (default) and --add operations, so that tag display and add confirmation output is locked down and registry persistence after tag add is verified via golden files.",
-      "acceptanceCriteria": [
-        "integration_tag.rs contains 5 #[test] functions: tag_show_empty, tag_show_json_empty, tag_add, tag_add_json, tag_add_then_show",
-        "tag_show_empty golden output contains 'No tags'",
-        "tag_show_json_empty golden output is valid JSON with \"tags\": []",
-        "tag_add golden output contains \"Added tag 'v3-release'\" and deployments.json artifact shows the tag",
-        "tag_add_json golden output is valid JSON with \"action\": \"add\" and \"tag\": \"v3-release\"",
-        "tag_add_then_show golden output shows both the add confirmation and the subsequent tag listing",
-        "PathNormalizer replaces workdir paths with <PROJECT_ROOT>",
-        "All tests pass with cargo test --workspace"
-      ],
+      "id": "P7-US-004",
+      "title": "Run Command Output Format Fixes",
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P6-US-005",
-      "title": "Tag Command Golden File Tests — Remove and Errors",
-      "description": "As a developer, I want golden-file integration tests for treb tag --remove and error paths (duplicate add, remove nonexistent, uninitialized), so that tag removal output and error messages are locked down and regressions are caught automatically.",
-      "acceptanceCriteria": [
-        "5 additional #[test] functions added to integration_tag.rs: tag_remove, tag_remove_json, tag_add_duplicate_error, tag_remove_nonexistent_error, tag_uninitialized (10 total across US-004 and US-005)",
-        "tag_remove golden output contains \"Removed tag 'v3-release'\"",
-        "tag_remove_json golden output is valid JSON with \"action\": \"remove\" and \"tag\": \"v3-release\"",
-        "tag_add_duplicate_error uses expect_err(true) and error contains 'already exists'",
-        "tag_remove_nonexistent_error uses expect_err(true) and error contains 'not found'",
-        "tag_uninitialized uses expect_err(true) and error mentions foundry.toml or treb init",
-        "All tests pass with cargo test --workspace"
-      ],
+      "id": "P7-US-005",
+      "title": "Register Command Golden File Tests",
       "priority": 5,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P6-US-006",
-      "title": "Output Format Fixes (if needed)",
-      "description": "As a developer, I want to review all generated golden files for output correctness and fix any format discrepancies found in the list, show, or tag command implementations, so that the golden files accurately represent the intended output format.",
-      "acceptanceCriteria": [
-        "All golden files have been reviewed for output correctness",
-        "Any output discrepancies found are fixed in the command source files",
-        "All golden files are regenerated after fixes",
-        "cargo test --workspace passes",
-        "cargo clippy --workspace passes with no warnings"
-      ],
+      "id": "P7-US-006",
+      "title": "Registry Artifact Verification and Final Cleanup",
       "priority": 6,
-      "passes": true,
+      "passes": false,
       "notes": ""
     }
   ]
