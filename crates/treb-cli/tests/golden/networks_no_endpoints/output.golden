@@ -1,0 +1,3 @@
+$ treb networks
+No RPC endpoints configured in foundry.toml.
+Add endpoints under [rpc_endpoints] in your foundry.toml.

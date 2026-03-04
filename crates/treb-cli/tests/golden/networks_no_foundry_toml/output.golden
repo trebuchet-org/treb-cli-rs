@@ -1,0 +1,3 @@
+$ treb networks
+Error: no foundry.toml found in the current directory.
+Run this command from a Foundry project root, or create a foundry.toml file.

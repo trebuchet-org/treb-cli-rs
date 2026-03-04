@@ -1,0 +1,77 @@
+//! Golden-file integration tests for `treb networks`.
+
+mod framework;
+
+use framework::context::TestContext;
+use framework::integration_test::{run_integration_test, IntegrationTest};
+
+/// foundry.toml with unresolved env var endpoints (no real HTTP calls needed).
+const FOUNDRY_TOML_UNRESOLVED: &str = r#"[profile.default]
+src = "src"
+
+[rpc_endpoints]
+mainnet = "${MAINNET_RPC_URL}"
+sepolia = "${SEPOLIA_RPC_URL}"
+"#;
+
+/// foundry.toml with no [rpc_endpoints] section.
+const FOUNDRY_TOML_NO_ENDPOINTS: &str = r#"[profile.default]
+src = "src"
+"#;
+
+/// Networks table with unresolved env vars shows Status column.
+#[test]
+fn networks_unresolved_env_vars() {
+    let ctx = TestContext::new("project");
+
+    let test = IntegrationTest::new("networks_unresolved_env_vars")
+        .pre_setup_hook(|ctx| {
+            std::fs::write(ctx.path().join("foundry.toml"), FOUNDRY_TOML_UNRESOLVED).unwrap();
+        })
+        .test(&["networks"]);
+
+    run_integration_test(&test, &ctx);
+}
+
+/// Networks JSON output with unresolved env vars has chain_id as null.
+#[test]
+fn networks_unresolved_json() {
+    let ctx = TestContext::new("project");
+
+    let test = IntegrationTest::new("networks_unresolved_json")
+        .pre_setup_hook(|ctx| {
+            std::fs::write(ctx.path().join("foundry.toml"), FOUNDRY_TOML_UNRESOLVED).unwrap();
+        })
+        .test(&["networks", "--json"]);
+
+    run_integration_test(&test, &ctx);
+}
+
+/// Networks without foundry.toml fails with error.
+#[test]
+fn networks_no_foundry_toml() {
+    let ctx = TestContext::new("project");
+
+    let test = IntegrationTest::new("networks_no_foundry_toml")
+        .pre_setup_hook(|ctx| {
+            std::fs::remove_file(ctx.path().join("foundry.toml")).ok();
+        })
+        .test(&["networks"])
+        .expect_err(true);
+
+    run_integration_test(&test, &ctx);
+}
+
+/// Networks with no endpoints configured shows helpful message.
+#[test]
+fn networks_no_endpoints() {
+    let ctx = TestContext::new("project");
+
+    let test = IntegrationTest::new("networks_no_endpoints")
+        .pre_setup_hook(|ctx| {
+            std::fs::write(ctx.path().join("foundry.toml"), FOUNDRY_TOML_NO_ENDPOINTS).unwrap();
+        })
+        .test(&["networks"]);
+
+    run_integration_test(&test, &ctx);
+}
