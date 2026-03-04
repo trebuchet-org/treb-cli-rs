@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use super::anvil_node::AnvilNode;
 use super::runner::TrebRunner;
-use super::workdir::{port_rewrite_foundry_toml_single, TestWorkdir};
+use super::workdir::{port_rewrite_foundry_toml, port_rewrite_foundry_toml_single, TestWorkdir};
 
 /// A complete test environment composing workdir, runner, and optional Anvil nodes.
 pub struct TestContext {
@@ -88,5 +88,26 @@ impl TestContext {
     /// Get a named Anvil node, if registered.
     pub fn anvil(&self, name: &str) -> Option<&AnvilNode> {
         self.anvil_nodes.get(name)
+    }
+
+    /// Access the full map of named Anvil nodes.
+    pub fn anvil_nodes(&self) -> &HashMap<String, AnvilNode> {
+        &self.anvil_nodes
+    }
+
+    /// Spawn a named Anvil node with a specific config and rewrite a single default port.
+    ///
+    /// Unlike [`with_anvil`], this lets you set chain ID and only rewrites one
+    /// specific port in `foundry.toml`, allowing multiple nodes with different ports.
+    pub async fn with_anvil_mapped(
+        mut self,
+        name: &str,
+        config: treb_forge::anvil::AnvilConfig,
+        default_port: u16,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let node = AnvilNode::spawn_with_config(config).await?;
+        port_rewrite_foundry_toml(self.workdir.path(), &[(default_port, node.port())])?;
+        self.anvil_nodes.insert(name.to_string(), node);
+        Ok(self)
     }
 }

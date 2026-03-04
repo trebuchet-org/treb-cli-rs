@@ -45,3 +45,4 @@ toml = { workspace = true }
 regex = { workspace = true }
 similar = { workspace = true }
 alloy-primitives = { workspace = true }
+num_cpus = { workspace = true }

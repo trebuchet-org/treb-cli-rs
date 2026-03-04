@@ -6,3 +6,4 @@ pub mod normalizer;
 pub mod golden;
 pub mod snapshot;
 pub mod cleanup;
+pub mod pool;
