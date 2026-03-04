@@ -39,3 +39,16 @@ Started: Wed Mar  4 01:58:35 AM CET 2026
   - For error tests, `bail!()` output goes to stderr and is captured in golden output as `Error: ...`
   - `output_artifact()` paths are relative to workdir; content is appended with `--- path ---` header
 ---
+
+## 2026-03-04 - P5-US-004
+- Created `integration_networks.rs` with four golden-file integration tests: `networks_unresolved_env_vars`, `networks_unresolved_json`, `networks_no_foundry_toml`, `networks_no_endpoints`
+- All tests use `IntegrationTest` + `run_integration_test` + `TestContext::new("project")`
+- Uses `pre_setup_hook` to write custom `foundry.toml` content for each scenario (env var endpoints, no endpoints, or remove foundry.toml)
+- Golden files at `tests/golden/networks_{unresolved_env_vars,unresolved_json,no_foundry_toml,no_endpoints}/output.golden`
+- No test requires a live RPC or Anvil node — unresolved env var endpoints avoid HTTP calls
+- Files changed: `crates/treb-cli/tests/integration_networks.rs`, `crates/treb-cli/tests/golden/networks_*/output.golden`
+- **Learnings for future iterations:**
+  - For commands that don't need `.treb/` init (like `networks`), no setup commands are needed — just `pre_setup_hook` to customize foundry.toml
+  - Using `${ENV_VAR}` in RPC endpoints avoids any real HTTP calls, making tests fast and deterministic
+  - The `networks` command output is deterministic (sorted alphabetically by name) so golden files are stable
+---
