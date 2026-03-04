@@ -20,14 +20,14 @@ Execution complete.
     "label": "Counter",
     "address": "<ADDRESS>",
     "type": "SINGLETON",
-    "transactionId": "<HASH>",
+    "transactionId": "tx-<HASH>",
     "deploymentStrategy": {
       "method": "CREATE",
       "initCodeHash": "<HASH>"
     },
     "proxyInfo": null,
     "artifact": {
-      "path": "<PROJECT_ROOT>/out/Counter.sol/Counter.json",
+      "path": "<PROJECT_ROOT>/src/Counter.sol",
       "compilerVersion": "",
       "bytecodeHash": "<HASH>",
       "scriptPath": "script/Deploy.s.sol",
@@ -44,8 +44,8 @@ Execution complete.
 
 --- .treb/transactions.json ---
 {
-  "<HASH>": {
-    "id": "<HASH>",
+  "tx-<HASH>": {
+    "id": "tx-<HASH>",
     "chainId": 31337,
     "hash": "",
     "status": "SIMULATED",

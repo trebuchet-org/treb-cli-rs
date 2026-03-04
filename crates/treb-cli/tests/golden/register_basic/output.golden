@@ -9,15 +9,15 @@ $ treb register --tx-hash <HASH> --network anvil-31337
 
 --- .treb/deployments.json ---
 {
-  "default/31337/Unknown:default": {
-    "id": "default/31337/Unknown:default",
+  "default/31337/Unknown": {
+    "id": "default/31337/Unknown",
     "namespace": "default",
     "chainId": 31337,
     "contractName": "Unknown",
-    "label": "default",
+    "label": "",
     "address": "<ADDRESS>",
     "type": "UNKNOWN",
-    "transactionId": "tx-4674c314",
+    "transactionId": "tx-<HASH>",
     "deploymentStrategy": {
       "method": "CREATE"
     },
