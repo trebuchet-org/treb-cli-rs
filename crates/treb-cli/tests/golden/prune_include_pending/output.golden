@@ -1,0 +1,14 @@
+$ treb prune --dry-run --include-pending
+┌────────────┬──────────────────────┬──────────────────────────────────────────────────────────────────┬──────────┐
+│ ID         ┆ Kind                 ┆ Reason                                                           ┆ Chain ID │
+╞════════════╪══════════════════════╪══════════════════════════════════════════════════════════════════╪══════════╡
+│ dep-1      ┆ BrokenTransactionRef ┆ deployment 'dep-1' references missing transaction 'tx-missing-1' ┆ 1        │
+├╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌┤
+│ dep-2      ┆ BrokenTransactionRef ┆ deployment 'dep-2' references missing transaction 'tx-missing-2' ┆ 42220    │
+├╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌┤
+│ tx-orphan  ┆ BrokenDeploymentRef  ┆ transaction 'tx-orphan' references missing deployment 'dep-gone' ┆ 1        │
+├╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌┤
+│ tx-pending ┆ OrphanedPendingEntry ┆ transaction 'tx-pending' has status Queued and may be orphaned   ┆ 1        │
+└────────────┴──────────────────────┴──────────────────────────────────────────────────────────────────┴──────────┘
+
+4 prune candidate(s) found. Re-run without --dry-run to remove.

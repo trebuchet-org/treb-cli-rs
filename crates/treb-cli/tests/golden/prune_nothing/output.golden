@@ -1,0 +1,2 @@
+$ treb prune --dry-run
+Nothing to prune.

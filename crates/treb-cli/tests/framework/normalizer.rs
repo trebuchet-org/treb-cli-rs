@@ -200,6 +200,18 @@ impl Normalizer for PathNormalizer {
     }
 }
 
+/// Replaces epoch-millisecond timestamps (10–13 digit sequences) that appear
+/// in backup paths like `prune-1709567890123` or `reset-1709567890123`
+/// with the prefix preserved and the number replaced by `<EPOCH>`.
+pub struct EpochNormalizer;
+
+impl Normalizer for EpochNormalizer {
+    fn normalize(&self, input: &str) -> String {
+        let re = Regex::new(r"(prune|reset|migrate|backup)-(\d{10,13})\b").unwrap();
+        re.replace_all(input, "${1}-<EPOCH>").into_owned()
+    }
+}
+
 /// Replaces short hex strings (7–10 chars) that appear in version output
 /// but aren't caught by `GitCommitNormalizer` (which requires specific
 /// prefixes like `@` or `commit `).
