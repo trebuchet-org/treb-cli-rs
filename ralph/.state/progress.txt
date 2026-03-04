@@ -93,3 +93,17 @@ Started: Wed Mar  4 12:57:44 AM CET 2026
   - Hook type `Box<dyn Fn(&TestContext)>` works well for pre/post setup/test callbacks in builder pattern
   - Golden file path convention: `tests/golden/{test.name}/output.golden` — consistent with GoldenFile API
 ---
+
+## 2026-03-04 - P3-US-007
+- Implemented 3 end-to-end smoke tests in `crates/treb-cli/tests/smoke_phase3.rs`
+- `pool_acquire_release_clean_state`: pool acquire/release cycle with EVM state verification (async, multi_thread)
+- `golden_file_round_trip`: treb version output normalized and compared against golden file
+- `integration_test_struct_smoke`: IntegrationTest struct with skip_golden runs treb version end-to-end
+- Created golden file at `crates/treb-cli/tests/golden/golden_file_round_trip/output.golden`
+- Added ShortHexNormalizer for 7-10 char hex hashes not caught by default GitCommitNormalizer
+- Files changed: `crates/treb-cli/tests/smoke_phase3.rs` (new), `crates/treb-cli/tests/golden/golden_file_round_trip/output.golden` (new)
+- **Learnings for future iterations:**
+  - GitCommitNormalizer only matches full 40-char hashes or 7-char after `@`/`commit ` — short hex hashes in version output (rustc commit, forge commit) need a separate ShortHexNormalizer with `\b[0-9a-f]{7,10}\b`
+  - Use `UPDATE_GOLDEN=1 cargo test --test <name> <test_fn>` to generate golden files before committing
+  - `assert_cmd::Assert::get_output()` borrows immutably — capture stdout/stderr to owned Strings before calling `.success()` which consumes self
+---

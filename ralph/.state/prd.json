@@ -123,7 +123,7 @@
         "Golden file(s) are committed to tests/golden/"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]
