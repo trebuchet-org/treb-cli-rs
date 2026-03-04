@@ -8,6 +8,7 @@ Started: Tue Mar  4 2026
 - `PathNormalizer::new(vec![ctx.path().display().to_string()])` normalizes temp dir paths to `<PROJECT_ROOT>`
 - Setup commands with `treb init` create `.treb/` directory before seed_registry can write deployments
 - `UPDATE_GOLDEN=1 cargo test` regenerates golden files from actual output
+- `DeploymentStore::list()` sorts by `(created_at, id)` — secondary sort by ID ensures deterministic order when timestamps are equal
 ---
 
 ## 2026-03-04 - P5-US-001
@@ -83,4 +84,18 @@ Started: Tue Mar  4 2026
   - `treb-registry` is a regular dependency of `treb-cli`, so it's available in integration tests without adding to `[dev-dependencies]`
   - The `seed_registry` helper takes `&Path` (project root) rather than `&TestContext` for flexibility — use `ctx.path()` in hooks
   - `env!("CARGO_MANIFEST_DIR")` resolves to the crate root at compile time, giving a stable path to fixtures
+---
+
+## 2026-03-04 - P6-US-002
+- Created `integration_list.rs` with 9 golden-file integration tests: list_table, list_json, list_empty, list_ls_alias, list_filter_namespace, list_filter_namespace_no_match, list_filter_contract, list_filter_type, list_uninitialized
+- All tests use `IntegrationTest` + `run_integration_test` + `TestContext::new("project")` + `PathNormalizer`
+- Tests needing deployments use `post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))`
+- Fixed non-deterministic sort in `DeploymentStore::list()` by adding secondary sort key (ID) when `created_at` is equal
+- Golden files at `tests/golden/list_*/output.golden`
+- Files changed: `crates/treb-cli/tests/integration_list.rs` (new), `crates/treb-registry/src/store/deployments.rs`, 9 golden files
+- **Learnings for future iterations:**
+  - Fixture deployments all share the same `created_at` timestamp — `DeploymentStore::list()` sorts by `(created_at, id)` for deterministic ordering
+  - The `ls` alias test uses `test(&["ls"])` — identical output to `list`
+  - `list_filter_namespace_no_match` returns "No deployments found." (not an error) because the command succeeds with empty results
+  - All fixture deployments are in namespace "mainnet", chain 42220, so namespace filter "mainnet" returns all 3
 ---
