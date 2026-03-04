@@ -1,0 +1,5 @@
+$ treb fork exit --network mainnet
+Exited fork mode for network 'mainnet'.
+Registry restored from snapshot.
+$ treb fork status
+No active forks.

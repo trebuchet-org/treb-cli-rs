@@ -1,0 +1,2 @@
+$ treb fork enter --network mainnet
+Error: network 'mainnet' is already forked; run `treb fork exit --network mainnet` first

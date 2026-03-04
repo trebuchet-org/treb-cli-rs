@@ -1,7 +1,7 @@
 //! Golden-file integration tests for `treb fork` subcommands.
 //!
-//! Tests exercise status, history, and diff subcommands including table output,
-//! JSON output, filtering, and uninitialized/error state paths.
+//! Tests exercise status, history, diff, enter, and exit subcommands including
+//! table output, JSON output, filtering, error paths, and uninitialized states.
 
 mod framework;
 
@@ -362,6 +362,125 @@ fn fork_diff_not_forked() {
         .setup(&["init"])
         .test(&["fork", "diff", "--network", "mainnet"])
         .expect_err(true)
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── Enter/Exit helpers ─────────────────────────────────────────────────
+
+/// Pre-populate fork state with an active mainnet fork and a snapshot
+/// directory containing registry files so that `fork exit` can restore.
+fn seed_fork_exit(project_root: &std::path::Path) {
+    let treb_dir = project_root.join(".treb");
+    let entry = sample_fork_entry(&treb_dir);
+    let snapshot_dir = std::path::PathBuf::from(&entry.snapshot_dir);
+    std::fs::create_dir_all(&snapshot_dir).unwrap();
+
+    // Write registry files to both locations
+    let deployments = r#"{"Counter_1": {"address": "0xaaa"}}"#;
+    std::fs::write(treb_dir.join(DEPLOYMENTS_FILE), deployments).unwrap();
+    std::fs::write(snapshot_dir.join(DEPLOYMENTS_FILE), deployments).unwrap();
+
+    let transactions = r#"{"tx_1": {"hash": "0x111"}}"#;
+    std::fs::write(treb_dir.join(TRANSACTIONS_FILE), transactions).unwrap();
+    std::fs::write(snapshot_dir.join(TRANSACTIONS_FILE), transactions).unwrap();
+
+    // Insert active fork entry
+    let mut store = ForkStateStore::new(&treb_dir);
+    store.insert_active_fork(entry).unwrap();
+}
+
+// ── fork enter: not initialized ─────────────────────────────────────────
+
+/// `treb fork enter --network mainnet` on an uninitialized project (no .treb/)
+/// should error and mention `treb init`.
+#[test]
+fn fork_enter_not_initialized() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_enter_not_initialized")
+        .pre_setup_hook(|ctx| {
+            std::fs::remove_dir_all(ctx.path().join(".treb")).unwrap();
+        })
+        .test(&["fork", "enter", "--network", "mainnet"])
+        .expect_err(true)
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork enter: already forked ──────────────────────────────────────────
+
+/// `treb fork enter --network mainnet` when mainnet is already forked should
+/// error and suggest running `treb fork exit`.
+#[test]
+fn fork_enter_already_forked() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_enter_already_forked")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_fork_status(ctx.path()))
+        .test(&["fork", "enter", "--network", "mainnet"])
+        .expect_err(true)
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork enter: no RPC URL ──────────────────────────────────────────────
+
+/// `treb fork enter --network mainnet` when mainnet has no RPC endpoint
+/// configured in foundry.toml should error mentioning the missing network.
+#[test]
+fn fork_enter_no_rpc_url() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_enter_no_rpc_url")
+        .setup(&["init"])
+        .test(&["fork", "enter", "--network", "mainnet"])
+        .expect_err(true)
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork exit: not forked ───────────────────────────────────────────────
+
+/// `treb fork exit --network mainnet` when mainnet is not actively forked
+/// should error with a message containing "not actively forked".
+#[test]
+fn fork_exit_not_forked() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_exit_not_forked")
+        .setup(&["init"])
+        .test(&["fork", "exit", "--network", "mainnet"])
+        .expect_err(true)
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork exit: success ──────────────────────────────────────────────────
+
+/// `treb fork exit --network mainnet` with an active fork should succeed,
+/// printing confirmation lines. A subsequent `fork status` should confirm
+/// the fork state no longer contains mainnet.
+#[test]
+fn fork_exit_success() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_exit_success")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_fork_exit(ctx.path()))
+        .test(&["fork", "exit", "--network", "mainnet"])
+        .test(&["fork", "status"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);

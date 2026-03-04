@@ -145,15 +145,7 @@ pub async fn run_enter(
 
     ensure_treb_dir(&treb_dir)?;
 
-    // Resolve upstream RPC URL
-    let fork_url = resolve_fork_url(&cwd, &network, rpc_url_override)?;
-
-    // Get chain_id from upstream
-    let chain_id = fetch_chain_id(&fork_url)
-        .await
-        .with_context(|| format!("failed to get chain ID from RPC URL: {fork_url}"))?;
-
-    // Load fork state and check not already forked
+    // Load fork state and check not already forked (before any HTTP calls)
     let mut store = ForkStateStore::new(&treb_dir);
     store.load().context("failed to load fork state")?;
 
@@ -164,6 +156,14 @@ pub async fn run_enter(
             network
         );
     }
+
+    // Resolve upstream RPC URL
+    let fork_url = resolve_fork_url(&cwd, &network, rpc_url_override)?;
+
+    // Get chain_id from upstream
+    let chain_id = fetch_chain_id(&fork_url)
+        .await
+        .with_context(|| format!("failed to get chain ID from RPC URL: {fork_url}"))?;
 
     // Create snapshot dir and snapshot registry
     let snapshot_dir = treb_dir.join(SNAPSHOT_BASE).join(&network);

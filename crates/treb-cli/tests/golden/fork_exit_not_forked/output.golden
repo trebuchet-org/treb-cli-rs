@@ -1,0 +1,5 @@
+$ treb fork exit --network mainnet
+Error: cannot exit: network 'mainnet' is not actively forked
+
+Caused by:
+    fork error: network is not actively forked: mainnet

@@ -1,98 +1,85 @@
 # Ralph Progress Log
-Started: Wed Mar  4 05:27:51 AM CET 2026
+Started: Wed Mar  4 06:27:19 AM CET 2026
 
 ## Codebase Patterns
-- TestWorkdir auto-creates `.treb/` directory — cannot test "no .treb/" path via golden file framework; use a fixture without `foundry.toml` instead for "uninitialized project" error tests
-- EpochNormalizer in `framework/normalizer.rs` replaces epoch timestamps in backup paths (e.g., `prune-<EPOCH>`, `reset-<EPOCH>`, `bak-<EPOCH>`)
-- The `regex` crate does NOT support look-behind; use capture groups with alternation instead (e.g., `(prune|reset)-(\d{10,13})`)
-- For prune/reset/migrate golden tests, seed registry data via `post_setup_hook` using `Registry::open()` + `insert_deployment()`/`insert_transaction()` directly
-- `compose-project` fixture is empty (just `.gitkeep`) — use for tests that need no foundry.toml
-- To test "no .treb/" error path, use `pre_setup_hook` on `minimal-project` to `remove_dir_all(".treb")` since TestWorkdir auto-creates it
-- ALL JSON output structs must use `#[serde(rename_all = "camelCase")]` — this is the project-wide convention for CLI JSON output
+- TestWorkdir always creates `.treb/` directory; use `pre_setup_hook` with `remove_dir_all` to test uninitialized state
+- Use fixed timestamps (`Utc.with_ymd_and_hms(...)`) in pre-populated test data for deterministic golden files
+- Use `localhost` instead of `127.0.0.1` in test URLs to avoid VersionNormalizer mangling IPs
+- Fork commands that should error on uninitialized projects need `ensure_treb_dir(&treb_dir)?` call
+- Table timestamp format `%Y-%m-%d %H:%M:%S UTC` is partially normalized: date becomes `<DATE>`, time stays fixed
+- JSON timestamp (ISO-8601) is fully normalized to `<TIMESTAMP>` by TimestampNormalizer
+- Chain multiple `.test()` calls in IntegrationTest to verify state after mutations (e.g., exit then status)
+- `with_context()` on errors produces "Caused by:" chains in golden file output — plan for multi-line error formats
+
 ---
 
-## 2026-03-04 - P9-US-001
-- Implemented 7 golden-file integration tests for `treb prune`: prune_dry_run, prune_destructive, prune_nothing, prune_chain_filter, prune_include_pending, prune_json_dry_run, prune_uninitialized
-- Added `EpochNormalizer` to `framework/normalizer.rs` for backup path normalization
+## 2026-03-04 - P10-US-001
+- Implemented 4 golden-file integration tests for `treb fork status`
+- Added `ensure_treb_dir` check to `run_status` in fork.rs for proper error on uninitialized projects
 - Files changed:
-  - `crates/treb-cli/tests/integration_prune.rs` (new)
-  - `crates/treb-cli/tests/framework/normalizer.rs` (added EpochNormalizer)
-  - `crates/treb-cli/tests/golden/prune_*/output.golden` (7 new golden files)
+  - `crates/treb-cli/src/commands/fork.rs` (added ensure_treb_dir to run_status)
+  - `crates/treb-cli/tests/integration_fork.rs` (new: 4 test functions)
+  - `crates/treb-cli/tests/golden/fork_status_no_forks/output.golden` (new)
+  - `crates/treb-cli/tests/golden/fork_status_with_active_fork/output.golden` (new)
+  - `crates/treb-cli/tests/golden/fork_status_json/output.golden` (new)
+  - `crates/treb-cli/tests/golden/fork_status_not_initialized/output.golden` (new)
 - **Learnings for future iterations:**
-  - TestWorkdir always creates `.treb/` — uninitialized tests must use a fixture without `foundry.toml`
-  - `regex` crate doesn't support look-behind — use capture groups with alternation for prefix-aware matching
-  - Registry seeding for prune tests: create clean pair (dep-ok/tx-ok), broken pairs (dep→missing tx, tx→missing dep), and pending tx
-  - `PruneCandidateKind` Display impl gives exact string used in table: BrokenTransactionRef, BrokenDeploymentRef, etc.
+  - TestWorkdir::new always creates `.treb/`, so uninitialized tests need `pre_setup_hook` to remove it
+  - `127.0.0.1` gets matched by VersionNormalizer as semver; use `localhost` to avoid mangling
+  - `read_json_file_or_default` silently returns default on missing file, so fork commands need explicit `ensure_treb_dir` to error properly
+  - Pre-populate fork state using `ForkStateStore::new(&treb_dir).insert_active_fork()` in `post_setup_hook`
+  - Pre-populate fork history using `ForkStateStore::new(&treb_dir).add_history()` — entries are prepended so add oldest first
 ---
 
-## 2026-03-04 - P9-US-002
-- Implemented 6 golden-file integration tests for `treb reset`: reset_full, reset_network_filter, reset_namespace_filter, reset_empty, reset_json, reset_uninitialized
+## 2026-03-04 - P10-US-002
+- Implemented 5 golden-file integration tests for `treb fork history`
+- Added `ensure_treb_dir` check to `run_history` in fork.rs for proper error on uninitialized projects
 - Files changed:
-  - `crates/treb-cli/tests/integration_reset.rs` (new)
-  - `crates/treb-cli/tests/golden/reset_*/output.golden` (6 new golden files)
+  - `crates/treb-cli/src/commands/fork.rs` (added ensure_treb_dir to run_history)
+  - `crates/treb-cli/tests/integration_fork.rs` (added 5 history test functions + seed_fork_history helper)
+  - `crates/treb-cli/tests/golden/fork_history_empty/output.golden` (new)
+  - `crates/treb-cli/tests/golden/fork_history_with_entries/output.golden` (new)
+  - `crates/treb-cli/tests/golden/fork_history_network_filter/output.golden` (new)
+  - `crates/treb-cli/tests/golden/fork_history_json/output.golden` (new)
+  - `crates/treb-cli/tests/golden/fork_history_not_initialized/output.golden` (new)
 - **Learnings for future iterations:**
-  - Reset's `--namespace` flag only filters deployments; transactions, safe transactions, and governor proposals are only filterable by `--network` (chain ID)
-  - `SafeTransaction` and `GovernorProposal` require full struct construction including `transactions: Vec<SafeTxData>` and `confirmations: Vec<Confirmation>` — use minimal defaults
-  - `ResetResult` JSON struct uses snake_case fields (no `rename_all = "camelCase"`) unlike domain types
-  - Re-used same fixture pattern as prune: `seed_reset_registry()` via `post_setup_hook`, `PathNormalizer` + `EpochNormalizer` for backup paths
+  - `add_history()` prepends entries (insert at index 0), so add oldest first for correct most-recent-first ordering
+  - History JSON omits `details` field entirely when None thanks to `skip_serializing_if`, while table shows "-"
+  - History tests follow same pattern as status: init → post_setup_hook to seed data → run command
 ---
 
-## 2026-03-04 - P9-US-003
-- Implemented 8 golden-file integration tests for `treb migrate`: migrate_config_dry_run_v1, migrate_config_v1_to_v2, migrate_config_already_v2, migrate_config_json_already_v2, migrate_config_json_dry_run, migrate_config_no_treb_toml, migrate_registry_up_to_date, migrate_registry_dry_run_up_to_date
-- Updated EpochNormalizer regex to also handle `bak-<EPOCH>` prefix (used by config migration backup `treb.toml.bak-<timestamp>`)
+## 2026-03-04 - P10-US-003
+- Implemented 4 golden-file integration tests for `treb fork diff`
+- Tests cover: no-changes, with-changes (table output), JSON output, not-forked error
 - Files changed:
-  - `crates/treb-cli/tests/integration_migrate.rs` (new)
-  - `crates/treb-cli/tests/framework/normalizer.rs` (added `bak` to EpochNormalizer alternation)
-  - `crates/treb-cli/tests/golden/migrate_*/output.golden` (8 new golden files)
+  - `crates/treb-cli/tests/integration_fork.rs` (added 4 diff test functions + 2 seed helpers)
+  - `crates/treb-cli/tests/golden/fork_diff_no_changes/output.golden` (new)
+  - `crates/treb-cli/tests/golden/fork_diff_with_changes/output.golden` (new)
+  - `crates/treb-cli/tests/golden/fork_diff_json/output.golden` (new)
+  - `crates/treb-cli/tests/golden/fork_diff_not_forked/output.golden` (new)
 - **Learnings for future iterations:**
-  - Config migration tests don't need registry seeding — use `post_setup_hook` to write v1/v2 `treb.toml` files directly
-  - Config backup path format is `treb.toml.bak-<millis>` (not `migrate-<millis>`); EpochNormalizer needed `bak` prefix support
-  - `migrate registry` on a freshly-initialized project always says "up to date" since `treb init` creates registry at REGISTRY_VERSION
-  - The `--dry-run` flag for `migrate registry` only differs from non-dry-run when registry version < REGISTRY_VERSION; both show same "up to date" message otherwise
-  - `serialize_treb_config_v2` includes an empty `[fork]` section in output even when fork config is default
+  - Diff tests need both fork state AND actual registry files (deployments.json, transactions.json) in treb_dir and snapshot_dir
+  - `run_diff` does NOT call `ensure_treb_dir` — it just errors if the network is not in fork mode (different from status/history)
+  - Use `seed_fork_diff_*` helpers that create snapshot dirs, write matching/differing registry files, and insert fork entry
+  - Keys in diff output are sorted (BTreeSet) — predictable order in golden files
 ---
 
-## 2026-03-04 - P9-US-004
-- Implemented 6 golden-file integration tests for `treb verify`: verify_already_verified, verify_all_none_unverified, verify_json_already_verified, verify_error_unknown_verifier, verify_uninitialized, verify_no_foundry_project
+## 2026-03-04 - P10-US-004
+- Implemented 5 golden-file integration tests for `treb fork enter` error paths and `treb fork exit` (errors + success)
+- Reordered `run_enter` to check already-forked state before making HTTP calls (resolve_fork_url, fetch_chain_id)
+- Tests cover: enter not-initialized, enter already-forked, enter no-rpc-url, exit not-forked, exit success
+- Exit success test chains two test commands (`fork exit` then `fork status`) to verify fork state cleanup
 - Files changed:
-  - `crates/treb-cli/tests/integration_verify.rs` (new)
-  - `crates/treb-cli/tests/golden/verify_*/output.golden` (6 new golden files)
+  - `crates/treb-cli/src/commands/fork.rs` (reordered run_enter: already-forked check before HTTP calls)
+  - `crates/treb-cli/tests/integration_fork.rs` (added seed_fork_exit helper + 5 test functions)
+  - `crates/treb-cli/tests/golden/fork_enter_not_initialized/output.golden` (new)
+  - `crates/treb-cli/tests/golden/fork_enter_already_forked/output.golden` (new)
+  - `crates/treb-cli/tests/golden/fork_enter_no_rpc_url/output.golden` (new)
+  - `crates/treb-cli/tests/golden/fork_exit_not_forked/output.golden` (new)
+  - `crates/treb-cli/tests/golden/fork_exit_success/output.golden` (new)
 - **Learnings for future iterations:**
-  - Verify command validates verifier name BEFORE checking foundry.toml/.treb — so unknown verifier errors fire even on uninitialized projects
-  - For "no .treb/" error path, use `pre_setup_hook` to delete `.treb/` directory (which TestWorkdir auto-creates) on `minimal-project` fixture
-  - `compose-project` fixture (no foundry.toml) triggers "no foundry.toml" error path
-  - Already-verified single deployment: text mode outputs to stderr only, JSON mode outputs to stdout only — no cross-contamination
-  - `VerifyOutputJson` uses `#[serde(rename_all = "camelCase")]` — field names: deploymentId, contractName, chainId, explorerUrl, verifiedAt
-  - Verify's `--all` batch path with empty/all-verified registry prints "No unverified deployments found." to stderr
----
-
-## 2026-03-04 - P9-US-005
-- Implemented 5 golden-file integration tests for `treb sync`: sync_no_safe_txs, sync_no_safe_txs_network_filter, sync_json_empty, sync_uninitialized, sync_no_foundry_project
-- Files changed:
-  - `crates/treb-cli/tests/integration_sync.rs` (new)
-  - `crates/treb-cli/tests/golden/sync_*/output.golden` (5 new golden files)
-- **Learnings for future iterations:**
-  - Sync command tests are simpler than other commands — no registry seeding needed for empty-state paths
-  - Sync's `SyncOutputJson` now uses camelCase fields (synced, updated, newlyExecuted, removed, errors) — fixed in P9-US-006
-  - Sync's `--network` filter accepts both numeric chain IDs and named chains (e.g., "mainnet") via alloy-chains
-  - Error messages differ per command: sync uses `anyhow::bail!()` directly while verify has custom error formatting
----
-
-## 2026-03-04 - P9-US-006
-- Reviewed all golden files from P9-US-001 through P9-US-005 against Go CLI output
-- Fixed JSON field naming inconsistency: added `#[serde(rename_all = "camelCase")]` to `ResetResult`, `SyncOutputJson`, and `PruneResult` structs
-- Regenerated golden files `reset_json/output.golden` and `sync_json_empty/output.golden` with camelCase field names
-- Updated unit test `sync_output_json_serialization` and integration test `sync_with_empty_registry_succeeds` for camelCase
-- Files changed:
-  - `crates/treb-cli/src/commands/prune.rs` (added camelCase to PruneResult)
-  - `crates/treb-cli/src/commands/reset.rs` (added camelCase to ResetResult)
-  - `crates/treb-cli/src/commands/sync.rs` (added camelCase to SyncOutputJson, updated unit test)
-  - `crates/treb-cli/tests/golden/reset_json/output.golden` (regenerated)
-  - `crates/treb-cli/tests/golden/sync_json_empty/output.golden` (regenerated)
-  - `crates/treb-cli/tests/safe_integration.rs` (updated field name assertion)
-- **Learnings for future iterations:**
-  - ALL JSON output structs in the CLI should use `#[serde(rename_all = "camelCase")]` for consistency
-  - When adding new `--json` output structs, always check existing patterns for field naming convention
-  - The Go CLI uses fundamentally different output format (emojis, colors, bullet points) — Rust CLI uses clean tables/text; "parity" means functional equivalence, not visual identity
-  - EpochNormalizer is properly shared in `framework/normalizer.rs` and used by prune, reset, and migrate test files
+  - `run_enter` should check local state (already-forked) before making network calls — both for testability and efficiency
+  - `run_exit` with `.with_context()` produces multi-line error output ("Caused by:" chain) in golden files
+  - Chain multiple `.test()` commands to verify state after mutations (e.g., `fork exit` then `fork status`)
+  - `seed_fork_exit` needs snapshot dir with registry files for `restore_registry` to succeed
 ---
