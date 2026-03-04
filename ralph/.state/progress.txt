@@ -31,3 +31,17 @@ Started: Tue Mar  4 02:00:00 AM CET 2026
   - StringUtils uses `calldata` params in external library functions — compiler handles storage→calldata conversion via delegatecall
   - MessageStorageV07 uses pragma =0.7.6 which requires foundry's multi-compiler auto-detection (no solc_version in foundry.toml)
 ---
+
+## 2026-03-04 - P4-US-003
+- Created minimal vendored library stubs for forge-std and openzeppelin-contracts
+- lib/forge-std/src/Script.sol: Vm interface (startBroadcast/stopBroadcast), console library, Script abstract contract
+- lib/openzeppelin-contracts/contracts/proxy/: ERC1967Proxy, TransparentUpgradeableProxy, BeaconProxy, UpgradeableBeacon (constructor-only stubs)
+- script/Deploy.s.sol: deploys Counter using forge-std Script base, pragma =0.8.30
+- fixture_compile.rs: `#[ignore]` test that runs `forge build` on the project fixture
+- Verified `forge build` succeeds on the fixture (all 7 source contracts + Deploy script compile)
+- Files changed: `crates/treb-cli/tests/fixtures/project/lib/` (5 new .sol stubs), `crates/treb-cli/tests/fixtures/project/script/Deploy.s.sol`, `crates/treb-cli/tests/fixture_compile.rs`
+- **Learnings for future iterations:**
+  - Library stubs from gen-deploy-project fixture can be reused — same pattern of constructor-only contracts
+  - The `#[ignore]` attribute on tests is the right approach for tests requiring external tools (forge)
+  - `forge build` auto-detects multi-compiler versions from pragma ranges — no explicit config needed
+---
