@@ -1,0 +1,5 @@
+$ treb migrate config --dry-run --json
+{
+  "dryRun": true,
+  "v2Content": "[accounts.deployer]\ntype = \"private_key\"\naddress = \"0xDeployerAddr\"\n\n[namespace.default.senders]\ndeployer = \"deployer\"\n\n[fork]\n"
+}

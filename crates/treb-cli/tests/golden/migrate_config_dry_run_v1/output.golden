@@ -1,0 +1,10 @@
+$ treb migrate config --dry-run
+[accounts.deployer]
+type = "private_key"
+address = "0xDeployerAddr"
+
+[namespace.default.senders]
+deployer = "deployer"
+
+[fork]
+

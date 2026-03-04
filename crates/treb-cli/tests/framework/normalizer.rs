@@ -207,7 +207,7 @@ pub struct EpochNormalizer;
 
 impl Normalizer for EpochNormalizer {
     fn normalize(&self, input: &str) -> String {
-        let re = Regex::new(r"(prune|reset|migrate|backup)-(\d{10,13})\b").unwrap();
+        let re = Regex::new(r"(prune|reset|migrate|backup|bak)-(\d{10,13})\b").unwrap();
         re.replace_all(input, "${1}-<EPOCH>").into_owned()
     }
 }

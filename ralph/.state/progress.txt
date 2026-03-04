@@ -3,7 +3,7 @@ Started: Wed Mar  4 05:27:51 AM CET 2026
 
 ## Codebase Patterns
 - TestWorkdir auto-creates `.treb/` directory — cannot test "no .treb/" path via golden file framework; use a fixture without `foundry.toml` instead for "uninitialized project" error tests
-- EpochNormalizer in `framework/normalizer.rs` replaces epoch timestamps in backup paths (e.g., `prune-<EPOCH>`, `reset-<EPOCH>`)
+- EpochNormalizer in `framework/normalizer.rs` replaces epoch timestamps in backup paths (e.g., `prune-<EPOCH>`, `reset-<EPOCH>`, `bak-<EPOCH>`)
 - The `regex` crate does NOT support look-behind; use capture groups with alternation instead (e.g., `(prune|reset)-(\d{10,13})`)
 - For prune/reset/migrate golden tests, seed registry data via `post_setup_hook` using `Registry::open()` + `insert_deployment()`/`insert_transaction()` directly
 - `compose-project` fixture is empty (just `.gitkeep`) — use for tests that need no foundry.toml
@@ -21,4 +21,31 @@ Started: Wed Mar  4 05:27:51 AM CET 2026
   - `regex` crate doesn't support look-behind — use capture groups with alternation for prefix-aware matching
   - Registry seeding for prune tests: create clean pair (dep-ok/tx-ok), broken pairs (dep→missing tx, tx→missing dep), and pending tx
   - `PruneCandidateKind` Display impl gives exact string used in table: BrokenTransactionRef, BrokenDeploymentRef, etc.
+---
+
+## 2026-03-04 - P9-US-002
+- Implemented 6 golden-file integration tests for `treb reset`: reset_full, reset_network_filter, reset_namespace_filter, reset_empty, reset_json, reset_uninitialized
+- Files changed:
+  - `crates/treb-cli/tests/integration_reset.rs` (new)
+  - `crates/treb-cli/tests/golden/reset_*/output.golden` (6 new golden files)
+- **Learnings for future iterations:**
+  - Reset's `--namespace` flag only filters deployments; transactions, safe transactions, and governor proposals are only filterable by `--network` (chain ID)
+  - `SafeTransaction` and `GovernorProposal` require full struct construction including `transactions: Vec<SafeTxData>` and `confirmations: Vec<Confirmation>` — use minimal defaults
+  - `ResetResult` JSON struct uses snake_case fields (no `rename_all = "camelCase"`) unlike domain types
+  - Re-used same fixture pattern as prune: `seed_reset_registry()` via `post_setup_hook`, `PathNormalizer` + `EpochNormalizer` for backup paths
+---
+
+## 2026-03-04 - P9-US-003
+- Implemented 8 golden-file integration tests for `treb migrate`: migrate_config_dry_run_v1, migrate_config_v1_to_v2, migrate_config_already_v2, migrate_config_json_already_v2, migrate_config_json_dry_run, migrate_config_no_treb_toml, migrate_registry_up_to_date, migrate_registry_dry_run_up_to_date
+- Updated EpochNormalizer regex to also handle `bak-<EPOCH>` prefix (used by config migration backup `treb.toml.bak-<timestamp>`)
+- Files changed:
+  - `crates/treb-cli/tests/integration_migrate.rs` (new)
+  - `crates/treb-cli/tests/framework/normalizer.rs` (added `bak` to EpochNormalizer alternation)
+  - `crates/treb-cli/tests/golden/migrate_*/output.golden` (8 new golden files)
+- **Learnings for future iterations:**
+  - Config migration tests don't need registry seeding — use `post_setup_hook` to write v1/v2 `treb.toml` files directly
+  - Config backup path format is `treb.toml.bak-<millis>` (not `migrate-<millis>`); EpochNormalizer needed `bak` prefix support
+  - `migrate registry` on a freshly-initialized project always says "up to date" since `treb init` creates registry at REGISTRY_VERSION
+  - The `--dry-run` flag for `migrate registry` only differs from non-dry-run when registry version < REGISTRY_VERSION; both show same "up to date" message otherwise
+  - `serialize_treb_config_v2` includes an empty `[fork]` section in output even when fork config is default
 ---

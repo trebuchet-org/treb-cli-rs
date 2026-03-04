@@ -1,0 +1,2 @@
+$ treb migrate config
+Error: no treb.toml found in <PROJECT_ROOT>

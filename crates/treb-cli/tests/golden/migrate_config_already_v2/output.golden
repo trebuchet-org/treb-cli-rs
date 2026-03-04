@@ -1,0 +1,2 @@
+$ treb migrate config
+treb.toml is already v2 format — nothing to migrate.
