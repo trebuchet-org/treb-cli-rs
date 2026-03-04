@@ -1,0 +1,2 @@
+=== cmd 0: [gen-deploy Counter --strategy create2 --proxy uups --output script/DeployCounter_create2_uups.s.sol] ===
+Generated deploy script: script/DeployCounter_create2_uups.s.sol

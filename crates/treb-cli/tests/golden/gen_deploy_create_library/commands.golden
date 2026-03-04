@@ -1,0 +1,2 @@
+=== cmd 0: [gen-deploy MathLib --strategy create --output script/DeployMathLib.s.sol] ===
+Generated deploy script: script/DeployMathLib.s.sol

@@ -10,10 +10,3 @@ Config Source:  treb.toml (v2)
 ╞═══════╪═════════════╪═════════╡
 │ anvil ┆ private_key ┆         │
 └───────┴─────────────┴─────────┘
-
-
---- .treb/config.local.json ---
-{
-  "namespace": "default",
-  "network": "mainnet"
-}

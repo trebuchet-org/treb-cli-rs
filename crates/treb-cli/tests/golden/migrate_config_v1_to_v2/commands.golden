@@ -1,0 +1,4 @@
+=== cmd 0: [migrate config] ===
+Migration complete.
+Backup written to: <PROJECT_ROOT>/treb.toml.bak-<UNIX_TIME>
+treb.toml updated to v2 format.

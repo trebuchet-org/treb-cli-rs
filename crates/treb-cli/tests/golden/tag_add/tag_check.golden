@@ -1,0 +1,6 @@
+{
+  "deploymentId": "mainnet/42220/FPMM:v<VERSION>",
+  "tags": [
+    "v3-release"
+  ]
+}
