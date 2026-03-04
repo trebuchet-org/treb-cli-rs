@@ -1,0 +1,16 @@
+$ treb init
+Initialized treb project at <PROJECT_ROOT>/.treb
+Run `treb config show` to view your configuration.
+
+--- .treb/config.local.json ---
+{
+  "namespace": "default",
+  "network": ""
+}
+
+--- .treb/registry.json ---
+{
+  "version": 2,
+  "createdAt": "<TIMESTAMP>",
+  "updatedAt": "<TIMESTAMP>"
+}
