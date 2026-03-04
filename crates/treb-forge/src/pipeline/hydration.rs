@@ -124,7 +124,7 @@ pub fn hydrate_deployment(
         label: extracted.label.clone(),
         address: extracted.address.to_checksum(None),
         deployment_type,
-        transaction_id: format!("{:#x}", extracted.transaction_id),
+        transaction_id: format!("tx-{:#x}", extracted.transaction_id),
         deployment_strategy,
         proxy_info,
         artifact,
@@ -151,7 +151,7 @@ pub fn hydrate_transactions(
         .iter()
         .flat_map(|event| &event.transactions)
         .map(|sim_tx| {
-            let tx_id_hex = format!("{:#x}", sim_tx.transactionId);
+            let tx_id_hex = format!("tx-{:#x}", sim_tx.transactionId);
 
             // Find deployment IDs that belong to this transaction.
             let linked_deployment_ids: Vec<String> = hydrated_deployments
@@ -194,7 +194,7 @@ pub fn hydrate_safe_transactions(
             let tx_ids: Vec<String> = event
                 .transactionIds
                 .iter()
-                .map(|id| format!("{:#x}", id))
+                .map(|id| format!("tx-{:#x}", id))
                 .collect();
 
             SafeTransaction {
@@ -266,7 +266,7 @@ pub fn hydrate_governor_proposals(
             let tx_ids: Vec<String> = event
                 .transactionIds
                 .iter()
-                .map(|id| format!("{:#x}", id))
+                .map(|id| format!("tx-{:#x}", id))
                 .collect();
 
             GovernorProposal {
@@ -388,10 +388,10 @@ mod tests {
         // Type is Singleton (no proxy)
         assert_eq!(deployment.deployment_type, DeploymentType::Singleton);
 
-        // Transaction ID is 0x-prefixed hex
+        // Transaction ID is tx-0x-prefixed hex
         assert_eq!(
             deployment.transaction_id,
-            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            "tx-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         );
 
         // Strategy fields
@@ -595,7 +595,7 @@ mod tests {
     fn hydrate_single_transaction_with_two_deployments() {
         let ctx = test_context();
         let tx_id = b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-        let tx_id_hex = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let tx_id_hex = "tx-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
         let events = vec![TransactionSimulated {
             transactions: vec![SimulatedTransaction {
@@ -677,15 +677,15 @@ mod tests {
         assert!(stx.executed_at.is_none());
         assert!(stx.execution_tx_hash.is_empty());
 
-        // Transaction IDs should be hex strings
+        // Transaction IDs should be tx-0x-prefixed hex strings
         assert_eq!(stx.transaction_ids.len(), 2);
         assert_eq!(
             stx.transaction_ids[0],
-            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            "tx-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         );
         assert_eq!(
             stx.transaction_ids[1],
-            "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            "tx-0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
         );
     }
 
@@ -753,8 +753,8 @@ mod tests {
             nonce: 0,
             transactions: Vec::new(),
             transaction_ids: vec![
-                format!("{:#x}", tx_id_1),
-                format!("{:#x}", tx_id_2),
+                format!("tx-{:#x}", tx_id_1),
+                format!("tx-{:#x}", tx_id_2),
             ],
             proposed_by: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
             proposed_at: chrono::Utc::now(),
@@ -883,15 +883,15 @@ mod tests {
         assert!(p.executed_at.is_none());
         assert!(p.execution_tx_hash.is_empty());
 
-        // Transaction IDs should be hex strings
+        // Transaction IDs should be tx-0x-prefixed hex strings
         assert_eq!(p.transaction_ids.len(), 2);
         assert_eq!(
             p.transaction_ids[0],
-            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            "tx-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         );
         assert_eq!(
             p.transaction_ids[1],
-            "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            "tx-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         );
     }
 
