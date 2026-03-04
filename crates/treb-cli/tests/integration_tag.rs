@@ -7,6 +7,21 @@ use framework::context::TestContext;
 use framework::integration_test::{run_integration_test, IntegrationTest};
 use framework::normalizer::PathNormalizer;
 
+/// Seed the registry and pre-add a "v3-release" tag to the FPMM:v3.0.0 deployment.
+/// Used by remove and duplicate-add tests that need a tag already present.
+fn seed_registry_with_tag(project_root: &std::path::Path) {
+    helpers::seed_registry(project_root);
+    let dep_path = project_root.join(".treb/deployments.json");
+    let data = std::fs::read_to_string(&dep_path).unwrap();
+    let mut map: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(&data).unwrap();
+    let dep = map.get_mut("mainnet/42220/FPMM:v3.0.0").unwrap();
+    dep.as_object_mut()
+        .unwrap()
+        .insert("tags".to_string(), serde_json::json!(["v3-release"]));
+    std::fs::write(&dep_path, serde_json::to_string_pretty(&map).unwrap()).unwrap();
+}
+
 /// Show tags on a deployment with no tags displays "No tags".
 #[test]
 fn tag_show_empty() {
@@ -99,6 +114,97 @@ fn tag_add_then_show() {
         .post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))
         .test(&["tag", "--add", "v3-release", "mainnet/42220/FPMM:v3.0.0"])
         .test(&["tag", "mainnet/42220/FPMM:v3.0.0"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// Removing an existing tag displays confirmation.
+#[test]
+fn tag_remove() {
+    let ctx = TestContext::new("project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("tag_remove")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_registry_with_tag(ctx.path()))
+        .test(&[
+            "tag", "--remove", "v3-release",
+            "mainnet/42220/FPMM:v3.0.0",
+        ])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// Removing an existing tag with --json produces valid JSON with action "remove".
+#[test]
+fn tag_remove_json() {
+    let ctx = TestContext::new("project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("tag_remove_json")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_registry_with_tag(ctx.path()))
+        .test(&[
+            "tag", "--json", "--remove", "v3-release",
+            "mainnet/42220/FPMM:v3.0.0",
+        ])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// Adding a tag that already exists produces an error containing "already exists".
+#[test]
+fn tag_add_duplicate_error() {
+    let ctx = TestContext::new("project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("tag_add_duplicate_error")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_registry_with_tag(ctx.path()))
+        .test(&[
+            "tag", "--add", "v3-release",
+            "mainnet/42220/FPMM:v3.0.0",
+        ])
+        .expect_err(true)
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// Removing a nonexistent tag produces an error containing "not found".
+#[test]
+fn tag_remove_nonexistent_error() {
+    let ctx = TestContext::new("project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("tag_remove_nonexistent_error")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))
+        .test(&[
+            "tag", "--remove", "v3-release",
+            "mainnet/42220/FPMM:v3.0.0",
+        ])
+        .expect_err(true)
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// Running tag on an uninitialized project produces an error mentioning treb init.
+#[test]
+fn tag_uninitialized() {
+    let ctx = TestContext::new("project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("tag_uninitialized")
+        .pre_setup_hook(|ctx| {
+            std::fs::remove_dir_all(ctx.treb_dir()).ok();
+        })
+        .test(&["tag", "mainnet/42220/FPMM:v3.0.0"])
+        .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);

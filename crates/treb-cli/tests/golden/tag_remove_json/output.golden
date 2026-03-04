@@ -1,0 +1,7 @@
+$ treb tag --json --remove v3-release mainnet/42220/FPMM:v<VERSION>
+{
+  "deploymentId": "mainnet/42220/FPMM:v<VERSION>",
+  "action": "remove",
+  "tags": [],
+  "tag": "v3-release"
+}

@@ -1,0 +1,2 @@
+$ treb tag --add v3-release mainnet/42220/FPMM:v<VERSION>
+Error: tag 'v3-release' already exists on deployment 'mainnet/42220/FPMM:v<VERSION>'

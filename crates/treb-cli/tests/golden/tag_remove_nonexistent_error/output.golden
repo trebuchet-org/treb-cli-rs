@@ -1,0 +1,2 @@
+$ treb tag --remove v3-release mainnet/42220/FPMM:v<VERSION>
+Error: tag 'v3-release' not found on deployment 'mainnet/42220/FPMM:v<VERSION>'
