@@ -176,6 +176,57 @@ impl Normalizer for ForgeWarningNormalizer {
     }
 }
 
+/// Replaces hashes only when preceded by specific prefixes (Tx, Hash, Init Code Hash,
+/// Bytecode Hash). Unlike the broad `HashNormalizer`, this avoids matching random
+/// 64-hex strings in output and preserves the `0x` prefix in the replacement.
+pub struct TargetedHashNormalizer;
+
+impl Normalizer for TargetedHashNormalizer {
+    fn normalize(&self, input: &str) -> String {
+        let re = Regex::new(
+            r"(Tx|Hash|Init Code Hash|Bytecode Hash): 0x[a-fA-F0-9]{64}",
+        )
+        .unwrap();
+        re.replace_all(input, "${1}: 0x<HASH>").into_owned()
+    }
+}
+
+/// Replaces git commit hashes only when preceded by specific labels.
+/// `Git Commit: <40-hex>` → `Git Commit: <GIT_COMMIT>` and
+/// `commit: <7-hex>` → `commit: <COMMIT>`.
+pub struct TargetedGitCommitNormalizer;
+
+impl Normalizer for TargetedGitCommitNormalizer {
+    fn normalize(&self, input: &str) -> String {
+        let full = Regex::new(r"Git Commit: [a-f0-9]{40}").unwrap();
+        let result = full.replace_all(input, "Git Commit: <GIT_COMMIT>");
+
+        let short = Regex::new(r"commit: [a-f0-9]{7}").unwrap();
+        short.replace_all(&result, "commit: <COMMIT>").into_owned()
+    }
+}
+
+/// Removes terminal line-clear escape sequences (`\x1b[2K`) optionally preceded
+/// by a carriage return.
+pub struct LineClearArtifactNormalizer;
+
+impl Normalizer for LineClearArtifactNormalizer {
+    fn normalize(&self, input: &str) -> String {
+        let re = Regex::new(r"\r?\x1b\[2K").unwrap();
+        re.replace_all(input, "").into_owned()
+    }
+}
+
+/// Removes entire `level=DEBUG` log lines from output.
+pub struct DebugNormalizer;
+
+impl Normalizer for DebugNormalizer {
+    fn normalize(&self, input: &str) -> String {
+        let re = Regex::new(r"(?mi)^level=DEBUG.*\n?").unwrap();
+        re.replace_all(input, "").into_owned()
+    }
+}
+
 /// Replaces absolute paths with `<PROJECT_ROOT>` for stable golden files.
 /// Paths are sorted longest-first to avoid partial matches.
 pub struct PathNormalizer {
@@ -383,6 +434,100 @@ mod tests {
             result,
             "Deployed to <ADDRESS> at <TIMESTAMP> v<VERSION>"
         );
+    }
+
+    // --- TargetedHashNormalizer ---
+
+    #[test]
+    fn targeted_hash_normalizer_replaces_prefixed_hashes() {
+        let n = TargetedHashNormalizer;
+        let hash = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+
+        assert_eq!(
+            n.normalize(&format!("Tx: {hash} confirmed")),
+            "Tx: 0x<HASH> confirmed"
+        );
+        assert_eq!(
+            n.normalize(&format!("Hash: {hash}")),
+            "Hash: 0x<HASH>"
+        );
+        assert_eq!(
+            n.normalize(&format!("Init Code Hash: {hash}")),
+            "Init Code Hash: 0x<HASH>"
+        );
+        assert_eq!(
+            n.normalize(&format!("Bytecode Hash: {hash}")),
+            "Bytecode Hash: 0x<HASH>"
+        );
+    }
+
+    #[test]
+    fn targeted_hash_normalizer_ignores_unprefixed_hashes() {
+        let n = TargetedHashNormalizer;
+        let hash = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        let input = format!("random {hash} value");
+        assert_eq!(n.normalize(&input), input);
+    }
+
+    // --- TargetedGitCommitNormalizer ---
+
+    #[test]
+    fn targeted_git_commit_normalizer_replaces_labeled_commits() {
+        let n = TargetedGitCommitNormalizer;
+
+        assert_eq!(
+            n.normalize("Git Commit: abcdef1234567890abcdef1234567890abcdef12"),
+            "Git Commit: <GIT_COMMIT>"
+        );
+        assert_eq!(
+            n.normalize("commit: abcdef1"),
+            "commit: <COMMIT>"
+        );
+    }
+
+    #[test]
+    fn targeted_git_commit_normalizer_ignores_unlabeled() {
+        let n = TargetedGitCommitNormalizer;
+        let input = "hash abcdef1234567890abcdef1234567890abcdef12 end";
+        assert_eq!(n.normalize(input), input);
+    }
+
+    // --- LineClearArtifactNormalizer ---
+
+    #[test]
+    fn line_clear_artifact_normalizer_removes_escape() {
+        let n = LineClearArtifactNormalizer;
+        assert_eq!(
+            n.normalize("before\x1b[2Kafter"),
+            "beforeafter"
+        );
+        assert_eq!(
+            n.normalize("before\r\x1b[2Kafter"),
+            "beforeafter"
+        );
+    }
+
+    #[test]
+    fn line_clear_artifact_normalizer_no_match() {
+        let n = LineClearArtifactNormalizer;
+        let input = "no escape sequences here";
+        assert_eq!(n.normalize(input), input);
+    }
+
+    // --- DebugNormalizer ---
+
+    #[test]
+    fn debug_normalizer_removes_debug_lines() {
+        let n = DebugNormalizer;
+        let input = "info line\nlevel=DEBUG some debug info\nother line\n";
+        assert_eq!(n.normalize(input), "info line\nother line\n");
+    }
+
+    #[test]
+    fn debug_normalizer_no_match() {
+        let n = DebugNormalizer;
+        let input = "level=INFO this is fine\nlevel=WARN also fine\n";
+        assert_eq!(n.normalize(input), input);
     }
 
     #[test]

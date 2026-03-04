@@ -1,90 +1,142 @@
 {
   "project": "treb-cli-rs",
-  "branchName": "ralph/phase-01-repository-scaffold-and-workspace-layout",
-  "description": "Bootstrap the Rust workspace for treb-cli-rs with foundry dependency chain, async runtime, error handling, CLI skeleton, and CI pipeline",
+  "branchName": "ralph/phase-05-integration-test-framework-golden-files-normalizers-and-integrationtest-dsl",
+  "description": "Align the Rust integration test framework's golden file pipeline, normalizers, and IntegrationTest DSL with the Go CLI's exact behavior so that golden files can serve as cross-CLI references.",
   "userStories": [
     {
-      "id": "P1-US-001",
-      "title": "Cargo Workspace and Toolchain Configuration",
-      "description": "As a developer, I want a properly configured Cargo workspace with two initial crates (treb-cli binary and treb-core library) and all toolchain/linting configuration so that subsequent phases build on a solid foundation.",
+      "id": "P5-US-001",
+      "title": "Add Missing Normalizers Part 1: TargetedHash, TargetedGitCommit, LineClearArtifact, Debug",
+      "description": "As a test author, I want TargetedHashNormalizer, TargetedGitCommitNormalizer, LineClearArtifactNormalizer, and DebugNormalizer structs so that the Rust framework has all targeted normalizers from Go's normalizers.go.",
       "acceptanceCriteria": [
-        "cargo build succeeds from workspace root",
-        "cargo run -p treb-cli prints output and exits 0",
-        "cargo fmt --check passes",
-        "cargo clippy --workspace passes with no warnings",
-        "rust-toolchain.toml specifies a nightly toolchain compatible with edition 2024",
-        "All config files (rustfmt.toml, clippy.toml, .gitignore) exist at workspace root"
+        "Each normalizer struct implements the Normalizer trait with unit tests covering match and no-match cases",
+        "TargetedHashNormalizer only matches hashes after Tx:, Hash:, Init Code Hash:, or Bytecode Hash: prefixes using regex `(Tx|Hash|Init Code Hash|Bytecode Hash): 0x[a-fA-F0-9]{64}` and replaces with `$prefix: 0x<HASH>`",
+        "TargetedGitCommitNormalizer matches `Git Commit: [a-f0-9]{40}` → `Git Commit: <GIT_COMMIT>` and `commit: [a-f0-9]{7}` → `commit: <COMMIT>`",
+        "LineClearArtifactNormalizer removes literal `\\r?\\x1b\\[2K` escape artifacts; DebugNormalizer removes entire `level=DEBUG` log lines via `(?mi)^level=DEBUG.*\\n`",
+        "cargo test and cargo clippy pass"
       ],
       "priority": 1,
       "passes": false,
       "notes": ""
     },
     {
-      "id": "P1-US-002",
-      "title": "Foundry Crate Integration and Alloy Re-exports",
-      "description": "As a developer, I want foundry-config and foundry-common as git dependencies with alloy primitive re-exports in treb-core so that downstream crates use foundry-aligned types without version conflicts.",
+      "id": "P5-US-002",
+      "title": "Add Missing Normalizers Part 2: ForgeOutput, Label, LegacySolidity",
+      "description": "As a test author, I want ForgeOutputNormalizer, LabelNormalizer, and LegacySolidityNormalizer structs so that all remaining normalizers from Go's normalizers.go have Rust counterparts.",
       "acceptanceCriteria": [
-        "cargo check --workspace succeeds with foundry crates resolving",
-        "treb_core::primitives::Address, treb_core::primitives::B256, and treb_core::primitives::U256 are importable and usable",
-        "A simple test in treb-core constructs an Address::ZERO and asserts it is zero",
-        "foundry_config::Config::load() is callable (import compiles)",
-        "The specific foundry git commit is documented in Cargo.toml",
-        "cargo clippy --workspace passes"
+        "Each normalizer struct implements the Normalizer trait with unit tests covering match and no-match cases",
+        "ForgeOutputNormalizer handles: CRLF→LF, \\r removal, Foundry nightly warning removal, compiler warning block collapse to `Compiler run successful!\\n`, triple+ blank lines → double blank line",
+        "LabelNormalizer accepts a label string at construction and replaces all occurrences with `<LABEL>`",
+        "LegacySolidityNormalizer replaces `\"bytecodeHash\": \"0x{hex64}\"` → `\"bytecodeHash\": \"0x<BYTECODE_HASH>\"`, `\"initCodeHash\": \"0x{hex64}\"` → `\"initCodeHash\": \"0x<INIT_CODE_HASH>\"`, and `Gas: \\d+` → `Gas: <GAS_AMOUNT>`",
+        "cargo test and cargo clippy pass"
       ],
       "priority": 2,
       "passes": false,
       "notes": ""
     },
     {
-      "id": "P1-US-003",
-      "title": "Error Strategy and Async Runtime",
-      "description": "As a developer, I want a project-wide error handling pattern using thiserror in treb-core and anyhow in treb-cli with a tokio async runtime so that all future code follows consistent error and async patterns.",
+      "id": "P5-US-003",
+      "title": "Fix Existing Normalizers Part 1: Address, Hash, RepositoryId",
+      "description": "As a test author, I want AddressNormalizer, HashNormalizer, and RepositoryIdNormalizer to produce identical output to Go's normalizers so that golden files are cross-CLI compatible.",
       "acceptanceCriteria": [
-        "treb_core::error::TrebError is a public enum with Config, Registry, Forge, and Io variants",
-        "TrebError implements std::error::Error and Display via thiserror",
-        "treb_core::Result<T> is a public type alias using TrebError",
-        "std::io::Error converts into TrebError via From",
-        "treb-cli main function is async and returns anyhow::Result<()>",
-        "A unit test in treb-core creates a TrebError::Config and formats it",
-        "cargo test --workspace passes",
-        "cargo clippy --workspace passes"
+        "AddressNormalizer replacement is `0x<ADDRESS>` (preserves 0x prefix), not `<ADDRESS>`",
+        "HashNormalizer replacement is `0x<HASH>` (preserves 0x prefix), not `<HASH>`",
+        "RepositoryIdNormalizer matches `tx-0x[a-fA-F0-9]{64}` → `tx-<ID>` and `tx-internal-[a-fA-F0-9]{64}` → `tx-internal-<ID>` (no longer uses UUID pattern)",
+        "All existing unit tests updated to match new replacement strings",
+        "cargo test and cargo clippy pass"
       ],
       "priority": 3,
       "passes": false,
       "notes": ""
     },
     {
-      "id": "P1-US-004",
-      "title": "CLI Skeleton with Clap",
-      "description": "As a developer, I want a clap-based CLI skeleton with version/help output and stub subcommands for all planned treb commands so that the command structure is established for future implementation.",
+      "id": "P5-US-004",
+      "title": "Fix Existing Normalizers Part 2: Timestamp, Version, Spinner, ForgeWarning",
+      "description": "As a test author, I want TimestampNormalizer, VersionNormalizer, SpinnerNormalizer, and ForgeWarningNormalizer to match Go's exact regex patterns and replacements so that normalized output is identical across CLIs.",
       "acceptanceCriteria": [
-        "cargo run -p treb-cli -- --help prints help with all subcommands listed",
-        "cargo run -p treb-cli -- --version prints version string",
-        "cargo run -p treb-cli -- run prints a 'not yet implemented' message",
-        "cargo run -p treb-cli -- list and cargo run -p treb-cli -- ls both work (alias)",
-        "All planned subcommands are present in the Commands enum: Run, List, Show, Init, Config, Verify, Tag, Register, Sync, Version, Networks, GenDeploy, Compose, Prune, Reset, Migrate, Fork, Dev",
-        "cargo clippy --workspace passes",
-        "cargo test --workspace passes"
+        "TimestampNormalizer uses `<TIME_AGO>` for relative times (not `<RELATIVE_TIME>`), adds `<UNIX_TIME>` for 10-13 digit sequences, adds standard datetime `\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}` → `<TIMESTAMP>`, removes date-only pattern",
+        "VersionNormalizer matches v-prefixed semver `v\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.\\-]+)?` → `v<VERSION>`, treb short version `(?m:^treb [a-z0-9]{7}$)` → `treb v<VERSION>`, and `-g[a-f0-9]{7,}` → `-g<COMMIT>`",
+        "SpinnerNormalizer matches Go's bracket-based braille spinner patterns `\\[[^\\]]+\\]` before Solc → `[*]` and collapses duplicate compiling lines",
+        "ForgeWarningNormalizer only matches the specific foundry treb-config warning line, not all Warning: lines",
+        "All existing unit tests updated to match new behavior",
+        "cargo test and cargo clippy pass"
       ],
       "priority": 4,
       "passes": false,
       "notes": ""
     },
     {
-      "id": "P1-US-005",
-      "title": "GitHub Actions CI and README",
-      "description": "As a contributor, I want a GitHub Actions CI pipeline and a README with build instructions so that code quality is enforced automatically and new contributors can get started quickly.",
+      "id": "P5-US-005",
+      "title": "Align Default Normalizer Chain with Go",
+      "description": "As a test author, I want NormalizerChain::default_chain() to return the same 10 normalizers in the same order as Go's GetDefaultNormalizers() so that default normalization produces identical output.",
       "acceptanceCriteria": [
-        ".github/workflows/ci.yml exists and is valid YAML",
-        "CI workflow defines jobs for check, test, clippy, and fmt",
-        "CI workflow uses Swatinem/rust-cache for faster builds",
-        "README.md exists with build, run, and test instructions",
-        "cargo fmt --check passes",
-        "cargo clippy --workspace passes"
+        "default_chain() returns exactly: ColorNormalizer, ForgeWarningNormalizer, LineClearArtifactNormalizer, SpinnerNormalizer, TimestampNormalizer, VersionNormalizer, TargetedGitCommitNormalizer, TargetedHashNormalizer, RepositoryIdNormalizer, DebugNormalizer",
+        "normalize() applies post-processing after all normalizers: CRLF→LF, trim leading/trailing whitespace, ensure trailing newline if non-empty",
+        "Broad HashNormalizer, AddressNormalizer, GitCommitNormalizer remain available as opt-in (not removed from codebase, just not in default chain)",
+        "Unit test normalizer_chain_applies_in_sequence updated for new default chain behavior",
+        "cargo test and cargo clippy pass"
       ],
       "priority": 5,
       "passes": false,
-      "notes": ""
+      "notes": "Depends on P5-US-001 through P5-US-004"
+    },
+    {
+      "id": "P5-US-006",
+      "title": "Align Command Output Format with Go Convention",
+      "description": "As a test author, I want command output blocks to use Go's `=== cmd N: [args] ===` header format so that golden files follow the same convention across CLIs.",
+      "acceptanceCriteria": [
+        "Command output blocks use format `=== cmd {i}: [{args}] ===\\n{output}\\n\\n` where i is 0-indexed",
+        "args is the space-joined argument list (not including `treb`)",
+        "Each command block ends with a double newline separator",
+        "cargo test and cargo clippy pass"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Independent of normalizer changes"
+    },
+    {
+      "id": "P5-US-007",
+      "title": "Separate Artifact Golden Files and DefaultOutputArtifacts",
+      "description": "As a test author, I want each artifact to get its own golden file and a DEFAULT_OUTPUT_ARTIFACTS constant so that artifact comparison matches Go's convention of separate per-artifact golden files.",
+      "acceptanceCriteria": [
+        "DEFAULT_OUTPUT_ARTIFACTS constant matches Go's list: deployments.json, registry.json, safe-txs.json, governor-txs.json",
+        "IntegrationTest::with_default_artifacts() builder method sets output_artifacts from the constant",
+        "Command output golden file is named `commands.golden` (not `output.golden`)",
+        "Each artifact gets its own `{basename}.golden` file with normalized content; missing artifact files are silently skipped",
+        "run_integration_test no longer appends artifacts inline to command output string",
+        "cargo test and cargo clippy pass"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Depends on P5-US-005"
+    },
+    {
+      "id": "P5-US-008",
+      "title": "Normalize Golden File Content on Comparison",
+      "description": "As a test author, I want both golden file content and actual output normalized before diffing so that golden files remain stable when normalizer patterns evolve.",
+      "acceptanceCriteria": [
+        "When comparing, both golden file content and actual output are normalized through the same normalizer chain before diffing",
+        "GoldenFile API supports passing normalizers for golden content normalization (or normalization happens in run_integration_test)",
+        "Round-trip test: a golden file with un-normalized content still matches if normalization produces the same result",
+        "cargo test and cargo clippy pass"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Depends on P5-US-005"
+    },
+    {
+      "id": "P5-US-009",
+      "title": "Regenerate Golden Files and Verify Full Test Suite",
+      "description": "As a test author, I want all golden files regenerated with the aligned normalizers and format so that the full test suite passes with cross-CLI-compatible golden files.",
+      "acceptanceCriteria": [
+        "All integration tests pass with regenerated golden files (run with UPDATE_GOLDEN=1 then without)",
+        "No orphaned output.golden files remain (replaced by commands.golden + {artifact}.golden)",
+        "cargo test --workspace passes",
+        "cargo clippy --workspace passes",
+        "cargo fmt --check passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "Depends on P5-US-001 through P5-US-008"
     }
   ]
 }
