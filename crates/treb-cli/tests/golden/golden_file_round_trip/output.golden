@@ -1,0 +1,5 @@
+      Version:  <VERSION>
+   Git Commit:  <SHORT_HASH>
+   Build Date:  <DATE>
+ Rust Version:  rustc <VERSION> (<SHORT_HASH> <DATE>)
+Forge Version:  forge v<VERSION> (<SHORT_HASH>)
