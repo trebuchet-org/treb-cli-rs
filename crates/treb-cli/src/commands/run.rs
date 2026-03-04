@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::env;
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::{bail, Context};
 use serde::Serialize;
@@ -74,6 +75,53 @@ pub fn ensure_initialized(cwd: &std::path::Path) -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+/// Resolve a network name to an RPC URL. If the input is already a URL, returns it directly.
+/// Falls back to looking up the name in foundry.toml [rpc_endpoints].
+fn resolve_rpc_url_for_chain_id(network_or_url: &str, cwd: &std::path::Path) -> Option<String> {
+    if network_or_url.starts_with("http://") || network_or_url.starts_with("https://") {
+        return Some(network_or_url.to_string());
+    }
+    let config = treb_config::load_foundry_config(cwd).ok()?;
+    let endpoints = treb_config::rpc_endpoints(&config);
+    let url = endpoints.get(network_or_url)?;
+    if url.contains("${") {
+        return None; // unresolved env vars
+    }
+    Some(url.clone())
+}
+
+/// Fetch the chain ID from an RPC endpoint via `eth_chainId`.
+async fn fetch_chain_id(rpc_url: &str) -> anyhow::Result<u64> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .context("failed to build HTTP client")?;
+
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "eth_chainId",
+        "params": [],
+        "id": 1
+    });
+
+    let resp: serde_json::Value = client
+        .post(rpc_url)
+        .json(&body)
+        .send()
+        .await
+        .context("eth_chainId request failed")?
+        .json()
+        .await
+        .context("invalid eth_chainId response")?;
+
+    let hex = resp
+        .get("result")
+        .and_then(|r| r.as_str())
+        .unwrap_or("0x0");
+    let stripped = hex.strip_prefix("0x").or_else(|| hex.strip_prefix("0X")).unwrap_or(hex);
+    Ok(u64::from_str_radix(stripped, 16).unwrap_or(0))
 }
 
 /// Execute a deployment script.
@@ -172,11 +220,24 @@ pub async fn run(
         script_config.rpc_url(url);
     }
 
+    // ── Resolve chain ID from RPC ──────────────────────────────────────
+    let chain_id = if let Some(ref network_or_url) = effective_rpc_url {
+        let actual_url = resolve_rpc_url_for_chain_id(network_or_url, &cwd);
+        if let Some(url) = actual_url {
+            fetch_chain_id(&url).await.unwrap_or(0)
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+
     // ── Build PipelineConfig and PipelineContext ─────────────────────────
     let pipeline_config = PipelineConfig {
         script_path: script.to_string(),
         dry_run,
         namespace: resolved.namespace.clone(),
+        chain_id,
         script_sig: sig.to_string(),
         script_args: Vec::new(), // args already in ScriptConfig
         ..Default::default()

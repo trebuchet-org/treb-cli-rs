@@ -3,7 +3,7 @@ No files changed, compilation skipped
 ┌──────────┬────────────────────────────────────────────┬───────────┬───────────┬───────┐
 │ Contract ┆ Address                                    ┆ Type      ┆ Namespace ┆ Chain │
 ╞══════════╪════════════════════════════════════════════╪═══════════╪═══════════╪═══════╡
-│ Counter  ┆ <ADDRESS> ┆ SINGLETON ┆ default   ┆ 0     │
+│ Counter  ┆ <ADDRESS> ┆ SINGLETON ┆ default   ┆ 31337 │
 └──────────┴────────────────────────────────────────────┴───────────┴───────────┴───────┘
 
 1 deployment recorded, 1 transaction
@@ -12,10 +12,10 @@ Execution complete.
 
 --- .treb/deployments.json ---
 {
-  "default/0/Counter:Counter": {
-    "id": "default/0/Counter:Counter",
+  "default/31337/Counter:Counter": {
+    "id": "default/31337/Counter:Counter",
     "namespace": "default",
-    "chainId": 0,
+    "chainId": 31337,
     "contractName": "Counter",
     "label": "Counter",
     "address": "<ADDRESS>",
@@ -46,13 +46,13 @@ Execution complete.
 {
   "<HASH>": {
     "id": "<HASH>",
-    "chainId": 0,
+    "chainId": 31337,
     "hash": "",
     "status": "SIMULATED",
     "sender": "<ADDRESS>",
     "nonce": 0,
     "deployments": [
-      "default/0/Counter:Counter"
+      "default/31337/Counter:Counter"
     ],
     "operations": [],
     "environment": "default",

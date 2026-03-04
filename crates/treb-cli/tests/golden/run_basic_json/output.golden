@@ -5,11 +5,11 @@ No files changed, compilation skipped
   "dry_run": false,
   "deployments": [
     {
-      "id": "default/0/Counter:Counter",
+      "id": "default/31337/Counter:Counter",
       "contract_name": "Counter",
       "address": "<ADDRESS>",
       "namespace": "default",
-      "chain_id": 0,
+      "chain_id": 31337,
       "deployment_type": "SINGLETON"
     }
   ],
