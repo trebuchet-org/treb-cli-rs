@@ -7,7 +7,7 @@ No files changed, compilation skipped
     {
       "id": "default/31337/Counter:Counter",
       "contract_name": "Counter",
-      "address": "<ADDRESS>",
+      "address": "0x5b73C5498c1E3b4dbA84de0F1833c4a029d90519",
       "namespace": "default",
       "chain_id": 31337,
       "deployment_type": "SINGLETON"
@@ -15,7 +15,7 @@ No files changed, compilation skipped
   ],
   "transactions": [
     {
-      "id": "tx-<HASH>",
+      "id": "tx-<ID>",
       "hash": "",
       "status": "SIMULATED"
     }

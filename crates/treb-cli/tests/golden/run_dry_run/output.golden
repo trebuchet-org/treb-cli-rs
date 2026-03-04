@@ -5,7 +5,7 @@ No files changed, compilation skipped
 ┌──────────┬────────────────────────────────────────────┬───────────┬───────────┬───────┐
 │ Contract ┆ Address                                    ┆ Type      ┆ Namespace ┆ Chain │
 ╞══════════╪════════════════════════════════════════════╪═══════════╪═══════════╪═══════╡
-│ Counter  ┆ <ADDRESS> ┆ SINGLETON ┆ default   ┆ 31337 │
+│ Counter  ┆ 0x5b73C5498c1E3b4dbA84de0F1833c4a029d90519 ┆ SINGLETON ┆ default   ┆ 31337 │
 └──────────┴────────────────────────────────────────────┴───────────┴───────────┴───────┘
 
 1 deployment would be recorded, 1 transaction

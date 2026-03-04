@@ -4,5 +4,5 @@ $ treb reset --yes --json
   "removedTransactions": 2,
   "removedSafeTransactions": 2,
   "removedGovernorProposals": 2,
-  "backupPath": "<PROJECT_ROOT>/.treb/backups/reset-<EPOCH>"
+  "backupPath": "<PROJECT_ROOT>/.treb/backups/reset-<UNIX_TIME>"
 }

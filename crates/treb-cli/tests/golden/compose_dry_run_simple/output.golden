@@ -7,4 +7,3 @@ Execution Plan:
 ──────────────────────────────────────────────────
 1. registry → script/DeployRegistry.s.sol
 2. token → script/DeployToken.s.sol
-

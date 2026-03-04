@@ -24,21 +24,23 @@ impl NormalizerChain {
         Self { normalizers }
     }
 
-    /// Default chain with all built-in normalizers.
+    /// Default chain matching Go's `GetDefaultNormalizers()` order.
     ///
-    /// Order matters: color first (strip ANSI), then hash before address
-    /// (64-hex must match before 40-hex to avoid partial matches).
+    /// Broad normalizers (HashNormalizer, AddressNormalizer, GitCommitNormalizer)
+    /// are intentionally omitted — use targeted variants instead. The broad ones
+    /// remain available for opt-in use via `NormalizerChain::new(...)`.
     pub fn default_chain() -> Self {
         Self::new(vec![
             Box::new(ColorNormalizer),
-            Box::new(SpinnerNormalizer),
             Box::new(ForgeWarningNormalizer),
-            Box::new(HashNormalizer),
-            Box::new(AddressNormalizer),
+            Box::new(LineClearArtifactNormalizer),
+            Box::new(SpinnerNormalizer),
             Box::new(TimestampNormalizer),
             Box::new(VersionNormalizer),
-            Box::new(GitCommitNormalizer),
+            Box::new(TargetedGitCommitNormalizer),
+            Box::new(TargetedHashNormalizer),
             Box::new(RepositoryIdNormalizer),
+            Box::new(DebugNormalizer),
         ])
     }
 }
@@ -48,6 +50,13 @@ impl Normalizer for NormalizerChain {
         let mut result = input.to_string();
         for n in &self.normalizers {
             result = n.normalize(&result);
+        }
+
+        // Post-processing: CRLF→LF, trim whitespace, ensure trailing newline
+        result = result.replace("\r\n", "\n");
+        result = result.trim().to_string();
+        if !result.is_empty() {
+            result.push('\n');
         }
         result
     }
@@ -473,7 +482,7 @@ mod tests {
         let input =
             "tx 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef addr 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let result = chain.normalize(input);
-        assert_eq!(result, "tx 0x<HASH> addr 0x<ADDRESS>");
+        assert_eq!(result, "tx 0x<HASH> addr 0x<ADDRESS>\n");
     }
 
     #[test]
@@ -591,11 +600,46 @@ mod tests {
     #[test]
     fn normalizer_chain_applies_in_sequence() {
         let chain = NormalizerChain::default_chain();
-        let input = "\x1b[32mDeployed\x1b[0m to 0x1234567890abcdef1234567890abcdef12345678 at 2024-01-15T12:30:45Z v0.1.0";
+        // Exercises: ColorNormalizer, TimestampNormalizer, VersionNormalizer, TargetedHashNormalizer
+        let input = "\x1b[32mDeployed\x1b[0m at 2024-01-15T12:30:45Z v0.1.0\nTx: 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef\n";
         let result = chain.normalize(input);
         assert_eq!(
             result,
-            "Deployed to 0x<ADDRESS> at <TIMESTAMP> v<VERSION>"
+            "Deployed at <TIMESTAMP> v<VERSION>\nTx: 0x<HASH>\n"
+        );
+    }
+
+    #[test]
+    fn normalizer_chain_post_processing() {
+        let chain = NormalizerChain::new(vec![Box::new(ColorNormalizer)]);
+
+        // CRLF → LF + trim + trailing newline
+        assert_eq!(
+            chain.normalize("  \r\nhello\r\n  "),
+            "hello\n"
+        );
+
+        // Empty input stays empty
+        assert_eq!(chain.normalize(""), "");
+        assert_eq!(chain.normalize("   "), "");
+    }
+
+    #[test]
+    fn normalizer_chain_broad_normalizers_opt_in() {
+        // Broad normalizers (Hash, Address, GitCommit) are NOT in default chain
+        let default = NormalizerChain::default_chain();
+        let addr = "0x1234567890abcdef1234567890abcdef12345678";
+        // Address without a prefix should NOT be normalized by default chain
+        assert!(default.normalize(&format!("deployed to {addr}\n")).contains(addr));
+
+        // But they work when explicitly included
+        let custom = NormalizerChain::new(vec![
+            Box::new(HashNormalizer),
+            Box::new(AddressNormalizer),
+        ]);
+        assert_eq!(
+            custom.normalize(&format!("deployed to {addr}")),
+            "deployed to 0x<ADDRESS>\n"
         );
     }
 

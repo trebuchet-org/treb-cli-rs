@@ -5,24 +5,24 @@ $ treb show --json mainnet/42220/FPMM:v<VERSION>
   "chainId": 42220,
   "contractName": "FPMM",
   "label": "v<VERSION>",
-  "address": "<ADDRESS>",
+  "address": "0x42eddd7dC046da254A93659CA9b02f294606833D",
   "type": "SINGLETON",
   "transactionId": "",
   "deploymentStrategy": {
     "method": "CREATE3",
-    "salt": "<HASH>",
-    "initCodeHash": "<HASH>",
-    "factory": "<ADDRESS>",
-    "constructorArgs": "<HASH>",
+    "salt": "0x32cb58b145d3f7e28c45ce4b2cc31fa94248b23f00a2e3014050467acb6c25eb",
+    "initCodeHash": "0xa0f13f7e31f02ed554bbaf380dbd9e8afe60c5a5965eb9fadfaf2a25de14510c",
+    "factory": "0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed",
+    "constructorArgs": "0x0000000000000000000000000000000000000000000000000000000000000001",
     "entropy": "mainnet/FPMM:v<VERSION>"
   },
   "proxyInfo": null,
   "artifact": {
     "path": "lib/mento-core/contracts/swap/FPMM.sol",
-    "compilerVersion": "<VERSION>+commit.e11b9ed9",
-    "bytecodeHash": "<HASH>",
+    "compilerVersion": "0.8.24+commit.e11b9ed9",
+    "bytecodeHash": "0x6b7fb93a42cf317aec80a67fcdc73ba8d75edb0be9e0bb01185e70f2028a5d6a",
     "scriptPath": "script/deploy/v3/DeployV3PreStage.s.sol",
-    "gitCommit": "<GIT_COMMIT>"
+    "gitCommit": "f7c896cf0da6eca082cf90066d7e9510978e4659"
   },
   "verification": {
     "status": "UNVERIFIED"

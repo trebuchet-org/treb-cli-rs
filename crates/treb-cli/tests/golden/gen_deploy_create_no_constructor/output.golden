@@ -3,7 +3,7 @@ Generated deploy script: script/DeploySimpleContract.s.sol
 
 --- script/DeploySimpleContract.s.sol ---
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^<VERSION>;
+pragma solidity ^0.8.0;
 
 import {Script, console} from "forge-std/Script.sol";
 import { SimpleContract } from "../src/SimpleContract.sol";

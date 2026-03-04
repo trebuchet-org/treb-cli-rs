@@ -2,9 +2,9 @@ $ treb fork history
 ┌─────────────────────────┬─────────┬─────────┬────────────────────────────┐
 │ Timestamp               ┆ Action  ┆ Network ┆ Details                    │
 ╞═════════════════════════╪═════════╪═════════╪════════════════════════════╡
-│ <DATE> 10:30:00 UTC ┆ restart ┆ mainnet ┆ Anvil reset; snapshot: 0x2 │
+│ <TIMESTAMP> UTC ┆ restart ┆ mainnet ┆ Anvil reset; snapshot: 0x2 │
 ├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
-│ <DATE> 14:00:00 UTC ┆ enter   ┆ sepolia ┆ -                          │
+│ <TIMESTAMP> UTC ┆ enter   ┆ sepolia ┆ -                          │
 ├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
-│ <DATE> 08:00:00 UTC ┆ enter   ┆ mainnet ┆ -                          │
+│ <TIMESTAMP> UTC ┆ enter   ┆ mainnet ┆ -                          │
 └─────────────────────────┴─────────┴─────────┴────────────────────────────┘

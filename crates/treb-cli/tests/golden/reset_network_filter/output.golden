@@ -4,4 +4,4 @@ Reset complete.
   Transactions removed:        1
   Safe transactions removed:   1
   Governor proposals removed:  1
-Backup created at: <PROJECT_ROOT>/.treb/backups/reset-<EPOCH>
+Backup created at: <PROJECT_ROOT>/.treb/backups/reset-<UNIX_TIME>

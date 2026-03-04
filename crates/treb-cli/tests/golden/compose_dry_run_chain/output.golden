@@ -8,4 +8,3 @@ Execution Plan:
 1. libs → script/DeployLibs.s.sol
 2. core → script/DeployCore.s.sol (depends on: [libs])
 3. periphery → script/DeployPeriphery.s.sol (depends on: [core])
-

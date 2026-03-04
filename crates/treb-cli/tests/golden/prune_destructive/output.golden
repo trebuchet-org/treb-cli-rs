@@ -10,4 +10,4 @@ $ treb prune --yes
 └───────────┴──────────────────────┴──────────────────────────────────────────────────────────────────┴──────────┘
 
 Removed 3 entry(s).
-Backup created at: <PROJECT_ROOT>/.treb/backups/prune-<EPOCH>
+Backup created at: <PROJECT_ROOT>/.treb/backups/prune-<UNIX_TIME>

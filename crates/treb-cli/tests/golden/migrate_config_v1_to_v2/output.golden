@@ -1,6 +1,6 @@
 $ treb migrate config
 Migration complete.
-Backup written to: <PROJECT_ROOT>/treb.toml.bak-<EPOCH>
+Backup written to: <PROJECT_ROOT>/treb.toml.bak-<UNIX_TIME>
 treb.toml updated to v2 format.
 
 --- treb.toml ---

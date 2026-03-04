@@ -6,24 +6,24 @@ $ treb list --json
     "chainId": 42220,
     "contractName": "FPMM",
     "label": "v<VERSION>",
-    "address": "<ADDRESS>",
+    "address": "0x42eddd7dC046da254A93659CA9b02f294606833D",
     "type": "SINGLETON",
     "transactionId": "",
     "deploymentStrategy": {
       "method": "CREATE3",
-      "salt": "<HASH>",
-      "initCodeHash": "<HASH>",
-      "factory": "<ADDRESS>",
-      "constructorArgs": "<HASH>",
+      "salt": "0x32cb58b145d3f7e28c45ce4b2cc31fa94248b23f00a2e3014050467acb6c25eb",
+      "initCodeHash": "0xa0f13f7e31f02ed554bbaf380dbd9e8afe60c5a5965eb9fadfaf2a25de14510c",
+      "factory": "0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed",
+      "constructorArgs": "0x0000000000000000000000000000000000000000000000000000000000000001",
       "entropy": "mainnet/FPMM:v<VERSION>"
     },
     "proxyInfo": null,
     "artifact": {
       "path": "lib/mento-core/contracts/swap/FPMM.sol",
-      "compilerVersion": "<VERSION>+commit.e11b9ed9",
-      "bytecodeHash": "<HASH>",
+      "compilerVersion": "0.8.24+commit.e11b9ed9",
+      "bytecodeHash": "0x6b7fb93a42cf317aec80a67fcdc73ba8d75edb0be9e0bb01185e70f2028a5d6a",
       "scriptPath": "script/deploy/v3/DeployV3PreStage.s.sol",
-      "gitCommit": "<GIT_COMMIT>"
+      "gitCommit": "f7c896cf0da6eca082cf90066d7e9510978e4659"
     },
     "verification": {
       "status": "UNVERIFIED"
@@ -38,24 +38,24 @@ $ treb list --json
     "chainId": 42220,
     "contractName": "FPMMFactory",
     "label": "v<VERSION>",
-    "address": "<ADDRESS>",
+    "address": "0x959597fD009876e6f53EbdB2F1c1Bc3f994579dF",
     "type": "SINGLETON",
     "transactionId": "",
     "deploymentStrategy": {
       "method": "CREATE3",
-      "salt": "<HASH>",
-      "initCodeHash": "<HASH>",
-      "factory": "<ADDRESS>",
-      "constructorArgs": "<HASH>",
+      "salt": "0x32cb58b145d3f7e28c45ce4b2cc31fa94248b23f00ab81cc01eccdf4986f4073",
+      "initCodeHash": "0xf2530974897bb0647478d9a9a169f35d3964836c8ad4455205285b020fcef03d",
+      "factory": "0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed",
+      "constructorArgs": "0x0000000000000000000000000000000000000000000000000000000000000001",
       "entropy": "mainnet/FPMMFactory:v<VERSION>"
     },
     "proxyInfo": null,
     "artifact": {
       "path": "lib/mento-core/contracts/swap/FPMMFactory.sol",
-      "compilerVersion": "<VERSION>+commit.e11b9ed9",
-      "bytecodeHash": "<HASH>",
+      "compilerVersion": "0.8.24+commit.e11b9ed9",
+      "bytecodeHash": "0x7c7a4e90bce79d7b7ed6e549549f3ea62f31ae8eddc9ed1ab3fe9416e63faf26",
       "scriptPath": "script/deploy/v3/DeployV3PreStage.s.sol",
-      "gitCommit": "<GIT_COMMIT>"
+      "gitCommit": "f7c896cf0da6eca082cf90066d7e9510978e4659"
     },
     "verification": {
       "status": "UNVERIFIED"
@@ -70,28 +70,28 @@ $ treb list --json
     "chainId": 42220,
     "contractName": "TransparentUpgradeableProxy",
     "label": "FPMMFactory",
-    "address": "<ADDRESS>",
+    "address": "0x22A81Fc75b0d5F7cac19cABa9F0c3719b3897F03",
     "type": "PROXY",
     "transactionId": "",
     "deploymentStrategy": {
       "method": "CREATE3",
-      "salt": "<HASH>",
-      "initCodeHash": "<HASH>",
-      "factory": "<ADDRESS>",
-      "constructorArgs": "<HASH>00000000000000000000000032cb58b145d3f7e28c45ce4b2cc31fa94248b23f00000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000164cd92c46c00000000000000000000000048aa96941dee68025c465c4917a687faeb8a83f500000000000000000000000070d8dc60f9701c46d4ce9ac141e154f6804e1dc300000000000000000000000058099b74f4acd642da77b4b7966b4138ec5ba45800000000000000000000000042eddd7dc046da254a93659ca9b02f294606833d000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000020000000000000000000000000dd57f6f181d0469143fe9380762d8a112e96e4a00000000000000000000000058099b74f4acd642da77b4b7966b4138ec5ba458000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000013880000000000000000000000000000000000000000000000000000000000000d0500000000000000000000000000000000000000000000000000000000",
+      "salt": "0x32cb58b145d3f7e28c45ce4b2cc31fa94248b23f00eef2eee23afd47b3f7fcaf",
+      "initCodeHash": "0x3ae7a3765ce4f7ccff8a5304eed0091668771ea46e8bd0a4b7e5589ee7bb8dc5",
+      "factory": "0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed",
+      "constructorArgs": "0x000000000000000000000000959597fd009876e6f53ebdb2f1c1bc3f994579df00000000000000000000000032cb58b145d3f7e28c45ce4b2cc31fa94248b23f00000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000164cd92c46c00000000000000000000000048aa96941dee68025c465c4917a687faeb8a83f500000000000000000000000070d8dc60f9701c46d4ce9ac141e154f6804e1dc300000000000000000000000058099b74f4acd642da77b4b7966b4138ec5ba45800000000000000000000000042eddd7dc046da254a93659ca9b02f294606833d000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000020000000000000000000000000dd57f6f181d0469143fe9380762d8a112e96e4a00000000000000000000000058099b74f4acd642da77b4b7966b4138ec5ba458000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000013880000000000000000000000000000000000000000000000000000000000000d0500000000000000000000000000000000000000000000000000000000",
       "entropy": "mainnet/lib/openzeppelin-contracts/contracts/proxy/transparent/TransparentUpgradeableProxy.sol:TransparentUpgradeableProxy:FPMMFactory"
     },
     "proxyInfo": {
       "type": "UUPS",
-      "implementation": "<ADDRESS>",
+      "implementation": "0x959597fD009876e6f53EbdB2F1c1Bc3f994579dF",
       "history": []
     },
     "artifact": {
       "path": "lib/openzeppelin-contracts/contracts/proxy/transparent/TransparentUpgradeableProxy.sol",
-      "compilerVersion": "<VERSION>+commit.64118f21",
-      "bytecodeHash": "<HASH>",
+      "compilerVersion": "0.8.33+commit.64118f21",
+      "bytecodeHash": "0xd18370017b91fe6cf7851e9a692f60f42cfb17d544cdf742d9efdf176f19fba2",
       "scriptPath": "script/deploy/v3/DeployV3PreStage.s.sol",
-      "gitCommit": "<GIT_COMMIT>"
+      "gitCommit": "f7c896cf0da6eca082cf90066d7e9510978e4659"
     },
     "verification": {
       "status": "UNVERIFIED"

@@ -2,11 +2,11 @@ $ treb verify dep-verified --json
 {
   "deploymentId": "dep-verified",
   "contractName": "TestContract",
-  "address": "<ADDRESS>",
+  "address": "0x0000000000000000000000000000000000000001",
   "chainId": 1,
   "verifier": "etherscan",
   "status": "VERIFIED",
-  "explorerUrl": "https://etherscan.io/address/<ADDRESS>",
+  "explorerUrl": "https://etherscan.io/address/0x0000000000000000000000000000000000000001",
   "reason": "",
   "verifiedAt": "<TIMESTAMP>"
 }

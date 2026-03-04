@@ -1,2 +1,2 @@
-$ treb register --tx-hash <HASH> --network anvil-31337
-Error: transaction not found: <HASH>
+$ treb register --tx-hash 0x0000000000000000000000000000000000000000000000000000000000000001 --network anvil-31337
+Error: transaction not found: 0x0000000000000000000000000000000000000000000000000000000000000001
