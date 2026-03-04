@@ -5,3 +5,4 @@ pub mod context;
 pub mod normalizer;
 pub mod golden;
 pub mod snapshot;
+pub mod cleanup;
