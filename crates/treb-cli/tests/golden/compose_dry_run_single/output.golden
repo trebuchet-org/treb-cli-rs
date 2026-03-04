@@ -1,5 +1,9 @@
 $ treb compose single.yaml --dry-run
-Compose dry-run: single-deploy
-Execution plan (1 components):
 
-  1. token — script/DeployToken.s.sol  [(no dependencies)]
+Orchestrating single-deploy
+Execution plan: 1 components
+
+Execution Plan:
+──────────────────────────────────────────────────
+1. token → script/DeployToken.s.sol
+

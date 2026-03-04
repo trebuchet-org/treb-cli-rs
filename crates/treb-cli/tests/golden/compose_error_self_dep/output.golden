@@ -1,2 +1,2 @@
 $ treb compose self-dep.yaml --dry-run
-Error: component 'a' cannot depend on itself
+Error: invalid orchestration configuration: component 'a' cannot depend on itself

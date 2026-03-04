@@ -1,2 +1,2 @@
 $ treb compose bad-dep.yaml --dry-run
-Error: component 'token' depends on unknown component 'nonexistent'
+Error: invalid orchestration configuration: component 'token' depends on non-existent component 'nonexistent'

@@ -99,7 +99,7 @@ fn compose_empty_group_fails() {
         .args(["compose", yaml.to_str().unwrap()])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("'group' must not be empty"));
+        .stderr(predicate::str::contains("group name is required"));
 }
 
 #[test]
@@ -112,7 +112,7 @@ fn compose_empty_components_fails() {
         .args(["compose", yaml.to_str().unwrap()])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("'components' must not be empty"));
+        .stderr(predicate::str::contains("at least one component is required"));
 }
 
 // ── Cycle detection ───────────────────────────────────────────────────
@@ -125,7 +125,7 @@ fn compose_cycle_detection_fails() {
         .args(["compose", fixture.to_str().unwrap()])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("dependency cycle detected"));
+        .stderr(predicate::str::contains("circular dependency detected"));
 }
 
 // ── Unknown dependency ────────────────────────────────────────────────
@@ -138,7 +138,7 @@ fn compose_unknown_dependency_fails() {
         .args(["compose", fixture.to_str().unwrap()])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("depends on unknown component"));
+        .stderr(predicate::str::contains("depends on non-existent component"));
 }
 
 // ── Dry-run ───────────────────────────────────────────────────────────
@@ -152,7 +152,7 @@ fn compose_dry_run_shows_plan() {
         .assert()
         .success()
         .stderr(
-            predicate::str::contains("Compose dry-run")
+            predicate::str::contains("Orchestrating")
                 .and(predicate::str::contains("Execution plan"))
                 .and(predicate::str::contains("token"))
                 .and(predicate::str::contains("registry")),
@@ -435,5 +435,5 @@ fn compose_empty_script_fails() {
         .args(["compose", yaml.to_str().unwrap()])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("empty 'script'"));
+        .stderr(predicate::str::contains("must specify a script"));
 }

@@ -1,6 +1,10 @@
 $ treb compose simple.yaml --dry-run
-Compose dry-run: simple-deploy
-Execution plan (2 components):
 
-  1. registry — script/DeployRegistry.s.sol  [(no dependencies)]
-  2. token — script/DeployToken.s.sol  [(no dependencies)]
+Orchestrating simple-deploy
+Execution plan: 2 components
+
+Execution Plan:
+──────────────────────────────────────────────────
+1. registry → script/DeployRegistry.s.sol
+2. token → script/DeployToken.s.sol
+

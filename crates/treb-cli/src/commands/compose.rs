@@ -75,10 +75,10 @@ pub fn load_compose_file(path: &str) -> anyhow::Result<ComposeFile> {
 /// component names.
 pub fn validate_compose_file(compose: &ComposeFile) -> anyhow::Result<()> {
     if compose.group.is_empty() {
-        bail!("compose file validation failed: 'group' must not be empty");
+        bail!("invalid orchestration configuration: group name is required");
     }
     if compose.components.is_empty() {
-        bail!("compose file validation failed: 'components' must not be empty");
+        bail!("invalid orchestration configuration: at least one component is required");
     }
     for (name, component) in &compose.components {
         // Validate component name: alphanumeric, hyphens, underscores only
@@ -87,14 +87,14 @@ pub fn validate_compose_file(compose: &ComposeFile) -> anyhow::Result<()> {
             .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
         {
             bail!(
-                "component '{}' has an invalid name: must contain only alphanumeric characters, hyphens, and underscores",
+                "invalid orchestration configuration: component '{}' has an invalid name: must contain only alphanumeric characters, hyphens, and underscores",
                 name
             );
         }
         // Validate script is non-empty
         if component.script.is_empty() {
             bail!(
-                "component '{}' has an empty 'script' field",
+                "invalid orchestration configuration: component '{}' must specify a script",
                 name
             );
         }
@@ -102,11 +102,11 @@ pub fn validate_compose_file(compose: &ComposeFile) -> anyhow::Result<()> {
         if let Some(deps) = &component.deps {
             for dep in deps {
                 if dep == name {
-                    bail!("component '{}' cannot depend on itself", name);
+                    bail!("invalid orchestration configuration: component '{}' cannot depend on itself", name);
                 }
                 if !compose.components.contains_key(dep) {
                     bail!(
-                        "component '{}' depends on unknown component '{}'",
+                        "invalid orchestration configuration: component '{}' depends on non-existent component '{}'",
                         name,
                         dep
                     );
@@ -234,7 +234,7 @@ pub fn build_execution_order(compose: &ComposeFile) -> anyhow::Result<Vec<String
             .map(|(&name, _)| name)
             .collect();
         bail!(
-            "dependency cycle detected involving: {}",
+            "circular dependency detected involving components: [{}]",
             cycle_members.join(", ")
         );
     }
@@ -281,28 +281,21 @@ fn build_plan(
 
 /// Display the dry-run plan in human-readable format.
 fn print_dry_run_plan(compose: &ComposeFile, plan: &[PlanEntry]) {
-    eprintln!("Compose dry-run: {}", compose.group);
-    eprintln!("Execution plan ({} components):\n", plan.len());
+    eprintln!("\nOrchestrating {}", compose.group);
+    eprintln!("Execution plan: {} components\n", plan.len());
+    eprintln!("Execution Plan:");
+    eprintln!("{}", "─".repeat(50));
     for entry in plan {
-        let deps_str = if entry.deps.is_empty() {
-            String::from("(no dependencies)")
-        } else {
-            format!("deps: {}", entry.deps.join(", "))
-        };
-        let skip_str = if entry.skipped {
-            "  (skipped — already completed)"
-        } else {
-            ""
-        };
-        eprintln!(
-            "  {step}. {name} — {script}  [{deps}]{skip}",
-            step = entry.step,
-            name = entry.component,
-            script = entry.script,
-            deps = deps_str,
-            skip = skip_str,
-        );
+        eprint!("{}. {} → {}", entry.step, entry.component, entry.script);
+        if !entry.deps.is_empty() {
+            eprint!(" (depends on: [{}])", entry.deps.join(", "));
+        }
+        if entry.skipped {
+            eprint!(" (skipped)");
+        }
+        eprintln!();
     }
+    eprintln!();
 }
 
 // ── Result aggregation ───────────────────────────────────────────────────
@@ -890,7 +883,7 @@ components:
         let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
         let err = validate_compose_file(&compose).unwrap_err();
         assert!(
-            err.to_string().contains("'group' must not be empty"),
+            err.to_string().contains("group name is required"),
             "expected empty group error, got: {}",
             err
         );
@@ -905,7 +898,7 @@ components: {}
         let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
         let err = validate_compose_file(&compose).unwrap_err();
         assert!(
-            err.to_string().contains("'components' must not be empty"),
+            err.to_string().contains("at least one component is required"),
             "expected empty components error, got: {}",
             err
         );
@@ -923,7 +916,7 @@ components:
         let err = validate_compose_file(&compose).unwrap_err();
         assert!(
             err.to_string().contains("component 'bad'")
-                && err.to_string().contains("empty 'script'"),
+                && err.to_string().contains("must specify a script"),
             "expected empty script error for 'bad', got: {}",
             err
         );
@@ -943,7 +936,7 @@ components:
         let err = validate_compose_file(&compose).unwrap_err();
         assert!(
             err.to_string()
-                .contains("component 'a' depends on unknown component 'nonexistent'"),
+                .contains("component 'a' depends on non-existent component 'nonexistent'"),
             "expected unknown dep error, got: {}",
             err
         );
@@ -1139,7 +1132,7 @@ components:
         let err = build_execution_order(&compose).unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("dependency cycle detected"),
+            msg.contains("circular dependency detected"),
             "expected cycle error, got: {}",
             msg
         );
@@ -1161,7 +1154,7 @@ components:
         let err = build_execution_order(&compose).unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("dependency cycle detected"),
+            msg.contains("circular dependency detected"),
             "expected cycle error, got: {}",
             msg
         );
@@ -1177,7 +1170,7 @@ components:
         ]);
         let err = build_execution_order(&compose).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("dependency cycle detected"));
+        assert!(msg.contains("circular dependency detected"));
         // Should mention the cycling components, not 'x'
         assert!(msg.contains("a") && msg.contains("b"));
     }

@@ -1,8 +1,12 @@
 $ treb compose diamond.yaml --dry-run
-Compose dry-run: diamond-deploy
-Execution plan (4 components):
 
-  1. base — script/DeployBase.s.sol  [(no dependencies)]
-  2. left — script/DeployLeft.s.sol  [deps: base]
-  3. right — script/DeployRight.s.sol  [deps: base]
-  4. top — script/DeployTop.s.sol  [deps: left, right]
+Orchestrating diamond-deploy
+Execution plan: 4 components
+
+Execution Plan:
+──────────────────────────────────────────────────
+1. base → script/DeployBase.s.sol
+2. left → script/DeployLeft.s.sol (depends on: [base])
+3. right → script/DeployRight.s.sol (depends on: [base])
+4. top → script/DeployTop.s.sol (depends on: [left, right])
+
