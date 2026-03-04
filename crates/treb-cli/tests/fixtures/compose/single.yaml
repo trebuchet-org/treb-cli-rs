@@ -1,0 +1,4 @@
+group: single-deploy
+components:
+  token:
+    script: script/DeployToken.s.sol

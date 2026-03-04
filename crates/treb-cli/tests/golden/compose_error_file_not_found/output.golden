@@ -1,0 +1,2 @@
+$ treb compose nonexistent.yaml --dry-run
+Error: compose file not found: nonexistent.yaml

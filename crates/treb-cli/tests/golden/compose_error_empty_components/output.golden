@@ -1,0 +1,2 @@
+$ treb compose empty-components.yaml --dry-run
+Error: compose file validation failed: 'components' must not be empty

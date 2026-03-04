@@ -1,0 +1,5 @@
+$ treb compose invalid.yaml --dry-run
+Error: failed to parse compose file: invalid.yaml
+
+Caused by:
+    did not find expected ',' or ']' at line 1 column 18, while parsing a flow sequence at line 1 column 6

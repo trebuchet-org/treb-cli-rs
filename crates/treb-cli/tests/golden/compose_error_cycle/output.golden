@@ -1,0 +1,2 @@
+$ treb compose cycle.yaml --dry-run
+Error: dependency cycle detected involving: alpha, beta, gamma

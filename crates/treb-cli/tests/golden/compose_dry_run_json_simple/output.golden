@@ -1,0 +1,15 @@
+$ treb compose simple.yaml --dry-run --json
+[
+  {
+    "step": 1,
+    "component": "registry",
+    "script": "script/DeployRegistry.s.sol",
+    "deps": []
+  },
+  {
+    "step": 2,
+    "component": "token",
+    "script": "script/DeployToken.s.sol",
+    "deps": []
+  }
+]

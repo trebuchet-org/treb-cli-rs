@@ -1,0 +1,25 @@
+$ treb compose chain.yaml --dry-run --json
+[
+  {
+    "step": 1,
+    "component": "libs",
+    "script": "script/DeployLibs.s.sol",
+    "deps": []
+  },
+  {
+    "step": 2,
+    "component": "core",
+    "script": "script/DeployCore.s.sol",
+    "deps": [
+      "libs"
+    ]
+  },
+  {
+    "step": 3,
+    "component": "periphery",
+    "script": "script/DeployPeriphery.s.sol",
+    "deps": [
+      "core"
+    ]
+  }
+]

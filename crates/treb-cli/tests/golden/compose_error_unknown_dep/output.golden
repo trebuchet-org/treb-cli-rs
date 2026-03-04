@@ -1,0 +1,2 @@
+$ treb compose bad-dep.yaml --dry-run
+Error: component 'token' depends on unknown component 'nonexistent'

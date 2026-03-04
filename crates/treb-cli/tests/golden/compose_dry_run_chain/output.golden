@@ -1,0 +1,7 @@
+$ treb compose chain.yaml --dry-run
+Compose dry-run: chain-deploy
+Execution plan (3 components):
+
+  1. libs — script/DeployLibs.s.sol  [(no dependencies)]
+  2. core — script/DeployCore.s.sol  [deps: libs]
+  3. periphery — script/DeployPeriphery.s.sol  [deps: core]
