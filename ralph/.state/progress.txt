@@ -1,87 +1,21 @@
 # Ralph Progress Log
-Started: Wed Mar  4 12:35:25 AM CET 2026
+Started: Wed Mar  4 12:57:44 AM CET 2026
+---
 
 ## Codebase Patterns
-- Integration test shared code goes in `tests/framework/mod.rs` (Rust 2024 edition treats subdirs without main.rs as modules, not test targets)
-- Test files that use framework: `mod framework;` at top, then `use framework::workdir::TestWorkdir;`
-- `tempfile::TempDir::keep()` replaces deprecated `into_path()` for preserving temp dirs
-- Fixture dir helper: `TestWorkdir::fixture_dir("name")` uses `env!("CARGO_MANIFEST_DIR")` for reliable paths
-- Symlink items (immutable): lib/, test/, .gitignore, remappings.txt; Copy items (mutable): foundry.toml, treb.toml, src/, script/
+- Rust `regex` crate does NOT support look-around (look-ahead/look-behind); use word boundaries `\b` or capture groups instead
+- Framework modules registered in `crates/treb-cli/tests/framework/mod.rs`
+- Workspace-level deps added in root `Cargo.toml` under `[workspace.dependencies]`, then referenced in crate `Cargo.toml` with `{ workspace = true }`
+
 ---
 
-## 2026-03-04 - P2-US-001
-- Implemented TestWorkdir struct with lightweight workspace creation
-- Created framework module structure: framework/mod.rs, workdir.rs, runner.rs (stub), anvil_node.rs (stub), context.rs (stub)
-- Created minimal-project fixture: foundry.toml, src/Counter.sol, script/Deploy.s.sol
-- Created framework_workdir.rs integration test with 4 tests (copies, symlinks, missing items, accessor)
-- Files changed:
-  - crates/treb-cli/tests/framework/mod.rs (new)
-  - crates/treb-cli/tests/framework/workdir.rs (new)
-  - crates/treb-cli/tests/framework/runner.rs (stub)
-  - crates/treb-cli/tests/framework/anvil_node.rs (stub)
-  - crates/treb-cli/tests/framework/context.rs (stub)
-  - crates/treb-cli/tests/framework_workdir.rs (new)
-  - crates/treb-cli/tests/fixtures/minimal-project/ (new)
+## 2026-03-04 - P3-US-001
+- Implemented Normalizer trait with `normalize(&self, input: &str) -> String`
+- Implemented all 9 built-in normalizers: ColorNormalizer, AddressNormalizer, HashNormalizer, TimestampNormalizer, VersionNormalizer, GitCommitNormalizer, RepositoryIdNormalizer, SpinnerNormalizer, ForgeWarningNormalizer
+- NormalizerChain::default_chain() applies normalizers in correct order (color first, hash before address)
+- 8 unit tests covering all normalizers and chain composition
+- Files changed: `Cargo.toml` (added `regex`), `crates/treb-cli/Cargo.toml` (added `regex` dev-dep), `crates/treb-cli/tests/framework/normalizer.rs` (new), `crates/treb-cli/tests/framework/mod.rs` (registered module)
 - **Learnings for future iterations:**
-  - Branch needed to be created from phase-01 branch (not main) since all crate code lives there
-  - In Rust 2024 edition, `tests/framework/mod.rs` is a shared module, not a test target — need separate test file
-  - `tempfile::TempDir::keep()` returns PathBuf directly (not Result), unlike old `into_path()`
----
-
-## 2026-03-04 - P2-US-002
-- Implemented `port_rewrite_foundry_toml()` and `port_rewrite_foundry_toml_single()` in framework/workdir.rs
-- Functions do string replacement of `localhost:{old_port}` and `127.0.0.1:{old_port}` patterns
-- `port_rewrite_foundry_toml_single()` rewrites both 8545 and 9545 to a given port
-- Created framework_port_rewrite.rs with 4 tests: single rewrite, multiple rewrites, missing file error, content preservation
-- Files changed:
-  - crates/treb-cli/tests/framework/workdir.rs (added port rewrite functions)
-  - crates/treb-cli/tests/framework_port_rewrite.rs (new)
-- **Learnings for future iterations:**
-  - Port rewrite via simple string replacement covers all URL patterns (http://localhost:PORT, localhost:PORT, 127.0.0.1:PORT) without needing regex
-  - Each test file that imports framework gets its own compilation — unused items from framework generate warnings per-test-binary (harmless)
-- `assert_cmd::cargo::cargo_bin("treb-cli")` resolves the binary path (crate name, not command name)
-- `--non-interactive` is command-specific (only `run`/`compose`), not a global CLI flag — don't auto-inject it
----
-
-## 2026-03-04 - P2-US-003
-- Implemented TrebRunner struct wrapping assert_cmd::Command with workdir, 60s timeout, debug output
-- `run()` and `run_with_env()` build Command with project defaults
-- `TREB_TEST_DEBUG=1` prints binary path, args, cwd, and exit code to stderr
-- Created framework_runner.rs with 4 tests: version succeeds, env vars, workdir accessor, invalid subcommand fails
-- Files changed:
-  - crates/treb-cli/tests/framework/runner.rs (implemented from stub)
-  - crates/treb-cli/tests/framework_runner.rs (new)
-- **Learnings for future iterations:**
-  - `--non-interactive` is not a global flag, only on `run` and `compose` commands — TrebRunner doesn't auto-inject it
-  - `assert_cmd::cargo::cargo_bin("treb-cli")` uses the crate/package name, not the binary command name
-  - `cmd.assert()` returns Assert which has `get_output()` for accessing status/stdout/stderr
----
-
-## 2026-03-04 - P2-US-004
-- Implemented AnvilNode struct wrapping treb_forge::AnvilConfig/AnvilInstance
-- `spawn()` creates node on OS-assigned port, `spawn_with_config()` accepts custom AnvilConfig
-- Accessors: `port()`, `chain_id()`, `rpc_url()`, `instance()` (for advanced API access)
-- Created framework_anvil_node.rs with 5 async tests: spawn, custom chain_id, port reachability, drop frees port, instance accessor
-- Files changed:
-  - crates/treb-cli/tests/framework/anvil_node.rs (implemented from stub)
-  - crates/treb-cli/tests/framework_anvil_node.rs (new)
-- **Learnings for future iterations:**
-  - Anvil `evm_snapshot` returns U256::ZERO for the first snapshot (not 1) — don't assert non-zero
-  - `alloy_primitives` is not a direct dep of treb-cli — use `treb_forge` re-exports or avoid in test assertions
-  - AnvilNode is a thin wrapper; Drop cleanup is handled by AnvilInstance's existing Drop impl
----
-
-## 2026-03-04 - P2-US-005
-- Implemented TestContext composition struct composing TestWorkdir, TrebRunner, and HashMap<String, AnvilNode>
-- `new(fixture_name)` creates workdir + runner; `with_anvil(name)` spawns node and rewrites foundry.toml ports
-- `run()` and `run_with_env()` delegate to TrebRunner; `anvil(name)` retrieves named nodes
-- Created framework_context.rs with 6 smoke tests: version, init, run_with_env, accessors, anvil reachability, port rewrite verification
-- Files changed:
-  - crates/treb-cli/tests/framework/context.rs (implemented from stub)
-  - crates/treb-cli/tests/framework_context.rs (new)
-- **Learnings for future iterations:**
-  - `treb init` requires foundry.toml in cwd and creates .treb/ with registry.json, config.local.json, etc.
-  - TestWorkdir auto-creates .treb/ — remove it first if testing `treb init`
-  - Builder-style `with_anvil()` consuming self works well for async setup chains
-  - All 6 tests pass including async anvil tests — full workspace green
+  - Rust `regex` crate does not support look-around assertions — had to refactor GitCommitNormalizer to use `\b` word boundaries instead
+  - Hash normalizer must run before Address normalizer so 64-hex values match first, avoiding partial 40-hex matches on the tail
 ---
