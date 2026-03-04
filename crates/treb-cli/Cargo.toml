@@ -42,3 +42,4 @@ predicates = { workspace = true }
 tempfile = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
+regex = { workspace = true }
