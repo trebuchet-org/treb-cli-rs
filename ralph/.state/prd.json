@@ -89,7 +89,7 @@
         "cargo check --workspace passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

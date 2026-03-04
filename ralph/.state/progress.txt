@@ -8,6 +8,8 @@ Started: Wed Mar  4 12:57:44 AM CET 2026
 - Workspace-level deps added in root `Cargo.toml` under `[workspace.dependencies]`, then referenced in crate `Cargo.toml` with `{ workspace = true }`
 - `similar` v2.7.0 `TextDiff::from_lines()` requires both args to be the same type — use `.as_str()` on `String` to match `&str`
 - Avoid `env::set_var`/`env::remove_var` in parallel tests (Rust 2024 makes them `unsafe` + they race); parameterise with a flag instead
+- Async cleanup in sync Drop: `tokio::task::block_in_place` + `Handle::current().block_on()` (requires `multi_thread` runtime)
+- `Semaphore::acquire().forget()` + `add_permits(1)` for manual permit management in pool patterns
 
 ---
 
@@ -59,4 +61,20 @@ Started: Wed Mar  4 12:57:44 AM CET 2026
   - `clean_workspace` is a standalone function (not a method) consistent with snapshot utilities pattern
   - REMOVE_DIRS constant makes it easy to extend the list of cleaned directories
   - `script/deploy/` cleanup iterates entries and skips `.gitkeep` by filename match
+---
+
+## 2026-03-04 - P3-US-005
+- Implemented `ContextPool` with `acquire()`/release (via `PoolGuard` Drop) in `framework/pool.rs`
+- `ContextPool::new(size, fixture)` creates N TestContexts, each with 2 AnvilNodes (chain 31337 on port 8545, chain 31338 on port 9545)
+- `PoolGuard` derefs to `TestContext`; on drop: reverts EVM snapshots, cleans workspace, takes fresh snapshots, returns context to pool
+- `default_size()` reads `RAYON_NUM_THREADS` or falls back to `num_cpus::get()`
+- Uses `tokio::sync::Semaphore` for blocking when pool exhausted, `std::sync::Mutex` for entry vec
+- Added `anvil_nodes()` accessor and `with_anvil_mapped()` builder to `TestContext` for per-node chain ID + port rewriting
+- 1 async test: acquire/modify/release/reacquire verifies clean chain state
+- Files changed: `Cargo.toml` (added `num_cpus`), `crates/treb-cli/Cargo.toml` (added `num_cpus` dev-dep), `crates/treb-cli/tests/framework/pool.rs` (new), `crates/treb-cli/tests/framework/context.rs` (added accessors), `crates/treb-cli/tests/framework/mod.rs` (registered module)
+- **Learnings for future iterations:**
+  - Async cleanup in synchronous Drop: use `tokio::task::block_in_place` + `Handle::current().block_on()` — requires `multi_thread` runtime
+  - `Semaphore::acquire().forget()` + `add_permits(1)` on release is the pattern for manual permit management (acquire removes permit, release adds it back)
+  - `port_rewrite_foundry_toml` (not `_single`) allows per-node port mapping when multiple Anvil nodes are needed
+  - EVM snapshot revert is destructive — must re-snapshot after revert for pool reuse (consistent with P3-US-003 learning)
 ---
