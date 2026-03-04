@@ -7,3 +7,4 @@ pub mod golden;
 pub mod snapshot;
 pub mod cleanup;
 pub mod pool;
+pub mod integration_test;
