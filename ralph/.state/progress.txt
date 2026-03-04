@@ -6,6 +6,8 @@ Started: Wed Mar  4 12:57:44 AM CET 2026
 - Rust `regex` crate does NOT support look-around (look-ahead/look-behind); use word boundaries `\b` or capture groups instead
 - Framework modules registered in `crates/treb-cli/tests/framework/mod.rs`
 - Workspace-level deps added in root `Cargo.toml` under `[workspace.dependencies]`, then referenced in crate `Cargo.toml` with `{ workspace = true }`
+- `similar` v2.7.0 `TextDiff::from_lines()` requires both args to be the same type — use `.as_str()` on `String` to match `&str`
+- Avoid `env::set_var`/`env::remove_var` in parallel tests (Rust 2024 makes them `unsafe` + they race); parameterise with a flag instead
 
 ---
 
@@ -18,4 +20,16 @@ Started: Wed Mar  4 12:57:44 AM CET 2026
 - **Learnings for future iterations:**
   - Rust `regex` crate does not support look-around assertions — had to refactor GitCommitNormalizer to use `\b` word boundaries instead
   - Hash normalizer must run before Address normalizer so 64-hex values match first, avoiding partial 40-hex matches on the tail
+---
+
+## 2026-03-04 - P3-US-002
+- Implemented GoldenFile struct with `compare()`, `compare_inner()`, and `compare_normalized()` methods
+- Golden file path: `{golden_dir}/{test_name}/{case_name}.golden`
+- `UPDATE_GOLDEN=1` env var creates/updates golden files; missing files panic with instructions; mismatches produce unified diffs
+- 3 unit tests: round-trip write+compare, mismatch diff, missing file panic
+- Files changed: `Cargo.toml` (added `similar`), `crates/treb-cli/Cargo.toml` (added `similar` dev-dep), `crates/treb-cli/tests/framework/golden.rs` (new), `crates/treb-cli/tests/framework/mod.rs` (registered module)
+- **Learnings for future iterations:**
+  - `similar` v2.7.0 `TextDiff::from_lines()` requires both args to be the same type; use `.as_str()` on `String`
+  - Env vars are process-global; parallel tests with `env::set_var` race. Extracted `compare_inner(update: bool)` so tests pass the flag directly instead of mutating env
+  - Rust 2024 edition makes `env::set_var`/`env::remove_var` `unsafe`
 ---
