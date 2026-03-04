@@ -1,0 +1,2 @@
+$ treb verify --all --verifier custom
+Error: unknown verifier 'custom': expected one of etherscan, sourcify, blockscout

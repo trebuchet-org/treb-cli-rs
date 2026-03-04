@@ -1,0 +1,2 @@
+$ treb verify dep-verified
+deployment 'dep-verified' is already verified — use --force to re-verify

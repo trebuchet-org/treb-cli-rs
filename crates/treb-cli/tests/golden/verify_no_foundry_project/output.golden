@@ -1,0 +1,4 @@
+$ treb verify --all
+Error: no foundry.toml found in <PROJECT_ROOT>
+
+Run `forge init` to create a Foundry project, then `treb init`.
