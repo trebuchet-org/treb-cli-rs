@@ -67,24 +67,24 @@ impl Normalizer for ColorNormalizer {
     }
 }
 
-/// Replaces 40-hex-char Ethereum addresses (0x-prefixed) with `<ADDRESS>`.
+/// Replaces 40-hex-char Ethereum addresses (0x-prefixed) with `0x<ADDRESS>`.
 pub struct AddressNormalizer;
 
 impl Normalizer for AddressNormalizer {
     fn normalize(&self, input: &str) -> String {
         let re = Regex::new(r"0x[0-9a-fA-F]{40}").unwrap();
-        re.replace_all(input, "<ADDRESS>").into_owned()
+        re.replace_all(input, "0x<ADDRESS>").into_owned()
     }
 }
 
-/// Replaces 64-hex-char hashes (0x-prefixed) with `<HASH>`.
+/// Replaces 64-hex-char hashes (0x-prefixed) with `0x<HASH>`.
 /// Must run before AddressNormalizer so 64-hex values are matched first.
 pub struct HashNormalizer;
 
 impl Normalizer for HashNormalizer {
     fn normalize(&self, input: &str) -> String {
         let re = Regex::new(r"0x[0-9a-fA-F]{64}").unwrap();
-        re.replace_all(input, "<HASH>").into_owned()
+        re.replace_all(input, "0x<HASH>").into_owned()
     }
 }
 
@@ -138,16 +138,18 @@ impl Normalizer for GitCommitNormalizer {
     }
 }
 
-/// Replaces UUID-like repository IDs.
+/// Replaces transaction-based repository IDs.
+/// Matches `tx-0x<64hex>` → `tx-<ID>` and `tx-internal-<64hex>` → `tx-internal-<ID>`.
 pub struct RepositoryIdNormalizer;
 
 impl Normalizer for RepositoryIdNormalizer {
     fn normalize(&self, input: &str) -> String {
-        let re = Regex::new(
-            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
-        )
-        .unwrap();
-        re.replace_all(input, "<REPO_ID>").into_owned()
+        // tx-internal must be matched first (longer prefix) to avoid partial match
+        let internal = Regex::new(r"tx-internal-[a-fA-F0-9]{64}").unwrap();
+        let result = internal.replace_all(input, "tx-internal-<ID>");
+
+        let tx = Regex::new(r"tx-0x[a-fA-F0-9]{64}").unwrap();
+        tx.replace_all(&result, "tx-<ID>").into_owned()
     }
 }
 
@@ -423,7 +425,7 @@ mod tests {
         let input = "deployed to 0x1234567890abcdef1234567890abcdef12345678 on chain 1";
         assert_eq!(
             n.normalize(input),
-            "deployed to <ADDRESS> on chain 1"
+            "deployed to 0x<ADDRESS> on chain 1"
         );
     }
 
@@ -432,7 +434,7 @@ mod tests {
         let n = HashNormalizer;
         let input =
             "tx 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef done";
-        assert_eq!(n.normalize(input), "tx <HASH> done");
+        assert_eq!(n.normalize(input), "tx 0x<HASH> done");
     }
 
     #[test]
@@ -445,7 +447,7 @@ mod tests {
         let input =
             "tx 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef addr 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let result = chain.normalize(input);
-        assert_eq!(result, "tx <HASH> addr <ADDRESS>");
+        assert_eq!(result, "tx 0x<HASH> addr 0x<ADDRESS>");
     }
 
     #[test]
@@ -500,7 +502,7 @@ mod tests {
         let result = chain.normalize(input);
         assert_eq!(
             result,
-            "Deployed to <ADDRESS> at <TIMESTAMP> v<VERSION>"
+            "Deployed to 0x<ADDRESS> at <TIMESTAMP> v<VERSION>"
         );
     }
 
@@ -595,6 +597,30 @@ mod tests {
     fn debug_normalizer_no_match() {
         let n = DebugNormalizer;
         let input = "level=INFO this is fine\nlevel=WARN also fine\n";
+        assert_eq!(n.normalize(input), input);
+    }
+
+    // --- RepositoryIdNormalizer ---
+
+    #[test]
+    fn repository_id_normalizer_replaces_tx_ids() {
+        let n = RepositoryIdNormalizer;
+        let hash = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+
+        assert_eq!(
+            n.normalize(&format!("id: tx-0x{hash} done")),
+            "id: tx-<ID> done"
+        );
+        assert_eq!(
+            n.normalize(&format!("id: tx-internal-{hash} done")),
+            "id: tx-internal-<ID> done"
+        );
+    }
+
+    #[test]
+    fn repository_id_normalizer_no_match() {
+        let n = RepositoryIdNormalizer;
+        let input = "no transaction ids here";
         assert_eq!(n.normalize(input), input);
     }
 
