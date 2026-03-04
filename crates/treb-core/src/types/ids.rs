@@ -22,6 +22,18 @@ pub fn generate_deployment_id(
     }
 }
 
+/// Return a human-readable display name for a contract.
+///
+/// Returns `ContractName` when `label` is empty,
+/// `ContractName:label` when non-empty.
+pub fn contract_display_name(contract_name: &str, label: &str) -> String {
+    if label.is_empty() {
+        contract_name.to_string()
+    } else {
+        format!("{contract_name}:{label}")
+    }
+}
+
 /// A deployment identifier, typically in the form `namespace/chainId/ContractName:Label`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -109,5 +121,15 @@ mod tests {
             generate_deployment_id("staging", 11155111, "Token", ""),
             "staging/11155111/Token"
         );
+    }
+
+    #[test]
+    fn display_name_empty_label() {
+        assert_eq!(contract_display_name("Counter", ""), "Counter");
+    }
+
+    #[test]
+    fn display_name_non_empty_label() {
+        assert_eq!(contract_display_name("Counter", "v2"), "Counter:v2");
     }
 }

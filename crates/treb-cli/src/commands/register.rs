@@ -365,7 +365,7 @@ pub async fn run(
 
     // ── Build defaults ──────────────────────────────────────────────────
     let effective_namespace = namespace.unwrap_or_else(|| "default".to_string());
-    let effective_label = label.unwrap_or_else(|| "default".to_string());
+    let effective_label = label.unwrap_or_default();
     let effective_name = resolve_contract_name(contract_name, contract);
     let hash_suffix = &tx_hash[2..tx_hash.len().min(10)];
     let tx_id = format!("tx-{hash_suffix}");
