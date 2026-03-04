@@ -132,3 +132,18 @@ Started: Tue Mar  4 2026
   - Tag CLI syntax: `treb tag <deployment>` (show), `treb tag --add <tag> <deployment>` (add), `treb tag --json ...` (JSON output)
   - All fixture deployments have `tags: null` so tag show on any of them gives "No tags" output
 ---
+
+## 2026-03-04 - P6-US-005
+- Added 5 new tests to `integration_tag.rs`: tag_remove, tag_remove_json, tag_add_duplicate_error, tag_remove_nonexistent_error, tag_uninitialized (10 total tag tests)
+- Created `seed_registry_with_tag()` local helper that seeds registry then pre-adds a "v3-release" tag to FPMM:v3.0.0 deployment
+- tag_remove and tag_remove_json use pre-seeded tag so golden files only show the remove operation
+- tag_add_duplicate_error uses pre-seeded tag + `expect_err(true)` — error contains "already exists"
+- tag_remove_nonexistent_error uses regular seed (no tags) + `expect_err(true)` — error contains "not found"
+- tag_uninitialized uses `pre_setup_hook` to remove `.treb/` (auto-created by TestWorkdir) — error mentions "treb init"
+- Golden files at `tests/golden/tag_{remove,remove_json,add_duplicate_error,remove_nonexistent_error,uninitialized}/output.golden`
+- Files changed: `crates/treb-cli/tests/integration_tag.rs`, 5 golden files
+- **Learnings for future iterations:**
+  - `expect_err` applies to ALL test commands in the chain — can't mix success+failure in test commands; use `setup()` or `post_setup_hook` for prerequisite steps that must succeed
+  - For tests needing pre-existing state (like a tag already added), modify deployments.json directly in post_setup_hook rather than chaining CLI commands
+  - TestWorkdir auto-creates `.treb/` — uninitialized tests must use `pre_setup_hook` to `remove_dir_all(ctx.treb_dir())` (same pattern as list/show/config uninitialized tests)
+---
