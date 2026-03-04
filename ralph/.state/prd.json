@@ -34,7 +34,7 @@
         "cargo check --workspace passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

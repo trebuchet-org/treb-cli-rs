@@ -15,3 +15,19 @@ Started: Tue Mar  4 02:00:00 AM CET 2026
   - Phase branches build on previous phases — must branch from phase-03 not main (main only has MASTER_PLAN.md)
   - ralph/.state/ is in .gitignore — use `git add -f` to force-add state files
 ---
+
+## 2026-03-04 - P4-US-002
+- Created all 7 Solidity source contracts in tests/fixtures/project/src/
+- Counter.sol: simple counter with setNumber() and increment(), pragma =0.8.30
+- SampleToken.sol: ERC20-like token with constructor(string, string, uint256), pragma ^0.8.30
+- StringUtils.sol: library with concat, length, toUpperCase, equal external functions, pragma ^0.7.0 || ^0.8.0
+- StringUtilsV2.sol: identical interface to StringUtils (separate for v0.8 import paths), pragma ^0.7.0 || ^0.8.0
+- UpgradeableCounter.sol: initializable counter with initialize(), increment(), getCount(), owner(), transferOwnership(), pragma =0.8.30
+- MessageStorageV07.sol: imports StringUtils, exercises library linkage, pragma =0.7.6
+- MessageStorageV08.sol: imports StringUtilsV2, exercises library linkage, pragma =0.8.30
+- Files changed: `crates/treb-cli/tests/fixtures/project/src/` (7 new .sol files)
+- **Learnings for future iterations:**
+  - Solidity contracts are pure fixture files — they don't affect cargo check/build at all
+  - StringUtils uses `calldata` params in external library functions — compiler handles storage→calldata conversion via delegatecall
+  - MessageStorageV07 uses pragma =0.7.6 which requires foundry's multi-compiler auto-detection (no solc_version in foundry.toml)
+---
