@@ -1,61 +1,13 @@
 # Ralph Progress Log
-Started: Tue Mar  4 02:00:00 AM CET 2026
+Started: Wed Mar  4 01:58:35 AM CET 2026
 ---
 
-## 2026-03-04 - P4-US-001
-- Created tests/fixtures/project/ directory with all configuration files
-- foundry.toml: profile settings (bytecode_hash=none, cbor_metadata=false, optimizer_runs=0), rpc_endpoints (anvil-31337 on 8545, anvil-31338 on 9545), etherscan config, lint settings
-- treb.toml: v2 format with [accounts.anvil] using Anvil's well-known private key (0xac0974...)
-- .env.example: placeholder vars (ANVIL_PK, ETHERSCAN_API_KEY, CONTRACT_VERSION, DEPLOYMENT_LABEL)
-- remappings.txt: forge-std/ and @openzeppelin/contracts/ entries
-- .gitignore: out/, cache/, broadcast/, .treb/
-- script/deploy/.gitkeep: empty directory for generated deploy scripts
-- Files changed: `crates/treb-cli/tests/fixtures/project/` (6 new files)
+## 2026-03-04 - P5-US-001
+- Added PathNormalizer (replaces absolute paths with `<PROJECT_ROOT>`, longest-first sorting) and ShortHexNormalizer (replaces 7-10 char hex strings with `<SHORT_HASH>`) to framework normalizer.rs
+- Removed local ShortHexNormalizer from smoke_phase3.rs, now imports from framework
+- Added unit tests for both new normalizers
+- Files changed: `crates/treb-cli/tests/framework/normalizer.rs`, `crates/treb-cli/tests/smoke_phase3.rs`
 - **Learnings for future iterations:**
-  - Phase branches build on previous phases — must branch from phase-03 not main (main only has MASTER_PLAN.md)
-  - ralph/.state/ is in .gitignore — use `git add -f` to force-add state files
----
-
-## 2026-03-04 - P4-US-002
-- Created all 7 Solidity source contracts in tests/fixtures/project/src/
-- Counter.sol: simple counter with setNumber() and increment(), pragma =0.8.30
-- SampleToken.sol: ERC20-like token with constructor(string, string, uint256), pragma ^0.8.30
-- StringUtils.sol: library with concat, length, toUpperCase, equal external functions, pragma ^0.7.0 || ^0.8.0
-- StringUtilsV2.sol: identical interface to StringUtils (separate for v0.8 import paths), pragma ^0.7.0 || ^0.8.0
-- UpgradeableCounter.sol: initializable counter with initialize(), increment(), getCount(), owner(), transferOwnership(), pragma =0.8.30
-- MessageStorageV07.sol: imports StringUtils, exercises library linkage, pragma =0.7.6
-- MessageStorageV08.sol: imports StringUtilsV2, exercises library linkage, pragma =0.8.30
-- Files changed: `crates/treb-cli/tests/fixtures/project/src/` (7 new .sol files)
-- **Learnings for future iterations:**
-  - Solidity contracts are pure fixture files — they don't affect cargo check/build at all
-  - StringUtils uses `calldata` params in external library functions — compiler handles storage→calldata conversion via delegatecall
-  - MessageStorageV07 uses pragma =0.7.6 which requires foundry's multi-compiler auto-detection (no solc_version in foundry.toml)
----
-
-## 2026-03-04 - P4-US-003
-- Created minimal vendored library stubs for forge-std and openzeppelin-contracts
-- lib/forge-std/src/Script.sol: Vm interface (startBroadcast/stopBroadcast), console library, Script abstract contract
-- lib/openzeppelin-contracts/contracts/proxy/: ERC1967Proxy, TransparentUpgradeableProxy, BeaconProxy, UpgradeableBeacon (constructor-only stubs)
-- script/Deploy.s.sol: deploys Counter using forge-std Script base, pragma =0.8.30
-- fixture_compile.rs: `#[ignore]` test that runs `forge build` on the project fixture
-- Verified `forge build` succeeds on the fixture (all 7 source contracts + Deploy script compile)
-- Files changed: `crates/treb-cli/tests/fixtures/project/lib/` (5 new .sol stubs), `crates/treb-cli/tests/fixtures/project/script/Deploy.s.sol`, `crates/treb-cli/tests/fixture_compile.rs`
-- **Learnings for future iterations:**
-  - Library stubs from gen-deploy-project fixture can be reused — same pattern of constructor-only contracts
-  - The `#[ignore]` attribute on tests is the right approach for tests requiring external tools (forge)
-  - `forge build` auto-detects multi-compiler versions from pragma ranges — no explicit config needed
----
-
-## 2026-03-04 - P4-US-004
-- Added `DEFAULT_FIXTURE` constant ("project") to `framework/workdir.rs`
-- Created `smoke_phase4.rs` with 3 smoke tests:
-  - `fixture_workdir_structure`: verifies all expected files, directories, symlinks, and source contracts
-  - `fixture_foundry_toml_port_rewrite`: verifies port rewriting for both anvil-31337 (8545) and anvil-31338 (9545)
-  - `fixture_treb_toml_present`: verifies treb.toml is copied with [accounts.anvil] and well-known private key
-- All tests pass with `cargo test --workspace` (0 failures)
-- Files changed: `crates/treb-cli/tests/framework/workdir.rs`, `crates/treb-cli/tests/smoke_phase4.rs`
-- **Learnings for future iterations:**
-  - Symlink verification uses `path.read_link().is_ok()` to confirm the item is a symlink (not just exists)
-  - The `smoke_phase4.rs` test binary also compiles the framework module tests (24 tests total for this binary)
-  - Test workdir copies mutable items (foundry.toml, treb.toml, src/, script/) and symlinks immutable items (lib/, remappings.txt, .gitignore)
+  - Phase-05 branch must be created from phase-04 (not main) since it depends on the test framework built in phases 2-4
+  - The `regex` crate is already available in test deps — no Cargo.toml changes needed for normalizers
 ---
