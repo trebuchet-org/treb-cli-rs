@@ -52,3 +52,17 @@ Started: Wed Mar  4 01:58:35 AM CET 2026
   - Using `${ENV_VAR}` in RPC endpoints avoids any real HTTP calls, making tests fast and deterministic
   - The `networks` command output is deterministic (sorted alphabetically by name) so golden files are stable
 ---
+
+## 2026-03-04 - P5-US-005
+- Created `integration_config.rs` with six golden-file integration tests: `config_show_default`, `config_show_json`, `config_set_show_round_trip`, `config_remove_show_round_trip`, `config_show_uninitialized`, `config_set_invalid_key`
+- All tests use `IntegrationTest` + `run_integration_test` + `TestContext::new("project")`
+- `PathNormalizer` applied to replace workdir absolute paths with `<PROJECT_ROOT>` in all tests
+- `config_set_show_round_trip` uses `output_artifact(".treb/config.local.json")` to verify persistence
+- Error tests use `expect_err(true)`: uninitialized mentions `treb init`, invalid key lists valid keys (namespace, network)
+- Golden files at `tests/golden/config_{show_default,show_json,set_show_round_trip,remove_show_round_trip,show_uninitialized,set_invalid_key}/output.golden`
+- Files changed: `crates/treb-cli/tests/integration_config.rs`, `crates/treb-cli/tests/golden/config_*/output.golden`
+- **Learnings for future iterations:**
+  - `config set namespace <value>` + `config show` will fail if the namespace doesn't exist in treb.toml — the resolver validates namespaces. Only set `network` for round-trip tests, or ensure the namespace is defined.
+  - The `config show` command resolves config from multiple sources (local, treb.toml, foundry.toml); the "project" fixture has a treb.toml with "default" namespace and an "anvil" sender
+  - `setup()` can be chained multiple times for multi-step setup (e.g., init → set → remove)
+---
