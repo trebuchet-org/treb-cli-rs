@@ -1,0 +1,44 @@
+$ treb gen-deploy Counter --strategy create2 --proxy uups --output script/DeployCounter_create2_uups.s.sol
+Generated deploy script: script/DeployCounter_create2_uups.s.sol
+
+--- script/DeployCounter_create2_uups.s.sol ---
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^<VERSION>;
+
+import {Script, console} from "forge-std/Script.sol";
+import { Counter } from "../src/Counter.sol";
+import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+
+// NOTE: Counter must inherit UUPSUpgradeable and override _authorizeUpgrade.
+contract DeployCounter is Script {
+    function run() public {
+        vm.startBroadcast();
+
+        // TODO: Set your deployment salt
+        bytes32 salt = bytes32(0);
+
+        // TODO: Set constructor arguments
+        uint256 initialCount = 0; // TODO: replace placeholder
+        address _owner = address(0); // TODO: replace placeholder
+
+        // Deploy implementation (must inherit UUPSUpgradeable)
+        Counter implementation = new Counter{salt: salt}(initialCount, _owner);
+
+        // TODO: Set initialization data for the proxy
+        bytes memory initData = abi.encodeWithSelector(
+            Counter.initialize.selector
+            // TODO: Add initialize function arguments
+        );
+
+        // Deploy UUPS proxy (uses ERC1967Proxy)
+        ERC1967Proxy proxy = new ERC1967Proxy(
+            address(implementation),
+            initData
+        );
+
+        console.log("Counter implementation deployed at:", address(implementation));
+        console.log("ERC1967Proxy deployed at:", address(proxy));
+
+        vm.stopBroadcast();
+    }
+}
