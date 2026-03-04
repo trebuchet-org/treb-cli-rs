@@ -1,0 +1,33 @@
+$ treb show --json mainnet/42220/FPMM:v<VERSION>
+{
+  "id": "mainnet/42220/FPMM:v<VERSION>",
+  "namespace": "mainnet",
+  "chainId": 42220,
+  "contractName": "FPMM",
+  "label": "v<VERSION>",
+  "address": "<ADDRESS>",
+  "type": "SINGLETON",
+  "transactionId": "",
+  "deploymentStrategy": {
+    "method": "CREATE3",
+    "salt": "<HASH>",
+    "initCodeHash": "<HASH>",
+    "factory": "<ADDRESS>",
+    "constructorArgs": "<HASH>",
+    "entropy": "mainnet/FPMM:v<VERSION>"
+  },
+  "proxyInfo": null,
+  "artifact": {
+    "path": "lib/mento-core/contracts/swap/FPMM.sol",
+    "compilerVersion": "<VERSION>+commit.e11b9ed9",
+    "bytecodeHash": "<HASH>",
+    "scriptPath": "script/deploy/v3/DeployV3PreStage.s.sol",
+    "gitCommit": "<GIT_COMMIT>"
+  },
+  "verification": {
+    "status": "UNVERIFIED"
+  },
+  "tags": null,
+  "createdAt": "<TIMESTAMP>",
+  "updatedAt": "<TIMESTAMP>"
+}

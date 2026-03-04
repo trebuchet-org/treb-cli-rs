@@ -1,0 +1,4 @@
+$ treb show nonexistent/1/Foo:bar
+Error: no deployment found matching 'nonexistent/1/Foo:bar'
+
+Run `treb list` to see available deployments.

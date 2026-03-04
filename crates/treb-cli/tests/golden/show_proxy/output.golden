@@ -1,0 +1,35 @@
+$ treb show mainnet/42220/TransparentUpgradeableProxy:FPMMFactory
+── Identity ──
+       ID:  mainnet/42220/TransparentUpgradeableProxy:FPMMFactory
+ Contract:  TransparentUpgradeableProxy
+    Label:  FPMMFactory
+Namespace:  mainnet
+     Type:  PROXY
+
+── On-Chain ──
+Chain ID:  42220
+ Address:  <ADDRESS>
+
+── Transaction ──
+Transaction ID:  
+        Method:  CREATE3
+Salt:  <HASH>
+Factory:  <ADDRESS>
+
+── Artifact ──
+         Path:  lib/openzeppelin-contracts/contracts/proxy/transparent/TransparentUpgradeableProxy.sol
+     Compiler:  <VERSION>+commit.64118f21
+Bytecode Hash:  <HASH>
+       Script:  script/deploy/v3/DeployV3PreStage.s.sol
+   Git Commit:  <GIT_COMMIT>
+
+── Verification ──
+Status:  UNVERIFIED
+
+── Proxy Info ──
+    Proxy Type:  UUPS
+Implementation:  <ADDRESS>
+
+── Timestamps ──
+Created At:  <TIMESTAMP>
+Updated At:  <TIMESTAMP>

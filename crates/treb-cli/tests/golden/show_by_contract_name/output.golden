@@ -1,0 +1,31 @@
+$ treb show FPMMFactory
+── Identity ──
+       ID:  mainnet/42220/FPMMFactory:v<VERSION>
+ Contract:  FPMMFactory
+    Label:  v<VERSION>
+Namespace:  mainnet
+     Type:  SINGLETON
+
+── On-Chain ──
+Chain ID:  42220
+ Address:  <ADDRESS>
+
+── Transaction ──
+Transaction ID:  
+        Method:  CREATE3
+Salt:  <HASH>
+Factory:  <ADDRESS>
+
+── Artifact ──
+         Path:  lib/mento-core/contracts/swap/FPMMFactory.sol
+     Compiler:  <VERSION>+commit.e11b9ed9
+Bytecode Hash:  <HASH>
+       Script:  script/deploy/v3/DeployV3PreStage.s.sol
+   Git Commit:  <GIT_COMMIT>
+
+── Verification ──
+Status:  UNVERIFIED
+
+── Timestamps ──
+Created At:  <TIMESTAMP>
+Updated At:  <TIMESTAMP>
