@@ -67,6 +67,7 @@ tempfile = "3"
 assert_cmd = "2"
 predicates = "3"
 regex = "1"
+similar = "2"
 
 # Error handling & async
 thiserror = "2"
