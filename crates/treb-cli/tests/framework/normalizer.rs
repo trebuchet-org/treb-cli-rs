@@ -88,35 +88,50 @@ impl Normalizer for HashNormalizer {
     }
 }
 
-/// Replaces ISO-8601 timestamps and relative time strings.
+/// Replaces timestamps with placeholders: ISO-8601, standard datetime,
+/// relative times, and unix timestamps.
 pub struct TimestampNormalizer;
 
 impl Normalizer for TimestampNormalizer {
     fn normalize(&self, input: &str) -> String {
-        // ISO-8601: 2024-01-15T12:30:45Z or 2024-01-15T12:30:45+00:00 or with millis
+        // ISO timestamps: 2024-08-09T14:30:45Z
         let iso = Regex::new(
-            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?",
+            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z?(\+\d+:\d+)?",
         )
         .unwrap();
         let result = iso.replace_all(input, "<TIMESTAMP>");
 
-        // Date-only: 2024-01-15
-        let date_only = Regex::new(r"\d{4}-\d{2}-\d{2}").unwrap();
-        let result = date_only.replace_all(&result, "<DATE>");
+        // Standard timestamps: 2024-08-09 14:30:45
+        let standard = Regex::new(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}").unwrap();
+        let result = standard.replace_all(&result, "<TIMESTAMP>");
 
-        // Relative times: "5 minutes ago", "1 hour ago", "2 days ago"
-        let relative = Regex::new(r"\d+\s+(second|minute|hour|day|week|month|year)s?\s+ago").unwrap();
-        relative.replace_all(&result, "<RELATIVE_TIME>").into_owned()
+        // Relative times: "2 minutes ago", "1 hour ago"
+        let relative = Regex::new(r"\d+ \w+ ago").unwrap();
+        let result = relative.replace_all(&result, "<TIME_AGO>");
+
+        // Unix timestamps (10-13 digits)
+        let unix = Regex::new(r"\b\d{10,13}\b").unwrap();
+        unix.replace_all(&result, "<UNIX_TIME>").into_owned()
     }
 }
 
-/// Replaces semver version strings (e.g., `1.2.3`, `0.1.0-alpha.1`).
+/// Replaces version-related strings: v-prefixed semver, treb short version,
+/// and git commit suffixes in version strings.
 pub struct VersionNormalizer;
 
 impl Normalizer for VersionNormalizer {
     fn normalize(&self, input: &str) -> String {
-        let re = Regex::new(r"\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?").unwrap();
-        re.replace_all(input, "<VERSION>").into_owned()
+        // Treb version: v1.0.0-beta.1-95-g6a2e70e
+        let semver = Regex::new(r"v\d+\.\d+\.\d+(-[a-zA-Z0-9.\-]+)?").unwrap();
+        let result = semver.replace_all(input, "v<VERSION>");
+
+        // Treb short version: "treb abcdef0" (7 char hex on its own line)
+        let treb_short = Regex::new(r"(?m:^treb [a-z0-9]{7}$)").unwrap();
+        let result = treb_short.replace_all(&result, "treb v<VERSION>");
+
+        // Git commit in version strings: -g6a2e70e
+        let git_commit = Regex::new(r"-g[a-f0-9]{7,}").unwrap();
+        git_commit.replace_all(&result, "-g<COMMIT>").into_owned()
     }
 }
 
@@ -153,27 +168,38 @@ impl Normalizer for RepositoryIdNormalizer {
     }
 }
 
-/// Strips spinner/progress indicator characters and lines.
+/// Normalizes spinner animation output from forge compilation.
+/// Collapses variable spinner frames and timing into deterministic output.
 pub struct SpinnerNormalizer;
 
 impl Normalizer for SpinnerNormalizer {
     fn normalize(&self, input: &str) -> String {
-        // Remove lines that are purely spinner characters (braille dots, common spinner chars)
-        let re = Regex::new(r"(?m)^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷|/\-\\]+\s*$\n?").unwrap();
-        let result = re.replace_all(input, "");
+        // Normalize the "finished" line: variable spinner char and timing
+        let finished =
+            Regex::new(r"\[[^\]]+\] Solc [^\n\r]* finished in [0-9.]+s").unwrap();
+        let result = finished.replace_all(input, "[*] Solc finished");
 
-        // Also remove carriage returns used by spinners to overwrite lines
-        let cr = Regex::new(r"\r[^\n]").unwrap();
-        cr.replace_all(&result, "").into_owned()
+        // Collapse consecutive "Compiling" spinner frames into a single normalized line
+        let compiling = Regex::new(
+            r"((?:\r)*\[[^\]]+\] Compiling[^\n\r]*\s*(?:\r?\n|\r))+"
+        )
+        .unwrap();
+        compiling
+            .replace_all(&result, "\r[⠃] Compiling...\n")
+            .into_owned()
     }
 }
 
-/// Strips common Forge warning/info lines that vary between environments.
+/// Removes the specific foundry treb-config warning line that appears when
+/// foundry.toml has a `[treb]` section. Does NOT strip all Warning: lines.
 pub struct ForgeWarningNormalizer;
 
 impl Normalizer for ForgeWarningNormalizer {
     fn normalize(&self, input: &str) -> String {
-        let re = Regex::new(r"(?m)^(Warning|warning|WARNING):?\s.*$\n?").unwrap();
+        let re = Regex::new(
+            r"(?m)^Warning: Found unknown `treb` config for profile `[^`]+` defined in foundry\.toml\.?\s*$\n?",
+        )
+        .unwrap();
         re.replace_all(input, "").into_owned()
     }
 }
@@ -478,20 +504,87 @@ mod tests {
         let n = TimestampNormalizer;
         assert_eq!(
             n.normalize("deployed 5 minutes ago"),
-            "deployed <RELATIVE_TIME>"
+            "deployed <TIME_AGO>"
         );
         assert_eq!(
             n.normalize("created 1 hour ago"),
-            "created <RELATIVE_TIME>"
+            "created <TIME_AGO>"
         );
     }
 
     #[test]
-    fn version_normalizer() {
+    fn timestamp_normalizer_handles_standard_datetime() {
+        let n = TimestampNormalizer;
+        assert_eq!(
+            n.normalize("at 2024-08-09 14:30:45 done"),
+            "at <TIMESTAMP> done"
+        );
+    }
+
+    #[test]
+    fn timestamp_normalizer_handles_unix_timestamps() {
+        let n = TimestampNormalizer;
+        // 10-digit unix timestamp
+        assert_eq!(
+            n.normalize("reset-1709567890 done"),
+            "reset-<UNIX_TIME> done"
+        );
+        // 13-digit unix timestamp (millis)
+        assert_eq!(
+            n.normalize("backup-1709567890123 done"),
+            "backup-<UNIX_TIME> done"
+        );
+    }
+
+    #[test]
+    fn version_normalizer_v_prefixed_semver() {
         let n = VersionNormalizer;
         assert_eq!(
-            n.normalize("treb v0.1.0 (forge 0.2.0)"),
-            "treb v<VERSION> (forge <VERSION>)"
+            n.normalize("treb v0.1.0 (forge v0.2.0)"),
+            "treb v<VERSION> (forge v<VERSION>)"
+        );
+        // Non-v-prefixed is NOT matched
+        assert_eq!(
+            n.normalize("forge 0.2.0"),
+            "forge 0.2.0"
+        );
+    }
+
+    #[test]
+    fn version_normalizer_treb_short_version() {
+        let n = VersionNormalizer;
+        assert_eq!(
+            n.normalize("treb abcdef0"),
+            "treb v<VERSION>"
+        );
+        // Only matches standalone lines
+        assert_eq!(
+            n.normalize("treb abcdef0 extra"),
+            "treb abcdef0 extra"
+        );
+    }
+
+    #[test]
+    fn version_normalizer_git_commit_suffix() {
+        let n = VersionNormalizer;
+        // Full version with prerelease and git describe suffix
+        assert_eq!(
+            n.normalize("v1.0.0-beta.1-95-g6a2e70e"),
+            "v<VERSION>"
+        );
+        // Standalone git commit suffix (not part of semver)
+        assert_eq!(
+            n.normalize("built from -g6a2e70e"),
+            "built from -g<COMMIT>"
+        );
+    }
+
+    #[test]
+    fn version_normalizer_no_match() {
+        let n = VersionNormalizer;
+        assert_eq!(
+            n.normalize("no version here"),
+            "no version here"
         );
     }
 
@@ -504,6 +597,50 @@ mod tests {
             result,
             "Deployed to 0x<ADDRESS> at <TIMESTAMP> v<VERSION>"
         );
+    }
+
+    // --- SpinnerNormalizer ---
+
+    #[test]
+    fn spinner_normalizer_replaces_solc_finished() {
+        let n = SpinnerNormalizer;
+        assert_eq!(
+            n.normalize("[⠆] Solc 0.8.21 finished in 1.23s"),
+            "[*] Solc finished"
+        );
+    }
+
+    #[test]
+    fn spinner_normalizer_collapses_compiling_lines() {
+        let n = SpinnerNormalizer;
+        let input = "\r[⠃] Compiling 5 files\n\r[⠆] Compiling 5 files\n\r[⠊] Compiling 5 files\n";
+        assert_eq!(
+            n.normalize(input),
+            "\r[⠃] Compiling...\n"
+        );
+    }
+
+    #[test]
+    fn spinner_normalizer_no_match() {
+        let n = SpinnerNormalizer;
+        let input = "Deployed contract to mainnet\n";
+        assert_eq!(n.normalize(input), input);
+    }
+
+    // --- ForgeWarningNormalizer ---
+
+    #[test]
+    fn forge_warning_normalizer_removes_treb_config_warning() {
+        let n = ForgeWarningNormalizer;
+        let input = "output\nWarning: Found unknown `treb` config for profile `default` defined in foundry.toml.\nmore output\n";
+        assert_eq!(n.normalize(input), "output\nmore output\n");
+    }
+
+    #[test]
+    fn forge_warning_normalizer_ignores_other_warnings() {
+        let n = ForgeWarningNormalizer;
+        let input = "Warning: some other warning\noutput\n";
+        assert_eq!(n.normalize(input), input);
     }
 
     // --- TargetedHashNormalizer ---
