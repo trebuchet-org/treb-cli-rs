@@ -1,0 +1,6 @@
+$ treb run script/NonExistent.s.sol --network anvil-31337 --broadcast --non-interactive
+Compiling and executing script/NonExistent.s.sol...
+Error: pipeline execution failed
+
+Caused by:
+    forge error: forge preprocessing failed: error sending request for url (http://localhost:8545/)

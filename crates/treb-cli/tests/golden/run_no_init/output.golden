@@ -1,0 +1,4 @@
+$ treb run script/Deploy.s.sol
+Error: no foundry.toml found in <PROJECT_ROOT>
+
+Run `forge init` to create a Foundry project, then `treb init`.

@@ -1,0 +1,66 @@
+$ treb run script/Deploy.s.sol --network anvil-31337 --broadcast --non-interactive --verbose
+No files changed, compilation skipped
+┌──────────┬────────────────────────────────────────────┬───────────┬───────────┬───────┐
+│ Contract ┆ Address                                    ┆ Type      ┆ Namespace ┆ Chain │
+╞══════════╪════════════════════════════════════════════╪═══════════╪═══════════╪═══════╡
+│ Counter  ┆ <ADDRESS> ┆ SINGLETON ┆ default   ┆ 0     │
+└──────────┴────────────────────────────────────────────┴───────────┴───────────┴───────┘
+
+1 deployment recorded, 1 transaction
+Config source: treb.toml (v2)
+Namespace: default
+RPC: anvil-31337
+Sender [anvil]: <ADDRESS>
+Compiling and executing script/Deploy.s.sol...
+Execution complete.
+Result: 1 deployment(s), 1 transaction(s), 0 skipped
+
+--- .treb/deployments.json ---
+{
+  "default/0/Counter:Counter": {
+    "id": "default/0/Counter:Counter",
+    "namespace": "default",
+    "chainId": 0,
+    "contractName": "Counter",
+    "label": "Counter",
+    "address": "<ADDRESS>",
+    "type": "SINGLETON",
+    "transactionId": "<HASH>",
+    "deploymentStrategy": {
+      "method": "CREATE",
+      "initCodeHash": "<HASH>"
+    },
+    "proxyInfo": null,
+    "artifact": {
+      "path": "<PROJECT_ROOT>/out/Counter.sol/Counter.json",
+      "compilerVersion": "",
+      "bytecodeHash": "<HASH>",
+      "scriptPath": "script/Deploy.s.sol",
+      "gitCommit": ""
+    },
+    "verification": {
+      "status": "UNVERIFIED"
+    },
+    "tags": null,
+    "createdAt": "<TIMESTAMP>",
+    "updatedAt": "<TIMESTAMP>"
+  }
+}
+
+--- .treb/transactions.json ---
+{
+  "<HASH>": {
+    "id": "<HASH>",
+    "chainId": 0,
+    "hash": "",
+    "status": "SIMULATED",
+    "sender": "<ADDRESS>",
+    "nonce": 0,
+    "deployments": [
+      "default/0/Counter:Counter"
+    ],
+    "operations": [],
+    "environment": "default",
+    "createdAt": "<TIMESTAMP>"
+  }
+}
