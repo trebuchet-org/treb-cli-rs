@@ -485,3 +485,94 @@ fn fork_exit_success() {
 
     run_integration_test(&test, &ctx);
 }
+
+// ── fork revert: not forked ─────────────────────────────────────────────
+
+/// `treb fork revert --network mainnet` when mainnet is not forked should
+/// error with a message mentioning "not in fork mode".
+#[test]
+fn fork_revert_not_forked() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_revert_not_forked")
+        .setup(&["init"])
+        .test(&["fork", "revert", "--network", "mainnet"])
+        .expect_err(true)
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork revert: no active forks ────────────────────────────────────────
+
+/// `treb fork revert --all --network mainnet` when no forks are active
+/// should print "No active forks to revert." (not an error).
+#[test]
+fn fork_revert_no_active_forks() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_revert_no_active_forks")
+        .setup(&["init"])
+        .test(&["fork", "revert", "--network", "mainnet", "--all"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork revert: port unreachable ───────────────────────────────────────
+
+/// `treb fork revert --network mainnet` when the fork's Anvil port (18545)
+/// is not reachable should error mentioning the port and "not reachable".
+#[test]
+fn fork_revert_port_unreachable() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_revert_port_unreachable")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_fork_status(ctx.path()))
+        .test(&["fork", "revert", "--network", "mainnet"])
+        .expect_err(true)
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork restart: not forked ────────────────────────────────────────────
+
+/// `treb fork restart --network mainnet` when mainnet is not forked should
+/// error with a message mentioning "not in fork mode".
+#[test]
+fn fork_restart_not_forked() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_restart_not_forked")
+        .setup(&["init"])
+        .test(&["fork", "restart", "--network", "mainnet"])
+        .expect_err(true)
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork restart: port unreachable ──────────────────────────────────────
+
+/// `treb fork restart --network mainnet` when the fork's Anvil port (18545)
+/// is not reachable should error mentioning the port and "not reachable".
+#[test]
+fn fork_restart_port_unreachable() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_restart_port_unreachable")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_fork_status(ctx.path()))
+        .test(&["fork", "restart", "--network", "mainnet"])
+        .expect_err(true)
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}

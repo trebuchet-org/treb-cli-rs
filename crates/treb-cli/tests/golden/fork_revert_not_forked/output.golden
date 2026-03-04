@@ -1,0 +1,2 @@
+$ treb fork revert --network mainnet
+Error: network 'mainnet' is not in fork mode
