@@ -2,18 +2,23 @@
 
 You are an autonomous coding agent working on a software project.
 
+## CRITICAL RULE: ONE STORY ONLY
+
+You MUST implement exactly ONE user story per invocation, then STOP. Do NOT continue to the next story. Do NOT implement multiple stories. After completing one story, write your progress report and end your response. A separate invocation will handle the next story.
+
 ## Your Task
 
 1. Read the PRD at `.state/prd.json` (relative to the ralph/ directory)
 2. Read the progress log at `.state/progress.txt` (check Codebase Patterns section first)
 3. Check you're on the correct branch from PRD `branchName`. If not, check it out or create from main.
 4. Pick the **highest priority** user story where `passes: false`
-5. Implement that single user story
+5. Implement ONLY that single user story — do NOT touch other stories
 6. Run quality checks (e.g., typecheck, lint, test - use whatever your project requires)
 7. Update CLAUDE.md files if you discover reusable patterns (see below)
 8. If checks pass, commit ALL changes with message: `feat: [Story ID] - [Story Title]`
-9. Update the PRD to set `passes: true` for the completed story
-10. Append your progress to `progress.txt`
+9. Update the PRD to set `passes: true` for ONLY the completed story
+10. Append your progress to `.state/progress.txt`
+11. STOP — do not start the next story
 
 ## Progress Report Format
 
@@ -89,16 +94,18 @@ If no browser tools are available, note in your progress report that manual brow
 
 ## Stop Condition
 
-After completing a user story, check if ALL stories have `passes: true`.
+After completing ONE user story, check if ALL stories now have `passes: true`.
 
 If ALL stories are complete and passing, reply with:
 <promise>COMPLETE</promise>
 
-If there are still stories with `passes: false`, end your response normally (another iteration will pick up the next story).
+If there are still stories with `passes: false`, STOP IMMEDIATELY. End your response. Do NOT implement the next story. Another invocation will handle it.
 
 ## Important
 
-- Work on ONE story per iteration
+- **ONE story per invocation** — this is the most important rule
+- After implementing one story: commit, update prd.json, write progress, then STOP
+- Do NOT look at the next story, do NOT start implementing it
 - Commit frequently
 - Keep CI green
 - Read the Codebase Patterns section in progress.txt before starting

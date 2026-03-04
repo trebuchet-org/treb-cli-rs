@@ -1,100 +1,89 @@
 {
   "project": "treb-cli-rs",
-  "branchName": "ralph/phase-01-deployment-id-label-transactionid-and-artifact-path-fixes",
-  "description": "Fix four foundational on-disk format incompatibilities between Rust CLI and Go CLI: deployment ID construction (omit label suffix when empty), label default (empty string instead of contract name), transaction ID format (tx-0x prefix), and artifact path (relative source path instead of absolute compiled-output path).",
+  "branchName": "ralph/phase-01-repository-scaffold-and-workspace-layout",
+  "description": "Bootstrap the Rust workspace for treb-cli-rs with foundry dependency chain, async runtime, error handling, CLI skeleton, and CI pipeline",
   "userStories": [
     {
       "id": "P1-US-001",
-      "title": "Fix Deployment ID Construction (Omit Label When Empty)",
-      "description": "As a developer, I want deployment IDs to use the format namespace/chainId/ContractName when label is empty and namespace/chainId/ContractName:label when non-empty, so that on-disk IDs are byte-identical to the Go CLI.",
+      "title": "Cargo Workspace and Toolchain Configuration",
+      "description": "As a developer, I want a properly configured Cargo workspace with two initial crates (treb-cli binary and treb-core library) and all toolchain/linting configuration so that subsequent phases build on a solid foundation.",
       "acceptanceCriteria": [
-        "generate_deployment_id(\"default\", 31337, \"Counter\", \"\") returns \"default/31337/Counter\"",
-        "generate_deployment_id(\"default\", 31337, \"Counter\", \"v2\") returns \"default/31337/Counter:v2\"",
-        "The register command's manual ID construction uses the same shared function (no duplication)",
-        "resolve_deployment() correctly resolves both ID formats (with and without label)",
-        "Unit tests for generate_deployment_id() cover both empty and non-empty labels",
-        "cargo check passes across the entire workspace"
+        "cargo build succeeds from workspace root",
+        "cargo run -p treb-cli prints output and exits 0",
+        "cargo fmt --check passes",
+        "cargo clippy --workspace passes with no warnings",
+        "rust-toolchain.toml specifies a nightly toolchain compatible with edition 2024",
+        "All config files (rustfmt.toml, clippy.toml, .gitignore) exist at workspace root"
       ],
       "priority": 1,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "P1-US-002",
-      "title": "Fix Label Default to Empty String",
-      "description": "As a developer, I want the label field to default to empty string when unspecified, so that deployment records match the Go CLI's convention of never defaulting label to the contract name or 'default'.",
+      "title": "Foundry Crate Integration and Alloy Re-exports",
+      "description": "As a developer, I want foundry-config and foundry-common as git dependencies with alloy primitive re-exports in treb-core so that downstream crates use foundry-aligned types without version conflicts.",
       "acceptanceCriteria": [
-        "When treb register is called without --label, the resulting deployment has \"label\": \"\"",
-        "When treb run deploys a contract whose on-chain event has an empty label, the resulting deployment has \"label\": \"\"",
-        "When a label IS explicitly provided (via --label or on-chain event), it is stored as-is",
-        "A contract_display_name helper returns ContractName when label is empty, ContractName:label when non-empty",
-        "cargo check passes across the entire workspace"
+        "cargo check --workspace succeeds with foundry crates resolving",
+        "treb_core::primitives::Address, treb_core::primitives::B256, and treb_core::primitives::U256 are importable and usable",
+        "A simple test in treb-core constructs an Address::ZERO and asserts it is zero",
+        "foundry_config::Config::load() is callable (import compiles)",
+        "The specific foundry git commit is documented in Cargo.toml",
+        "cargo clippy --workspace passes"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "P1-US-003",
-      "title": "Fix Transaction ID Format to Use tx- Prefix",
-      "description": "As a developer, I want all transaction IDs stored as \"tx-0x<full_64_hex_chars>\" so that the format matches the Go CLI's tx-prefixed convention exactly.",
+      "title": "Error Strategy and Async Runtime",
+      "description": "As a developer, I want a project-wide error handling pattern using thiserror in treb-core and anyhow in treb-cli with a tokio async runtime so that all future code follows consistent error and async patterns.",
       "acceptanceCriteria": [
-        "In the run pipeline, transaction_id is stored as \"tx-0x<full_64_hex_chars>\"",
-        "In the register command, transaction_id uses the same full-hash format: \"tx-0x<full_hash>\"",
-        "Transaction records created by hydrate_transactions() use the tx- prefixed ID as their map key",
-        "All references to transaction IDs (in Deployment.transactionId and Transaction.id) are consistent",
-        "cargo check passes across the entire workspace"
+        "treb_core::error::TrebError is a public enum with Config, Registry, Forge, and Io variants",
+        "TrebError implements std::error::Error and Display via thiserror",
+        "treb_core::Result<T> is a public type alias using TrebError",
+        "std::io::Error converts into TrebError via From",
+        "treb-cli main function is async and returns anyhow::Result<()>",
+        "A unit test in treb-core creates a TrebError::Config and formats it",
+        "cargo test --workspace passes",
+        "cargo clippy --workspace passes"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "P1-US-004",
-      "title": "Fix Artifact Path to Use Relative Source Path",
-      "description": "As a developer, I want artifact.path to store the relative Solidity source path (e.g., \"src/Counter.sol\") extracted from forge artifact metadata, so that it matches the Go CLI's format instead of storing the absolute compiled artifact path.",
+      "title": "CLI Skeleton with Clap",
+      "description": "As a developer, I want a clap-based CLI skeleton with version/help output and stub subcommands for all planned treb commands so that the command structure is established for future implementation.",
       "acceptanceCriteria": [
-        "artifact.path stores the relative source file path (e.g., \"src/Counter.sol\") for deployments created via treb run",
-        "The source path is extracted from forge artifact metadata (sourceName or equivalent field), not constructed from the artifact file path",
-        "If no artifact match is found, artifact.path is \"\" (empty string)",
-        "For treb register (which lacks artifact metadata), artifact.path remains \"\"",
-        "cargo check passes across the entire workspace"
+        "cargo run -p treb-cli -- --help prints help with all subcommands listed",
+        "cargo run -p treb-cli -- --version prints version string",
+        "cargo run -p treb-cli -- run prints a 'not yet implemented' message",
+        "cargo run -p treb-cli -- list and cargo run -p treb-cli -- ls both work (alias)",
+        "All planned subcommands are present in the Commands enum: Run, List, Show, Init, Config, Verify, Tag, Register, Sync, Version, Networks, GenDeploy, Compose, Prune, Reset, Migrate, Fork, Dev",
+        "cargo clippy --workspace passes",
+        "cargo test --workspace passes"
       ],
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "P1-US-005",
-      "title": "Update Lookup Index and ID Parsing for Both ID Formats",
-      "description": "As a developer, I want the lookup index and deployment resolution to handle both new Go-compatible IDs (namespace/chainId/Name) and old Rust-style IDs (namespace/chainId/Name:label) so that existing .treb/ directories continue to work.",
+      "title": "GitHub Actions CI and README",
+      "description": "As a contributor, I want a GitHub Actions CI pipeline and a README with build instructions so that code quality is enforced automatically and new contributors can get started quickly.",
       "acceptanceCriteria": [
-        "LookupIndex::build() correctly indexes deployments regardless of whether the ID has a label suffix or not",
-        "resolve_deployment() with query \"Counter\" resolves a deployment with ID \"default/31337/Counter\" (no label)",
-        "resolve_deployment() with query \"Counter:v2\" resolves a deployment with ID \"default/31337/Counter:v2\"",
-        "resolve_deployment() with query \"default/31337/Counter\" resolves by exact match",
-        "Querying by address still works correctly regardless of ID format",
-        "Loading a deployments.json with old-style IDs (e.g., \"default/31337/Counter:Counter\") does not crash",
-        "cargo check passes; unit tests added for resolution edge cases"
+        ".github/workflows/ci.yml exists and is valid YAML",
+        "CI workflow defines jobs for check, test, clippy, and fmt",
+        "CI workflow uses Swatinem/rust-cache for faster builds",
+        "README.md exists with build, run, and test instructions",
+        "cargo fmt --check passes",
+        "cargo clippy --workspace passes"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "P1-US-006",
-      "title": "Update Golden Files and Verify All Tests Pass",
-      "description": "As a developer, I want all golden files regenerated with the corrected formats and all tests passing, so that the test suite validates the new on-disk format end-to-end.",
-      "acceptanceCriteria": [
-        "All golden files under tests/golden/ are regenerated using UPDATE_GOLDEN=1 cargo test",
-        "The normalizer handles the new tx-0x<HASH> format consistently",
-        "cargo test passes with zero failures across the entire workspace (without UPDATE_GOLDEN)",
-        "cargo clippy passes with no new warnings",
-        "Spot-check at least 3 golden files confirming: deployment IDs without trailing colon when label is empty, \"label\": \"\" (empty string), \"transactionId\": \"tx-0x...\" format, and artifact.path as relative source path",
-        "cargo check passes across the entire workspace"
-      ],
-      "priority": 6,
-      "passes": true,
+      "passes": false,
       "notes": ""
     }
   ]
