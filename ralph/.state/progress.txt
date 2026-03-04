@@ -15,6 +15,9 @@ Started: Tue Mar  4 2026
 - `treb run` does NOT auto-detect raw CREATE ops — it only finds deployments via treb-specific events
 - Error-path tests (no Anvil needed) use sync `#[test]`; Anvil-backed tests use `#[tokio::test(flavor = "multi_thread")]`
 - `pre_setup_hook` removes `.treb/` + `foundry.toml` to simulate uninitialized projects for error tests
+- `treb run --broadcast` does NOT send real Ethereum transactions to Anvil — it simulates in-process via forge pipeline; use `eth_sendTransaction` directly for real on-chain txs
+- For `treb register` tests, deploy contracts directly on Anvil via `reqwest` + `eth_sendTransaction` RPC call, then register by tx hash
+- Happy-path register tests need dynamic tx hash → use `GoldenFile` directly instead of `IntegrationTest` builder
 ---
 
 ## 2026-03-04 - P7-US-001
@@ -77,4 +80,24 @@ Started: Tue Mar  4 2026
   - `PipelineConfig.chain_id` defaults to 0 and is used throughout hydration (deployment IDs, transactions) — always set it before pipeline execution
   - Transaction `hash` field is intentionally empty ("") because `TransactionSimulated` events don't carry blockchain tx hashes — status is SIMULATED, not EXECUTED
   - Multiple `rpc_call`/`json_rpc_call` implementations exist across commands (register.rs, fork.rs, networks.rs) — could be consolidated in future refactoring
+---
+
+## 2026-03-04 - P7-US-005
+- Created `crates/treb-cli/tests/integration_register.rs` with 5 tests:
+  - `register_basic`: Anvil-backed async test. Deploys minimal contract directly on Anvil via `eth_sendTransaction`, then registers via `treb register --tx-hash`. Verifies table output (Contract/Address/Namespace/Chain) and `deployments.json` artifact.
+  - `register_json`: Same setup, adds `--json`. Verifies JSON structure with `success`, `tx_hash`, `chain_id`, `mode`, `deployments`, `transaction_id` fields.
+  - `register_error_bad_prefix`: Sync (no Anvil), tests `--tx-hash abc123` without `0x` prefix. Error mentions "starting with 0x".
+  - `register_error_no_init`: Sync (no Anvil), `pre_setup_hook` removes `.treb/` and `foundry.toml`. Error mentions "foundry.toml".
+  - `register_error_tx_not_found`: Anvil-backed, uses fabricated nonexistent hash. Error mentions "not found".
+- Helper `deploy_contract_on_anvil(rpc_url)` sends `eth_sendTransaction` with minimal creation bytecode to Anvil's default account, returns real on-chain tx hash.
+- Helper `run_register_golden_test()` mimics `run_integration_test()` output format with dynamic command args and golden file comparison.
+- Generated 5 golden files under `tests/golden/register_*/output.golden`
+- Files changed: `integration_register.rs`, 5 golden files
+- **Learnings for future iterations:**
+  - `treb run --broadcast` does NOT broadcast real Ethereum txs to Anvil — the forge pipeline simulates in-process. The `transactions.json` status is always SIMULATED with `hash: ""`
+  - To get a real on-chain tx for `treb register`, deploy directly via `eth_sendTransaction` RPC call to Anvil's default account (`0xf39F...92266`)
+  - Anvil auto-mines, so `eth_sendTransaction` returns the tx hash immediately after mining
+  - `treb register` uses `debug_traceTransaction` with callTracer to find CREATE operations — works with direct contract creation txs
+  - Truncated hashes (e.g., `0x4674...85cb`) and tx IDs (e.g., `tx-4674c314`) are deterministic for the same bytecode+sender+nonce on fresh Anvil
+  - The `register` command doesn't have `--non-interactive` flag (only `run` and `compose` have it)
 ---

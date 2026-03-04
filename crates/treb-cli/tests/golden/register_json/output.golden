@@ -1,0 +1,17 @@
+$ treb register --tx-hash <HASH> --network anvil-31337 --json
+{
+  "success": true,
+  "tx_hash": "<HASH>",
+  "chain_id": 31337,
+  "mode": "trace",
+  "deployments": [
+    {
+      "id": "default/31337/Unknown:default",
+      "contract_name": "Unknown",
+      "address": "<ADDRESS>",
+      "namespace": "default",
+      "chain_id": 31337
+    }
+  ],
+  "transaction_id": "tx-4674c314"
+}

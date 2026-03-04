@@ -47,7 +47,7 @@
       "id": "P7-US-005",
       "title": "Register Command Golden File Tests",
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
