@@ -1,0 +1,7 @@
+$ treb reset --yes --network 1
+Reset complete.
+  Deployments removed:         2
+  Transactions removed:        1
+  Safe transactions removed:   1
+  Governor proposals removed:  1
+Backup created at: <PROJECT_ROOT>/.treb/backups/reset-<EPOCH>

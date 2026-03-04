@@ -1,0 +1,4 @@
+$ treb reset --yes
+Error: no foundry.toml found in <PROJECT_ROOT>
+
+Run `forge init`, then `treb init`.
