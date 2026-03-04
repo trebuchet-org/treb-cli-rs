@@ -45,3 +45,17 @@ Started: Tue Mar  4 02:00:00 AM CET 2026
   - The `#[ignore]` attribute on tests is the right approach for tests requiring external tools (forge)
   - `forge build` auto-detects multi-compiler versions from pragma ranges — no explicit config needed
 ---
+
+## 2026-03-04 - P4-US-004
+- Added `DEFAULT_FIXTURE` constant ("project") to `framework/workdir.rs`
+- Created `smoke_phase4.rs` with 3 smoke tests:
+  - `fixture_workdir_structure`: verifies all expected files, directories, symlinks, and source contracts
+  - `fixture_foundry_toml_port_rewrite`: verifies port rewriting for both anvil-31337 (8545) and anvil-31338 (9545)
+  - `fixture_treb_toml_present`: verifies treb.toml is copied with [accounts.anvil] and well-known private key
+- All tests pass with `cargo test --workspace` (0 failures)
+- Files changed: `crates/treb-cli/tests/framework/workdir.rs`, `crates/treb-cli/tests/smoke_phase4.rs`
+- **Learnings for future iterations:**
+  - Symlink verification uses `path.read_link().is_ok()` to confirm the item is a symlink (not just exists)
+  - The `smoke_phase4.rs` test binary also compiles the framework module tests (24 tests total for this binary)
+  - Test workdir copies mutable items (foundry.toml, treb.toml, src/, script/) and symlinks immutable items (lib/, remappings.txt, .gitignore)
+---
