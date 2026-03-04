@@ -9,6 +9,7 @@ Started: Tue Mar  4 2026
 - Setup commands with `treb init` create `.treb/` directory before seed_registry can write deployments
 - `UPDATE_GOLDEN=1 cargo test` regenerates golden files from actual output
 - `DeploymentStore::list()` sorts by `(created_at, id)` — secondary sort by ID ensures deterministic order when timestamps are equal
+- `deployments.json` uses `HashMap<String, Deployment>` — key order is non-deterministic; avoid using it as an `output_artifact` directly; instead use a `post_test_hook` to extract deterministic subsets
 ---
 
 ## 2026-03-04 - P5-US-001
@@ -115,4 +116,19 @@ Started: Tue Mar  4 2026
   - For proxy tests, use `TransparentUpgradeableProxy:FPMMFactory` — the only fixture deployment with `proxyInfo` set
   - For unique contract name resolution, use `FPMMFactory` — `FPMM` is ambiguous (shared across proxy fixture label)
   - The `show` command's `print_kv` aligns keys right-padded per section — each section independently calculates max key width
+---
+
+## 2026-03-04 - P6-US-004
+- Created `integration_tag.rs` with 5 golden-file integration tests: tag_show_empty, tag_show_json_empty, tag_add, tag_add_json, tag_add_then_show
+- All tests use `IntegrationTest` + `run_integration_test` + `TestContext::new("project")` + `PathNormalizer`
+- Tests needing deployments use `post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))`
+- tag_add uses `post_test_hook` to extract tags into deterministic `tag_check.json` artifact (avoids HashMap ordering flakiness in deployments.json)
+- tag_add_then_show chains two `.test()` calls: add then show, verifying persistence
+- Golden files at `tests/golden/tag_*/output.golden`
+- Files changed: `crates/treb-cli/tests/integration_tag.rs` (new), 5 golden files
+- **Learnings for future iterations:**
+  - `deployments.json` serializes a HashMap so key order is non-deterministic across runs — never use it as `output_artifact` directly
+  - Use `post_test_hook` to extract specific fields into a small deterministic JSON file for artifact comparison
+  - Tag CLI syntax: `treb tag <deployment>` (show), `treb tag --add <tag> <deployment>` (add), `treb tag --json ...` (JSON output)
+  - All fixture deployments have `tags: null` so tag show on any of them gives "No tags" output
 ---

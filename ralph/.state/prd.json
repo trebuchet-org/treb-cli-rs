@@ -72,7 +72,7 @@
         "All tests pass with cargo test --workspace"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
