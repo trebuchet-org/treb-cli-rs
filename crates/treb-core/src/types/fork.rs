@@ -260,4 +260,97 @@ mod tests {
         assert!(state.forks.is_empty());
         assert!(state.history.is_empty());
     }
+
+    /// Serialize → deserialize → serialize produces identical JSON (Value equality).
+    #[test]
+    fn fork_state_json_round_trip_produces_identical_json() {
+        let mut state = ForkState::default();
+        state
+            .forks
+            .insert("mainnet".into(), sample_fork_entry());
+        state.history.push(sample_history_entry());
+
+        let json1 = serde_json::to_value(&state).unwrap();
+        let deserialized: ForkState = serde_json::from_value(json1.clone()).unwrap();
+        let json2 = serde_json::to_value(&deserialized).unwrap();
+
+        assert_eq!(json1, json2, "serialize → deserialize → serialize must produce identical JSON");
+    }
+
+    /// Deserialize a known-good Go-format fork.json to verify cross-CLI compatibility.
+    #[test]
+    fn fork_state_go_fixture_compatibility() {
+        let go_json = r#"{
+  "forks": {
+    "mainnet": {
+      "network": "mainnet",
+      "rpcUrl": "http://127.0.0.1:8545",
+      "port": 8545,
+      "chainId": 1,
+      "forkUrl": "https://eth.llamarpc.com",
+      "forkBlockNumber": 19000000,
+      "snapshotDir": ".treb/snapshots/mainnet",
+      "startedAt": "2026-03-03T12:00:00Z",
+      "envVarName": "ETH_RPC_URL",
+      "originalRpc": "https://eth.llamarpc.com",
+      "anvilPid": 12345,
+      "pidFile": ".treb/anvil-mainnet.pid",
+      "logFile": ".treb/anvil-mainnet.log",
+      "enteredAt": "2026-03-03T12:00:00Z",
+      "snapshots": [
+        {
+          "index": 0,
+          "snapshotId": "0x1",
+          "command": "enter",
+          "timestamp": "2026-03-03T12:00:00Z"
+        }
+      ]
+    }
+  },
+  "history": [
+    {
+      "action": "enter",
+      "network": "mainnet",
+      "timestamp": "2026-03-03T12:00:00Z"
+    },
+    {
+      "action": "exit",
+      "network": "mainnet",
+      "timestamp": "2026-03-03T13:00:00Z",
+      "details": "exited fork mode"
+    }
+  ]
+}"#;
+
+        let state: ForkState = serde_json::from_str(go_json)
+            .expect("Go-format fork.json must deserialize into ForkState");
+
+        // Verify fork entry fields
+        let entry = state.forks.get("mainnet").expect("mainnet fork must exist");
+        assert_eq!(entry.network, "mainnet");
+        assert_eq!(entry.rpc_url, "http://127.0.0.1:8545");
+        assert_eq!(entry.port, 8545);
+        assert_eq!(entry.chain_id, 1);
+        assert_eq!(entry.fork_url, "https://eth.llamarpc.com");
+        assert_eq!(entry.fork_block_number, Some(19_000_000));
+        assert_eq!(entry.snapshot_dir, ".treb/snapshots/mainnet");
+        assert_eq!(entry.env_var_name, "ETH_RPC_URL");
+        assert_eq!(entry.original_rpc, "https://eth.llamarpc.com");
+        assert_eq!(entry.anvil_pid, 12345);
+        assert_eq!(entry.pid_file, ".treb/anvil-mainnet.pid");
+        assert_eq!(entry.log_file, ".treb/anvil-mainnet.log");
+
+        // Verify snapshot entry
+        assert_eq!(entry.snapshots.len(), 1);
+        assert_eq!(entry.snapshots[0].index, 0);
+        assert_eq!(entry.snapshots[0].snapshot_id, "0x1");
+        assert_eq!(entry.snapshots[0].command, "enter");
+
+        // Verify history entries
+        assert_eq!(state.history.len(), 2);
+        assert_eq!(state.history[0].action, "enter");
+        assert_eq!(state.history[0].details, None);
+        assert_eq!(state.history[1].action, "exit");
+        assert_eq!(state.history[1].details, Some("exited fork mode".into()));
+    }
 }
