@@ -101,3 +101,26 @@ Started: Tue Mar  4 2026
   - Truncated hashes (e.g., `0x4674...85cb`) and tx IDs (e.g., `tx-4674c314`) are deterministic for the same bytecode+sender+nonce on fresh Anvil
   - The `register` command doesn't have `--non-interactive` flag (only `run` and `compose` have it)
 ---
+
+## 2026-03-04 - P7-US-006
+- Verified all `output_artifact` golden files for registry JSON correctness (no code changes needed)
+- **deployments.json** review:
+  - All fields use camelCase: `id`, `namespace`, `chainId`, `contractName`, `label`, `address`, `type`, `transactionId`, `deploymentStrategy`, `proxyInfo`, `artifact`, `verification`, `tags`, `createdAt`, `updatedAt`
+  - All required fields present in both `run_basic` and `register_basic` golden artifacts
+  - `type` field uses `#[serde(rename = "type")]` (not `deploymentType`) — intentional for Go version compatibility
+  - Map structure correct (key = deployment ID, value = deployment object)
+  - `skip_serializing_if` correctly omits empty optional fields (salt, factory, etc.)
+- **transactions.json** review:
+  - All fields use camelCase: `id`, `chainId`, `hash`, `status`, `sender`, `nonce`, `deployments`, `operations`, `environment`, `createdAt`
+  - `blockNumber` correctly omitted when 0 (via `skip_serializing_if = "is_zero_u64"`)
+  - Map structure correct (key = tx ID, value = transaction object)
+- **Cross-reference verified**: `deployments` array values in transactions.json (`"default/31337/Counter:Counter"`) match deployment keys in deployments.json
+- **DateTime<Utc>** uses chrono default serde = RFC 3339 / ISO-8601 (normalized to `<TIMESTAMP>` in golden files)
+- All 1000+ tests pass across workspace, cargo clippy clean with no warnings
+- Files changed: none (verification-only story)
+- **Learnings for future iterations:**
+  - `deployment_type` serializes as `"type"` (not `"deploymentType"`) via `#[serde(rename = "type")]` — same pattern used for `proxy_type` in ProxyInfo
+  - Transaction `hash` field serializes as `"hash"` (not `"txHash"`) — single-word fields don't need camelCase conversion
+  - `deployments` field in Transaction serializes as `"deployments"` (not `"deploymentIds"`) — contains full deployment ID strings, not just IDs
+  - CLI `--json` output uses snake_case (e.g., `contract_name`, `chain_id`, `dry_run`) while registry files use camelCase — two different serialization conventions
+---
