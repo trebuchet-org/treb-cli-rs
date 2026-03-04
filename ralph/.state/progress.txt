@@ -8,6 +8,8 @@ Started: Wed Mar  4 04:28:24 AM CET 2026
 - Use `CompilerOutputNormalizer` for gen-deploy tests (forge compilation may produce stderr output)
 - `output_artifact("script/DeployFoo.s.sol")` captures generated Solidity in golden output
 - gen-deploy writes "Generated deploy script: {path}" to stderr on success; --json goes to stdout
+- gen-deploy templates use `pragma solidity ^0.8.0;` (matching Go CLI), SPDX `UNLICENSED` (per Phase 15 PRD)
+- Go CLI (treb-cli) at `/home/sol/projects/treb-cli` uses TrebScript architecture, not directly comparable to Rust standalone Script templates
 ---
 
 ## 2026-03-04 - P8-US-001
@@ -23,6 +25,37 @@ Started: Wed Mar  4 04:28:24 AM CET 2026
   - NEW: crates/treb-cli/tests/golden/gen_deploy_json/output.golden
 - **Learnings for future iterations:**
   - `gen-deploy-project` fixture already has all needed contracts (Counter, SimpleContract, MathLib)
-  - VersionNormalizer in default chain replaces `^0.8.13` with `^<VERSION>` in golden output
+  - VersionNormalizer in default chain replaces semver strings (e.g. `0.8.0`) with `<VERSION>` in golden output
   - No anvil needed for gen-deploy — pure compilation + template rendering
+---
+
+## 2026-03-04 - P8-US-002
+- Implemented 10 additional golden-file integration tests (16 total) for `treb gen-deploy`
+- Proxy variant tests: gen_deploy_erc1967, gen_deploy_uups, gen_deploy_transparent, gen_deploy_beacon
+- Strategy+proxy combo: gen_deploy_create2_uups
+- Custom proxy: gen_deploy_custom_proxy_contract
+- Error paths: gen_deploy_error_missing_contract, gen_deploy_error_invalid_strategy, gen_deploy_error_invalid_proxy, gen_deploy_error_library_proxy
+- Files changed:
+  - MODIFIED: crates/treb-cli/tests/integration_gen_deploy.rs
+  - NEW: 10 golden file directories under crates/treb-cli/tests/golden/
+- **Learnings for future iterations:**
+  - Error path tests use `expect_err(true)` and don't need `output_artifact` (errors happen before file write)
+  - Error messages from anyhow in `fn main()` are prefixed with "Error: " automatically
+  - Proxy templates: UUPS adds UUPSUpgradeable note, Transparent adds proxyAdmin, Beacon adds UpgradeableBeacon
+  - `--proxy-contract MyCustomProxy` replaces default proxy name and switches import to TODO comment
+---
+
+## 2026-03-04 - P8-US-003
+- Reviewed all 16 gen-deploy golden files for template correctness against Go CLI and Phase 15 PRD spec
+- Fixed pragma version: `^0.8.13` → `^0.8.0` (matching Go CLI and Phase 15 PRD spec)
+- Added array type handling to `placeholder_for_type` (e.g., `uint256[]` → `new uint256[](0)`)
+- Updated assertion in `cli_gen_deploy.rs` to expect `^0.8.0`
+- Files changed:
+  - MODIFIED: crates/treb-cli/src/commands/gen_deploy.rs (templates + placeholder_for_type + unit tests)
+  - MODIFIED: crates/treb-cli/tests/cli_gen_deploy.rs (pragma assertion)
+- **Learnings for future iterations:**
+  - Go CLI uses fundamentally different template architecture (TrebScript + Deployer) vs Rust CLI (standalone forge-std Script) — parity is at structural element level, not identical output
+  - Go CLI uses `MIT` license + `^0.8.0` pragma; Rust uses `UNLICENSED` (per Phase 15 PRD) + `^0.8.0` (now fixed)
+  - Golden files are unaffected by pragma change because VersionNormalizer replaces all semver strings
+  - OpenZeppelin import paths in Rust templates are correct: `@openzeppelin/contracts/proxy/{type}/{Contract}.sol`
 ---

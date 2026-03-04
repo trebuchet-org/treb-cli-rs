@@ -245,7 +245,7 @@ fn gen_deploy_json_output_has_expected_fields() {
 
     let code = json["code"].as_str().unwrap();
     assert!(code.contains("// SPDX-License-Identifier: UNLICENSED"));
-    assert!(code.contains("pragma solidity ^0.8.13;"));
+    assert!(code.contains("pragma solidity ^0.8.0;"));
     assert!(code.contains("contract DeployCounter is Script"));
 }
 

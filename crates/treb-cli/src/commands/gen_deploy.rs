@@ -87,7 +87,7 @@ struct GenDeployOutput {
 
 const CREATE_TEMPLATE: &str = "\
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.0;
 
 import {Script, console} from \"forge-std/Script.sol\";
 import { {{contract_name}} } from \"{{import_path}}\";
@@ -132,7 +132,7 @@ contract Deploy{{contract_name}} is Script {
 
 const CREATE2_TEMPLATE: &str = "\
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.0;
 
 import {Script, console} from \"forge-std/Script.sol\";
 import { {{contract_name}} } from \"{{import_path}}\";
@@ -180,7 +180,7 @@ contract Deploy{{contract_name}} is Script {
 
 const CREATE3_TEMPLATE: &str = "\
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.0;
 
 import {Script, console} from \"forge-std/Script.sol\";
 import { {{contract_name}} } from \"{{import_path}}\";
@@ -228,7 +228,7 @@ contract Deploy{{contract_name}} is Script {
 
 const ERC1967_PROXY_TEMPLATE: &str = "\
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.0;
 
 import {Script, console} from \"forge-std/Script.sol\";
 import { {{contract_name}} } from \"{{import_path}}\";
@@ -325,7 +325,7 @@ contract Deploy{{contract_name}} is Script {
 
 const UUPS_PROXY_TEMPLATE: &str = "\
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.0;
 
 import {Script, console} from \"forge-std/Script.sol\";
 import { {{contract_name}} } from \"{{import_path}}\";
@@ -421,7 +421,7 @@ contract Deploy{{contract_name}} is Script {
 
 const TRANSPARENT_PROXY_TEMPLATE: &str = "\
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.0;
 
 import {Script, console} from \"forge-std/Script.sol\";
 import { {{contract_name}} } from \"{{import_path}}\";
@@ -520,7 +520,7 @@ contract Deploy{{contract_name}} is Script {
 
 const BEACON_PROXY_TEMPLATE: &str = "\
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.0;
 
 import {Script, console} from \"forge-std/Script.sol\";
 import { {{contract_name}} } from \"{{import_path}}\";
@@ -637,6 +637,10 @@ fn default_proxy_contract(proxy: &str) -> &str {
 /// Return a Solidity placeholder literal for the given type.
 fn placeholder_for_type(solidity_type: &str) -> String {
     match solidity_type {
+        t if t.ends_with("[]") => {
+            let base = &t[..t.len() - 2];
+            format!("new {base}[](0)")
+        }
         t if t.starts_with("uint") || t.starts_with("int") => "0".to_string(),
         "address" => "address(0)".to_string(),
         "bool" => "false".to_string(),
@@ -1111,7 +1115,7 @@ mod tests {
 
         let code = render_create(&ctx);
         assert!(code.contains("// SPDX-License-Identifier: UNLICENSED"));
-        assert!(code.contains("pragma solidity ^0.8.13;"));
+        assert!(code.contains("pragma solidity ^0.8.0;"));
         assert!(code.contains("import {Script, console} from \"forge-std/Script.sol\";"));
         assert!(code.contains("import { Counter } from \"../src/Counter.sol\";"));
         assert!(code.contains("contract DeployCounter is Script"));
@@ -1173,7 +1177,7 @@ mod tests {
         // First line should be SPDX
         assert!(code.starts_with("// SPDX-License-Identifier: UNLICENSED\n"));
         // Should have pragma
-        assert!(code.contains("pragma solidity ^0.8.13;"));
+        assert!(code.contains("pragma solidity ^0.8.0;"));
         // Should have forge-std import
         assert!(code.contains("import {Script, console} from \"forge-std/Script.sol\";"));
         // Should inherit from Script
@@ -1218,7 +1222,7 @@ mod tests {
 
         let code = render_create2(&ctx);
         assert!(code.contains("// SPDX-License-Identifier: UNLICENSED"));
-        assert!(code.contains("pragma solidity ^0.8.13;"));
+        assert!(code.contains("pragma solidity ^0.8.0;"));
         assert!(code.contains("import { Counter } from \"../src/Counter.sol\";"));
         assert!(code.contains("contract DeployCounter is Script"));
         assert!(code.contains("bytes32 salt = bytes32(0);"));
@@ -1297,7 +1301,7 @@ mod tests {
 
         let code = render_create3(&ctx);
         assert!(code.contains("// SPDX-License-Identifier: UNLICENSED"));
-        assert!(code.contains("pragma solidity ^0.8.13;"));
+        assert!(code.contains("pragma solidity ^0.8.0;"));
         assert!(code.contains("import { Counter } from \"../src/Counter.sol\";"));
         assert!(code.contains("interface ICreateX"));
         assert!(code.contains("deployCreate3(bytes32 salt, bytes memory initCode)"));
