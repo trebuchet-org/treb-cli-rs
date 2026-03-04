@@ -1,0 +1,8 @@
+$ treb version --json
+{
+  "version": "<VERSION>",
+  "git_commit": "<SHORT_HASH>",
+  "build_date": "<DATE>",
+  "rust_version": "rustc <VERSION> (<SHORT_HASH> <DATE>)",
+  "forge_version": "forge v<VERSION> (<SHORT_HASH>)"
+}
