@@ -212,6 +212,65 @@ impl Normalizer for ShortHexNormalizer {
     }
 }
 
+/// Normalizes solc compilation progress lines in forge output.
+/// E.g., `Compiling 5 files with solc 0.8.21` → `Compiling <N> files with solc <SOLC_VERSION>`
+/// Also handles `Solc 0.8.21 finished in ...` lines.
+pub struct CompilerOutputNormalizer;
+
+impl Normalizer for CompilerOutputNormalizer {
+    fn normalize(&self, input: &str) -> String {
+        // "Compiling N files with solc X.Y.Z" or "Compiling N file with Solc X.Y.Z"
+        let compiling = Regex::new(
+            r"(?i)Compiling \d+ files? with solc \d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?"
+        )
+        .unwrap();
+        let result = compiling.replace_all(input, "Compiling <N> files with solc <SOLC_VERSION>");
+
+        // "Solc X.Y.Z finished in ..."
+        let finished = Regex::new(
+            r"(?i)Solc \d+\.\d+\.\d+(-[a-zA-Z0-9.]+)? finished"
+        )
+        .unwrap();
+        finished.replace_all(&result, "Solc <SOLC_VERSION> finished").into_owned()
+    }
+}
+
+/// Normalizes gas values in forge output.
+/// Matches patterns like `gas: 12345`, `Gas used: 54321`, `gasUsed: 123`.
+pub struct GasNormalizer;
+
+impl Normalizer for GasNormalizer {
+    fn normalize(&self, input: &str) -> String {
+        // "gas: NNN", "Gas used: NNN", "gas_used: NNN", "gasUsed: NNN", "gas used: NNN"
+        let re = Regex::new(r"(?i)(gas(?:[_ ]?used)?)\s*:\s*\d+").unwrap();
+        re.replace_all(input, "${1}: <GAS>").into_owned()
+    }
+}
+
+/// Normalizes block numbers in forge output.
+/// Matches patterns like `block: 1`, `Block: 123`, `blockNumber: 42`, `Block Number: 7`.
+pub struct BlockNumberNormalizer;
+
+impl Normalizer for BlockNumberNormalizer {
+    fn normalize(&self, input: &str) -> String {
+        // "block: N", "Block: N", "blockNumber: N", "Block Number: N"
+        let re = Regex::new(r"(?i)(block(?:[_ ]?number)?)\s*:\s*\d+").unwrap();
+        re.replace_all(input, "${1}: <BLOCK>").into_owned()
+    }
+}
+
+/// Normalizes timing/duration strings in forge output.
+/// Matches patterns like `1.23s`, `456ms`, `2.5µs`.
+pub struct DurationNormalizer;
+
+impl Normalizer for DurationNormalizer {
+    fn normalize(&self, input: &str) -> String {
+        // Match durations like "1.23s", "456ms", "2µs", "100.5ms"
+        let re = Regex::new(r"\d+(?:\.\d+)?(?:µs|ms|s|m)\b").unwrap();
+        re.replace_all(input, "<DURATION>").into_owned()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -346,6 +405,98 @@ mod tests {
         assert_eq!(
             n.normalize("hash abcdef0123 end"),
             "hash <SHORT_HASH> end"
+        );
+    }
+
+    // --- CompilerOutputNormalizer ---
+
+    #[test]
+    fn compiler_output_normalizer_compiling_line() {
+        let n = CompilerOutputNormalizer;
+        assert_eq!(
+            n.normalize("Compiling 5 files with solc 0.8.21"),
+            "Compiling <N> files with solc <SOLC_VERSION>"
+        );
+        // Also handles singular and pre-release
+        assert_eq!(
+            n.normalize("Compiling 1 file with solc 0.8.26-nightly.2024.1.15"),
+            "Compiling <N> files with solc <SOLC_VERSION>"
+        );
+    }
+
+    #[test]
+    fn compiler_output_normalizer_no_match() {
+        let n = CompilerOutputNormalizer;
+        assert_eq!(
+            n.normalize("deployed contract to mainnet"),
+            "deployed contract to mainnet"
+        );
+    }
+
+    #[test]
+    fn compiler_output_normalizer_finished_line() {
+        let n = CompilerOutputNormalizer;
+        assert_eq!(
+            n.normalize("Solc 0.8.21 finished in 1.23s"),
+            "Solc <SOLC_VERSION> finished in 1.23s"
+        );
+    }
+
+    // --- GasNormalizer ---
+
+    #[test]
+    fn gas_normalizer_replaces_gas_values() {
+        let n = GasNormalizer;
+        assert_eq!(n.normalize("gas: 12345"), "gas: <GAS>");
+        assert_eq!(n.normalize("Gas used: 54321"), "Gas used: <GAS>");
+        assert_eq!(n.normalize("gasUsed: 99999"), "gasUsed: <GAS>");
+    }
+
+    #[test]
+    fn gas_normalizer_no_match() {
+        let n = GasNormalizer;
+        assert_eq!(
+            n.normalize("deployed contract to mainnet"),
+            "deployed contract to mainnet"
+        );
+    }
+
+    // --- BlockNumberNormalizer ---
+
+    #[test]
+    fn block_number_normalizer_replaces_block_numbers() {
+        let n = BlockNumberNormalizer;
+        assert_eq!(n.normalize("block: 1"), "block: <BLOCK>");
+        assert_eq!(n.normalize("Block Number: 42"), "Block Number: <BLOCK>");
+        assert_eq!(n.normalize("blockNumber: 100"), "blockNumber: <BLOCK>");
+    }
+
+    #[test]
+    fn block_number_normalizer_no_match() {
+        let n = BlockNumberNormalizer;
+        assert_eq!(
+            n.normalize("deployed contract to mainnet"),
+            "deployed contract to mainnet"
+        );
+    }
+
+    // --- DurationNormalizer ---
+
+    #[test]
+    fn duration_normalizer_replaces_durations() {
+        let n = DurationNormalizer;
+        assert_eq!(n.normalize("finished in 1.23s"), "finished in <DURATION>");
+        assert_eq!(n.normalize("took 456ms"), "took <DURATION>");
+        assert_eq!(n.normalize("fast: 2µs"), "fast: <DURATION>");
+        assert_eq!(n.normalize("total 100.5ms"), "total <DURATION>");
+    }
+
+    #[test]
+    fn duration_normalizer_no_match() {
+        let n = DurationNormalizer;
+        assert_eq!(
+            n.normalize("deployed contract to mainnet"),
+            "deployed contract to mainnet"
         );
     }
 }
