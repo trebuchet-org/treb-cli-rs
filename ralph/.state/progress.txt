@@ -1,3 +1,17 @@
 # Ralph Progress Log
 Started: Tue Mar  4 02:00:00 AM CET 2026
 ---
+
+## 2026-03-04 - P4-US-001
+- Created tests/fixtures/project/ directory with all configuration files
+- foundry.toml: profile settings (bytecode_hash=none, cbor_metadata=false, optimizer_runs=0), rpc_endpoints (anvil-31337 on 8545, anvil-31338 on 9545), etherscan config, lint settings
+- treb.toml: v2 format with [accounts.anvil] using Anvil's well-known private key (0xac0974...)
+- .env.example: placeholder vars (ANVIL_PK, ETHERSCAN_API_KEY, CONTRACT_VERSION, DEPLOYMENT_LABEL)
+- remappings.txt: forge-std/ and @openzeppelin/contracts/ entries
+- .gitignore: out/, cache/, broadcast/, .treb/
+- script/deploy/.gitkeep: empty directory for generated deploy scripts
+- Files changed: `crates/treb-cli/tests/fixtures/project/` (6 new files)
+- **Learnings for future iterations:**
+  - Phase branches build on previous phases — must branch from phase-03 not main (main only has MASTER_PLAN.md)
+  - ralph/.state/ is in .gitignore — use `git add -f` to force-add state files
+---
