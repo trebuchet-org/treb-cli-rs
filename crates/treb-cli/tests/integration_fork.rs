@@ -1,12 +1,12 @@
-//! Golden-file integration tests for `treb fork status`.
+//! Golden-file integration tests for `treb fork` subcommands.
 //!
-//! Tests exercise no-forks display, active-fork table output, JSON output,
-//! and uninitialized project error paths.
+//! Tests exercise status and history subcommands including table output,
+//! JSON output, filtering, and uninitialized project error paths.
 
 mod framework;
 
 use chrono::{TimeZone, Utc};
-use treb_core::types::fork::ForkEntry;
+use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
 use treb_registry::ForkStateStore;
 
 use framework::context::TestContext;
@@ -111,6 +111,136 @@ fn fork_status_not_initialized() {
             std::fs::remove_dir_all(ctx.path().join(".treb")).unwrap();
         })
         .test(&["fork", "status"])
+        .expect_err(true)
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── History helpers ─────────────────────────────────────────────────────
+
+/// Pre-populate fork state with history entries for golden file tests.
+///
+/// Creates 3 entries in chronological order; the store prepends each, so the
+/// final order in `history` is most-recent-first:
+///   1. restart mainnet (with details)
+///   2. enter  sepolia  (no details)
+///   3. enter  mainnet  (no details)
+fn seed_fork_history(project_root: &std::path::Path) {
+    let treb_dir = project_root.join(".treb");
+    let mut store = ForkStateStore::new(&treb_dir);
+
+    // Oldest first — add_history prepends, so last add ends up at index 0.
+    let entries = vec![
+        ForkHistoryEntry {
+            action: "enter".to_string(),
+            network: "mainnet".to_string(),
+            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 8, 0, 0).unwrap(),
+            details: None,
+        },
+        ForkHistoryEntry {
+            action: "enter".to_string(),
+            network: "sepolia".to_string(),
+            timestamp: Utc.with_ymd_and_hms(2026, 1, 12, 14, 0, 0).unwrap(),
+            details: None,
+        },
+        ForkHistoryEntry {
+            action: "restart".to_string(),
+            network: "mainnet".to_string(),
+            timestamp: Utc.with_ymd_and_hms(2026, 1, 15, 10, 30, 0).unwrap(),
+            details: Some("Anvil reset; snapshot: 0x2".to_string()),
+        },
+    ];
+
+    for entry in entries {
+        store.add_history(entry).unwrap();
+    }
+}
+
+// ── fork history: empty ─────────────────────────────────────────────────
+
+/// `treb fork history` with no history entries should print "No fork history."
+#[test]
+fn fork_history_empty() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_history_empty")
+        .setup(&["init"])
+        .test(&["fork", "history"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork history: with entries ──────────────────────────────────────────
+
+/// `treb fork history` with entries should display a table with 4 columns
+/// (Timestamp, Action, Network, Details) in most-recent-first order.
+/// Entries with details = None should show "-".
+#[test]
+fn fork_history_with_entries() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_history_with_entries")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_fork_history(ctx.path()))
+        .test(&["fork", "history"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork history: network filter ────────────────────────────────────────
+
+/// `treb fork history --network mainnet` should only display mainnet entries.
+#[test]
+fn fork_history_network_filter() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_history_network_filter")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_fork_history(ctx.path()))
+        .test(&["fork", "history", "--network", "mainnet"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork history: JSON output ───────────────────────────────────────────
+
+/// `treb fork history --json` should emit a valid JSON array with correct
+/// camelCase field names. Entries with details = None should omit the field.
+#[test]
+fn fork_history_json() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_history_json")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_fork_history(ctx.path()))
+        .test(&["fork", "history", "--json"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork history: not initialized ───────────────────────────────────────
+
+/// `treb fork history` on an uninitialized project (no .treb/) should error
+/// and mention `treb init`.
+#[test]
+fn fork_history_not_initialized() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_history_not_initialized")
+        .pre_setup_hook(|ctx| {
+            std::fs::remove_dir_all(ctx.path().join(".treb")).unwrap();
+        })
+        .test(&["fork", "history"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 

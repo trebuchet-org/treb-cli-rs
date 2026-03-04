@@ -1,0 +1,19 @@
+$ treb fork history --json
+[
+  {
+    "action": "restart",
+    "network": "mainnet",
+    "timestamp": "<TIMESTAMP>",
+    "details": "Anvil reset; snapshot: 0x2"
+  },
+  {
+    "action": "enter",
+    "network": "sepolia",
+    "timestamp": "<TIMESTAMP>"
+  },
+  {
+    "action": "enter",
+    "network": "mainnet",
+    "timestamp": "<TIMESTAMP>"
+  }
+]
