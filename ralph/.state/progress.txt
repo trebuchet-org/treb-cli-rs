@@ -12,6 +12,8 @@ Started: Tue Mar  4 2026
 - Anvil-backed golden file tests use `#[tokio::test(flavor = "multi_thread")]` with `TestContext::new("project").with_anvil("anvil-31337").await`
 - Fixture Deploy.s.sol must emit `ContractDeployed` and `TransactionSimulated` events for `treb run` to detect deployments
 - `treb run` does NOT auto-detect raw CREATE ops — it only finds deployments via treb-specific events
+- Error-path tests (no Anvil needed) use sync `#[test]`; Anvil-backed tests use `#[tokio::test(flavor = "multi_thread")]`
+- `pre_setup_hook` removes `.treb/` + `foundry.toml` to simulate uninitialized projects for error tests
 ---
 
 ## 2026-03-04 - P7-US-001
@@ -43,4 +45,21 @@ Started: Tue Mar  4 2026
   - Updated Deploy.s.sol to emit events like the `e2e_workflow.rs` `TrebDeploySimple` script; existing Phase 6 tests are unaffected since they use `seed_registry()` not `treb run`
   - `output_artifact()` only includes file content if the file exists (conditional append)
   - Chain ID shows as `0` in output for Anvil-backed runs — may need investigation in P7-US-004
+---
+
+## 2026-03-04 - P7-US-003
+- Added 5 new tests to `crates/treb-cli/tests/integration_run.rs` (8 total):
+  - `run_debug`: Anvil-backed, tests `--debug` flag. Forge debugger requires TTY so no extra trace output in headless mode, but confirms the flag passes through without error.
+  - `run_verbose`: Anvil-backed, tests `--verbose` flag. Golden output includes `Config source`, `Namespace`, `RPC`, `Sender [role]`, and `Result: N deployment(s)...` lines.
+  - `run_missing_script`: Sync (no Anvil), tests missing script error path. Error surfaces as forge pipeline failure since the script file doesn't exist.
+  - `run_no_init`: Sync (no Anvil), tests uninitialized project. `pre_setup_hook` removes `.treb/` and `foundry.toml`. Error mentions `foundry.toml`.
+  - `run_bad_signature`: Anvil-backed, tests invalid `--sig "nonexistent()"`. Error mentions `Function 'nonexistent()' is not implemented`.
+- Generated 5 golden files: `run_debug/`, `run_verbose/`, `run_missing_script/`, `run_no_init/`, `run_bad_signature/`
+- Files changed: `integration_run.rs`, 5 golden files
+- **Learnings for future iterations:**
+  - `--debug` flag in Forge enables interactive TUI debugger — in headless subprocess (no TTY), it passes through silently with no extra output
+  - `--verbose` adds pre-execution context (Config source, Namespace, RPC, Sender addresses) and post-execution summary (Result: N deployment(s), N transaction(s), N skipped) on stderr
+  - Error-path tests that don't need Anvil should use sync `#[test]` (not `#[tokio::test]`) per PRD requirement
+  - Missing script errors manifest as "forge preprocessing failed" connection errors when no Anvil is running, since forge tries RPC before compilation
+  - `pre_setup_hook` runs before setup commands — use it to delete `.treb/` and `foundry.toml` to simulate uninitialized state
 ---

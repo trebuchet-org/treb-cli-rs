@@ -33,7 +33,7 @@
       "id": "P7-US-003",
       "title": "Run Command Golden File Tests — Debug and Error Paths",
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
