@@ -33,3 +33,16 @@ Started: Wed Mar  4 12:57:44 AM CET 2026
   - Env vars are process-global; parallel tests with `env::set_var` race. Extracted `compare_inner(update: bool)` so tests pass the flag directly instead of mutating env
   - Rust 2024 edition makes `env::set_var`/`env::remove_var` `unsafe`
 ---
+
+## 2026-03-04 - P3-US-003
+- Implemented EVM snapshot/revert utility functions: `take_snapshot`, `revert_snapshot`, `take_snapshots`, `revert_snapshots`
+- All functions are standalone async helpers wrapping `AnvilNode::instance().snapshot()/revert()`
+- `revert_snapshot` returns error if revert returns false (snapshot not found)
+- Multi-node variants operate on `HashMap<String, AnvilNode>` → `HashMap<String, U256>`
+- 2 async tests: single-node snapshot/modify/revert round-trip, multi-node take/revert
+- Files changed: `crates/treb-cli/Cargo.toml` (added `alloy-primitives` dev-dep), `crates/treb-cli/tests/framework/snapshot.rs` (new), `crates/treb-cli/tests/framework/mod.rs` (registered module)
+- **Learnings for future iterations:**
+  - `alloy-primitives` needed as explicit dev-dep for `U256` and `address!` macro in test code — not re-exported by `treb-forge`
+  - `AnvilInstance::snapshot()` returns `U256`, `revert()` returns `bool` — false means snapshot ID not found
+  - EVM snapshot revert is destructive (consumes the snapshot) — must re-snapshot after revert for pool reuse
+---
