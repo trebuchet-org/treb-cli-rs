@@ -11,3 +11,16 @@ Started: Wed Mar  4 01:58:35 AM CET 2026
   - Phase-05 branch must be created from phase-04 (not main) since it depends on the test framework built in phases 2-4
   - The `regex` crate is already available in test deps — no Cargo.toml changes needed for normalizers
 ---
+
+## 2026-03-04 - P5-US-002
+- Created `integration_version.rs` with two golden-file integration tests: `version_human` and `version_json`
+- Both tests use `IntegrationTest` + `run_integration_test` + `TestContext::new("project")`
+- `ShortHexNormalizer` applied as extra normalizer for short hex strings (git commit hashes)
+- Golden files generated at `tests/golden/version_human/output.golden` and `tests/golden/version_json/output.golden`
+- Files changed: `crates/treb-cli/tests/integration_version.rs`, `crates/treb-cli/tests/golden/version_human/output.golden`, `crates/treb-cli/tests/golden/version_json/output.golden`
+- **Learnings for future iterations:**
+  - Each integration test file needs `mod framework;` at the top (same as smoke_phase3.rs)
+  - Golden files are auto-generated with `UPDATE_GOLDEN=1 cargo test --test <test_name>`
+  - The default normalizer chain handles VERSION, DATE, GIT_COMMIT etc.; ShortHexNormalizer covers 7-10 char hex (e.g., short git hashes in parentheses)
+  - `TestContext::new("project")` uses the "project" fixture (full foundry project with src/script/lib)
+---
