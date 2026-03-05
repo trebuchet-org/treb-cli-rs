@@ -5,8 +5,13 @@
 //! output is appropriate, and [`color_enabled`] to query or apply the decision
 //! to the owo-colors subsystem.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use owo_colors::Style;
 use treb_core::types::DeploymentType;
+
+/// Resolved color state (set once by [`color_enabled`], queried via [`is_color_enabled`]).
+static COLOR_ENABLED: AtomicBool = AtomicBool::new(true);
 
 // ---------------------------------------------------------------------------
 // Palette constants – general
@@ -126,10 +131,16 @@ pub fn should_use_color() -> bool {
 /// colorization in the owo-colors subsystem for the remainder of the process.
 pub fn color_enabled(override_disabled: bool) -> bool {
     let enabled = !override_disabled && should_use_color();
+    COLOR_ENABLED.store(enabled, Ordering::Relaxed);
     if !enabled {
         owo_colors::set_override(false);
     }
     enabled
+}
+
+/// Query whether color output was enabled by the last call to [`color_enabled`].
+pub fn is_color_enabled() -> bool {
+    COLOR_ENABLED.load(Ordering::Relaxed)
 }
 
 // ---------------------------------------------------------------------------

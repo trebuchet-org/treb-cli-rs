@@ -8,6 +8,8 @@ use treb_core::types::{Deployment, DeploymentType};
 use treb_registry::Registry;
 
 use crate::output;
+use crate::ui::color;
+use crate::ui::tree::TreeNode;
 
 /// Filter criteria for deployments. All specified filters are combined with AND logic.
 pub struct DeploymentFilters {
@@ -116,6 +118,19 @@ fn type_sort_key(dt: &DeploymentType) -> u8 {
     }
 }
 
+/// Format a deployment entry label for tree display.
+///
+/// - Empty label: `ContractName 0xABCD...EFGH`
+/// - Non-empty label: `ContractName:label 0xABCD...EFGH`
+fn format_deployment_entry(d: &Deployment) -> String {
+    let addr = output::truncate_address(&d.address);
+    if d.label.is_empty() {
+        format!("{} {}", d.contract_name, addr)
+    } else {
+        format!("{}:{} {}", d.contract_name, d.label, addr)
+    }
+}
+
 /// Organize a flat list of deployments into a hierarchical grouping:
 /// namespace → chain_id → deployment type category.
 ///
@@ -205,29 +220,34 @@ pub async fn run(
     } else if filtered.is_empty() {
         println!("No deployments found.");
     } else {
-        let mut table = output::build_table(&[
-            "Name",
-            "Label",
-            "Namespace",
-            "Chain",
-            "Type",
-            "Address",
-            "Verification",
-        ]);
-
-        for d in &filtered {
-            table.add_row(vec![
-                d.contract_name.as_str(),
-                d.label.as_str(),
-                d.namespace.as_str(),
-                &d.chain_id.to_string(),
-                &d.deployment_type.to_string(),
-                &output::truncate_address(&d.address),
-                &d.verification.status.to_string(),
-            ]);
+        let grouped = group_deployments(&filtered);
+        let mut first = true;
+        for (namespace, chains) in &grouped {
+            if !first {
+                println!();
+            }
+            first = false;
+            let mut ns_node = TreeNode::new(namespace.clone()).with_style(color::NAMESPACE);
+            for (chain_id, type_groups) in chains {
+                let mut chain_node =
+                    TreeNode::new(chain_id.to_string()).with_style(color::CHAIN);
+                for tg in type_groups {
+                    let type_label = tg.deployment_type.to_string();
+                    let mut type_node = TreeNode::new(type_label);
+                    for d in &tg.deployments {
+                        let entry_label = format_deployment_entry(d);
+                        type_node = type_node.child(TreeNode::new(entry_label));
+                    }
+                    chain_node = chain_node.child(type_node);
+                }
+                ns_node = ns_node.child(chain_node);
+            }
+            if color::is_color_enabled() {
+                println!("{}", ns_node.render_styled());
+            } else {
+                println!("{}", ns_node.render());
+            }
         }
-
-        output::print_table(&table);
     }
 
     Ok(())
