@@ -89,6 +89,8 @@ pub struct PipelineResult {
     pub success: bool,
     /// Total gas used by script execution.
     pub gas_used: u64,
+    /// Number of decoded events from script execution.
+    pub event_count: usize,
     /// Decoded console.log output from script execution.
     pub console_logs: Vec<String>,
 }

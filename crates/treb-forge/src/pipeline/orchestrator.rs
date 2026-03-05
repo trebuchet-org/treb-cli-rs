@@ -118,6 +118,7 @@ impl RunPipeline {
 
         // 4. Decode events
         let parsed_events = decode_events(&execution.raw_logs);
+        let event_count = parsed_events.len();
 
         // 5. Extract deployments, collisions, and proxy relationships
         let extracted_deployments = extract_deployments(&parsed_events, Some(&artifact_index));
@@ -219,6 +220,7 @@ impl RunPipeline {
             dry_run: self.context.config.dry_run,
             success: true,
             gas_used: execution.gas_used,
+            event_count,
             console_logs: execution.logs,
         })
     }

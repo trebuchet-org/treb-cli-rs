@@ -65,6 +65,14 @@ pub fn print_kv(pairs: &[(&str, &str)]) {
     }
 }
 
+/// Print key-value pairs with right-padded keys for alignment to stderr.
+pub fn eprint_kv(pairs: &[(&str, &str)]) {
+    let max_key_len = pairs.iter().map(|(k, _)| k.len()).max().unwrap_or(0);
+    for (key, value) in pairs {
+        eprintln!("{:>width$}:  {}", key, value, width = max_key_len);
+    }
+}
+
 /// Truncate an address to `0xABCD...EFGH` format (first 4 + last 4 hex chars).
 pub fn truncate_address(address: &str) -> String {
     if address.len() >= 10 {

@@ -180,18 +180,6 @@ pub async fn run(
     let mut resolved_senders =
         resolve_all_senders(&resolved.senders).await.context("failed to resolve senders")?;
 
-    // ── Verbose context output ───────────────────────────────────────────
-    if verbose && !json {
-        eprintln!("Config source: {}", resolved.config_source);
-        eprintln!("Namespace: {}", resolved.namespace);
-        if let Some(ref url) = effective_rpc_url {
-            eprintln!("RPC: {}", url);
-        }
-        for (role, sender) in &resolved_senders {
-            eprintln!("Sender [{}]: {:?}", role, sender.sender_address());
-        }
-    }
-
     // ── Build ScriptConfig with all CLI flags ────────────────────────────
     let mut script_config = build_script_config_with_senders(&resolved, script, &resolved_senders)
         .context("failed to build script configuration")?;
@@ -223,6 +211,38 @@ pub async fn run(
     } else {
         0
     };
+
+    // ── Verbose pre-execution context ──────────────────────────────────
+    if verbose && !json {
+        let broadcast_mode = if dry_run {
+            "dry-run"
+        } else if broadcast {
+            "broadcast"
+        } else {
+            "simulate"
+        };
+        let rpc_display = effective_rpc_url.as_deref().unwrap_or("(none)");
+        let chain_id_str = chain_id.to_string();
+        let mut kv_pairs: Vec<(&str, &str)> = vec![
+            ("Config source", &resolved.config_source),
+            ("Namespace", &resolved.namespace),
+            ("Chain ID", &chain_id_str),
+            ("RPC", rpc_display),
+        ];
+        // Collect sender lines
+        let sender_lines: Vec<String> = resolved_senders
+            .iter()
+            .map(|(role, s)| format!("{}: {:?}", role, s.sender_address()))
+            .collect();
+        for line in &sender_lines {
+            kv_pairs.push(("Sender", line));
+        }
+        kv_pairs.push(("Script path", script));
+        kv_pairs.push(("Function sig", sig));
+        kv_pairs.push(("Broadcast mode", broadcast_mode));
+        output::eprint_kv(&kv_pairs);
+        eprintln!();
+    }
 
     // ── Build PipelineConfig and PipelineContext ─────────────────────────
     let pipeline_config = PipelineConfig {
@@ -294,15 +314,36 @@ pub async fn run(
 
     // ── Verbose post-execution output ────────────────────────────────────
     if verbose && !json {
-        if !result.console_logs.is_empty() {
-            eprintln!("Console output: {} line(s)", result.console_logs.len());
+        eprintln!();
+        // Event count summary
+        let event_str = format!("{} event(s) decoded", result.event_count);
+        let console_str = format!("{} console.log line(s)", result.console_logs.len());
+        let dep_str = format!("{} deployment(s)", result.deployments.len());
+        let tx_str = format!("{} transaction(s)", result.transactions.len());
+        let skip_str = format!("{} skipped", result.skipped.len());
+        let summary_pairs: Vec<(&str, &str)> = vec![
+            ("Events", &event_str),
+            ("Console", &console_str),
+            ("Deployments", &dep_str),
+            ("Transactions", &tx_str),
+            ("Skipped", &skip_str),
+        ];
+        output::eprint_kv(&summary_pairs);
+
+        // Per-deployment registry write confirmations
+        if !result.deployments.is_empty() {
+            eprintln!();
+            let action = if result.dry_run { "Would register" } else { "Registered" };
+            for rd in &result.deployments {
+                let d = &rd.deployment;
+                eprintln!(
+                    "  {} {} ({})",
+                    action,
+                    d.contract_name,
+                    output::truncate_address(&d.address),
+                );
+            }
         }
-        eprintln!(
-            "Result: {} deployment(s), {} transaction(s), {} skipped",
-            result.deployments.len(),
-            result.transactions.len(),
-            result.skipped.len()
-        );
     }
 
     // ── Display results ──────────────────────────────────────────────────
