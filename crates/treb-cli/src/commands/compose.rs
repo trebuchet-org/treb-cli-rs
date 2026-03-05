@@ -275,7 +275,7 @@ fn print_dry_run_plan(compose: &ComposeFile, plan: &[PlanEntry]) {
         if entry.skipped {
             eprint!(
                 "{}. {} → {}",
-                entry.step,
+                styled(&entry.step.to_string(), color::LABEL),
                 styled(&entry.component, color::WARNING),
                 styled(&entry.script, color::MUTED),
             );
