@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/treb-cli", "crates/treb-core", "crates/treb-config", "crates/treb-registry", "crates/treb-forge", "crates/treb-verify", "crates/treb-safe"]
+members = ["crates/treb-cli", "crates/treb-core", "crates/treb-config", "crates/treb-registry", "crates/treb-forge", "crates/treb-verify", "crates/treb-safe", "crates/treb-sol"]
 resolver = "3"
 
 [workspace.package]
@@ -16,6 +16,7 @@ treb-registry = { path = "crates/treb-registry" }
 treb-forge = { path = "crates/treb-forge" }
 treb-verify = { path = "crates/treb-verify" }
 treb-safe = { path = "crates/treb-safe" }
+treb-sol = { path = "crates/treb-sol" }
 
 # Foundry — pinned to tag v1.5.1 (commit b0a9dd9ceda36f63e2326ce530c10e6916f4b8a2)
 foundry-config = { git = "https://github.com/foundry-rs/foundry", tag = "v1.5.1" }
