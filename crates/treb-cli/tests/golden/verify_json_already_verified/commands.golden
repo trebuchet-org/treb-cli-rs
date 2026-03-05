@@ -1,12 +1,12 @@
 === cmd 0: [verify dep-verified --json] ===
 {
-  "deploymentId": "dep-verified",
-  "contractName": "TestContract",
   "address": "0x0000000000000000000000000000000000000001",
   "chainId": 1,
-  "verifier": "etherscan",
-  "status": "VERIFIED",
+  "contractName": "TestContract",
+  "deploymentId": "dep-verified",
   "explorerUrl": "https://etherscan.io/address/0x0000000000000000000000000000000000000001",
   "reason": "",
-  "verifiedAt": "<TIMESTAMP>"
+  "status": "VERIFIED",
+  "verifiedAt": "<TIMESTAMP>",
+  "verifier": "etherscan"
 }

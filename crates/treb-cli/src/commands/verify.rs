@@ -5,6 +5,7 @@ use std::{env, time::Duration};
 use anyhow::{Context, bail};
 use chrono::Utc;
 use console::Term;
+use owo_colors::{OwoColorize, Style};
 use serde::Serialize;
 use treb_core::types::{VerificationStatus, VerifierStatus};
 use treb_registry::Registry;
@@ -13,6 +14,7 @@ use treb_verify::VerifyOpts;
 use crate::{
     commands::resolve::resolve_deployment,
     output,
+    ui::color,
     ui::selector::{fuzzy_select_deployment_id, multiselect_deployments},
 };
 
@@ -64,6 +66,17 @@ fn aggregate_status(verifier_results: &std::collections::HashMap<String, Verifie
         VerificationStatus::Failed
     } else {
         VerificationStatus::Partial
+    }
+}
+
+/// Conditionally apply an owo-colors [`Style`] to text.
+///
+/// Returns the styled string when color is enabled, plain text otherwise.
+fn styled(text: &str, style: Style) -> String {
+    if color::is_color_enabled() {
+        format!("{}", text.style(style))
+    } else {
+        text.to_string()
     }
 }
 
@@ -170,8 +183,9 @@ pub async fn run(
             output::print_json(&out)?;
         } else {
             eprintln!(
-                "deployment '{}' is already verified — use --force to re-verify",
-                deployment_id
+                "  {} {} is already verified — use --force to re-verify",
+                styled("\u{2713}", color::SUCCESS),
+                contract_name,
             );
         }
         return Ok(());
@@ -181,6 +195,13 @@ pub async fn run(
     let _ = resolved;
 
     // --- Multi-verifier loop ---
+    if !json {
+        output::print_stage(
+            "\u{1f50d}",
+            &format!("Verifying {} ({})", contract_name, output::truncate_address(&address)),
+        );
+    }
+
     let mut dep = registry.get_deployment(&deployment_id).unwrap().clone();
     let verifier_count = verifiers.len();
 
@@ -217,7 +238,6 @@ pub async fn run(
             }
         };
 
-        eprintln!("Verifying {} ({}) on {}...", contract_name, &address, verifier);
         let result = verify_args.run().await;
         let explorer_url = treb_verify::explorer_url(chain_id, &address, verifier);
 
@@ -235,9 +255,13 @@ pub async fn run(
                     },
                 );
                 if !json {
-                    eprintln!("Verified {} on {}", contract_name, verifier);
+                    eprintln!(
+                        "  {}: {}",
+                        verifier,
+                        styled("VERIFIED", color::VERIFIED),
+                    );
                     if let Some(ref url) = explorer_url {
-                        eprintln!("  {url}");
+                        eprintln!("    {}", styled(url, color::MUTED));
                     }
                 }
             }
@@ -252,7 +276,11 @@ pub async fn run(
                     },
                 );
                 if !json {
-                    eprintln!("Failed to verify {} on {}: {}", contract_name, verifier, reason);
+                    eprintln!(
+                        "  {}: {}",
+                        verifier,
+                        styled("FAILED", color::FAILED),
+                    );
                 }
             }
         }
