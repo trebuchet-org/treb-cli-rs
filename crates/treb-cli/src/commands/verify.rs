@@ -400,13 +400,23 @@ async fn run_batch(
         let address = dep_snapshot.address.clone();
         let chain_id = dep_snapshot.chain_id;
 
-        eprintln!(
-            "[{}/{}] Verifying {} ({})...",
-            i + 1,
-            total,
-            contract_name,
-            output::truncate_address(&address)
-        );
+        if !json {
+            let action = if dep_snapshot.verification.status == VerificationStatus::Verified {
+                "Re-verifying"
+            } else {
+                "Verifying"
+            };
+            output::print_stage(
+                "\u{1f50d}",
+                &format!(
+                    "[{}/{}] {} {}",
+                    i + 1,
+                    total,
+                    action,
+                    contract_name,
+                ),
+            );
+        }
 
         let mut dep_owned = dep_snapshot;
         let verifier_count = verifiers.len();
@@ -431,7 +441,6 @@ async fn run_batch(
                 Ok(args) => args,
                 Err(e) => {
                     let reason = format!("{e:#}");
-                    eprintln!("  Failed to build verify args for {}: {reason}", verifier);
                     dep_owned.verification.verifiers.insert(
                         verifier.to_lowercase(),
                         VerifierStatus {
@@ -440,6 +449,13 @@ async fn run_batch(
                             reason,
                         },
                     );
+                    if !json {
+                        eprintln!(
+                            "  {}: {}",
+                            verifier,
+                            styled("FAILED", color::FAILED),
+                        );
+                    }
                     continue;
                 }
             };
@@ -456,14 +472,23 @@ async fn run_batch(
                         verifier.to_lowercase(),
                         VerifierStatus {
                             status: "VERIFIED".to_string(),
-                            url: explorer_url.unwrap_or_default(),
+                            url: explorer_url.clone().unwrap_or_default(),
                             reason: String::new(),
                         },
                     );
+                    if !json {
+                        eprintln!(
+                            "  {}: {}",
+                            verifier,
+                            styled("VERIFIED", color::VERIFIED),
+                        );
+                        if let Some(ref url) = explorer_url {
+                            eprintln!("    {}", styled(url, color::MUTED));
+                        }
+                    }
                 }
                 Err(e) => {
                     let reason = format!("{e:#}");
-                    eprintln!("  Failed on {}: {reason}", verifier);
                     dep_owned.verification.verifiers.insert(
                         verifier.to_lowercase(),
                         VerifierStatus {
@@ -472,6 +497,13 @@ async fn run_batch(
                             reason,
                         },
                     );
+                    if !json {
+                        eprintln!(
+                            "  {}: {}",
+                            verifier,
+                            styled("FAILED", color::FAILED),
+                        );
+                    }
                 }
             }
 
@@ -527,14 +559,25 @@ async fn run_batch(
         output::print_json(&results)?;
     } else {
         // Print summary table.
-        let mut table = output::build_table(&["Contract", "Address", "Status", "URL/Reason"]);
+        let mut table = output::build_table(&["Contract", "Address", "Status", "Badge"]);
         for r in &results {
-            let detail = if r.status == "VERIFIED" { &r.explorer_url } else { &r.reason };
+            let status_styled = match r.status.as_str() {
+                "VERIFIED" => styled("VERIFIED", color::VERIFIED),
+                "FAILED" => styled("FAILED", color::FAILED),
+                "PARTIAL" => styled("PARTIAL", color::WARNING),
+                _ => r.status.clone(),
+            };
+            let badge = match r.status.as_str() {
+                "VERIFIED" => styled("\u{2713}", color::VERIFIED),
+                "FAILED" => styled("\u{2717}", color::FAILED),
+                "PARTIAL" => styled("~", color::WARNING),
+                _ => styled("-", color::MUTED),
+            };
             table.add_row(vec![
-                r.contract_name.as_str(),
-                &output::truncate_address(&r.address),
-                r.status.as_str(),
-                detail,
+                r.contract_name.clone(),
+                output::truncate_address(&r.address),
+                status_styled,
+                badge,
             ]);
         }
         output::print_table(&table);

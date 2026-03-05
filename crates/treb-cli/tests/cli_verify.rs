@@ -291,6 +291,6 @@ fn verify_all_force_proceeds_with_reverification() {
         !stderr.contains("No unverified deployments found"),
         "--all --force should not print noop message: {stderr}"
     );
-    // Should show progress messages indicating it tried to verify.
-    assert!(stderr.contains("Verifying"), "--all --force should attempt verification: {stderr}");
+    // Should show progress messages indicating it tried to re-verify.
+    assert!(stderr.contains("Re-verifying"), "--all --force should attempt re-verification: {stderr}");
 }

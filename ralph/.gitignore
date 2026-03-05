@@ -1,8 +1,0 @@
-# Ralph infrastructure and state (managed by installer, regenerated each run)
-.ralph/
-
-# OS files
-.DS_Store
-
-# Claude Code internal
-.claude/

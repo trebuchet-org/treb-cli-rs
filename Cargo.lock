@@ -8261,6 +8261,7 @@ dependencies = [
  "treb-registry",
  "treb-safe",
  "treb-verify",
+ "unicode-width 0.2.0",
 ]
 
 [[package]]
