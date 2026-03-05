@@ -3,11 +3,16 @@
 use std::env;
 
 use anyhow::{Context, bail};
+use owo_colors::{OwoColorize, Style};
 use treb_core::types::Deployment;
 use treb_registry::Registry;
 
 use crate::{
-    commands::resolve::resolve_deployment, output, ui::selector::fuzzy_select_deployment_id,
+    commands::resolve::resolve_deployment,
+    output,
+    ui::badge,
+    ui::color,
+    ui::selector::fuzzy_select_deployment_id,
 };
 
 /// Verifier display order with human-readable labels (matches badge::VERIFIER_ORDER).
@@ -59,23 +64,64 @@ pub async fn run(deployment_query: Option<String>, json: bool) -> anyhow::Result
     Ok(())
 }
 
+/// Conditionally apply an owo-colors [`Style`] to text.
+///
+/// Returns the styled string when color is enabled, plain text otherwise.
+fn styled(text: &str, style: Style) -> String {
+    if color::is_color_enabled() {
+        format!("{}", text.style(style))
+    } else {
+        text.to_string()
+    }
+}
+
+/// Print a section header with optional STAGE styling.
+fn print_header(title: &str) {
+    println!("{}", styled(&format!("── {title} ──"), color::STAGE));
+}
+
+/// Style a verification status value according to its meaning.
+fn styled_verification_status(status: &str) -> String {
+    let style = match status.to_uppercase().as_str() {
+        "VERIFIED" => color::VERIFIED,
+        "FAILED" => color::FAILED,
+        _ => color::UNVERIFIED,
+    };
+    styled(status, style)
+}
+
 fn print_deployment_details(d: &Deployment) {
     // Identity
-    println!("── Identity ──");
+    print_header("Identity");
+    let ns_display = match badge::fork_badge(&d.namespace) {
+        Some(fb) => format!("{} {}", d.namespace, styled(&fb, color::FORK_BADGE)),
+        None => d.namespace.clone(),
+    };
+    let type_str = d.deployment_type.to_string();
+    let type_styled = styled(
+        &type_str,
+        color::style_for_deployment_type(d.deployment_type.clone()),
+    );
     output::print_kv(&[
         ("ID", &d.id),
         ("Contract", &d.contract_name),
         ("Label", &d.label),
-        ("Namespace", &d.namespace),
-        ("Type", &d.deployment_type.to_string()),
+        ("Namespace", &ns_display),
+        ("Type", &type_styled),
     ]);
 
     // On-Chain
-    println!("\n── On-Chain ──");
-    output::print_kv(&[("Chain ID", &d.chain_id.to_string()), ("Address", &d.address)]);
+    println!();
+    print_header("On-Chain");
+    let addr_styled = styled(&d.address, color::ADDRESS);
+    output::print_kv(&[
+        ("Chain ID", &d.chain_id.to_string()),
+        ("Address", &addr_styled),
+    ]);
 
     // Transaction
-    println!("\n── Transaction ──");
+    println!();
+    print_header("Transaction");
     output::print_kv(&[
         ("Transaction ID", &d.transaction_id),
         ("Method", &d.deployment_strategy.method.to_string()),
@@ -88,7 +134,8 @@ fn print_deployment_details(d: &Deployment) {
     }
 
     // Artifact
-    println!("\n── Artifact ──");
+    println!();
+    print_header("Artifact");
     output::print_kv(&[
         ("Path", &d.artifact.path),
         ("Compiler", &d.artifact.compiler_version),
@@ -98,14 +145,17 @@ fn print_deployment_details(d: &Deployment) {
     ]);
 
     // Verification
-    println!("\n── Verification ──");
+    println!();
+    print_header("Verification");
     if d.verification.verifiers.is_empty() {
-        output::print_kv(&[("Status", "UNVERIFIED")]);
+        let status = styled_verification_status("UNVERIFIED");
+        output::print_kv(&[("Status", &status)]);
     } else {
         let mut pairs: Vec<(String, String)> = Vec::new();
         for (key, label) in VERIFIER_DISPLAY_ORDER {
             if let Some(vs) = d.verification.verifiers.get(key) {
-                let mut detail = vs.status.clone();
+                let status_styled = styled_verification_status(&vs.status);
+                let mut detail = status_styled;
                 if !vs.url.is_empty() {
                     detail.push_str(&format!(" {}", vs.url));
                 }
@@ -125,13 +175,16 @@ fn print_deployment_details(d: &Deployment) {
 
     // Proxy Info (only for proxy deployments)
     if let Some(ref proxy) = d.proxy_info {
-        println!("\n── Proxy Info ──");
+        println!();
+        print_header("Proxy Info");
+        let impl_styled = styled(&proxy.implementation, color::ADDRESS);
         output::print_kv(&[
             ("Proxy Type", &proxy.proxy_type),
-            ("Implementation", &proxy.implementation),
+            ("Implementation", &impl_styled),
         ]);
         if !proxy.admin.is_empty() {
-            output::print_kv(&[("Admin", &proxy.admin)]);
+            let admin_styled = styled(&proxy.admin, color::ADDRESS);
+            output::print_kv(&[("Admin", &admin_styled)]);
         }
         if !proxy.history.is_empty() {
             println!("  Upgrade History:");
@@ -149,13 +202,15 @@ fn print_deployment_details(d: &Deployment) {
     // Tags (only when present)
     if let Some(ref tags) = d.tags {
         if !tags.is_empty() {
-            println!("\n── Tags ──");
+            println!();
+            print_header("Tags");
             println!("  {}", tags.join(", "));
         }
     }
 
     // Timestamps
-    println!("\n── Timestamps ──");
+    println!();
+    print_header("Timestamps");
     output::print_kv(&[
         ("Created At", &d.created_at.to_rfc3339()),
         ("Updated At", &d.updated_at.to_rfc3339()),
