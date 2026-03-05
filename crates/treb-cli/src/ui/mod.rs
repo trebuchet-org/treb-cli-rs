@@ -3,3 +3,4 @@
 pub mod color;
 pub mod prompt;
 pub mod selector;
+pub mod tree;
