@@ -543,6 +543,10 @@ fn main() {
     println!("cargo:rerun-if-changed=../../.git/HEAD");
     println!("cargo:rerun-if-changed=../../.git/refs");
     println!("cargo:rerun-if-changed=src/main.rs");
+    // Re-run when treb-sol submodule pointer changes.
+    println!("cargo:rerun-if-changed=../../lib/treb-sol");
+    // Re-run when workspace Cargo.toml changes (foundry version pinning).
+    println!("cargo:rerun-if-changed=../../Cargo.toml");
 
     // Git commit hash.
     let git_commit = Command::new("git")
@@ -565,6 +569,34 @@ fn main() {
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|| "unknown".to_string());
     println!("cargo:rustc-env=TREB_BUILD_DATE={build_date}");
+
+    // Foundry version: extract the pinned git tag from workspace Cargo.toml.
+    let foundry_version = std::fs::read_to_string("../../Cargo.toml")
+        .ok()
+        .and_then(|contents| {
+            // Look for: foundry-config = { git = "...", tag = "vX.Y.Z" }
+            contents
+                .lines()
+                .find(|line| line.contains("foundry-config") && line.contains("tag"))
+                .and_then(|line| {
+                    let tag_start = line.find("tag = \"")? + 7;
+                    let tag_end = line[tag_start..].find('"')? + tag_start;
+                    Some(line[tag_start..tag_end].to_string())
+                })
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+    println!("cargo:rustc-env=TREB_FOUNDRY_VERSION={foundry_version}");
+
+    // treb-sol submodule commit hash.
+    let treb_sol_commit = Command::new("git")
+        .args(["-C", "../../lib/treb-sol", "rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    println!("cargo:rustc-env=TREB_SOL_COMMIT={treb_sol_commit}");
 
     // Rust version.
     let rust_version = Command::new("rustc")
