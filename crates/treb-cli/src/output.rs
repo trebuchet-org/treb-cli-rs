@@ -107,6 +107,23 @@ pub fn print_stage(emoji: &str, message: &str) {
     eprintln!("{}", format_stage(emoji, message));
 }
 
+/// Format a warning banner message with emoji prefix.
+///
+/// Returns `"emoji message"` with the message styled using [`color::WARNING`]
+/// when color is enabled, or plain text when disabled.
+pub fn format_warning_banner(emoji: &str, message: &str) -> String {
+    if color::is_color_enabled() {
+        format!("{} {}", emoji, message.style(color::WARNING))
+    } else {
+        format!("{} {}", emoji, message)
+    }
+}
+
+/// Print a warning banner to stdout with emoji prefix and warning styling.
+pub fn print_warning_banner(emoji: &str, message: &str) {
+    println!("{}", format_warning_banner(emoji, message));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

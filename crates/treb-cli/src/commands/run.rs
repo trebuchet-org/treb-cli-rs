@@ -279,6 +279,13 @@ pub async fn run(
     }
 
     let pipeline = RunPipeline::new(pipeline_context).with_script_config(script_config);
+
+    if !json && !dry_run && broadcast {
+        output::print_stage("\u{1f4e1}", "Broadcasting...");
+    } else if !json && dry_run {
+        output::print_stage("\u{1f9ea}", "Simulating...");
+    }
+
     let result = pipeline.execute(&mut registry).await.context("pipeline execution failed")?;
 
     if !json {
@@ -487,7 +494,7 @@ fn build_run_deployment_node(d: &treb_core::types::Deployment) -> TreeNode {
 fn display_result_human(result: &PipelineResult) {
     // Dry-run banner
     if result.dry_run {
-        println!("[DRY RUN] No changes were written to the registry.");
+        output::print_warning_banner("\u{1f6a7}", "[DRY RUN] No changes were written to the registry.");
         println!();
     }
 
@@ -592,7 +599,8 @@ fn display_result_human(result: &PipelineResult) {
             parts.push(format!("{} skipped", skip_count));
         }
         if result.gas_used > 0 {
-            parts.push(format!("{} gas used", output::format_gas(result.gas_used)));
+            let gas_verb = if result.dry_run { "gas would be used" } else { "gas used" };
+            parts.push(format!("{} {}", output::format_gas(result.gas_used), gas_verb));
         }
         println!("{}", parts.join(", "));
     }
