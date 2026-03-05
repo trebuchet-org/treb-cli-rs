@@ -1,10 +1,13 @@
 //! Shared output formatting utilities for CLI commands.
 //!
 //! Provides consistent output patterns: pretty JSON, UTF-8 tables with bold
-//! headers, and aligned key-value pair printing.
+//! headers, aligned key-value pair printing, and stage progress indicators.
 
 use comfy_table::{Attribute, Cell, ContentArrangement, Table};
+use owo_colors::OwoColorize;
 use serde::Serialize;
+
+use crate::ui::color;
 
 /// Print a value as pretty-printed JSON to stdout.
 ///
@@ -68,5 +71,54 @@ pub fn truncate_address(address: &str) -> String {
         format!("{}...{}", &address[..6], &address[address.len() - 4..])
     } else {
         address.to_string()
+    }
+}
+
+/// Format a stage progress message with emoji prefix.
+///
+/// Returns `"emoji message"` with the message styled using the [`color::STAGE`]
+/// palette when color is enabled, or plain text when disabled.
+pub fn format_stage(emoji: &str, message: &str) -> String {
+    if color::is_color_enabled() {
+        format!("{} {}", emoji, message.style(color::STAGE))
+    } else {
+        format!("{} {}", emoji, message)
+    }
+}
+
+/// Print a stage progress message to stderr with emoji prefix.
+///
+/// Outputs `"emoji styled_message\n"` to stderr. The message is styled with
+/// [`color::STAGE`] when color is enabled.
+pub fn print_stage(emoji: &str, message: &str) {
+    eprintln!("{}", format_stage(emoji, message));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_stage_with_color_enabled() {
+        owo_colors::set_override(true);
+        color::color_enabled(false);
+
+        let result = format_stage("\u{1f528}", "Compiling...");
+        assert!(result.contains("\u{1f528}"), "should contain emoji");
+        assert!(result.contains("Compiling..."), "should contain message");
+        assert!(result.contains("\x1b["), "should contain ANSI codes when color enabled");
+    }
+
+    #[test]
+    fn format_stage_with_color_disabled() {
+        owo_colors::set_override(false);
+        color::color_enabled(true); // override_disabled = true -> color off
+
+        let result = format_stage("\u{1f528}", "Compiling...");
+        assert_eq!(result, "\u{1f528} Compiling...");
+        assert!(!result.contains("\x1b["), "should not contain ANSI codes when color disabled");
+
+        // Restore
+        owo_colors::set_override(true);
     }
 }

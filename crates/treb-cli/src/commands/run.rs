@@ -268,14 +268,14 @@ pub async fn run(
     let mut registry = Registry::open(&cwd).context("failed to open registry")?;
 
     if !json {
-        eprintln!("Compiling and executing {}...", script);
+        output::print_stage("\u{1f528}", &format!("Compiling and executing {}...", script));
     }
 
     let pipeline = RunPipeline::new(pipeline_context).with_script_config(script_config);
     let result = pipeline.execute(&mut registry).await.context("pipeline execution failed")?;
 
     if !json {
-        eprintln!("Execution complete.");
+        output::print_stage("\u{2705}", "Execution complete.");
     }
 
     // ── Verbose post-execution output ────────────────────────────────────
