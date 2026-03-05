@@ -134,7 +134,50 @@ pub fn print_warning_banner(emoji: &str, message: &str) {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
     use super::*;
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().expect("env test lock poisoned")
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        original: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let original = std::env::var(key).ok();
+            // SAFETY: Serialized by env_lock() in tests that mutate env vars.
+            unsafe { std::env::set_var(key, value) };
+            Self { key, original }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let original = std::env::var(key).ok();
+            // SAFETY: Serialized by env_lock() in tests that mutate env vars.
+            unsafe { std::env::remove_var(key) };
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(value) => {
+                    // SAFETY: Serialized by env_lock() in tests that mutate env vars.
+                    unsafe { std::env::set_var(self.key, value) };
+                }
+                None => {
+                    // SAFETY: Serialized by env_lock() in tests that mutate env vars.
+                    unsafe { std::env::remove_var(self.key) };
+                }
+            }
+        }
+    }
 
     #[test]
     fn format_gas_zero() {
@@ -158,6 +201,9 @@ mod tests {
 
     #[test]
     fn format_stage_with_color_enabled() {
+        let _lock = env_lock();
+        let _no_color = EnvVarGuard::unset("NO_COLOR");
+        let _term = EnvVarGuard::set("TERM", "xterm-256color");
         owo_colors::set_override(true);
         color::color_enabled(false);
 
@@ -169,6 +215,7 @@ mod tests {
 
     #[test]
     fn format_stage_with_color_disabled() {
+        let _lock = env_lock();
         owo_colors::set_override(false);
         color::color_enabled(true); // override_disabled = true -> color off
 

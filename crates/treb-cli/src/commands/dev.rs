@@ -402,6 +402,7 @@ mod tests {
     use std::{fs, time::Duration};
     use tempfile::TempDir;
     use treb_core::types::fork::ForkEntry;
+    use treb_forge::AnvilInstance;
     use treb_forge::anvil::AnvilConfig;
     use treb_registry::ForkStateStore;
 
@@ -549,6 +550,16 @@ mod tests {
         }
     }
 
+    /// Try to spawn Anvil for tests. In restricted environments where process
+    /// forking is disallowed, skip the dependent test by returning `None`.
+    async fn spawn_anvil_or_skip() -> Option<AnvilInstance> {
+        match AnvilConfig::new().port(0).spawn().await {
+            Ok(anvil) => Some(anvil),
+            Err(err) if err.to_string().contains("Operation not permitted") => None,
+            Err(err) => panic!("spawn: {err}"),
+        }
+    }
+
     // ── anvil start updates fork state ────────────────────────────────────
 
     /// Verifies that `update_fork_state_with_anvil` correctly fills in rpc_url
@@ -563,7 +574,9 @@ mod tests {
         store.insert_active_fork(entry.clone()).unwrap();
 
         // Spawn a real Anvil instance.
-        let anvil = AnvilConfig::new().port(0).spawn().await.expect("spawn");
+        let Some(anvil) = spawn_anvil_or_skip().await else {
+            return;
+        };
         let rpc_url = anvil.rpc_url().to_string();
         let port = anvil.port();
         let chain_id = anvil.chain_id();
@@ -625,7 +638,9 @@ mod tests {
 
     #[tokio::test]
     async fn running_anvil_port_is_reachable() {
-        let anvil = AnvilConfig::new().port(0).spawn().await.expect("spawn");
+        let Some(anvil) = spawn_anvil_or_skip().await else {
+            return;
+        };
         let port = anvil.port();
         assert!(is_port_reachable(port).await, "running Anvil port should be reachable");
     }
@@ -633,7 +648,9 @@ mod tests {
     #[tokio::test]
     async fn dropped_anvil_port_is_not_reachable() {
         let port = {
-            let anvil = AnvilConfig::new().port(0).spawn().await.expect("spawn");
+            let Some(anvil) = spawn_anvil_or_skip().await else {
+                return;
+            };
             anvil.port()
         };
         // After drop, poll until port is free (up to 2 seconds).

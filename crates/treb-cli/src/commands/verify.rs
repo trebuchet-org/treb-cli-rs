@@ -597,10 +597,56 @@ async fn run_batch(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
 
     use treb_core::types::{VerificationStatus, VerifierStatus};
 
     use super::{aggregate_status, resolve_api_key};
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().expect("env test lock poisoned")
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        original: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let guard = Self::capture(key);
+            // SAFETY: Serialized by env_lock(), so no concurrent env mutation in these tests.
+            unsafe { std::env::set_var(key, value) };
+            guard
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let guard = Self::capture(key);
+            // SAFETY: Serialized by env_lock(), so no concurrent env mutation in these tests.
+            unsafe { std::env::remove_var(key) };
+            guard
+        }
+
+        fn capture(key: &'static str) -> Self {
+            Self { key, original: std::env::var(key).ok() }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(value) => {
+                    // SAFETY: Serialized by env_lock(), so no concurrent env mutation in these tests.
+                    unsafe { std::env::set_var(self.key, value) };
+                }
+                None => {
+                    // SAFETY: Serialized by env_lock(), so no concurrent env mutation in these tests.
+                    unsafe { std::env::remove_var(self.key) };
+                }
+            }
+        }
+    }
 
     #[test]
     fn aggregate_status_all_verified() {
@@ -676,27 +722,22 @@ mod tests {
 
     // --- resolve_api_key tests ---
 
-    // SAFETY: These tests manipulate env vars which is inherently unsafe in multi-threaded
-    // contexts. Cargo test runs each #[test] in its own thread but these use unique-enough
-    // env var values that interference is unlikely. The unsafe blocks satisfy the Rust 2024
-    // requirement for std::env::set_var / remove_var.
-
     #[test]
     fn resolve_api_key_explicit_overrides_env_for_etherscan() {
-        unsafe { std::env::set_var("ETHERSCAN_API_KEY", "env-key") };
+        let _lock = env_lock();
+        let _guard = EnvVarGuard::set("ETHERSCAN_API_KEY", "env-key");
         let explicit = Some("explicit-key".to_string());
         let result = resolve_api_key("etherscan", &explicit);
         assert_eq!(result, Some("explicit-key".to_string()));
-        unsafe { std::env::remove_var("ETHERSCAN_API_KEY") };
     }
 
     #[test]
     fn resolve_api_key_explicit_overrides_env_for_blockscout() {
-        unsafe { std::env::set_var("BLOCKSCOUT_API_KEY", "env-key") };
+        let _lock = env_lock();
+        let _guard = EnvVarGuard::set("BLOCKSCOUT_API_KEY", "env-key");
         let explicit = Some("explicit-key".to_string());
         let result = resolve_api_key("blockscout", &explicit);
         assert_eq!(result, Some("explicit-key".to_string()));
-        unsafe { std::env::remove_var("BLOCKSCOUT_API_KEY") };
     }
 
     #[test]
@@ -708,18 +749,18 @@ mod tests {
 
     #[test]
     fn resolve_api_key_etherscan_from_env() {
-        unsafe { std::env::set_var("ETHERSCAN_API_KEY", "eth-env-key") };
+        let _lock = env_lock();
+        let _guard = EnvVarGuard::set("ETHERSCAN_API_KEY", "eth-env-key");
         let result = resolve_api_key("etherscan", &None);
         assert_eq!(result, Some("eth-env-key".to_string()));
-        unsafe { std::env::remove_var("ETHERSCAN_API_KEY") };
     }
 
     #[test]
     fn resolve_api_key_blockscout_from_env() {
-        unsafe { std::env::set_var("BLOCKSCOUT_API_KEY", "block-env-key") };
+        let _lock = env_lock();
+        let _guard = EnvVarGuard::set("BLOCKSCOUT_API_KEY", "block-env-key");
         let result = resolve_api_key("blockscout", &None);
         assert_eq!(result, Some("block-env-key".to_string()));
-        unsafe { std::env::remove_var("BLOCKSCOUT_API_KEY") };
     }
 
     #[test]
@@ -730,14 +771,16 @@ mod tests {
 
     #[test]
     fn resolve_api_key_etherscan_no_env_returns_none() {
-        unsafe { std::env::remove_var("ETHERSCAN_API_KEY") };
+        let _lock = env_lock();
+        let _guard = EnvVarGuard::unset("ETHERSCAN_API_KEY");
         let result = resolve_api_key("etherscan", &None);
         assert_eq!(result, None);
     }
 
     #[test]
     fn resolve_api_key_blockscout_no_env_returns_none() {
-        unsafe { std::env::remove_var("BLOCKSCOUT_API_KEY") };
+        let _lock = env_lock();
+        let _guard = EnvVarGuard::unset("BLOCKSCOUT_API_KEY");
         let result = resolve_api_key("blockscout", &None);
         assert_eq!(result, None);
     }

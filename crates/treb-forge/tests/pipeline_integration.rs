@@ -110,6 +110,8 @@ fn build_pipeline_result(
         skipped,
         dry_run,
         success: true,
+        gas_used: 0,
+        event_count: 0,
         console_logs: Vec::new(),
     }
 }

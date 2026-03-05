@@ -52,6 +52,16 @@ fn sample_entry(treb_dir: &Path, network: &str) -> ForkEntry {
     }
 }
 
+/// Spawn Anvil for integration tests, skipping when process forking is blocked
+/// by the current execution environment.
+async fn spawn_anvil_or_skip() -> Option<treb_forge::AnvilInstance> {
+    match treb_forge::anvil::AnvilConfig::new().port(0).spawn().await {
+        Ok(anvil) => Some(anvil),
+        Err(err) if err.to_string().contains("Operation not permitted") => None,
+        Err(err) => panic!("failed to spawn Anvil: {err}"),
+    }
+}
+
 // ── fork status with no forks ─────────────────────────────────────────────────
 
 /// `treb fork status` should report "No active forks" when the fork-state file
@@ -248,10 +258,10 @@ fn fork_exit_restores_registry() {
 /// succeeds without requiring external network access.
 #[tokio::test(flavor = "multi_thread")]
 async fn fork_enter_creates_state_and_snapshot() {
-    use treb_forge::anvil::AnvilConfig;
-
     // Spawn a local Anvil so the binary can call eth_chainId.
-    let anvil = AnvilConfig::new().port(0).spawn().await.expect("failed to spawn Anvil");
+    let Some(anvil) = spawn_anvil_or_skip().await else {
+        return;
+    };
     let rpc_url = anvil.rpc_url().to_string();
 
     let (root, treb_dir) = make_project();
@@ -317,12 +327,12 @@ async fn fork_enter_creates_state_and_snapshot() {
 #[tokio::test(flavor = "multi_thread")]
 async fn signal_handling_sigterm_shuts_down_anvil_cleanly() {
     use std::time::Duration;
-    use treb_forge::anvil::AnvilConfig;
 
     // Spawn an "upstream" Anvil to serve as the fork origin.  The subprocess
     // will fork from this URL so `run_anvil_start` has a valid `fork_url`.
-    let upstream =
-        AnvilConfig::new().port(0).spawn().await.expect("failed to spawn upstream Anvil");
+    let Some(upstream) = spawn_anvil_or_skip().await else {
+        return;
+    };
     let fork_url = upstream.rpc_url().to_string();
 
     // Build a temporary project directory with a pre-populated fork entry.
