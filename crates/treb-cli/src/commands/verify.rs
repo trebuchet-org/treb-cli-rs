@@ -31,12 +31,48 @@ struct VerifyOutputJson {
     verified_at: Option<String>,
 }
 
+/// Resolve the API key for a verifier.
+///
+/// If an explicit key was provided via `--verifier-api-key`, it takes precedence.
+/// Otherwise, checks the standard environment variable for the verifier:
+///   - etherscan  -> ETHERSCAN_API_KEY
+///   - blockscout -> BLOCKSCOUT_API_KEY
+///   - sourcify   -> None (keyless)
+fn resolve_api_key(verifier: &str, explicit_key: &Option<String>) -> Option<String> {
+    if explicit_key.is_some() {
+        return explicit_key.clone();
+    }
+    match verifier {
+        "etherscan" => env::var("ETHERSCAN_API_KEY").ok(),
+        "blockscout" => env::var("BLOCKSCOUT_API_KEY").ok(),
+        _ => None,
+    }
+}
+
+/// Compute aggregate verification status from per-verifier results.
+///
+/// All VERIFIED -> Verified, all FAILED -> Failed, mixed -> Partial.
+fn aggregate_status(verifier_results: &std::collections::HashMap<String, VerifierStatus>) -> VerificationStatus {
+    if verifier_results.is_empty() {
+        return VerificationStatus::Unverified;
+    }
+    let all_verified = verifier_results.values().all(|v| v.status == "VERIFIED");
+    let all_failed = verifier_results.values().all(|v| v.status == "FAILED");
+    if all_verified {
+        VerificationStatus::Verified
+    } else if all_failed {
+        VerificationStatus::Failed
+    } else {
+        VerificationStatus::Partial
+    }
+}
+
 /// Run the verify command.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     deployment: Option<String>,
     all: bool,
-    verifier: &str,
+    verifiers: &[String],
     verifier_url: Option<String>,
     verifier_api_key: Option<String>,
     force: bool,
@@ -45,11 +81,16 @@ pub async fn run(
     delay: u64,
     json: bool,
 ) -> anyhow::Result<()> {
-    // Validate verifier value.
-    match verifier {
-        "etherscan" | "sourcify" | "blockscout" => {}
-        other => {
-            bail!("unknown verifier '{}': expected one of etherscan, sourcify, blockscout", other);
+    // Validate all verifier values.
+    for v in verifiers {
+        match v.as_str() {
+            "etherscan" | "sourcify" | "blockscout" => {}
+            other => {
+                bail!(
+                    "unknown verifier '{}': expected one of etherscan, sourcify, blockscout",
+                    other
+                );
+            }
         }
     }
 
@@ -72,7 +113,7 @@ pub async fn run(
 
     if all {
         return run_batch(
-            verifier,
+            verifiers,
             verifier_url,
             verifier_api_key,
             force,
@@ -114,6 +155,7 @@ pub async fn run(
     // Skip if already verified and not forced.
     if already_verified && !force {
         if json {
+            let verifier = verifiers.first().map(|s| s.as_str()).unwrap_or("etherscan");
             let out = VerifyOutputJson {
                 deployment_id,
                 contract_name,
@@ -135,99 +177,135 @@ pub async fn run(
         return Ok(());
     }
 
-    // Build verification options from CLI args.
-    let opts = VerifyOpts {
-        verifier: verifier.to_string(),
-        verifier_url,
-        verifier_api_key: verifier_api_key.clone(),
-        etherscan_api_key: verifier_api_key,
-        rpc_url: None,
-        force,
-        watch,
-        retries,
-        delay: delay as u32,
-        root: cwd,
-    };
+    // Release the borrow on `resolved` before mutating registry.
+    let _ = resolved;
 
-    let verify_args = treb_verify::build_verify_args(resolved, &opts)?;
-    // `resolved` borrow ends here (NLL) — registry is free for mutation.
-
-    eprintln!("Verifying {} ({})...", contract_name, &address);
-    let result = verify_args.run().await;
-
-    let explorer_url = treb_verify::explorer_url(chain_id, &address, verifier);
-
-    // Update registry based on verification result.
+    // --- Multi-verifier loop ---
     let mut dep = registry.get_deployment(&deployment_id).unwrap().clone();
+    let verifier_count = verifiers.len();
 
-    match result {
-        Ok(()) => {
-            dep.verification.status = VerificationStatus::Verified;
-            dep.verification.verified_at = Some(Utc::now());
-            if let Some(ref url) = explorer_url {
-                dep.verification.etherscan_url = url.clone();
+    for (vi, verifier) in verifiers.iter().enumerate() {
+        let resolved_key = resolve_api_key(verifier, &verifier_api_key);
+        let opts = VerifyOpts {
+            verifier: verifier.clone(),
+            verifier_url: verifier_url.clone(),
+            verifier_api_key: resolved_key.clone(),
+            etherscan_api_key: resolved_key,
+            rpc_url: None,
+            force,
+            watch,
+            retries,
+            delay: delay as u32,
+            root: cwd.clone(),
+        };
+
+        // Re-fetch deployment reference for build_verify_args (needs &Deployment).
+        let dep_ref = registry.get_deployment(&deployment_id).unwrap();
+        let verify_args = match treb_verify::build_verify_args(dep_ref, &opts) {
+            Ok(args) => args,
+            Err(e) => {
+                let reason = format!("{e:#}");
+                dep.verification.verifiers.insert(
+                    verifier.to_lowercase(),
+                    VerifierStatus {
+                        status: "FAILED".to_string(),
+                        url: String::new(),
+                        reason,
+                    },
+                );
+                continue;
             }
-            dep.verification.verifiers.insert(
-                verifier.to_string(),
-                VerifierStatus {
-                    status: "VERIFIED".to_string(),
-                    url: explorer_url.clone().unwrap_or_default(),
-                    reason: String::new(),
-                },
-            );
-            registry.update_deployment(dep)?;
+        };
 
-            if json {
-                let out = VerifyOutputJson {
-                    deployment_id,
-                    contract_name,
-                    address,
-                    chain_id,
-                    verifier: verifier.to_string(),
-                    status: "VERIFIED".to_string(),
-                    explorer_url: explorer_url.unwrap_or_default(),
-                    reason: String::new(),
-                    verified_at: Some(Utc::now().to_rfc3339()),
-                };
-                output::print_json(&out)?;
-            } else {
-                eprintln!("Verified {} on {}", contract_name, verifier);
+        eprintln!("Verifying {} ({}) on {}...", contract_name, &address, verifier);
+        let result = verify_args.run().await;
+        let explorer_url = treb_verify::explorer_url(chain_id, &address, verifier);
+
+        match result {
+            Ok(()) => {
                 if let Some(ref url) = explorer_url {
-                    eprintln!("  {url}");
+                    dep.verification.etherscan_url = url.clone();
+                }
+                dep.verification.verifiers.insert(
+                    verifier.to_lowercase(),
+                    VerifierStatus {
+                        status: "VERIFIED".to_string(),
+                        url: explorer_url.clone().unwrap_or_default(),
+                        reason: String::new(),
+                    },
+                );
+                if !json {
+                    eprintln!("Verified {} on {}", contract_name, verifier);
+                    if let Some(ref url) = explorer_url {
+                        eprintln!("  {url}");
+                    }
+                }
+            }
+            Err(e) => {
+                let reason = format!("{e:#}");
+                dep.verification.verifiers.insert(
+                    verifier.to_lowercase(),
+                    VerifierStatus {
+                        status: "FAILED".to_string(),
+                        url: String::new(),
+                        reason: reason.clone(),
+                    },
+                );
+                if !json {
+                    eprintln!("Failed to verify {} on {}: {}", contract_name, verifier, reason);
                 }
             }
         }
-        Err(e) => {
-            let reason = format!("{e:#}");
-            dep.verification.status = VerificationStatus::Failed;
-            dep.verification.reason = reason.clone();
-            dep.verification.verifiers.insert(
-                verifier.to_string(),
-                VerifierStatus {
-                    status: "FAILED".to_string(),
-                    url: String::new(),
-                    reason: reason.clone(),
-                },
-            );
-            registry.update_deployment(dep)?;
 
-            if json {
-                let out = VerifyOutputJson {
-                    deployment_id,
-                    contract_name,
-                    address,
-                    chain_id,
-                    verifier: verifier.to_string(),
-                    status: "FAILED".to_string(),
-                    explorer_url: String::new(),
-                    reason,
-                    verified_at: None,
-                };
-                output::print_json(&out)?;
-            } else {
-                bail!("verification failed for {}: {}", contract_name, reason);
-            }
+        // Rate limiting delay between verifier attempts (skip after the last one).
+        if vi + 1 < verifier_count && delay > 0 {
+            tokio::time::sleep(Duration::from_secs(delay)).await;
         }
+    }
+
+    // Compute aggregate status and update registry once.
+    let agg_status = aggregate_status(&dep.verification.verifiers);
+    dep.verification.status = agg_status.clone();
+    if agg_status == VerificationStatus::Verified || agg_status == VerificationStatus::Partial {
+        dep.verification.verified_at = Some(Utc::now());
+    }
+    // Set reason from first failed verifier, if any.
+    dep.verification.reason = dep
+        .verification
+        .verifiers
+        .values()
+        .find(|v| v.status == "FAILED")
+        .map(|v| v.reason.clone())
+        .unwrap_or_default();
+
+    registry.update_deployment(dep.clone())?;
+
+    // Output.
+    if json {
+        let agg_status_str = match dep.verification.status {
+            VerificationStatus::Verified => "VERIFIED",
+            VerificationStatus::Failed => "FAILED",
+            VerificationStatus::Partial => "PARTIAL",
+            VerificationStatus::Unverified => "UNVERIFIED",
+        };
+        let verifier_label = verifiers.first().map(|s| s.as_str()).unwrap_or("etherscan");
+        let out = VerifyOutputJson {
+            deployment_id,
+            contract_name,
+            address,
+            chain_id,
+            verifier: verifier_label.to_string(),
+            status: agg_status_str.to_string(),
+            explorer_url: dep.verification.etherscan_url,
+            reason: dep.verification.reason,
+            verified_at: dep.verification.verified_at.map(|t| t.to_rfc3339()),
+        };
+        output::print_json(&out)?;
+    } else if dep.verification.status == VerificationStatus::Failed {
+        bail!(
+            "verification failed for {}",
+            contract_name
+        );
     }
 
     Ok(())
@@ -236,7 +314,7 @@ pub async fn run(
 /// Batch verification: verify all unverified (or all with --force) deployments.
 #[allow(clippy::too_many_arguments)]
 async fn run_batch(
-    verifier: &str,
+    verifiers: &[String],
     verifier_url: Option<String>,
     verifier_api_key: Option<String>,
     force: bool,
@@ -289,10 +367,10 @@ async fn run_batch(
     let mut results: Vec<VerifyOutputJson> = Vec::new();
 
     for (i, dep_id) in candidate_ids.iter().enumerate() {
-        let dep = registry.get_deployment(dep_id).unwrap();
-        let contract_name = dep.contract_name.clone();
-        let address = dep.address.clone();
-        let chain_id = dep.chain_id;
+        let dep_snapshot = registry.get_deployment(dep_id).unwrap().clone();
+        let contract_name = dep_snapshot.contract_name.clone();
+        let address = dep_snapshot.address.clone();
+        let chain_id = dep_snapshot.chain_id;
 
         eprintln!(
             "[{}/{}] Verifying {} ({})...",
@@ -302,104 +380,115 @@ async fn run_batch(
             output::truncate_address(&address)
         );
 
-        let opts = VerifyOpts {
-            verifier: verifier.to_string(),
-            verifier_url: verifier_url.clone(),
-            verifier_api_key: verifier_api_key.clone(),
-            etherscan_api_key: verifier_api_key.clone(),
-            rpc_url: None,
-            force,
-            watch,
-            retries,
-            delay: delay as u32,
-            root: cwd.to_path_buf(),
-        };
+        let mut dep_owned = dep_snapshot;
+        let verifier_count = verifiers.len();
 
-        let verify_args = match treb_verify::build_verify_args(dep, &opts) {
-            Ok(args) => args,
-            Err(e) => {
-                let reason = format!("{e:#}");
-                eprintln!("  Failed to build verify args: {reason}");
-                results.push(VerifyOutputJson {
-                    deployment_id: dep_id.clone(),
-                    contract_name,
-                    address,
-                    chain_id,
-                    verifier: verifier.to_string(),
-                    status: "FAILED".to_string(),
-                    explorer_url: String::new(),
-                    reason,
-                    verified_at: None,
-                });
-                continue;
-            }
-        };
-        // Borrow on `dep` released here (NLL).
+        for (vi, verifier) in verifiers.iter().enumerate() {
+            let resolved_key = resolve_api_key(verifier, &verifier_api_key);
+            let opts = VerifyOpts {
+                verifier: verifier.clone(),
+                verifier_url: verifier_url.clone(),
+                verifier_api_key: resolved_key.clone(),
+                etherscan_api_key: resolved_key,
+                rpc_url: None,
+                force,
+                watch,
+                retries,
+                delay: delay as u32,
+                root: cwd.to_path_buf(),
+            };
 
-        let result = verify_args.run().await;
-        let explorer_url = treb_verify::explorer_url(chain_id, &address, verifier);
-
-        let mut dep_owned = registry.get_deployment(dep_id).unwrap().clone();
-
-        match result {
-            Ok(()) => {
-                dep_owned.verification.status = VerificationStatus::Verified;
-                dep_owned.verification.verified_at = Some(Utc::now());
-                if let Some(ref url) = explorer_url {
-                    dep_owned.verification.etherscan_url = url.clone();
+            let dep_ref = registry.get_deployment(dep_id).unwrap();
+            let verify_args = match treb_verify::build_verify_args(dep_ref, &opts) {
+                Ok(args) => args,
+                Err(e) => {
+                    let reason = format!("{e:#}");
+                    eprintln!("  Failed to build verify args for {}: {reason}", verifier);
+                    dep_owned.verification.verifiers.insert(
+                        verifier.to_lowercase(),
+                        VerifierStatus {
+                            status: "FAILED".to_string(),
+                            url: String::new(),
+                            reason,
+                        },
+                    );
+                    continue;
                 }
-                dep_owned.verification.verifiers.insert(
-                    verifier.to_string(),
-                    VerifierStatus {
-                        status: "VERIFIED".to_string(),
-                        url: explorer_url.clone().unwrap_or_default(),
-                        reason: String::new(),
-                    },
-                );
-                registry.update_deployment(dep_owned)?;
+            };
 
-                results.push(VerifyOutputJson {
-                    deployment_id: dep_id.clone(),
-                    contract_name,
-                    address,
-                    chain_id,
-                    verifier: verifier.to_string(),
-                    status: "VERIFIED".to_string(),
-                    explorer_url: explorer_url.unwrap_or_default(),
-                    reason: String::new(),
-                    verified_at: Some(Utc::now().to_rfc3339()),
-                });
+            let result = verify_args.run().await;
+            let explorer_url = treb_verify::explorer_url(chain_id, &address, verifier);
+
+            match result {
+                Ok(()) => {
+                    if let Some(ref url) = explorer_url {
+                        dep_owned.verification.etherscan_url = url.clone();
+                    }
+                    dep_owned.verification.verifiers.insert(
+                        verifier.to_lowercase(),
+                        VerifierStatus {
+                            status: "VERIFIED".to_string(),
+                            url: explorer_url.unwrap_or_default(),
+                            reason: String::new(),
+                        },
+                    );
+                }
+                Err(e) => {
+                    let reason = format!("{e:#}");
+                    eprintln!("  Failed on {}: {reason}", verifier);
+                    dep_owned.verification.verifiers.insert(
+                        verifier.to_lowercase(),
+                        VerifierStatus {
+                            status: "FAILED".to_string(),
+                            url: String::new(),
+                            reason,
+                        },
+                    );
+                }
             }
-            Err(e) => {
-                let reason = format!("{e:#}");
-                dep_owned.verification.status = VerificationStatus::Failed;
-                dep_owned.verification.reason = reason.clone();
-                dep_owned.verification.verifiers.insert(
-                    verifier.to_string(),
-                    VerifierStatus {
-                        status: "FAILED".to_string(),
-                        url: String::new(),
-                        reason: reason.clone(),
-                    },
-                );
-                registry.update_deployment(dep_owned)?;
 
-                eprintln!("  Failed: {reason}");
-                results.push(VerifyOutputJson {
-                    deployment_id: dep_id.clone(),
-                    contract_name,
-                    address,
-                    chain_id,
-                    verifier: verifier.to_string(),
-                    status: "FAILED".to_string(),
-                    explorer_url: String::new(),
-                    reason,
-                    verified_at: None,
-                });
+            // Rate limiting delay between verifier attempts (skip after the last one).
+            if vi + 1 < verifier_count && delay > 0 {
+                tokio::time::sleep(Duration::from_secs(delay)).await;
             }
         }
 
-        // Rate limiting delay between requests (skip after the last one).
+        // Compute aggregate status and update registry once per deployment.
+        let agg_status = aggregate_status(&dep_owned.verification.verifiers);
+        dep_owned.verification.status = agg_status.clone();
+        if agg_status == VerificationStatus::Verified || agg_status == VerificationStatus::Partial {
+            dep_owned.verification.verified_at = Some(Utc::now());
+        }
+        dep_owned.verification.reason = dep_owned
+            .verification
+            .verifiers
+            .values()
+            .find(|v| v.status == "FAILED")
+            .map(|v| v.reason.clone())
+            .unwrap_or_default();
+
+        registry.update_deployment(dep_owned.clone())?;
+
+        let agg_status_str = match dep_owned.verification.status {
+            VerificationStatus::Verified => "VERIFIED",
+            VerificationStatus::Failed => "FAILED",
+            VerificationStatus::Partial => "PARTIAL",
+            VerificationStatus::Unverified => "UNVERIFIED",
+        };
+
+        results.push(VerifyOutputJson {
+            deployment_id: dep_id.clone(),
+            contract_name,
+            address,
+            chain_id,
+            verifier: verifiers.first().map(|s| s.as_str()).unwrap_or("etherscan").to_string(),
+            status: agg_status_str.to_string(),
+            explorer_url: dep_owned.verification.etherscan_url,
+            reason: dep_owned.verification.reason,
+            verified_at: dep_owned.verification.verified_at.map(|t| t.to_rfc3339()),
+        });
+
+        // Rate limiting delay between deployments (skip after the last one).
         if i + 1 < total && delay > 0 {
             tokio::time::sleep(Duration::from_secs(delay)).await;
         }
