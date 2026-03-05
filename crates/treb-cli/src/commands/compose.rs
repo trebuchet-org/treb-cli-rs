@@ -551,7 +551,7 @@ pub async fn run(
             let component = &compose.components[name];
 
             if skip_set.contains(name) {
-                eprintln!("# {} (skipped)", name);
+                println!("# {} (skipped)", name);
                 continue;
             }
 
@@ -616,8 +616,8 @@ pub async fn run(
                 })
                 .collect::<Vec<_>>()
                 .join(" ");
-            eprintln!("# {}", name);
-            eprintln!("{}", cmd_str);
+            println!("# {}", name);
+            println!("{}", cmd_str);
         }
         return Ok(());
     }
@@ -966,8 +966,10 @@ pub async fn run(
     }
 
     // Print debug directory path.
-    if let Some(ref dir) = debug_dir {
-        eprintln!("Debug logs saved to {}", dir.display());
+    if !json {
+        if let Some(ref dir) = debug_dir {
+            eprintln!("Debug logs saved to {}", dir.display());
+        }
     }
 
     // Full successful completion: delete the state file.
