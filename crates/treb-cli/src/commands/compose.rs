@@ -376,12 +376,13 @@ fn display_compose_human(group: &str, results: &[ComponentResultEntry], totals: 
         match r.status {
             ComponentStatus::Success => {
                 println!(
-                    "  {} — {} deployment{}, {} transaction{}",
+                    "  {} — {} deployment{}, {} transaction{}, {} gas",
                     r.component,
                     r.deployments,
                     if r.deployments == 1 { "" } else { "s" },
                     r.transactions,
                     if r.transactions == 1 { "" } else { "s" },
+                    output::format_gas(r.gas_used),
                 );
             }
             ComponentStatus::Skipped => {
@@ -402,11 +403,12 @@ fn display_compose_human(group: &str, results: &[ComponentResultEntry], totals: 
 
     println!();
     println!(
-        "Totals: {} deployment{}, {} transaction{} | {} succeeded, {} skipped, {} failed, {} not executed",
+        "Totals: {} deployment{}, {} transaction{}, {} gas | {} succeeded, {} skipped, {} failed, {} not executed",
         totals.deployments,
         if totals.deployments == 1 { "" } else { "s" },
         totals.transactions,
         if totals.transactions == 1 { "" } else { "s" },
+        output::format_gas(totals.gas_used),
         totals.succeeded,
         totals.skipped,
         totals.failed,
