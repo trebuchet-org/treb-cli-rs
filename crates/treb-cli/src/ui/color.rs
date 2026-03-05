@@ -6,9 +6,10 @@
 //! to the owo-colors subsystem.
 
 use owo_colors::Style;
+use treb_core::types::DeploymentType;
 
 // ---------------------------------------------------------------------------
-// Palette constants
+// Palette constants – general
 // ---------------------------------------------------------------------------
 
 #[allow(dead_code)]
@@ -30,6 +31,73 @@ pub const ERROR: Style = Style::new().red().bold();
 #[allow(dead_code)]
 /// Color/style for muted/secondary text.
 pub const MUTED: Style = Style::new().dimmed();
+
+// ---------------------------------------------------------------------------
+// Palette constants – deployment-specific
+// ---------------------------------------------------------------------------
+
+#[allow(dead_code)]
+/// Color/style for namespace labels.
+pub const NAMESPACE: Style = Style::new().cyan().bold();
+
+#[allow(dead_code)]
+/// Color/style for chain labels.
+pub const CHAIN: Style = Style::new().magenta().bold();
+
+#[allow(dead_code)]
+/// Color/style for proxy deployment type.
+pub const TYPE_PROXY: Style = Style::new().blue().bold();
+
+#[allow(dead_code)]
+/// Color/style for library deployment type.
+pub const TYPE_LIBRARY: Style = Style::new().yellow();
+
+#[allow(dead_code)]
+/// Color/style for singleton deployment type.
+pub const TYPE_SINGLETON: Style = Style::new().green();
+
+#[allow(dead_code)]
+/// Color/style for unknown deployment type.
+pub const TYPE_UNKNOWN: Style = Style::new().dimmed();
+
+#[allow(dead_code)]
+/// Color/style for address display.
+pub const ADDRESS: Style = Style::new().white().dimmed();
+
+#[allow(dead_code)]
+/// Color/style for deployment labels/names.
+pub const LABEL: Style = Style::new().bold();
+
+#[allow(dead_code)]
+/// Color/style for fork badge indicators.
+pub const FORK_BADGE: Style = Style::new().yellow().bold();
+
+#[allow(dead_code)]
+/// Color/style for verified status.
+pub const VERIFIED: Style = Style::new().green().bold();
+
+#[allow(dead_code)]
+/// Color/style for failed verification status.
+pub const FAILED: Style = Style::new().red().bold();
+
+#[allow(dead_code)]
+/// Color/style for unverified status.
+pub const UNVERIFIED: Style = Style::new().dimmed();
+
+// ---------------------------------------------------------------------------
+// Deployment type → style mapping
+// ---------------------------------------------------------------------------
+
+/// Returns the appropriate [`Style`] for a given [`DeploymentType`].
+#[allow(dead_code)]
+pub fn style_for_deployment_type(dt: DeploymentType) -> Style {
+    match dt {
+        DeploymentType::Proxy => TYPE_PROXY,
+        DeploymentType::Library => TYPE_LIBRARY,
+        DeploymentType::Singleton => TYPE_SINGLETON,
+        DeploymentType::Unknown => TYPE_UNKNOWN,
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Color enable / disable helpers
@@ -114,5 +182,26 @@ mod tests {
             }
         }
         assert!(!result, "should_use_color() must return false when TERM=dumb");
+    }
+
+    #[test]
+    fn style_for_deployment_type_covers_all_variants() {
+        // Verify all DeploymentType variants map to the expected style constant.
+        assert_eq!(
+            format!("{:?}", style_for_deployment_type(DeploymentType::Proxy)),
+            format!("{:?}", TYPE_PROXY),
+        );
+        assert_eq!(
+            format!("{:?}", style_for_deployment_type(DeploymentType::Library)),
+            format!("{:?}", TYPE_LIBRARY),
+        );
+        assert_eq!(
+            format!("{:?}", style_for_deployment_type(DeploymentType::Singleton)),
+            format!("{:?}", TYPE_SINGLETON),
+        );
+        assert_eq!(
+            format!("{:?}", style_for_deployment_type(DeploymentType::Unknown)),
+            format!("{:?}", TYPE_UNKNOWN),
+        );
     }
 }
