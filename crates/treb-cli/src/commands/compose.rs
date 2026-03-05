@@ -499,9 +499,6 @@ pub async fn run(
 
     // ── Dump command: print per-component forge commands and exit ─────
     if dump_command {
-        // Inject env vars once for config resolution.
-        super::run::inject_env_vars(&env_vars)?;
-
         for name in &order {
             let component = &compose.components[name];
 
@@ -509,6 +506,9 @@ pub async fn run(
                 eprintln!("# {} (skipped)", name);
                 continue;
             }
+
+            // Re-inject global env vars (reset any previous component overrides).
+            super::run::inject_env_vars(&env_vars)?;
 
             // Inject per-component env vars.
             if let Some(env_map) = &component.env {
