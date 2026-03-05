@@ -69,6 +69,9 @@ fn verify_help_shows_all_flags() {
 
     assert!(stdout.contains("--all"), "help should show --all");
     assert!(stdout.contains("--verifier"), "help should show --verifier");
+    assert!(stdout.contains("--etherscan"), "help should show --etherscan");
+    assert!(stdout.contains("--blockscout"), "help should show --blockscout");
+    assert!(stdout.contains("--sourcify"), "help should show --sourcify");
     assert!(stdout.contains("--verifier-url"), "help should show --verifier-url");
     assert!(stdout.contains("--verifier-api-key"), "help should show --verifier-api-key");
     assert!(stdout.contains("--force"), "help should show --force");
@@ -176,6 +179,132 @@ fn verify_accepts_blockscout_verifier() {
     assert!(
         !stderr.contains("unknown verifier"),
         "blockscout should be a valid verifier: {stderr}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// --etherscan / --blockscout / --sourcify shorthand flags
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn verify_etherscan_shorthand_flag_accepted() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_deployments(&tmp);
+
+    let output = treb()
+        .args(["verify", "NonexistentContract", "--etherscan"])
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("unexpected argument"),
+        "--etherscan should be accepted: {stderr}"
+    );
+}
+
+#[test]
+fn verify_blockscout_shorthand_flag_accepted() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_deployments(&tmp);
+
+    let output = treb()
+        .args(["verify", "NonexistentContract", "--blockscout"])
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("unexpected argument"),
+        "--blockscout should be accepted: {stderr}"
+    );
+}
+
+#[test]
+fn verify_sourcify_shorthand_flag_accepted() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_deployments(&tmp);
+
+    let output = treb()
+        .args(["verify", "NonexistentContract", "--sourcify"])
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("unexpected argument"),
+        "--sourcify should be accepted: {stderr}"
+    );
+}
+
+#[test]
+fn verify_multiple_shorthand_flags_combined() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_deployments(&tmp);
+
+    let output = treb()
+        .args(["verify", "NonexistentContract", "--etherscan", "--sourcify"])
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("unexpected argument"),
+        "--etherscan --sourcify combined should be accepted: {stderr}"
+    );
+}
+
+#[test]
+fn verify_all_three_shorthand_flags() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_deployments(&tmp);
+
+    let output = treb()
+        .args([
+            "verify",
+            "NonexistentContract",
+            "--etherscan",
+            "--blockscout",
+            "--sourcify",
+        ])
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("unexpected argument"),
+        "all three shorthand flags should be accepted: {stderr}"
+    );
+}
+
+#[test]
+fn verify_shorthand_overrides_verifier_flag() {
+    // When both --verifier and a shorthand flag are provided, the shorthand
+    // should take precedence. The command should not reject the combination.
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_deployments(&tmp);
+
+    let output = treb()
+        .args([
+            "verify",
+            "NonexistentContract",
+            "--verifier",
+            "sourcify",
+            "--etherscan",
+        ])
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("unexpected argument"),
+        "--etherscan should override --verifier without conflict: {stderr}"
     );
 }
 
