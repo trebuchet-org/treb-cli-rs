@@ -18,7 +18,14 @@ treb-verify = { path = "crates/treb-verify" }
 treb-safe = { path = "crates/treb-safe" }
 treb-sol = { path = "crates/treb-sol" }
 
-# Foundry — pinned to tag v1.5.1 (commit b0a9dd9ceda36f63e2326ce530c10e6916f4b8a2)
+# === Foundry + Alloy Version Pinning Strategy ===
+# Foundry crates are pinned to a specific git tag (currently v1.5.1).
+# Alloy crates are pinned to v1.1.1 via [patch.crates-io] because foundry
+# v1.5.1 depends on alloy-evm 0.24.2, which breaks with alloy >=1.7.
+# To upgrade: bump the foundry tag here, update the alloy pin tag in
+# [patch.crates-io] to the matching version, and verify that build.rs
+# (crates/treb-cli/build.rs) still extracts TREB_FOUNDRY_VERSION correctly
+# — it parses the tag from the foundry-config line in this file.
 foundry-config = { git = "https://github.com/foundry-rs/foundry", tag = "v1.5.1" }
 foundry-common = { git = "https://github.com/foundry-rs/foundry", tag = "v1.5.1" }
 foundry-compilers = "0.19.14"
