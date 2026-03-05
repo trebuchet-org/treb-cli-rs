@@ -1,0 +1,3 @@
+[submodule "lib/treb-sol"]
+	path = lib/treb-sol
+	url = https://github.com/trebuchet-org/treb-sol.git
