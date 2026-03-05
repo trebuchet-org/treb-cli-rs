@@ -10,6 +10,7 @@ use std::{
 use anyhow::{Context, bail};
 use chrono::Utc;
 use clap::Subcommand;
+use owo_colors::{OwoColorize, Style};
 use tokio::net::TcpStream;
 use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
 use treb_forge::createx::createx_deployed_bytecode;
@@ -17,6 +18,8 @@ use treb_registry::{
     DEPLOYMENTS_FILE, ForkStateStore, TRANSACTIONS_FILE, remove_snapshot, restore_registry,
     snapshot_registry,
 };
+
+use crate::ui::color;
 
 const TREB_DIR: &str = ".treb";
 const SNAPSHOT_BASE: &str = "snapshots";
@@ -454,10 +457,14 @@ pub async fn run_status(json: bool) -> anyhow::Result<()> {
 
     let forks = store.list_active_forks();
 
+    let now = Utc::now();
+    let deployment_count = count_fork_deployments(&treb_dir);
+
     if json {
         let mut statuses = Vec::new();
         for entry in &forks {
             let running = is_port_reachable(entry.port).await;
+            let uptime = format_uptime(now - entry.started_at);
             statuses.push(serde_json::json!({
                 "network":         entry.network,
                 "rpcUrl":          entry.rpc_url,
@@ -465,6 +472,9 @@ pub async fn run_status(json: bool) -> anyhow::Result<()> {
                 "chainId":         entry.chain_id,
                 "forkBlockNumber": entry.fork_block_number,
                 "startedAt":       entry.started_at,
+                "uptime":          uptime,
+                "snapshotCount":   entry.snapshots.len(),
+                "deploymentCount": deployment_count,
                 "status":          if running { "running" } else { "stopped" },
             }));
         }
@@ -479,28 +489,36 @@ pub async fn run_status(json: bool) -> anyhow::Result<()> {
 
     let mut table = crate::output::build_table(&[
         "Network",
+        "Chain ID",
         "RPC URL",
         "Port",
-        "Chain ID",
         "Fork Block",
         "Started At",
+        "Uptime",
+        "Snapshots",
+        "Deployments",
         "Status",
     ]);
 
     for entry in &forks {
         let running = is_port_reachable(entry.port).await;
-        let status = if running { "running" } else { "stopped" };
+        let status_text = if running { "running" } else { "stopped" };
+        let status_style = if running { color::SUCCESS } else { color::ERROR };
         let fork_block =
             entry.fork_block_number.map(|b| b.to_string()).unwrap_or_else(|| "latest".into());
+        let uptime = format_uptime(now - entry.started_at);
 
         table.add_row(vec![
-            entry.network.as_str(),
-            entry.rpc_url.as_str(),
-            &entry.port.to_string(),
-            &entry.chain_id.to_string(),
-            fork_block.as_str(),
-            &entry.started_at.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
-            status,
+            styled(&entry.network, color::NAMESPACE),
+            entry.chain_id.to_string(),
+            entry.rpc_url.clone(),
+            entry.port.to_string(),
+            fork_block,
+            entry.started_at.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+            uptime,
+            entry.snapshots.len().to_string(),
+            deployment_count.to_string(),
+            styled(status_text, status_style),
         ]);
     }
 
@@ -641,6 +659,49 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+fn styled(text: &str, style: Style) -> String {
+    if color::is_color_enabled() {
+        format!("{}", text.style(style))
+    } else {
+        text.to_string()
+    }
+}
+
+/// Format a duration as a human-readable uptime string.
+///
+/// Examples: `"2h 15m"`, `"3d 1h"`, `"< 1m"`, `"45m"`.
+fn format_uptime(duration: chrono::Duration) -> String {
+    let total_secs = duration.num_seconds().max(0);
+    let days = total_secs / 86400;
+    let hours = (total_secs % 86400) / 3600;
+    let minutes = (total_secs % 3600) / 60;
+
+    if days > 0 {
+        if hours > 0 {
+            format!("{days}d {hours}h")
+        } else {
+            format!("{days}d")
+        }
+    } else if hours > 0 {
+        if minutes > 0 {
+            format!("{hours}h {minutes}m")
+        } else {
+            format!("{hours}h")
+        }
+    } else if minutes > 0 {
+        format!("{minutes}m")
+    } else {
+        "< 1m".to_string()
+    }
+}
+
+/// Count deployments in the registry whose keys start with `fork/`.
+fn count_fork_deployments(treb_dir: &Path) -> usize {
+    load_json_map(&treb_dir.join(DEPLOYMENTS_FILE))
+        .map(|m| m.keys().filter(|k| k.starts_with("fork/")).count())
+        .unwrap_or(0)
+}
 
 fn ensure_treb_dir(treb_dir: &Path) -> anyhow::Result<()> {
     if !treb_dir.exists() {
@@ -1159,5 +1220,55 @@ mod tests {
             .chain(snapshot_map.keys().filter(|k| !current_map.contains_key(*k)))
             .collect();
         assert!(changes.is_empty(), "expected no changes: {changes:?}");
+    }
+
+    // ── format_uptime tests ──────────────────────────────────────────────
+
+    #[test]
+    fn format_uptime_less_than_one_minute() {
+        let dur = chrono::Duration::seconds(30);
+        assert_eq!(super::format_uptime(dur), "< 1m");
+    }
+
+    #[test]
+    fn format_uptime_zero() {
+        let dur = chrono::Duration::seconds(0);
+        assert_eq!(super::format_uptime(dur), "< 1m");
+    }
+
+    #[test]
+    fn format_uptime_negative() {
+        let dur = chrono::Duration::seconds(-10);
+        assert_eq!(super::format_uptime(dur), "< 1m");
+    }
+
+    #[test]
+    fn format_uptime_minutes_only() {
+        let dur = chrono::Duration::minutes(45);
+        assert_eq!(super::format_uptime(dur), "45m");
+    }
+
+    #[test]
+    fn format_uptime_hours_and_minutes() {
+        let dur = chrono::Duration::minutes(135); // 2h 15m
+        assert_eq!(super::format_uptime(dur), "2h 15m");
+    }
+
+    #[test]
+    fn format_uptime_hours_exact() {
+        let dur = chrono::Duration::hours(3);
+        assert_eq!(super::format_uptime(dur), "3h");
+    }
+
+    #[test]
+    fn format_uptime_days_and_hours() {
+        let dur = chrono::Duration::hours(25); // 1d 1h
+        assert_eq!(super::format_uptime(dur), "1d 1h");
+    }
+
+    #[test]
+    fn format_uptime_days_exact() {
+        let dur = chrono::Duration::days(3);
+        assert_eq!(super::format_uptime(dur), "3d");
     }
 }

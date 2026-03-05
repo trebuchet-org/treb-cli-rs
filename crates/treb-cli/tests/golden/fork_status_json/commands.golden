@@ -7,6 +7,9 @@
     "chainId": 1,
     "forkBlockNumber": null,
     "startedAt": "<TIMESTAMP>",
+    "uptime": "<UPTIME>",
+    "snapshotCount": 0,
+    "deploymentCount": 0,
     "status": "stopped"
   }
 ]

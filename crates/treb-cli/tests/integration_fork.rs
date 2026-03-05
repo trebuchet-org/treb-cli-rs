@@ -12,7 +12,7 @@ use treb_registry::{DEPLOYMENTS_FILE, ForkStateStore, TRANSACTIONS_FILE};
 use framework::{
     context::TestContext,
     integration_test::{IntegrationTest, run_integration_test},
-    normalizer::PathNormalizer,
+    normalizer::{PathNormalizer, UptimeNormalizer},
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -77,7 +77,8 @@ fn fork_status_with_active_fork() {
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_fork_status(ctx.path()))
         .test(&["fork", "status"])
-        .extra_normalizer(Box::new(path_normalizer));
+        .extra_normalizer(Box::new(path_normalizer))
+        .extra_normalizer(Box::new(UptimeNormalizer));
 
     run_integration_test(&test, &ctx);
 }
@@ -94,7 +95,8 @@ fn fork_status_json() {
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_fork_status(ctx.path()))
         .test(&["fork", "status", "--json"])
-        .extra_normalizer(Box::new(path_normalizer));
+        .extra_normalizer(Box::new(path_normalizer))
+        .extra_normalizer(Box::new(UptimeNormalizer));
 
     run_integration_test(&test, &ctx);
 }

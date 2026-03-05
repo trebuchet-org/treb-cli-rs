@@ -420,6 +420,18 @@ impl Normalizer for DebugLogNormalizer {
     }
 }
 
+/// Normalizes human-readable uptime strings produced by `format_uptime()`.
+///
+/// Matches patterns like `3d 1h`, `2h 15m`, `45m`, `< 1m`.
+pub struct UptimeNormalizer;
+
+impl Normalizer for UptimeNormalizer {
+    fn normalize(&self, input: &str) -> String {
+        let re = Regex::new(r"\d+d \d+h|\d+d|\d+h \d+m|\d+h|\d+m|< 1m").unwrap();
+        re.replace_all(input, "<UPTIME>").into_owned()
+    }
+}
+
 /// Normalizes timing/duration strings in forge output.
 /// Matches patterns like `1.23s`, `456ms`, `2.5µs`.
 pub struct DurationNormalizer;
