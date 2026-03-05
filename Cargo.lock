@@ -8322,6 +8322,7 @@ dependencies = [
  "treb-core",
  "treb-registry",
  "treb-safe",
+ "treb-sol",
 ]
 
 [[package]]

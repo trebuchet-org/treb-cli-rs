@@ -1,122 +1,25 @@
-//! ABI definitions for treb event types using alloy's `sol!` macro.
+//! ABI type re-exports from `treb-sol`.
 //!
-//! Defines type-safe Rust bindings for:
-//! - `ITrebEvents` — treb's custom deployment and transaction events
-//! - `ICreateX` — CreateX factory contract events
-//! - `ProxyEvents` — ERC-1967 proxy standard events
+//! All Solidity event and struct types are defined in the `treb-sol` crate
+//! via alloy's `sol!` macro and re-exported here for use in `treb-forge`.
+//!
+//! Covers three interface groups:
+//! - **ITrebEvents** — treb deployment and transaction events
+//! - **ICreateX** — CreateX factory contract events
+//! - **ProxyEvents** — ERC-1967 proxy standard events
 
-use alloy_sol_types::sol;
+// ITrebEvents
+pub use treb_sol::{
+    ContractDeployed, DeploymentCollision, DeploymentDetails, GovernorProposalCreated,
+    SafeTransactionExecuted, SafeTransactionQueued, SimulatedTransaction, Transaction,
+    TransactionSimulated,
+};
 
-sol! {
-    /// Details about a deployed contract, passed as a parameter to deployment events.
-    #[derive(Debug)]
-    struct DeploymentDetails {
-        string artifact;
-        string label;
-        string entropy;
-        bytes32 salt;
-        bytes32 bytecodeHash;
-        bytes32 initCodeHash;
-        bytes constructorArgs;
-        string createStrategy;
-    }
+// ICreateX
+pub use treb_sol::{ContractCreation_0, ContractCreation_1, Create3ProxyContractCreation};
 
-    /// A simulated transaction with its metadata.
-    #[derive(Debug)]
-    struct SimulatedTransaction {
-        bytes32 transactionId;
-        string senderId;
-        address sender;
-        bytes returnData;
-        Transaction transaction;
-    }
-
-    /// A transaction's core fields (target, calldata, value).
-    #[derive(Debug)]
-    struct Transaction {
-        address to;
-        bytes data;
-        uint256 value;
-    }
-
-    /// Emitted when a transaction is simulated during script execution.
-    #[derive(Debug)]
-    event TransactionSimulated(
-        SimulatedTransaction[] transactions
-    );
-
-    /// Emitted when a contract is deployed via treb's deployment framework.
-    #[derive(Debug)]
-    event ContractDeployed(
-        address indexed deployer,
-        address indexed location,
-        bytes32 indexed transactionId,
-        DeploymentDetails deployment
-    );
-
-    /// Emitted when a Safe multisig transaction is queued.
-    #[derive(Debug)]
-    event SafeTransactionQueued(
-        bytes32 indexed safeTxHash,
-        address indexed safe,
-        address indexed proposer,
-        bytes32[] transactionIds
-    );
-
-    /// Emitted when a Safe multisig transaction is executed.
-    #[derive(Debug)]
-    event SafeTransactionExecuted(
-        bytes32 indexed safeTxHash,
-        address indexed safe,
-        address indexed executor,
-        bytes32[] transactionIds
-    );
-
-    /// Emitted when a deployment would collide with an existing contract.
-    #[derive(Debug)]
-    event DeploymentCollision(
-        address indexed existingContract,
-        DeploymentDetails deployment
-    );
-
-    /// Emitted when a Governor proposal is created from a deployment script.
-    #[derive(Debug)]
-    event GovernorProposalCreated(
-        uint256 indexed proposalId,
-        address indexed governor,
-        address indexed proposer,
-        bytes32[] transactionIds
-    );
-}
-
-sol! {
-    /// Emitted by CreateX on contract creation with a salt (CREATE2).
-    #[derive(Debug)]
-    #[sol(rpc)]
-    event ContractCreation(address indexed newContract, bytes32 indexed salt);
-    /// Emitted by CreateX on contract creation without a salt.
-    #[derive(Debug)]
-    #[sol(rpc)]
-    event ContractCreation(address indexed newContract);
-    /// Emitted by CreateX on CREATE3 proxy contract creation.
-    #[derive(Debug)]
-    #[sol(rpc)]
-    event Create3ProxyContractCreation(address indexed newContract, bytes32 indexed salt);
-}
-
-sol! {
-    /// Emitted when a proxy's implementation is upgraded.
-    #[derive(Debug)]
-    event Upgraded(address indexed implementation);
-
-    /// Emitted when a transparent proxy's admin is changed.
-    #[derive(Debug)]
-    event AdminChanged(address previousAdmin, address newAdmin);
-
-    /// Emitted when a beacon proxy's beacon is upgraded.
-    #[derive(Debug)]
-    event BeaconUpgraded(address indexed beacon);
-}
+// ERC-1967 Proxy Events
+pub use treb_sol::{AdminChanged, BeaconUpgraded, Upgraded};
 
 #[cfg(test)]
 mod tests {
