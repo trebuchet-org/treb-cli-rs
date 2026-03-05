@@ -12,6 +12,7 @@ use std::{
 };
 
 use anyhow::{Context, bail};
+use owo_colors::{OwoColorize, Style};
 use serde::{Deserialize, Serialize};
 use treb_config::{ResolveOpts, resolve_config};
 use treb_forge::{
@@ -21,7 +22,7 @@ use treb_forge::{
 };
 use treb_registry::Registry;
 
-use crate::output;
+use crate::{output, ui::color};
 
 // ── Compose file schema ──────────────────────────────────────────────────
 
@@ -366,6 +367,15 @@ fn compute_totals(results: &[ComponentResultEntry]) -> ComposeTotals {
     totals
 }
 
+/// Apply a color style when color is enabled, plain text otherwise.
+fn styled(text: &str, style: Style) -> String {
+    if color::is_color_enabled() {
+        format!("{}", text.style(style))
+    } else {
+        text.to_string()
+    }
+}
+
 /// Display compose results in human-readable format.
 fn display_compose_human(group: &str, results: &[ComponentResultEntry], totals: &ComposeTotals) {
     println!();
@@ -375,40 +385,56 @@ fn display_compose_human(group: &str, results: &[ComponentResultEntry], totals: 
     for r in results {
         match r.status {
             ComponentStatus::Success => {
-                println!(
-                    "  {} — {} deployment{}, {} transaction{}, {} gas",
+                let icon = styled("\u{2714}", color::SUCCESS); // ✔
+                let mut line = format!(
+                    "  {} {} — {} deployment{}, {} transaction{}",
+                    icon,
                     r.component,
                     r.deployments,
                     if r.deployments == 1 { "" } else { "s" },
                     r.transactions,
                     if r.transactions == 1 { "" } else { "s" },
-                    output::format_gas(r.gas_used),
                 );
+                if r.gas_used > 0 {
+                    line.push_str(&format!(", {} gas", output::format_gas(r.gas_used)));
+                }
+                println!("{line}");
             }
             ComponentStatus::Skipped => {
-                println!("  {} (skipped)", r.component);
+                let icon = styled("\u{23ed}", color::WARNING); // ⏭
+                println!("  {} {} {}", icon, r.component, styled("(skipped)", color::WARNING));
             }
             ComponentStatus::Failed => {
-                println!(
-                    "  {} (failed): {}",
-                    r.component,
-                    r.error.as_deref().unwrap_or("unknown error")
-                );
+                let icon = styled("\u{2718}", color::ERROR); // ✘
+                println!("  {} {} {}", icon, r.component, styled("(failed)", color::ERROR));
+                let msg = r.error.as_deref().unwrap_or("unknown error");
+                println!("    {}", styled(msg, color::MUTED));
             }
             ComponentStatus::NotExecuted => {
-                println!("  {} (not executed)", r.component);
+                let icon = styled("\u{2014}", color::MUTED); // —
+                println!(
+                    "  {} {} {}",
+                    icon,
+                    r.component,
+                    styled("(not executed)", color::MUTED)
+                );
             }
         }
     }
 
     println!();
+    let gas_str = if totals.gas_used > 0 {
+        format!(", {} gas", output::format_gas(totals.gas_used))
+    } else {
+        String::new()
+    };
     println!(
-        "Totals: {} deployment{}, {} transaction{}, {} gas | {} succeeded, {} skipped, {} failed, {} not executed",
+        "Totals: {} deployment{}, {} transaction{}{} | {} succeeded, {} skipped, {} failed, {} not executed",
         totals.deployments,
         if totals.deployments == 1 { "" } else { "s" },
         totals.transactions,
         if totals.transactions == 1 { "" } else { "s" },
-        output::format_gas(totals.gas_used),
+        gas_str,
         totals.succeeded,
         totals.skipped,
         totals.failed,
