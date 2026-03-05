@@ -36,7 +36,7 @@ struct VerifyOutputJson {
 pub async fn run(
     deployment: Option<String>,
     all: bool,
-    verifier: &str,
+    verifiers: &[String],
     verifier_url: Option<String>,
     verifier_api_key: Option<String>,
     force: bool,
@@ -45,13 +45,20 @@ pub async fn run(
     delay: u64,
     json: bool,
 ) -> anyhow::Result<()> {
-    // Validate verifier value.
-    match verifier {
-        "etherscan" | "sourcify" | "blockscout" => {}
-        other => {
-            bail!("unknown verifier '{}': expected one of etherscan, sourcify, blockscout", other);
+    // Validate all verifier values.
+    for v in verifiers {
+        match v.as_str() {
+            "etherscan" | "sourcify" | "blockscout" => {}
+            other => {
+                bail!(
+                    "unknown verifier '{}': expected one of etherscan, sourcify, blockscout",
+                    other
+                );
+            }
         }
     }
+
+    let verifier = verifiers.first().map(|s| s.as_str()).unwrap_or("etherscan");
 
     let cwd = env::current_dir().context("failed to determine current directory")?;
 
@@ -72,7 +79,7 @@ pub async fn run(
 
     if all {
         return run_batch(
-            verifier,
+            verifiers,
             verifier_url,
             verifier_api_key,
             force,
@@ -236,7 +243,7 @@ pub async fn run(
 /// Batch verification: verify all unverified (or all with --force) deployments.
 #[allow(clippy::too_many_arguments)]
 async fn run_batch(
-    verifier: &str,
+    verifiers: &[String],
     verifier_url: Option<String>,
     verifier_api_key: Option<String>,
     force: bool,
@@ -246,6 +253,7 @@ async fn run_batch(
     json: bool,
     cwd: &std::path::Path,
 ) -> anyhow::Result<()> {
+    let verifier = verifiers.first().map(|s| s.as_str()).unwrap_or("etherscan");
     let mut registry = Registry::open(cwd).context("failed to open registry")?;
 
     // Collect candidate deployments as owned values to avoid borrow conflicts.

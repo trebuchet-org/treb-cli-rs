@@ -157,6 +157,15 @@ enum Commands {
         /// Verification provider (etherscan, sourcify, blockscout)
         #[arg(long, default_value = "etherscan")]
         verifier: String,
+        /// Verify on Etherscan
+        #[arg(long)]
+        etherscan: bool,
+        /// Verify on Blockscout
+        #[arg(long)]
+        blockscout: bool,
+        /// Verify on Sourcify
+        #[arg(long)]
+        sourcify: bool,
         /// Verifier API URL override
         #[arg(long)]
         verifier_url: Option<String>,
@@ -489,6 +498,9 @@ async fn main() -> anyhow::Result<()> {
             deployment,
             all,
             verifier,
+            etherscan,
+            blockscout,
+            sourcify,
             verifier_url,
             verifier_api_key,
             force,
@@ -497,10 +509,27 @@ async fn main() -> anyhow::Result<()> {
             delay,
             json,
         } => {
+            // Shorthand flags override --verifier when any are specified.
+            let verifiers = if etherscan || blockscout || sourcify {
+                let mut v = Vec::new();
+                if etherscan {
+                    v.push("etherscan".to_string());
+                }
+                if blockscout {
+                    v.push("blockscout".to_string());
+                }
+                if sourcify {
+                    v.push("sourcify".to_string());
+                }
+                v
+            } else {
+                vec![verifier]
+            };
+
             commands::verify::run(
                 deployment,
                 all,
-                &verifier,
+                &verifiers,
                 verifier_url,
                 verifier_api_key,
                 force,
