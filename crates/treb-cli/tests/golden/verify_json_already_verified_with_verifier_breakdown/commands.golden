@@ -1,0 +1,24 @@
+=== cmd 0: [verify dep-verified --json] ===
+{
+  "address": "0x0000000000000000000000000000000000000001",
+  "chainId": 1,
+  "contractName": "TestContract",
+  "deploymentId": "dep-verified",
+  "explorerUrl": "https://etherscan.io/address/0x0000000000000000000000000000000000000001",
+  "reason": "",
+  "status": "VERIFIED",
+  "verifiedAt": "<TIMESTAMP>",
+  "verifier": "etherscan",
+  "verifiers": {
+    "etherscan": {
+      "reason": "",
+      "status": "VERIFIED",
+      "url": "https://etherscan.io/address/0x0000000000000000000000000000000000000001#code"
+    },
+    "sourcify": {
+      "reason": "",
+      "status": "VERIFIED",
+      "url": "https://repo.sourcify.dev/contracts/full_match/1/0x0000000000000000000000000000000000000001/"
+    }
+  }
+}

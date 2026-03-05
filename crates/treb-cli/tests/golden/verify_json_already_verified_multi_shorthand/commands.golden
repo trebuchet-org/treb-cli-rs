@@ -1,0 +1,13 @@
+=== cmd 0: [verify dep-verified --json --etherscan --sourcify] ===
+{
+  "address": "0x0000000000000000000000000000000000000001",
+  "chainId": 1,
+  "contractName": "TestContract",
+  "deploymentId": "dep-verified",
+  "explorerUrl": "https://etherscan.io/address/0x0000000000000000000000000000000000000001",
+  "reason": "",
+  "status": "VERIFIED",
+  "verifiedAt": "<TIMESTAMP>",
+  "verifier": "etherscan",
+  "verifiers": {}
+}

@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use chrono::Utc;
 use treb_core::types::{
     ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, TransactionStatus,
-    VerificationInfo, VerificationStatus,
+    VerificationInfo, VerificationStatus, VerifierStatus,
 };
 use treb_registry::Registry;
 
@@ -86,6 +86,34 @@ fn make_transaction(
     }
 }
 
+/// Build a verified deployment whose `verifiers` map has per-verifier entries.
+fn make_verified_deployment_with_verifiers(
+    id: &str,
+    tx_id: &str,
+    chain_id: u64,
+) -> treb_core::types::Deployment {
+    let mut dep = make_verified_deployment(id, tx_id, chain_id);
+    let mut verifiers = HashMap::new();
+    verifiers.insert(
+        "etherscan".to_string(),
+        VerifierStatus {
+            status: "VERIFIED".to_string(),
+            url: format!("https://etherscan.io/address/0x{:040x}#code", 1u64),
+            reason: String::new(),
+        },
+    );
+    verifiers.insert(
+        "sourcify".to_string(),
+        VerifierStatus {
+            status: "VERIFIED".to_string(),
+            url: format!("https://repo.sourcify.dev/contracts/full_match/1/0x{:040x}/", 1u64),
+            reason: String::new(),
+        },
+    );
+    dep.verification.verifiers = verifiers;
+    dep
+}
+
 /// Seed the registry with one already-verified deployment and its transaction.
 fn seed_verified_registry(project_root: &std::path::Path) {
     let mut registry = Registry::open(project_root).expect("registry should open");
@@ -94,6 +122,18 @@ fn seed_verified_registry(project_root: &std::path::Path) {
         .insert_transaction(make_transaction("tx-1", vec!["dep-verified".to_string()], 1))
         .unwrap();
     registry.insert_deployment(make_verified_deployment("dep-verified", "tx-1", 1)).unwrap();
+}
+
+/// Seed the registry with a verified deployment that has per-verifier breakdown.
+fn seed_verified_registry_with_verifiers(project_root: &std::path::Path) {
+    let mut registry = Registry::open(project_root).expect("registry should open");
+
+    registry
+        .insert_transaction(make_transaction("tx-1", vec!["dep-verified".to_string()], 1))
+        .unwrap();
+    registry
+        .insert_deployment(make_verified_deployment_with_verifiers("dep-verified", "tx-1", 1))
+        .unwrap();
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────
@@ -184,6 +224,83 @@ fn verify_no_foundry_project() {
     let test = IntegrationTest::new("verify_no_foundry_project")
         .test(&["verify", "--all"])
         .expect_err(true)
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── New multi-verifier golden file tests ────────────────────────────────
+
+/// JSON output with --sourcify shorthand shows verifier field as "sourcify".
+#[test]
+fn verify_json_already_verified_sourcify() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("verify_json_already_verified_sourcify")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_verified_registry(ctx.path()))
+        .test(&["verify", "dep-verified", "--json", "--sourcify"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// JSON output with per-verifier breakdown from populated verifiers map.
+#[test]
+fn verify_json_already_verified_with_verifier_breakdown() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("verify_json_already_verified_with_verifier_breakdown")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_verified_registry_with_verifiers(ctx.path()))
+        .test(&["verify", "dep-verified", "--json"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// Already-verified deployment with --etherscan --sourcify multi-shorthand prints skip.
+#[test]
+fn verify_already_verified_multi_shorthand() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("verify_already_verified_multi_shorthand")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_verified_registry(ctx.path()))
+        .test(&["verify", "dep-verified", "--etherscan", "--sourcify"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// --all --json with no unverified deployments returns empty JSON array.
+#[test]
+fn verify_all_none_unverified_json() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("verify_all_none_unverified_json")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_verified_registry(ctx.path()))
+        .test(&["verify", "--all", "--json"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// JSON output with --etherscan --sourcify multi-shorthand shows first verifier.
+#[test]
+fn verify_json_already_verified_multi_shorthand() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("verify_json_already_verified_multi_shorthand")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_verified_registry(ctx.path()))
+        .test(&["verify", "dep-verified", "--json", "--etherscan", "--sourcify"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
