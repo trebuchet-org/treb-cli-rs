@@ -6,6 +6,7 @@ use unicode_width::UnicodeWidthStr;
 /// Returns the current terminal width in columns.
 ///
 /// Falls back to 80 if the terminal width cannot be determined (e.g., non-TTY).
+#[allow(dead_code)]
 pub fn terminal_width() -> usize {
     Term::stdout()
         .size_checked()
@@ -16,6 +17,7 @@ pub fn terminal_width() -> usize {
 /// Returns the display width of a string, stripping ANSI escape codes before measuring.
 ///
 /// Uses unicode-width for accurate measurement of wide characters.
+#[allow(dead_code)]
 pub fn display_width(s: &str) -> usize {
     let stripped = console::strip_ansi_codes(s);
     UnicodeWidthStr::width(stripped.as_ref())
