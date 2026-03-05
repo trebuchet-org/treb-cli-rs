@@ -29,6 +29,7 @@ nucleo-matcher = { workspace = true }
 dialoguer = { workspace = true }
 console = { workspace = true }
 owo-colors = { workspace = true }
+unicode-width = { workspace = true }
 clap_complete = { workspace = true }
 
 [build-dependencies]

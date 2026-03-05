@@ -217,6 +217,49 @@ impl ScriptConfig {
         self
     }
 
+    /// Build the equivalent `forge script` CLI command string.
+    ///
+    /// Returns the command as a vector of arguments suitable for display.
+    /// Includes all relevant flags: path, sig, rpc-url, sender, broadcast,
+    /// slow, legacy, verify.
+    pub fn to_forge_command(&self) -> Vec<String> {
+        let mut cmd = vec!["forge".to_string(), "script".to_string()];
+        cmd.push(self.script_path.clone());
+        if self.sig != "run()" {
+            cmd.push("--sig".to_string());
+            cmd.push(self.sig.clone());
+        }
+        for arg in &self.args {
+            cmd.push(arg.clone());
+        }
+        if let Some(ref tc) = self.target_contract {
+            cmd.push("--target-contract".to_string());
+            cmd.push(tc.clone());
+        }
+        let rpc = self.fork_url.as_ref().or(self.rpc_url.as_ref());
+        if let Some(url) = rpc {
+            cmd.push("--rpc-url".to_string());
+            cmd.push(url.clone());
+        }
+        if let Some(ref sender) = self.sender {
+            cmd.push("--sender".to_string());
+            cmd.push(format!("{:#x}", sender));
+        }
+        if self.broadcast {
+            cmd.push("--broadcast".to_string());
+        }
+        if self.slow {
+            cmd.push("--slow".to_string());
+        }
+        if self.legacy {
+            cmd.push("--legacy".to_string());
+        }
+        if self.verify {
+            cmd.push("--verify".to_string());
+        }
+        cmd
+    }
+
     /// Convert this `ScriptConfig` into forge `ScriptArgs`.
     ///
     /// Constructs `ScriptArgs` from `Default::default()` and sets all fields
@@ -467,6 +510,43 @@ mod tests {
         assert_eq!(args.evm.sender, Some(safe_addr.parse::<Address>().unwrap()));
         // wallet opts should NOT have a private key (signing deferred)
         assert!(args.wallets.private_key.is_none());
+    }
+
+    #[test]
+    fn to_forge_command_basic() {
+        let config = ScriptConfig::new("script/Deploy.s.sol");
+        let cmd = config.to_forge_command();
+        assert_eq!(cmd, vec!["forge", "script", "script/Deploy.s.sol"]);
+    }
+
+    #[test]
+    fn to_forge_command_with_all_flags() {
+        let mut config = ScriptConfig::new("script/Deploy.s.sol");
+        config
+            .sig("deploy(uint256)")
+            .rpc_url("http://localhost:8545")
+            .sender(ANVIL_ADDR_0)
+            .broadcast(true)
+            .slow(true)
+            .legacy(true)
+            .verify(true);
+        let cmd = config.to_forge_command();
+        assert!(cmd.contains(&"--sig".to_string()));
+        assert!(cmd.contains(&"deploy(uint256)".to_string()));
+        assert!(cmd.contains(&"--rpc-url".to_string()));
+        assert!(cmd.contains(&"http://localhost:8545".to_string()));
+        assert!(cmd.contains(&"--sender".to_string()));
+        assert!(cmd.contains(&"--broadcast".to_string()));
+        assert!(cmd.contains(&"--slow".to_string()));
+        assert!(cmd.contains(&"--legacy".to_string()));
+        assert!(cmd.contains(&"--verify".to_string()));
+    }
+
+    #[test]
+    fn to_forge_command_default_sig_omitted() {
+        let config = ScriptConfig::new("script/Deploy.s.sol");
+        let cmd = config.to_forge_command();
+        assert!(!cmd.contains(&"--sig".to_string()), "default sig run() should be omitted");
     }
 
     #[test]

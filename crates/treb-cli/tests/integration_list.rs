@@ -128,6 +128,21 @@ fn list_filter_type() {
     run_integration_test(&test, &ctx);
 }
 
+/// Fork-namespace deployments show [fork] badge in tree output.
+#[test]
+fn list_with_fork_badge() {
+    let ctx = TestContext::new("project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("list_with_fork_badge")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))
+        .test(&["list", "--fork"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
 /// List without initialized project fails with error mentioning treb init.
 #[test]
 fn list_uninitialized() {

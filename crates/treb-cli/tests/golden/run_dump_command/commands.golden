@@ -1,0 +1,2 @@
+=== cmd 0: [run script/Deploy.s.sol --network anvil-31337 --broadcast --non-interactive --dump-command] ===
+forge script script/Deploy.s.sol --rpc-url anvil-31337 --broadcast

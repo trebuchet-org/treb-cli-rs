@@ -1,6 +1,6 @@
 === cmd 0: [list --type PROXY] ===
-┌─────────────────────────────┬─────────────┬───────────┬───────┬───────┬───────────────┬──────────────┐
-│ Name                        ┆ Label       ┆ Namespace ┆ Chain ┆ Type  ┆ Address       ┆ Verification │
-╞═════════════════════════════╪═════════════╪═══════════╪═══════╪═══════╪═══════════════╪══════════════╡
-│ TransparentUpgradeableProxy ┆ FPMMFactory ┆ mainnet   ┆ 42220 ┆ PROXY ┆ 0x22A8...7F03 ┆ UNVERIFIED   │
-└─────────────────────────────┴─────────────┴───────────┴───────┴───────┴───────────────┴──────────────┘
+mainnet
+\-- 42220
+    \-- PROXY
+        \-- TransparentUpgradeableProxy:FPMMFactory 0x22A8...7F03 UNVERIFIED
+            \-- Implementation 0x9595...79dF

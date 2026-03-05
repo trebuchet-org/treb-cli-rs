@@ -10,8 +10,8 @@ use framework::{
     context::TestContext,
     integration_test::{IntegrationTest, run_integration_test},
     normalizer::{
-        BlockNumberNormalizer, CompilerOutputNormalizer, DurationNormalizer, GasNormalizer,
-        PathNormalizer,
+        BlockNumberNormalizer, CompilerOutputNormalizer, DebugLogNormalizer, DurationNormalizer,
+        GasNormalizer, PathNormalizer,
     },
 };
 
@@ -134,7 +134,8 @@ async fn run_debug() {
         .extra_normalizer(Box::new(CompilerOutputNormalizer))
         .extra_normalizer(Box::new(GasNormalizer))
         .extra_normalizer(Box::new(BlockNumberNormalizer))
-        .extra_normalizer(Box::new(DurationNormalizer));
+        .extra_normalizer(Box::new(DurationNormalizer))
+        .extra_normalizer(Box::new(DebugLogNormalizer));
 
     run_integration_test(&test, &ctx);
 }
@@ -167,6 +168,32 @@ async fn run_verbose() {
         .extra_normalizer(Box::new(GasNormalizer))
         .extra_normalizer(Box::new(BlockNumberNormalizer))
         .extra_normalizer(Box::new(DurationNormalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// Dump command — prints equivalent forge script CLI command and exits.
+///
+/// Verifies that `--dump-command` outputs the forge command and exits without executing.
+#[tokio::test(flavor = "multi_thread")]
+async fn run_dump_command() {
+    let ctx =
+        TestContext::new("project").with_anvil("anvil-31337").await.expect("failed to spawn anvil");
+
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("run_dump_command")
+        .setup(&["init"])
+        .test(&[
+            "run",
+            "script/Deploy.s.sol",
+            "--network",
+            "anvil-31337",
+            "--broadcast",
+            "--non-interactive",
+            "--dump-command",
+        ])
+        .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
 }

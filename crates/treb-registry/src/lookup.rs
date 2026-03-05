@@ -167,18 +167,21 @@ mod tests {
 
         let index = build_lookup_index(&deployments);
 
-        // 3 deployments, 2 unique contract names (FPMM, FPMMFactory, TransparentUpgradeableProxy)
-        assert_eq!(index.by_name.len(), 3);
+        // 4 deployments, 4 unique contract names
+        assert_eq!(index.by_name.len(), 4);
         assert!(index.by_name.contains_key("fpmm"));
         assert!(index.by_name.contains_key("fpmmfactory"));
         assert!(index.by_name.contains_key("transparentupgradeableproxy"));
+        assert!(index.by_name.contains_key("mocktoken"));
 
-        // All 3 have addresses
-        assert_eq!(index.by_address.len(), 3);
+        // All 4 have addresses
+        assert_eq!(index.by_address.len(), 4);
         assert!(index.by_address.contains_key("0x42eddd7dc046da254a93659ca9b02f294606833d"));
 
-        // No tags in the fixture
-        assert!(index.by_tag.is_empty());
+        // FPMMFactory has tags ["core", "v3-release"]
+        assert_eq!(index.by_tag.len(), 2);
+        assert!(index.by_tag.contains_key("core"));
+        assert!(index.by_tag.contains_key("v3-release"));
     }
 
     #[test]

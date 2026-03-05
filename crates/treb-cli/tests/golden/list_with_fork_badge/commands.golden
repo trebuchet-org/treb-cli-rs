@@ -1,0 +1,5 @@
+=== cmd 0: [list --fork] ===
+fork/42220
+\-- 42220
+    \-- SINGLETON
+        \-- MockToken 0xDeaD...beeF UNVERIFIED [fork]
