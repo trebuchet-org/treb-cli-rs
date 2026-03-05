@@ -308,20 +308,24 @@ impl std::fmt::Display for ComponentStatus {
 
 /// Per-component result summary.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ComponentResultEntry {
     pub component: String,
     pub status: ComponentStatus,
     pub deployments: usize,
     pub transactions: usize,
+    pub gas_used: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
 /// Aggregate totals across all components.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ComposeTotals {
     pub deployments: usize,
     pub transactions: usize,
+    pub gas_used: u64,
     pub succeeded: usize,
     pub skipped: usize,
     pub failed: usize,
@@ -342,6 +346,7 @@ fn compute_totals(results: &[ComponentResultEntry]) -> ComposeTotals {
     let mut totals = ComposeTotals {
         deployments: 0,
         transactions: 0,
+        gas_used: 0,
         succeeded: 0,
         skipped: 0,
         failed: 0,
@@ -350,6 +355,7 @@ fn compute_totals(results: &[ComponentResultEntry]) -> ComposeTotals {
     for r in results {
         totals.deployments += r.deployments;
         totals.transactions += r.transactions;
+        totals.gas_used += r.gas_used;
         match r.status {
             ComponentStatus::Success => totals.succeeded += 1,
             ComponentStatus::Skipped => totals.skipped += 1,
@@ -546,6 +552,7 @@ pub async fn run(
                 status: ComponentStatus::Skipped,
                 deployments: 0,
                 transactions: 0,
+                gas_used: 0,
                 error: None,
             });
             continue;
@@ -558,6 +565,7 @@ pub async fn run(
                 status: ComponentStatus::NotExecuted,
                 deployments: 0,
                 transactions: 0,
+                gas_used: 0,
                 error: None,
             });
             continue;
@@ -666,6 +674,7 @@ pub async fn run(
                     status: ComponentStatus::Success,
                     deployments: result.deployments.len(),
                     transactions: result.transactions.len(),
+                    gas_used: result.gas_used,
                     error: None,
                 });
 
@@ -685,6 +694,7 @@ pub async fn run(
                     status: ComponentStatus::Failed,
                     deployments: 0,
                     transactions: 0,
+                    gas_used: 0,
                     error: Some(error_msg),
                 });
 
@@ -1356,6 +1366,7 @@ components:
                 status: ComponentStatus::Success,
                 deployments: 2,
                 transactions: 3,
+                gas_used: 100_000,
                 error: None,
             },
             ComponentResultEntry {
@@ -1363,12 +1374,14 @@ components:
                 status: ComponentStatus::Success,
                 deployments: 1,
                 transactions: 1,
+                gas_used: 50_000,
                 error: None,
             },
         ];
         let totals = compute_totals(&results);
         assert_eq!(totals.deployments, 3);
         assert_eq!(totals.transactions, 4);
+        assert_eq!(totals.gas_used, 150_000);
         assert_eq!(totals.succeeded, 2);
         assert_eq!(totals.skipped, 0);
         assert_eq!(totals.failed, 0);
@@ -1383,6 +1396,7 @@ components:
                 status: ComponentStatus::Skipped,
                 deployments: 0,
                 transactions: 0,
+                gas_used: 0,
                 error: None,
             },
             ComponentResultEntry {
@@ -1390,6 +1404,7 @@ components:
                 status: ComponentStatus::Success,
                 deployments: 3,
                 transactions: 2,
+                gas_used: 200_000,
                 error: None,
             },
             ComponentResultEntry {
@@ -1397,6 +1412,7 @@ components:
                 status: ComponentStatus::Failed,
                 deployments: 0,
                 transactions: 0,
+                gas_used: 0,
                 error: Some("script reverted".to_string()),
             },
             ComponentResultEntry {
@@ -1404,12 +1420,14 @@ components:
                 status: ComponentStatus::NotExecuted,
                 deployments: 0,
                 transactions: 0,
+                gas_used: 0,
                 error: None,
             },
         ];
         let totals = compute_totals(&results);
         assert_eq!(totals.deployments, 3);
         assert_eq!(totals.transactions, 2);
+        assert_eq!(totals.gas_used, 200_000);
         assert_eq!(totals.succeeded, 1);
         assert_eq!(totals.skipped, 1);
         assert_eq!(totals.failed, 1);
@@ -1422,6 +1440,7 @@ components:
         let totals = compute_totals(&results);
         assert_eq!(totals.deployments, 0);
         assert_eq!(totals.transactions, 0);
+        assert_eq!(totals.gas_used, 0);
         assert_eq!(totals.succeeded, 0);
         assert_eq!(totals.skipped, 0);
         assert_eq!(totals.failed, 0);
@@ -1436,6 +1455,7 @@ components:
                 status: ComponentStatus::Success,
                 deployments: 2,
                 transactions: 1,
+                gas_used: 100_000,
                 error: None,
             },
             ComponentResultEntry {
@@ -1443,6 +1463,7 @@ components:
                 status: ComponentStatus::Success,
                 deployments: 1,
                 transactions: 2,
+                gas_used: 75_000,
                 error: None,
             },
         ];
@@ -1465,19 +1486,22 @@ components:
         assert_eq!(components[0]["status"], "success");
         assert_eq!(components[0]["deployments"], 2);
         assert_eq!(components[0]["transactions"], 1);
+        assert_eq!(components[0]["gasUsed"], 100_000);
         assert!(components[0].get("error").is_none());
 
         assert_eq!(components[1]["component"], "core");
         assert_eq!(components[1]["status"], "success");
         assert_eq!(components[1]["deployments"], 1);
         assert_eq!(components[1]["transactions"], 2);
+        assert_eq!(components[1]["gasUsed"], 75_000);
 
         assert_eq!(parsed["totals"]["deployments"], 3);
         assert_eq!(parsed["totals"]["transactions"], 3);
+        assert_eq!(parsed["totals"]["gasUsed"], 175_000);
         assert_eq!(parsed["totals"]["succeeded"], 2);
         assert_eq!(parsed["totals"]["skipped"], 0);
         assert_eq!(parsed["totals"]["failed"], 0);
-        assert_eq!(parsed["totals"]["not_executed"], 0);
+        assert_eq!(parsed["totals"]["notExecuted"], 0);
     }
 
     #[test]
@@ -1488,6 +1512,7 @@ components:
                 status: ComponentStatus::Success,
                 deployments: 1,
                 transactions: 1,
+                gas_used: 50_000,
                 error: None,
             },
             ComponentResultEntry {
@@ -1495,6 +1520,7 @@ components:
                 status: ComponentStatus::Failed,
                 deployments: 0,
                 transactions: 0,
+                gas_used: 0,
                 error: Some("script reverted".to_string()),
             },
             ComponentResultEntry {
@@ -1502,6 +1528,7 @@ components:
                 status: ComponentStatus::NotExecuted,
                 deployments: 0,
                 transactions: 0,
+                gas_used: 0,
                 error: None,
             },
         ];
@@ -1520,12 +1547,15 @@ components:
         let components = parsed["components"].as_array().unwrap();
         assert_eq!(components[1]["status"], "failed");
         assert_eq!(components[1]["error"], "script reverted");
+        assert_eq!(components[1]["gasUsed"], 0);
         assert_eq!(components[2]["status"], "not_executed");
+        assert_eq!(components[2]["gasUsed"], 0);
         assert!(components[2].get("error").is_none());
 
         assert_eq!(parsed["totals"]["succeeded"], 1);
         assert_eq!(parsed["totals"]["failed"], 1);
-        assert_eq!(parsed["totals"]["not_executed"], 1);
+        assert_eq!(parsed["totals"]["notExecuted"], 1);
+        assert_eq!(parsed["totals"]["gasUsed"], 50_000);
     }
 
     #[test]
@@ -1536,6 +1566,7 @@ components:
                 status: ComponentStatus::Skipped,
                 deployments: 0,
                 transactions: 0,
+                gas_used: 0,
                 error: None,
             },
             ComponentResultEntry {
@@ -1543,6 +1574,7 @@ components:
                 status: ComponentStatus::Success,
                 deployments: 5,
                 transactions: 3,
+                gas_used: 300_000,
                 error: None,
             },
         ];
@@ -1559,11 +1591,13 @@ components:
         let components = parsed["components"].as_array().unwrap();
         assert_eq!(components[0]["status"], "skipped");
         assert_eq!(components[0]["deployments"], 0);
+        assert_eq!(components[0]["gasUsed"], 0);
 
         assert_eq!(parsed["totals"]["skipped"], 1);
         assert_eq!(parsed["totals"]["succeeded"], 1);
         assert_eq!(parsed["totals"]["deployments"], 5);
         assert_eq!(parsed["totals"]["transactions"], 3);
+        assert_eq!(parsed["totals"]["gasUsed"], 300_000);
     }
 
     #[test]
@@ -1582,6 +1616,7 @@ components:
             status: ComponentStatus::Success,
             deployments: 2,
             transactions: 1,
+            gas_used: 80_000,
             error: None,
         }];
         let totals = compute_totals(&results);
