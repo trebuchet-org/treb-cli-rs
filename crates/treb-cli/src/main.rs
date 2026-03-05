@@ -343,6 +343,12 @@ enum Commands {
         /// Show verbose output
         #[arg(long, short)]
         verbose: bool,
+        /// Save per-component debug logs to .treb/debug-compose-<timestamp>/
+        #[arg(long)]
+        debug: bool,
+        /// Print per-component forge commands and exit without executing
+        #[arg(long)]
+        dump_command: bool,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -603,6 +609,8 @@ async fn main() -> anyhow::Result<()> {
             slow,
             legacy,
             verbose,
+            debug,
+            dump_command,
             json,
             env,
             non_interactive,
@@ -620,6 +628,8 @@ async fn main() -> anyhow::Result<()> {
                 slow,
                 legacy,
                 verbose,
+                debug,
+                dump_command,
                 json,
                 env,
                 non_interactive,

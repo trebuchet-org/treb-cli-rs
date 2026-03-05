@@ -5,7 +5,7 @@
 
 use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
-    env,
+    env, fs,
     hash::{DefaultHasher, Hash, Hasher},
     io::{self, BufRead, IsTerminal, Write},
     path::{Path, PathBuf},
@@ -446,6 +446,8 @@ pub async fn run(
     slow: bool,
     legacy: bool,
     verbose: bool,
+    debug: bool,
+    dump_command: bool,
     json: bool,
     env_vars: Vec<String>,
     non_interactive: bool,
@@ -495,6 +497,83 @@ pub async fn run(
     let cwd = env::current_dir().context("failed to determine current directory")?;
     super::run::ensure_initialized(&cwd)?;
 
+    // ── Dump command: print per-component forge commands and exit ─────
+    if dump_command {
+        // Inject env vars once for config resolution.
+        super::run::inject_env_vars(&env_vars)?;
+
+        for name in &order {
+            let component = &compose.components[name];
+
+            if skip_set.contains(name) {
+                eprintln!("# {} (skipped)", name);
+                continue;
+            }
+
+            // Inject per-component env vars.
+            if let Some(env_map) = &component.env {
+                for (key, value) in env_map {
+                    unsafe { env::set_var(key, value) };
+                }
+            }
+
+            let resolved = resolve_config(ResolveOpts {
+                project_root: cwd.clone(),
+                namespace: namespace.clone(),
+                network: network.clone(),
+                profile: profile.clone(),
+                sender_overrides: HashMap::new(),
+            })
+            .with_context(|| format!("failed to resolve config for component '{}'", name))?;
+
+            let effective_rpc_url = rpc_url.clone().or_else(|| resolved.network.clone());
+
+            let resolved_senders = resolve_all_senders(&resolved.senders)
+                .await
+                .with_context(|| format!("failed to resolve senders for component '{}'", name))?;
+
+            let mut script_config =
+                build_script_config_with_senders(&resolved, &component.script, &resolved_senders)
+                    .with_context(|| {
+                        format!("failed to build script config for component '{}'", name)
+                    })?;
+
+            let sig = component.sig.as_deref().unwrap_or("run()");
+            let args = component.args.clone().unwrap_or_default();
+            let effective_verify = component.verify.unwrap_or(verify);
+
+            script_config
+                .sig(sig)
+                .args(args)
+                .broadcast(broadcast)
+                .dry_run(false)
+                .slow(slow || resolved.slow)
+                .legacy(legacy)
+                .verify(effective_verify)
+                .non_interactive(true);
+
+            if let Some(ref url) = effective_rpc_url {
+                script_config.rpc_url(url);
+            }
+
+            let cmd_parts = script_config.to_forge_command();
+            let cmd_str = cmd_parts
+                .iter()
+                .map(|p| {
+                    if p.contains(' ') || p.contains('"') {
+                        format!("'{}'", p.replace('\'', "'\\''"))
+                    } else {
+                        p.clone()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            eprintln!("# {}", name);
+            eprintln!("{}", cmd_str);
+        }
+        return Ok(());
+    }
+
     // ── Broadcast confirmation (once before first component) ──────────
     if broadcast && !non_interactive {
         let is_tty = io::stdin().is_terminal();
@@ -537,6 +616,17 @@ pub async fn run(
     let mut state = ComposeState {
         compose_hash: compose_hash.clone(),
         completed: skip_set.iter().cloned().collect(),
+    };
+
+    // ── Debug log directory ─────────────────────────────────────────
+    let debug_dir = if debug {
+        let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+        let dir = cwd.join(".treb").join(format!("debug-compose-{}", timestamp));
+        fs::create_dir_all(&dir)
+            .with_context(|| format!("failed to create debug directory: {}", dir.display()))?;
+        Some(dir)
+    } else {
+        None
     };
 
     // ── Execute components in topological order ───────────────────────
@@ -677,6 +767,51 @@ pub async fn run(
                     output::print_stage("\u{2705}", &format!("[{}/{}] '{}' completed", i + 1, total, name));
                 }
 
+                // Write per-component debug log.
+                if let Some(ref dir) = debug_dir {
+                    let mut log = String::new();
+                    log.push_str(&format!("component: {}\n", name));
+                    log.push_str("status: success\n");
+                    log.push_str(&format!("script: {}\n", component.script));
+                    log.push_str(&format!("sig: {}\n", sig));
+                    log.push_str(&format!("namespace: {}\n", resolved.namespace));
+                    if let Some(ref url) = effective_rpc_url {
+                        log.push_str(&format!("rpc: {}\n", url));
+                    }
+                    log.push_str(&format!("broadcast: {}\n", broadcast));
+                    log.push_str(&format!("verify: {}\n", effective_verify));
+                    log.push_str(&format!("gas_used: {}\n", result.gas_used));
+                    log.push_str(&format!("deployments: {}\n", result.deployments.len()));
+                    log.push_str(&format!("transactions: {}\n", result.transactions.len()));
+
+                    if !result.deployments.is_empty() {
+                        log.push_str("\n--- Deployments ---\n");
+                        for rd in &result.deployments {
+                            let d = &rd.deployment;
+                            log.push_str(&format!(
+                                "  {} {} ({}) chain={}\n",
+                                d.deployment_type, d.contract_name, d.address, d.chain_id
+                            ));
+                        }
+                    }
+
+                    if !result.transactions.is_empty() {
+                        log.push_str("\n--- Transactions ---\n");
+                        for rt in &result.transactions {
+                            let tx = &rt.transaction;
+                            log.push_str(&format!(
+                                "  {} {} ({})\n",
+                                tx.id, tx.hash, tx.status
+                            ));
+                        }
+                    }
+
+                    let log_path = dir.join(format!("{}.log", name));
+                    fs::write(&log_path, &log).with_context(|| {
+                        format!("failed to write debug log to {}", log_path.display())
+                    })?;
+                }
+
                 component_results.push(ComponentResultEntry {
                     component: name.clone(),
                     status: ComponentStatus::Success,
@@ -696,6 +831,20 @@ pub async fn run(
                     "Component '{}' failed ({}/{} completed): {}",
                     name, completed, total, error_msg
                 );
+
+                // Write per-component debug log for failure.
+                if let Some(ref dir) = debug_dir {
+                    let mut log = String::new();
+                    log.push_str(&format!("component: {}\n", name));
+                    log.push_str("status: failed\n");
+                    log.push_str(&format!("script: {}\n", component.script));
+                    log.push_str(&format!("sig: {}\n", sig));
+                    log.push_str(&format!("error: {}\n", error_msg));
+                    let log_path = dir.join(format!("{}.log", name));
+                    fs::write(&log_path, &log).with_context(|| {
+                        format!("failed to write debug log to {}", log_path.display())
+                    })?;
+                }
 
                 component_results.push(ComponentResultEntry {
                     component: name.clone(),
@@ -727,6 +876,11 @@ pub async fn run(
         display_compose_json(&compose.group, component_results, totals, success)?;
     } else {
         display_compose_human(&compose.group, &component_results, &totals);
+    }
+
+    // Print debug directory path.
+    if let Some(ref dir) = debug_dir {
+        eprintln!("Debug logs saved to {}", dir.display());
     }
 
     // Full successful completion: delete the state file.

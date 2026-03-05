@@ -39,6 +39,8 @@ fn compose_help_shows_all_flags() {
     assert!(stdout.contains("--json"), "help should show --json");
     assert!(stdout.contains("--env"), "help should show --env");
     assert!(stdout.contains("--non-interactive"), "help should show --non-interactive");
+    assert!(stdout.contains("--debug"), "help should show --debug");
+    assert!(stdout.contains("--dump-command"), "help should show --dump-command");
 }
 
 #[test]
@@ -272,6 +274,7 @@ fn compose_all_flags_accepted() {
             "--slow",
             "--legacy",
             "--verbose",
+            "--debug",
             "--json",
             "--env",
             "FOO=bar",
@@ -307,6 +310,27 @@ fn compose_resume_flag_accepted() {
         "should not have arg parsing error: {stderr}"
     );
     assert!(output.status.success());
+}
+
+// ── Dump-command flag ──────────────────────────────────────────────────
+
+#[test]
+fn compose_dump_command_flag_accepted() {
+    let fixture = fixtures_dir().join("simple.yaml");
+
+    // --dump-command should be accepted by the parser (will fail at config
+    // resolution since there's no foundry project, but should NOT fail at
+    // arg parsing).
+    let output = treb()
+        .args(["compose", fixture.to_str().unwrap(), "--dump-command"])
+        .output()
+        .expect("failed to run compose --dump-command");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("error: unexpected argument"),
+        "should not have arg parsing error: {stderr}"
+    );
 }
 
 // ── Compose without init (non-dry-run) ────────────────────────────────
