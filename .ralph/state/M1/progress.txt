@@ -16,6 +16,10 @@ Started: Thu Mar  5 10:41:35 PM CET 2026
 - `styled()` helper pattern: `fn styled(text: &str, style: Style) -> String` gated on `color::is_color_enabled()` — used in show.rs, verify.rs, and now compose.rs
 - Color styles: SUCCESS=green+bold, ERROR=red+bold, WARNING=yellow, MUTED=dimmed, LABEL=bold
 - `run::resolve_rpc_url_for_chain_id()` and `run::fetch_chain_id()` are `pub(crate)` — reusable for chain ID resolution from any command
+- `print_json()` sorts all JSON keys alphabetically via `sort_json_keys()` — ALL JSON golden files need updating after introducing this
+- CLI tests checking stderr for styled output need ANSI stripping (`regex` + `\x1b\[[0-9;]*m`) before pattern matching
+- `UPDATE_GOLDEN=1 cargo test` is the canonical way to regenerate golden files
+- Dump-command golden tests need `minimal-project` fixture + `.setup(&["init"])` since dump-command requires `ensure_initialized()`
 
 ## 2026-03-05 - P7-US-001
 - Added `gas_used: u64` field to `ComponentResultEntry` and `ComposeTotals`
@@ -101,4 +105,20 @@ Started: Thu Mar  5 10:41:35 PM CET 2026
   - `resolve_rpc_url_for_chain_id` and `fetch_chain_id` are now `pub(crate)` in run.rs — reusable by any command that needs chain ID
   - When building `Vec<(&str, &str)>` for `eprint_kv()`, all owned Strings must be declared before the vec to satisfy borrow lifetimes
   - Pre-existing 2 cli_compose integration test failures (`compose_dry_run_chain_shows_correct_order`, `compose_dry_run_diamond_shows_correct_order`) are from US-002 ANSI codes — deferred to US-007
+---
+
+## 2026-03-06 - P7-US-007
+- Updated 6 compose dry-run golden files to include US-002 warning banner (`🚧 [DRY RUN]...`)
+- Updated all JSON golden files across commands (compose, config, gen-deploy, migrate, networks, prune, register, reset, sync, tag, version) for deterministic alphabetical key ordering from `sort_json_keys()/print_json()`
+- Added `compose_dump_command_simple` golden test: validates per-component `forge script` output for 2-component simple.yaml
+- Added `compose_dump_command_chain` golden test: validates dependency-order output for 3-component chain.yaml (libs → core → periphery)
+- Fixed `cli_compose.rs` tests (`compose_dry_run_chain_shows_correct_order`, `compose_dry_run_diamond_shows_correct_order`) that broke from US-005 ANSI styling: added `strip_ansi()` helper using `regex` crate to strip ANSI escape codes before pattern matching
+- Dump-command golden tests use `minimal-project` fixture with `.setup(&["init"])` since `--dump-command` requires `ensure_initialized()` (foundry.toml + .treb/ directory)
+- Files changed: `crates/treb-cli/tests/integration_compose.rs`, `crates/treb-cli/tests/cli_compose.rs`, 22 golden files
+- **Learnings for future iterations:**
+  - `print_json()` now sorts all JSON keys alphabetically via `sort_json_keys()` — ALL JSON golden files need updating when this is first introduced
+  - Styled output (ANSI codes) in stderr breaks `str::find("1.")` / `str::contains("1. base")` patterns — use `strip_ansi()` helper to strip `\x1b\[[0-9;]*m` codes
+  - `compose-project` fixture is empty (no foundry.toml) — dry-run tests work but dump-command/execution tests need `minimal-project` + `init` setup
+  - `UPDATE_GOLDEN=1 cargo test` is the canonical way to regenerate golden files; works for both creation and updates
+  - Dump-command golden tests require `.setup(&["init"])` + `.post_setup_hook(|ctx| copy_compose_fixture(...))` pattern
 ---
