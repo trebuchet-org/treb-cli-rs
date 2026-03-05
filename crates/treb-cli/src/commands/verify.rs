@@ -243,8 +243,14 @@ pub async fn run(
 
         match result {
             Ok(()) => {
-                if let Some(ref url) = explorer_url {
-                    dep.verification.etherscan_url = url.clone();
+                // Set etherscan_url from first successful verification only.
+                if dep.verification.etherscan_url.is_empty() {
+                    if let Some(ref url) = explorer_url {
+                        dep.verification.etherscan_url = url.clone();
+                    }
+                }
+                if dep.verification.verified_at.is_none() {
+                    dep.verification.verified_at = Some(Utc::now());
                 }
                 dep.verification.verifiers.insert(
                     verifier.to_lowercase(),
@@ -294,9 +300,7 @@ pub async fn run(
     // Compute aggregate status and update registry once.
     let agg_status = aggregate_status(&dep.verification.verifiers);
     dep.verification.status = agg_status.clone();
-    if agg_status == VerificationStatus::Verified || agg_status == VerificationStatus::Partial {
-        dep.verification.verified_at = Some(Utc::now());
-    }
+    // verified_at already set on first successful verification above.
     // Set reason from first failed verifier, if any.
     dep.verification.reason = dep
         .verification
@@ -465,8 +469,14 @@ async fn run_batch(
 
             match result {
                 Ok(()) => {
-                    if let Some(ref url) = explorer_url {
-                        dep_owned.verification.etherscan_url = url.clone();
+                    // Set etherscan_url from first successful verification only.
+                    if dep_owned.verification.etherscan_url.is_empty() {
+                        if let Some(ref url) = explorer_url {
+                            dep_owned.verification.etherscan_url = url.clone();
+                        }
+                    }
+                    if dep_owned.verification.verified_at.is_none() {
+                        dep_owned.verification.verified_at = Some(Utc::now());
                     }
                     dep_owned.verification.verifiers.insert(
                         verifier.to_lowercase(),
@@ -516,9 +526,7 @@ async fn run_batch(
         // Compute aggregate status and update registry once per deployment.
         let agg_status = aggregate_status(&dep_owned.verification.verifiers);
         dep_owned.verification.status = agg_status.clone();
-        if agg_status == VerificationStatus::Verified || agg_status == VerificationStatus::Partial {
-            dep_owned.verification.verified_at = Some(Utc::now());
-        }
+        // verified_at already set on first successful verification above.
         dep_owned.verification.reason = dep_owned
             .verification
             .verifiers
@@ -584,4 +592,85 @@ async fn run_batch(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use treb_core::types::{VerificationStatus, VerifierStatus};
+
+    use super::aggregate_status;
+
+    #[test]
+    fn aggregate_status_all_verified() {
+        let mut verifiers = HashMap::new();
+        verifiers.insert(
+            "etherscan".to_string(),
+            VerifierStatus { status: "VERIFIED".to_string(), url: String::new(), reason: String::new() },
+        );
+        verifiers.insert(
+            "sourcify".to_string(),
+            VerifierStatus { status: "VERIFIED".to_string(), url: String::new(), reason: String::new() },
+        );
+        verifiers.insert(
+            "blockscout".to_string(),
+            VerifierStatus { status: "VERIFIED".to_string(), url: String::new(), reason: String::new() },
+        );
+        assert_eq!(aggregate_status(&verifiers), VerificationStatus::Verified);
+    }
+
+    #[test]
+    fn aggregate_status_all_failed() {
+        let mut verifiers = HashMap::new();
+        verifiers.insert(
+            "etherscan".to_string(),
+            VerifierStatus { status: "FAILED".to_string(), url: String::new(), reason: "timeout".to_string() },
+        );
+        verifiers.insert(
+            "sourcify".to_string(),
+            VerifierStatus { status: "FAILED".to_string(), url: String::new(), reason: "not found".to_string() },
+        );
+        assert_eq!(aggregate_status(&verifiers), VerificationStatus::Failed);
+    }
+
+    #[test]
+    fn aggregate_status_mixed_returns_partial() {
+        let mut verifiers = HashMap::new();
+        verifiers.insert(
+            "etherscan".to_string(),
+            VerifierStatus { status: "VERIFIED".to_string(), url: String::new(), reason: String::new() },
+        );
+        verifiers.insert(
+            "sourcify".to_string(),
+            VerifierStatus { status: "FAILED".to_string(), url: String::new(), reason: "error".to_string() },
+        );
+        assert_eq!(aggregate_status(&verifiers), VerificationStatus::Partial);
+    }
+
+    #[test]
+    fn aggregate_status_empty_returns_unverified() {
+        let verifiers = HashMap::new();
+        assert_eq!(aggregate_status(&verifiers), VerificationStatus::Unverified);
+    }
+
+    #[test]
+    fn aggregate_status_single_verified() {
+        let mut verifiers = HashMap::new();
+        verifiers.insert(
+            "etherscan".to_string(),
+            VerifierStatus { status: "VERIFIED".to_string(), url: String::new(), reason: String::new() },
+        );
+        assert_eq!(aggregate_status(&verifiers), VerificationStatus::Verified);
+    }
+
+    #[test]
+    fn aggregate_status_single_failed() {
+        let mut verifiers = HashMap::new();
+        verifiers.insert(
+            "etherscan".to_string(),
+            VerifierStatus { status: "FAILED".to_string(), url: String::new(), reason: "err".to_string() },
+        );
+        assert_eq!(aggregate_status(&verifiers), VerificationStatus::Failed);
+    }
 }
