@@ -10,6 +10,13 @@ use crate::{
     commands::resolve::resolve_deployment, output, ui::selector::fuzzy_select_deployment_id,
 };
 
+/// Verifier display order with human-readable labels (matches badge::VERIFIER_ORDER).
+const VERIFIER_DISPLAY_ORDER: [(&str, &str); 3] = [
+    ("etherscan", "Etherscan"),
+    ("sourcify", "Sourcify"),
+    ("blockscout", "Blockscout"),
+];
+
 pub async fn run(deployment_query: Option<String>, json: bool) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
 
@@ -92,9 +99,25 @@ fn print_deployment_details(d: &Deployment) {
 
     // Verification
     println!("\n── Verification ──");
-    output::print_kv(&[("Status", &d.verification.status.to_string())]);
-    if !d.verification.etherscan_url.is_empty() {
-        output::print_kv(&[("Etherscan URL", &d.verification.etherscan_url)]);
+    if d.verification.verifiers.is_empty() {
+        output::print_kv(&[("Status", "UNVERIFIED")]);
+    } else {
+        let mut pairs: Vec<(String, String)> = Vec::new();
+        for (key, label) in VERIFIER_DISPLAY_ORDER {
+            if let Some(vs) = d.verification.verifiers.get(key) {
+                let mut detail = vs.status.clone();
+                if !vs.url.is_empty() {
+                    detail.push_str(&format!(" {}", vs.url));
+                }
+                if !vs.reason.is_empty() {
+                    detail.push_str(&format!(" — {}", vs.reason));
+                }
+                pairs.push((label.to_string(), detail));
+            }
+        }
+        let kv_refs: Vec<(&str, &str)> =
+            pairs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        output::print_kv(&kv_refs);
     }
     if let Some(ref verified_at) = d.verification.verified_at {
         output::print_kv(&[("Verified At", &verified_at.to_rfc3339())]);
