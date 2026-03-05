@@ -1,0 +1,30 @@
+# Ralph Progress Log
+Started: Thu Mar  5 06:51:37 PM CET 2026
+---
+
+## Codebase Patterns
+- Shorthand verifier flags (--etherscan, --blockscout, --sourcify) are resolved in main.rs match arm, not in verify.rs
+- verify.rs run() and run_batch() accept &[String] for verifiers; the caller in main.rs builds the Vec
+- CLI integration tests use `cargo_bin_cmd!("treb-cli")` macro via `assert_cmd` crate
+- Test helpers `init_project_with_deployments` and `init_project_with_verified_deployments` in cli_verify.rs set up fixture data from treb-core fixtures
+- All verify tests pass with `cargo test -p treb-cli -- verify` (covers both cli_verify.rs and integration_verify.rs)
+
+## 2026-03-05 - P6-US-001
+- What was implemented: Added test coverage for per-verifier shorthand flags. The implementation (CLI flags + resolution logic) was already in place; tests were the missing piece.
+- Files changed:
+  - `crates/treb-cli/tests/cli_verify.rs` — added 6 new tests for shorthand flags + updated help test to check for --etherscan/--blockscout/--sourcify
+- **Learnings for future iterations:**
+  - The shorthand flag → verifier list resolution happens in `main.rs` lines 518-532, not in verify.rs
+  - When shorthand flags are set, they build a Vec; otherwise the single `--verifier` value (default "etherscan") is wrapped in a vec
+  - All verify tests (20 in cli_verify.rs + 6 in integration_verify.rs) pass cleanly
+---
+
+## 2026-03-05 - P6-US-002
+- What was implemented: Fixed etherscan_url and verified_at to be set from the first successful verification (not overwritten by subsequent successes). Added 6 unit tests for the aggregate_status function covering all-verified, all-failed, mixed/partial, empty, single-verified, and single-failed cases.
+- Files changed:
+  - `crates/treb-cli/src/commands/verify.rs` — fixed first-success-only etherscan_url/verified_at in both single and batch paths; added #[cfg(test)] module with aggregate_status tests
+- **Learnings for future iterations:**
+  - The multi-verifier loop, aggregate_status(), rate limiting, and registry update were already implemented in a prior iteration — this story only needed the first-success fix and unit tests
+  - `aggregate_status()` is a private fn in verify.rs — unit tests must be in the same file's #[cfg(test)] module
+  - Both single-deploy (run()) and batch (run_batch()) paths have their own multi-verifier loop — changes must be applied to both
+---
