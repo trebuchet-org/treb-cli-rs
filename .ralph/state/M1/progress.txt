@@ -1,0 +1,124 @@
+# Ralph Progress Log
+Started: Thu Mar  5 10:41:35 PM CET 2026
+---
+
+## Codebase Patterns
+- Compose result structs (`ComponentResultEntry`, `ComposeTotals`) now use `#[serde(rename_all = "camelCase")]` — JSON keys are camelCase (e.g. `gasUsed`, `notExecuted`)
+- `PipelineResult.gas_used` already exists in `treb-forge/src/pipeline/types.rs` — no need to add it
+- Compose unit tests live in `compose.rs` itself under `#[cfg(test)] mod tests`; run with `cargo test -p treb-cli --bin treb-cli -- compose`
+- 6 pre-existing golden file failures (`compose_dry_run_*`) are from US-002 warning banner + US-001 camelCase changes — deferred to P7-US-007
+- `ComponentResultEntry` is constructed in 4 places in the execution loop: skipped, not-executed, success (from pipeline result), and failed
+- Golden file integration tests capture stdout+stderr combined — any new stderr output (e.g. stage indicators, banners) will break golden files
+- `output::print_warning_banner()` goes to stdout; for stderr use `eprintln!("{}", output::format_warning_banner(...))`
+- Stage indicator emojis: rocket(\u{1f680})=start, hammer(\u{1f528})=executing, checkmark(\u{2705})=complete, skip(\u{23ed}\u{fe0f})=skipped, cross(\u{274c})=failed
+- `ScriptConfig::to_forge_command()` returns `Vec<String>` of forge CLI args — use for `--dump-command` per-component output
+- When adding new CLI flags to compose: update Compose enum variant in main.rs, the match arm destructuring, AND compose::run() signature
+- `styled()` helper pattern: `fn styled(text: &str, style: Style) -> String` gated on `color::is_color_enabled()` — used in show.rs, verify.rs, and now compose.rs
+- Color styles: SUCCESS=green+bold, ERROR=red+bold, WARNING=yellow, MUTED=dimmed, LABEL=bold
+- `run::resolve_rpc_url_for_chain_id()` and `run::fetch_chain_id()` are `pub(crate)` — reusable for chain ID resolution from any command
+- `print_json()` sorts all JSON keys alphabetically via `sort_json_keys()` — ALL JSON golden files need updating after introducing this
+- CLI tests checking stderr for styled output need ANSI stripping (`regex` + `\x1b\[[0-9;]*m`) before pattern matching
+- `UPDATE_GOLDEN=1 cargo test` is the canonical way to regenerate golden files
+- Dump-command golden tests need `minimal-project` fixture + `.setup(&["init"])` since dump-command requires `ensure_initialized()`
+
+## 2026-03-05 - P7-US-001
+- Added `gas_used: u64` field to `ComponentResultEntry` and `ComposeTotals`
+- Added `#[serde(rename_all = "camelCase")]` to both structs for project convention compliance
+- Updated `compute_totals()` to sum `gas_used` across components
+- Populated `gas_used` from `PipelineResult.gas_used` on success, `0` for skipped/failed/not-executed
+- Updated all 7 unit tests that construct `ComponentResultEntry` (added gas_used values and gas assertions)
+- Updated JSON assertion keys from `not_executed` to `notExecuted` to match camelCase serialization
+- Files changed: `crates/treb-cli/src/commands/compose.rs`
+- **Learnings for future iterations:**
+  - The compose execution loop has 4 `ComponentResultEntry` construction sites — don't forget any when adding fields
+  - JSON golden tests for dry-run plan use different structs (`DryRunPlanEntry`) — they're unaffected by result struct changes
+  - Pre-existing golden file failures exist for JSON key ordering — don't try to fix them in unrelated stories
+---
+
+## 2026-03-05 - P7-US-002
+- Added emoji stage indicators via `print_stage()`: orchestration start (rocket), per-component execution (hammer), completion (checkmark), skipping (skip), overall result (checkmark/cross)
+- Added styled dry-run warning banner via `format_warning_banner()` to stderr before plan display
+- Refactored broadcast confirmation to use aligned `eprint_kv()` for key-value display
+- All stage output confirmed to go to stderr; result data to stdout
+- Existing `!json` guards maintained for --json suppression
+- Files changed: `crates/treb-cli/src/commands/compose.rs`
+- **Learnings for future iterations:**
+  - `print_warning_banner()` outputs to stdout — use `eprintln!("{}", format_warning_banner(...))` for stderr
+  - Golden file integration tests capture both stdout AND stderr combined — any new stderr output will break golden files
+  - Human-readable dry-run golden files (compose_dry_run_*) now need updating due to the new warning banner — deferred to P7-US-007
+  - Stage indicator emojis used: rocket=start, hammer=executing, checkmark=complete, skip=skipped, cross=failed
+---
+
+## 2026-03-05 - P7-US-003
+- Added `--debug` and `--dump-command` CLI flags to the compose command (main.rs Compose variant + compose::run signature)
+- `--dump-command`: iterates components in topological order, resolves config, builds ScriptConfig per component, calls `to_forge_command()`, prints with `# component-name` header. Skipped components get `# name (skipped)` comment instead
+- `--debug`: creates `.treb/debug-compose-<timestamp>/` directory before execution loop, writes per-component `<name>.log` files with status/script/sig/namespace/rpc/gas/deployments/transactions. Prints directory path to stderr after results
+- Updated `compose_help_shows_all_flags` test to check for `--debug` and `--dump-command`
+- Updated `compose_all_flags_accepted` test to include `--debug`
+- Added `compose_dump_command_flag_accepted` test
+- Files changed: `crates/treb-cli/src/commands/compose.rs`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/tests/cli_compose.rs`
+- **Learnings for future iterations:**
+  - The `--dump-command` pattern: resolve config + build ScriptConfig + `to_forge_command()` — same as run command but per-component in a loop
+  - Debug logs use per-component files (not a single file like `run --debug`) since compose has multiple components
+  - Shell-quoting in dump-command output uses single quotes for args with spaces/double-quotes, matching the run command pattern
+  - Pre-existing golden file failures (6 compose_dry_run_* tests) are from US-002 warning banner changes, deferred to US-007
+---
+
+## 2026-03-05 - P7-US-004
+- Added `styled()` helper function to compose.rs (same pattern as show.rs and verify.rs)
+- Added imports: `owo_colors::{OwoColorize, Style}` and `crate::ui::color`
+- Modified `display_compose_human()` with color-coded status icons per component:
+  - Success: green checkmark (✔) via `color::SUCCESS`
+  - Failed: red cross (✘) via `color::ERROR`, error message indented on next line in `color::MUTED`
+  - Skipped: yellow skip arrow (⏭) via `color::WARNING`
+  - Not executed: dimmed dash (—) via `color::MUTED`
+- Gas usage displayed per component only when non-zero; totals gas also conditional
+- `display_compose_json()` left completely unchanged
+- Files changed: `crates/treb-cli/src/commands/compose.rs`
+- **Learnings for future iterations:**
+  - The `styled()` helper is duplicated in show.rs, verify.rs, and now compose.rs — could be centralized in output.rs but keeping local per convention
+  - Unicode icons: ✔=\u{2714}, ✘=\u{2718}, ⏭=\u{23ed}, —=\u{2014}
+  - Gas display change (conditional vs always) will affect golden file output for result display — US-007 will need to account for this
+---
+
+## 2026-03-05 - P7-US-005
+- Modified `print_dry_run_plan()` to use `styled()` helper for color-coded output
+- Non-skipped entries: step number and component name styled with LABEL (bold), script path styled with MUTED (dimmed)
+- Skipped entries: component name and "(skipped)" suffix styled with WARNING (yellow), script path styled with MUTED
+- Plain output (no color) maintains identical format to original via `styled()` passthrough
+- Files changed: `crates/treb-cli/src/commands/compose.rs`
+- **Learnings for future iterations:**
+  - `styled()` returns plain text when color is disabled, so backward compatibility is automatic — no need for separate code paths
+  - Skipped entries intentionally use plain step numbers (not bold) to visually de-emphasize them vs active entries
+  - Golden file tests run with color disabled, so styled output doesn't affect golden file content
+---
+
+## 2026-03-05 - P7-US-006
+- Replaced basic verbose pre-execution output with aligned key-value pairs via `eprint_kv()`: Script, Namespace, RPC, Chain ID, Sig, Verify
+- Added verbose post-execution summary per component: Deployments, Transactions, Gas (using `eprint_kv()`)
+- Added resume mode verbose output: compose hash and skip count displayed when `--verbose --resume` with non-empty skip set
+- Chain ID resolved per component via `fetch_chain_id()` (only when RPC URL is available and verbose is enabled)
+- Made `resolve_rpc_url_for_chain_id()` and `fetch_chain_id()` `pub(crate)` in run.rs to share with compose
+- All verbose blocks gated on `verbose && !json` — `--verbose --json` suppresses all verbose output
+- Files changed: `crates/treb-cli/src/commands/compose.rs`, `crates/treb-cli/src/commands/run.rs`
+- **Learnings for future iterations:**
+  - `resolve_rpc_url_for_chain_id` and `fetch_chain_id` are now `pub(crate)` in run.rs — reusable by any command that needs chain ID
+  - When building `Vec<(&str, &str)>` for `eprint_kv()`, all owned Strings must be declared before the vec to satisfy borrow lifetimes
+  - Pre-existing 2 cli_compose integration test failures (`compose_dry_run_chain_shows_correct_order`, `compose_dry_run_diamond_shows_correct_order`) are from US-002 ANSI codes — deferred to US-007
+---
+
+## 2026-03-06 - P7-US-007
+- Updated 6 compose dry-run golden files to include US-002 warning banner (`🚧 [DRY RUN]...`)
+- Updated all JSON golden files across commands (compose, config, gen-deploy, migrate, networks, prune, register, reset, sync, tag, version) for deterministic alphabetical key ordering from `sort_json_keys()/print_json()`
+- Added `compose_dump_command_simple` golden test: validates per-component `forge script` output for 2-component simple.yaml
+- Added `compose_dump_command_chain` golden test: validates dependency-order output for 3-component chain.yaml (libs → core → periphery)
+- Fixed `cli_compose.rs` tests (`compose_dry_run_chain_shows_correct_order`, `compose_dry_run_diamond_shows_correct_order`) that broke from US-005 ANSI styling: added `strip_ansi()` helper using `regex` crate to strip ANSI escape codes before pattern matching
+- Dump-command golden tests use `minimal-project` fixture with `.setup(&["init"])` since `--dump-command` requires `ensure_initialized()` (foundry.toml + .treb/ directory)
+- Files changed: `crates/treb-cli/tests/integration_compose.rs`, `crates/treb-cli/tests/cli_compose.rs`, 22 golden files
+- **Learnings for future iterations:**
+  - `print_json()` now sorts all JSON keys alphabetically via `sort_json_keys()` — ALL JSON golden files need updating when this is first introduced
+  - Styled output (ANSI codes) in stderr breaks `str::find("1.")` / `str::contains("1. base")` patterns — use `strip_ansi()` helper to strip `\x1b\[[0-9;]*m` codes
+  - `compose-project` fixture is empty (no foundry.toml) — dry-run tests work but dump-command/execution tests need `minimal-project` + `init` setup
+  - `UPDATE_GOLDEN=1 cargo test` is the canonical way to regenerate golden files; works for both creation and updates
+  - Dump-command golden tests require `.setup(&["init"])` + `.post_setup_hook(|ctx| copy_compose_fixture(...))` pattern
+---

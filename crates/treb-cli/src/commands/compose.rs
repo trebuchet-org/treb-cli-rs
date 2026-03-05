@@ -5,13 +5,14 @@
 
 use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
-    env,
+    env, fs,
     hash::{DefaultHasher, Hash, Hasher},
     io::{self, BufRead, IsTerminal, Write},
     path::{Path, PathBuf},
 };
 
 use anyhow::{Context, bail};
+use owo_colors::{OwoColorize, Style};
 use serde::{Deserialize, Serialize};
 use treb_config::{ResolveOpts, resolve_config};
 use treb_forge::{
@@ -21,7 +22,7 @@ use treb_forge::{
 };
 use treb_registry::Registry;
 
-use crate::output;
+use crate::{output, ui::color};
 
 // ── Compose file schema ──────────────────────────────────────────────────
 
@@ -271,12 +272,27 @@ fn print_dry_run_plan(compose: &ComposeFile, plan: &[PlanEntry]) {
     eprintln!("Execution Plan:");
     eprintln!("{}", "─".repeat(50));
     for entry in plan {
-        eprint!("{}. {} → {}", entry.step, entry.component, entry.script);
-        if !entry.deps.is_empty() {
-            eprint!(" (depends on: [{}])", entry.deps.join(", "));
-        }
         if entry.skipped {
-            eprint!(" (skipped)");
+            eprint!(
+                "{}. {} → {}",
+                styled(&entry.step.to_string(), color::LABEL),
+                styled(&entry.component, color::WARNING),
+                styled(&entry.script, color::MUTED),
+            );
+            if !entry.deps.is_empty() {
+                eprint!(" (depends on: [{}])", entry.deps.join(", "));
+            }
+            eprint!(" {}", styled("(skipped)", color::WARNING));
+        } else {
+            eprint!(
+                "{}. {} → {}",
+                styled(&entry.step.to_string(), color::LABEL),
+                styled(&entry.component, color::LABEL),
+                styled(&entry.script, color::MUTED),
+            );
+            if !entry.deps.is_empty() {
+                eprint!(" (depends on: [{}])", entry.deps.join(", "));
+            }
         }
         eprintln!();
     }
@@ -308,20 +324,24 @@ impl std::fmt::Display for ComponentStatus {
 
 /// Per-component result summary.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ComponentResultEntry {
     pub component: String,
     pub status: ComponentStatus,
     pub deployments: usize,
     pub transactions: usize,
+    pub gas_used: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
 /// Aggregate totals across all components.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ComposeTotals {
     pub deployments: usize,
     pub transactions: usize,
+    pub gas_used: u64,
     pub succeeded: usize,
     pub skipped: usize,
     pub failed: usize,
@@ -342,6 +362,7 @@ fn compute_totals(results: &[ComponentResultEntry]) -> ComposeTotals {
     let mut totals = ComposeTotals {
         deployments: 0,
         transactions: 0,
+        gas_used: 0,
         succeeded: 0,
         skipped: 0,
         failed: 0,
@@ -350,6 +371,7 @@ fn compute_totals(results: &[ComponentResultEntry]) -> ComposeTotals {
     for r in results {
         totals.deployments += r.deployments;
         totals.transactions += r.transactions;
+        totals.gas_used += r.gas_used;
         match r.status {
             ComponentStatus::Success => totals.succeeded += 1,
             ComponentStatus::Skipped => totals.skipped += 1,
@@ -358,6 +380,15 @@ fn compute_totals(results: &[ComponentResultEntry]) -> ComposeTotals {
         }
     }
     totals
+}
+
+/// Apply a color style when color is enabled, plain text otherwise.
+fn styled(text: &str, style: Style) -> String {
+    if color::is_color_enabled() {
+        format!("{}", text.style(style))
+    } else {
+        text.to_string()
+    }
 }
 
 /// Display compose results in human-readable format.
@@ -369,38 +400,51 @@ fn display_compose_human(group: &str, results: &[ComponentResultEntry], totals: 
     for r in results {
         match r.status {
             ComponentStatus::Success => {
-                println!(
-                    "  {} — {} deployment{}, {} transaction{}",
+                let icon = styled("\u{2714}", color::SUCCESS); // ✔
+                let mut line = format!(
+                    "  {} {} — {} deployment{}, {} transaction{}",
+                    icon,
                     r.component,
                     r.deployments,
                     if r.deployments == 1 { "" } else { "s" },
                     r.transactions,
                     if r.transactions == 1 { "" } else { "s" },
                 );
+                if r.gas_used > 0 {
+                    line.push_str(&format!(", {} gas", output::format_gas(r.gas_used)));
+                }
+                println!("{line}");
             }
             ComponentStatus::Skipped => {
-                println!("  {} (skipped)", r.component);
+                let icon = styled("\u{23ed}", color::WARNING); // ⏭
+                println!("  {} {} {}", icon, r.component, styled("(skipped)", color::WARNING));
             }
             ComponentStatus::Failed => {
-                println!(
-                    "  {} (failed): {}",
-                    r.component,
-                    r.error.as_deref().unwrap_or("unknown error")
-                );
+                let icon = styled("\u{2718}", color::ERROR); // ✘
+                println!("  {} {} {}", icon, r.component, styled("(failed)", color::ERROR));
+                let msg = r.error.as_deref().unwrap_or("unknown error");
+                println!("    {}", styled(msg, color::MUTED));
             }
             ComponentStatus::NotExecuted => {
-                println!("  {} (not executed)", r.component);
+                let icon = styled("\u{2014}", color::MUTED); // —
+                println!(
+                    "  {} {} {}",
+                    icon,
+                    r.component,
+                    styled("(not executed)", color::MUTED)
+                );
             }
         }
     }
 
     println!();
     println!(
-        "Totals: {} deployment{}, {} transaction{} | {} succeeded, {} skipped, {} failed, {} not executed",
+        "Totals: {} deployment{}, {} transaction{}, {} gas | {} succeeded, {} skipped, {} failed, {} not executed",
         totals.deployments,
         if totals.deployments == 1 { "" } else { "s" },
         totals.transactions,
         if totals.transactions == 1 { "" } else { "s" },
+        output::format_gas(totals.gas_used),
         totals.succeeded,
         totals.skipped,
         totals.failed,
@@ -438,6 +482,8 @@ pub async fn run(
     slow: bool,
     legacy: bool,
     verbose: bool,
+    debug: bool,
+    dump_command: bool,
     json: bool,
     env_vars: Vec<String>,
     non_interactive: bool,
@@ -470,12 +516,26 @@ pub async fn run(
         HashSet::new()
     };
 
+    // ── Verbose resume context ────────────────────────────────────────
+    if verbose && !json && resume && !skip_set.is_empty() {
+        let hash_str = &compose_hash;
+        let skip_count = skip_set.len().to_string();
+        let kv_pairs: Vec<(&str, &str)> = vec![
+            ("Compose hash", hash_str),
+            ("Skipping", &skip_count),
+        ];
+        output::eprint_kv(&kv_pairs);
+        eprintln!();
+    }
+
     // Dry-run: show execution plan and exit.
     if dry_run {
         let plan = build_plan(&compose, &order, &skip_set);
         if json {
             output::print_json(&plan)?;
         } else {
+            eprintln!("{}", output::format_warning_banner("\u{1f6a7}", "[DRY RUN] Showing execution plan only — no changes will be made."));
+            eprintln!();
             print_dry_run_plan(&compose, &plan);
         }
         return Ok(());
@@ -485,19 +545,105 @@ pub async fn run(
     let cwd = env::current_dir().context("failed to determine current directory")?;
     super::run::ensure_initialized(&cwd)?;
 
+    // ── Dump command: print per-component forge commands and exit ─────
+    if dump_command {
+        for name in &order {
+            let component = &compose.components[name];
+
+            if skip_set.contains(name) {
+                println!("# {} (skipped)", name);
+                continue;
+            }
+
+            // Re-inject global env vars (reset any previous component overrides).
+            super::run::inject_env_vars(&env_vars)?;
+
+            // Inject per-component env vars.
+            if let Some(env_map) = &component.env {
+                for (key, value) in env_map {
+                    unsafe { env::set_var(key, value) };
+                }
+            }
+
+            let resolved = resolve_config(ResolveOpts {
+                project_root: cwd.clone(),
+                namespace: namespace.clone(),
+                network: network.clone(),
+                profile: profile.clone(),
+                sender_overrides: HashMap::new(),
+            })
+            .with_context(|| format!("failed to resolve config for component '{}'", name))?;
+
+            let effective_rpc_url = rpc_url.clone().or_else(|| resolved.network.clone());
+
+            let resolved_senders = resolve_all_senders(&resolved.senders)
+                .await
+                .with_context(|| format!("failed to resolve senders for component '{}'", name))?;
+
+            let mut script_config =
+                build_script_config_with_senders(&resolved, &component.script, &resolved_senders)
+                    .with_context(|| {
+                        format!("failed to build script config for component '{}'", name)
+                    })?;
+
+            let sig = component.sig.as_deref().unwrap_or("run()");
+            let args = component.args.clone().unwrap_or_default();
+            let effective_verify = component.verify.unwrap_or(verify);
+
+            script_config
+                .sig(sig)
+                .args(args)
+                .broadcast(broadcast)
+                .dry_run(false)
+                .slow(slow || resolved.slow)
+                .legacy(legacy)
+                .verify(effective_verify)
+                .non_interactive(true);
+
+            if let Some(ref url) = effective_rpc_url {
+                script_config.rpc_url(url);
+            }
+
+            let cmd_parts = script_config.to_forge_command();
+            let cmd_str = cmd_parts
+                .iter()
+                .map(|p| {
+                    if p.contains(' ') || p.contains('"') {
+                        format!("'{}'", p.replace('\'', "'\\''"))
+                    } else {
+                        p.clone()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            println!("# {}", name);
+            println!("{}", cmd_str);
+        }
+        return Ok(());
+    }
+
     // ── Broadcast confirmation (once before first component) ──────────
     if broadcast && !non_interactive {
         let is_tty = io::stdin().is_terminal();
         if is_tty {
             let executing_count = order.iter().filter(|n| !skip_set.contains(*n)).count();
-            eprintln!("About to broadcast {} component(s) to the network.", executing_count);
-            eprintln!("  Compose: {}", compose.group);
+            let count_str = format!("{}", executing_count);
+            let mut kv_pairs: Vec<(&str, &str)> = vec![
+                ("Components", &count_str),
+                ("Compose", &compose.group),
+            ];
+            let ns_ref;
             if let Some(ref ns) = namespace {
-                eprintln!("  Namespace: {}", ns);
+                ns_ref = ns.clone();
+                kv_pairs.push(("Namespace", &ns_ref));
             }
+            let net_ref;
             if let Some(ref net) = network {
-                eprintln!("  Network: {}", net);
+                net_ref = net.clone();
+                kv_pairs.push(("Network", &net_ref));
             }
+            eprintln!("About to broadcast to the network.");
+            output::eprint_kv(&kv_pairs);
             eprint!("Proceed? [y/N] ");
             io::stderr().flush().ok();
 
@@ -520,6 +666,17 @@ pub async fn run(
         completed: skip_set.iter().cloned().collect(),
     };
 
+    // ── Debug log directory ─────────────────────────────────────────
+    let debug_dir = if debug {
+        let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+        let dir = cwd.join(".treb").join(format!("debug-compose-{}", timestamp));
+        fs::create_dir_all(&dir)
+            .with_context(|| format!("failed to create debug directory: {}", dir.display()))?;
+        Some(dir)
+    } else {
+        None
+    };
+
     // ── Execute components in topological order ───────────────────────
     let total = order.len();
     let mut completed = skip_set.len();
@@ -527,25 +684,21 @@ pub async fn run(
     let mut failed_component: Option<String> = None;
 
     if !json {
-        eprintln!("Compose: {} ({} components)", compose.group, total);
+        output::print_stage("\u{1f680}", &format!("Orchestrating {} ({} components)", compose.group, total));
     }
 
     for (i, name) in order.iter().enumerate() {
         // Skip already-completed components (resume mode).
         if skip_set.contains(name) {
             if !json {
-                eprintln!(
-                    "[{}/{}] Component '{}' (skipped — already completed)",
-                    i + 1,
-                    total,
-                    name
-                );
+                output::print_stage("\u{23ed}\u{fe0f}", &format!("[{}/{}] Skipping '{}' (already completed)", i + 1, total, name));
             }
             component_results.push(ComponentResultEntry {
                 component: name.clone(),
                 status: ComponentStatus::Skipped,
                 deployments: 0,
                 transactions: 0,
+                gas_used: 0,
                 error: None,
             });
             continue;
@@ -558,6 +711,7 @@ pub async fn run(
                 status: ComponentStatus::NotExecuted,
                 deployments: 0,
                 transactions: 0,
+                gas_used: 0,
                 error: None,
             });
             continue;
@@ -566,7 +720,7 @@ pub async fn run(
         let component = &compose.components[name];
 
         if !json {
-            eprintln!("[{}/{}] Executing component: {}", i + 1, total, name);
+            output::print_stage("\u{1f528}", &format!("[{}/{}] Executing '{}'...", i + 1, total, name));
         }
 
         // Re-inject global env vars (reset any previous component overrides).
@@ -624,11 +778,36 @@ pub async fn run(
 
         // Verbose per-component context.
         if verbose && !json {
-            eprintln!("  Script: {}", component.script);
-            eprintln!("  Namespace: {}", resolved.namespace);
-            if let Some(ref url) = effective_rpc_url {
-                eprintln!("  RPC: {}", url);
+            let sig_display = sig.to_string();
+            let verify_display = effective_verify.to_string();
+            let rpc_display = effective_rpc_url.clone().unwrap_or_default();
+            let chain_id_str = if !rpc_display.is_empty() {
+                let resolved_url =
+                    super::run::resolve_rpc_url_for_chain_id(&rpc_display, &cwd);
+                if let Some(url) = resolved_url {
+                    let cid = super::run::fetch_chain_id(&url).await.unwrap_or(0);
+                    if cid > 0 { cid.to_string() } else { String::new() }
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            };
+
+            let mut kv_pairs: Vec<(&str, &str)> = vec![
+                ("Script", &component.script),
+                ("Namespace", &resolved.namespace),
+            ];
+            if !rpc_display.is_empty() {
+                kv_pairs.push(("RPC", &rpc_display));
             }
+            if !chain_id_str.is_empty() {
+                kv_pairs.push(("Chain ID", &chain_id_str));
+            }
+            kv_pairs.push(("Sig", &sig_display));
+            kv_pairs.push(("Verify", &verify_display));
+            output::eprint_kv(&kv_pairs);
+            eprintln!();
         }
 
         // Build pipeline context.
@@ -658,7 +837,66 @@ pub async fn run(
             Ok(result) => {
                 completed += 1;
                 if !json {
-                    eprintln!("[{}/{}] Component '{}' completed", i + 1, total, name);
+                    output::print_stage("\u{2705}", &format!("[{}/{}] '{}' completed", i + 1, total, name));
+                }
+
+                // Verbose post-execution summary per component.
+                if verbose && !json {
+                    let dep_str = format!("{} deployment(s)", result.deployments.len());
+                    let tx_str = format!("{} transaction(s)", result.transactions.len());
+                    let gas_str = format!("{} gas", output::format_gas(result.gas_used));
+                    let summary_pairs: Vec<(&str, &str)> = vec![
+                        ("Deployments", &dep_str),
+                        ("Transactions", &tx_str),
+                        ("Gas", &gas_str),
+                    ];
+                    output::eprint_kv(&summary_pairs);
+                    eprintln!();
+                }
+
+                // Write per-component debug log.
+                if let Some(ref dir) = debug_dir {
+                    let mut log = String::new();
+                    log.push_str(&format!("component: {}\n", name));
+                    log.push_str("status: success\n");
+                    log.push_str(&format!("script: {}\n", component.script));
+                    log.push_str(&format!("sig: {}\n", sig));
+                    log.push_str(&format!("namespace: {}\n", resolved.namespace));
+                    if let Some(ref url) = effective_rpc_url {
+                        log.push_str(&format!("rpc: {}\n", url));
+                    }
+                    log.push_str(&format!("broadcast: {}\n", broadcast));
+                    log.push_str(&format!("verify: {}\n", effective_verify));
+                    log.push_str(&format!("gas_used: {}\n", result.gas_used));
+                    log.push_str(&format!("deployments: {}\n", result.deployments.len()));
+                    log.push_str(&format!("transactions: {}\n", result.transactions.len()));
+
+                    if !result.deployments.is_empty() {
+                        log.push_str("\n--- Deployments ---\n");
+                        for rd in &result.deployments {
+                            let d = &rd.deployment;
+                            log.push_str(&format!(
+                                "  {} {} ({}) chain={}\n",
+                                d.deployment_type, d.contract_name, d.address, d.chain_id
+                            ));
+                        }
+                    }
+
+                    if !result.transactions.is_empty() {
+                        log.push_str("\n--- Transactions ---\n");
+                        for rt in &result.transactions {
+                            let tx = &rt.transaction;
+                            log.push_str(&format!(
+                                "  {} {} ({})\n",
+                                tx.id, tx.hash, tx.status
+                            ));
+                        }
+                    }
+
+                    let log_path = dir.join(format!("{}.log", name));
+                    fs::write(&log_path, &log).with_context(|| {
+                        format!("failed to write debug log to {}", log_path.display())
+                    })?;
                 }
 
                 component_results.push(ComponentResultEntry {
@@ -666,6 +904,7 @@ pub async fn run(
                     status: ComponentStatus::Success,
                     deployments: result.deployments.len(),
                     transactions: result.transactions.len(),
+                    gas_used: result.gas_used,
                     error: None,
                 });
 
@@ -680,11 +919,26 @@ pub async fn run(
                     name, completed, total, error_msg
                 );
 
+                // Write per-component debug log for failure.
+                if let Some(ref dir) = debug_dir {
+                    let mut log = String::new();
+                    log.push_str(&format!("component: {}\n", name));
+                    log.push_str("status: failed\n");
+                    log.push_str(&format!("script: {}\n", component.script));
+                    log.push_str(&format!("sig: {}\n", sig));
+                    log.push_str(&format!("error: {}\n", error_msg));
+                    let log_path = dir.join(format!("{}.log", name));
+                    fs::write(&log_path, &log).with_context(|| {
+                        format!("failed to write debug log to {}", log_path.display())
+                    })?;
+                }
+
                 component_results.push(ComponentResultEntry {
                     component: name.clone(),
                     status: ComponentStatus::Failed,
                     deployments: 0,
                     transactions: 0,
+                    gas_used: 0,
                     error: Some(error_msg),
                 });
 
@@ -697,10 +951,25 @@ pub async fn run(
     let totals = compute_totals(&component_results);
     let success = failed_component.is_none();
 
+    if !json {
+        if success {
+            output::print_stage("\u{2705}", "Orchestration complete.");
+        } else {
+            output::print_stage("\u{274c}", "Orchestration failed.");
+        }
+    }
+
     if json {
         display_compose_json(&compose.group, component_results, totals, success)?;
     } else {
         display_compose_human(&compose.group, &component_results, &totals);
+    }
+
+    // Print debug directory path.
+    if !json {
+        if let Some(ref dir) = debug_dir {
+            eprintln!("Debug logs saved to {}", dir.display());
+        }
     }
 
     // Full successful completion: delete the state file.
@@ -1356,6 +1625,7 @@ components:
                 status: ComponentStatus::Success,
                 deployments: 2,
                 transactions: 3,
+                gas_used: 100_000,
                 error: None,
             },
             ComponentResultEntry {
@@ -1363,12 +1633,14 @@ components:
                 status: ComponentStatus::Success,
                 deployments: 1,
                 transactions: 1,
+                gas_used: 50_000,
                 error: None,
             },
         ];
         let totals = compute_totals(&results);
         assert_eq!(totals.deployments, 3);
         assert_eq!(totals.transactions, 4);
+        assert_eq!(totals.gas_used, 150_000);
         assert_eq!(totals.succeeded, 2);
         assert_eq!(totals.skipped, 0);
         assert_eq!(totals.failed, 0);
@@ -1383,6 +1655,7 @@ components:
                 status: ComponentStatus::Skipped,
                 deployments: 0,
                 transactions: 0,
+                gas_used: 0,
                 error: None,
             },
             ComponentResultEntry {
@@ -1390,6 +1663,7 @@ components:
                 status: ComponentStatus::Success,
                 deployments: 3,
                 transactions: 2,
+                gas_used: 200_000,
                 error: None,
             },
             ComponentResultEntry {
@@ -1397,6 +1671,7 @@ components:
                 status: ComponentStatus::Failed,
                 deployments: 0,
                 transactions: 0,
+                gas_used: 0,
                 error: Some("script reverted".to_string()),
             },
             ComponentResultEntry {
@@ -1404,12 +1679,14 @@ components:
                 status: ComponentStatus::NotExecuted,
                 deployments: 0,
                 transactions: 0,
+                gas_used: 0,
                 error: None,
             },
         ];
         let totals = compute_totals(&results);
         assert_eq!(totals.deployments, 3);
         assert_eq!(totals.transactions, 2);
+        assert_eq!(totals.gas_used, 200_000);
         assert_eq!(totals.succeeded, 1);
         assert_eq!(totals.skipped, 1);
         assert_eq!(totals.failed, 1);
@@ -1422,6 +1699,7 @@ components:
         let totals = compute_totals(&results);
         assert_eq!(totals.deployments, 0);
         assert_eq!(totals.transactions, 0);
+        assert_eq!(totals.gas_used, 0);
         assert_eq!(totals.succeeded, 0);
         assert_eq!(totals.skipped, 0);
         assert_eq!(totals.failed, 0);
@@ -1436,6 +1714,7 @@ components:
                 status: ComponentStatus::Success,
                 deployments: 2,
                 transactions: 1,
+                gas_used: 100_000,
                 error: None,
             },
             ComponentResultEntry {
@@ -1443,6 +1722,7 @@ components:
                 status: ComponentStatus::Success,
                 deployments: 1,
                 transactions: 2,
+                gas_used: 75_000,
                 error: None,
             },
         ];
@@ -1465,19 +1745,22 @@ components:
         assert_eq!(components[0]["status"], "success");
         assert_eq!(components[0]["deployments"], 2);
         assert_eq!(components[0]["transactions"], 1);
+        assert_eq!(components[0]["gasUsed"], 100_000);
         assert!(components[0].get("error").is_none());
 
         assert_eq!(components[1]["component"], "core");
         assert_eq!(components[1]["status"], "success");
         assert_eq!(components[1]["deployments"], 1);
         assert_eq!(components[1]["transactions"], 2);
+        assert_eq!(components[1]["gasUsed"], 75_000);
 
         assert_eq!(parsed["totals"]["deployments"], 3);
         assert_eq!(parsed["totals"]["transactions"], 3);
+        assert_eq!(parsed["totals"]["gasUsed"], 175_000);
         assert_eq!(parsed["totals"]["succeeded"], 2);
         assert_eq!(parsed["totals"]["skipped"], 0);
         assert_eq!(parsed["totals"]["failed"], 0);
-        assert_eq!(parsed["totals"]["not_executed"], 0);
+        assert_eq!(parsed["totals"]["notExecuted"], 0);
     }
 
     #[test]
@@ -1488,6 +1771,7 @@ components:
                 status: ComponentStatus::Success,
                 deployments: 1,
                 transactions: 1,
+                gas_used: 50_000,
                 error: None,
             },
             ComponentResultEntry {
@@ -1495,6 +1779,7 @@ components:
                 status: ComponentStatus::Failed,
                 deployments: 0,
                 transactions: 0,
+                gas_used: 0,
                 error: Some("script reverted".to_string()),
             },
             ComponentResultEntry {
@@ -1502,6 +1787,7 @@ components:
                 status: ComponentStatus::NotExecuted,
                 deployments: 0,
                 transactions: 0,
+                gas_used: 0,
                 error: None,
             },
         ];
@@ -1520,12 +1806,15 @@ components:
         let components = parsed["components"].as_array().unwrap();
         assert_eq!(components[1]["status"], "failed");
         assert_eq!(components[1]["error"], "script reverted");
+        assert_eq!(components[1]["gasUsed"], 0);
         assert_eq!(components[2]["status"], "not_executed");
+        assert_eq!(components[2]["gasUsed"], 0);
         assert!(components[2].get("error").is_none());
 
         assert_eq!(parsed["totals"]["succeeded"], 1);
         assert_eq!(parsed["totals"]["failed"], 1);
-        assert_eq!(parsed["totals"]["not_executed"], 1);
+        assert_eq!(parsed["totals"]["notExecuted"], 1);
+        assert_eq!(parsed["totals"]["gasUsed"], 50_000);
     }
 
     #[test]
@@ -1536,6 +1825,7 @@ components:
                 status: ComponentStatus::Skipped,
                 deployments: 0,
                 transactions: 0,
+                gas_used: 0,
                 error: None,
             },
             ComponentResultEntry {
@@ -1543,6 +1833,7 @@ components:
                 status: ComponentStatus::Success,
                 deployments: 5,
                 transactions: 3,
+                gas_used: 300_000,
                 error: None,
             },
         ];
@@ -1559,11 +1850,13 @@ components:
         let components = parsed["components"].as_array().unwrap();
         assert_eq!(components[0]["status"], "skipped");
         assert_eq!(components[0]["deployments"], 0);
+        assert_eq!(components[0]["gasUsed"], 0);
 
         assert_eq!(parsed["totals"]["skipped"], 1);
         assert_eq!(parsed["totals"]["succeeded"], 1);
         assert_eq!(parsed["totals"]["deployments"], 5);
         assert_eq!(parsed["totals"]["transactions"], 3);
+        assert_eq!(parsed["totals"]["gasUsed"], 300_000);
     }
 
     #[test]
@@ -1582,6 +1875,7 @@ components:
             status: ComponentStatus::Success,
             deployments: 2,
             transactions: 1,
+            gas_used: 80_000,
             error: None,
         }];
         let totals = compute_totals(&results);

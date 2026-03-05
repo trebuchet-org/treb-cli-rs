@@ -10,7 +10,10 @@
 
 mod framework;
 
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use framework::{
     context::TestContext,
@@ -136,6 +139,69 @@ fn compose_dry_run_json_chain() {
     let test = IntegrationTest::new("compose_dry_run_json_chain")
         .pre_setup_hook(|ctx| copy_compose_fixture("chain.yaml", ctx))
         .test(&["compose", "chain.yaml", "--dry-run", "--json"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// Dry-run resume + verbose shows hash/skip context and marks completed step.
+#[test]
+fn compose_dry_run_resume_verbose() {
+    let ctx = TestContext::new("compose-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("compose_dry_run_resume_verbose")
+        .pre_setup_hook(|ctx| {
+            copy_compose_fixture("simple.yaml", ctx);
+            fs::create_dir_all(ctx.treb_dir()).unwrap();
+            let state = serde_json::json!({
+                "compose_hash": "deadbeef",
+                "completed": ["registry"]
+            });
+            fs::write(
+                ctx.treb_dir().join("compose-state.json"),
+                serde_json::to_string_pretty(&state).unwrap(),
+            )
+            .unwrap();
+        })
+        .test(&["compose", "simple.yaml", "--dry-run", "--resume", "--verbose"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── Dump-command tests ───────────────────────────────────────────────────
+
+/// Dump-command with two independent components (simple.yaml).
+///
+/// Verifies per-component `forge script` commands are printed in topological
+/// order with `# component-name` headers.
+#[test]
+fn compose_dump_command_simple() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("compose_dump_command_simple")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| copy_compose_fixture("simple.yaml", ctx))
+        .test(&["compose", "simple.yaml", "--dump-command"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// Dump-command with a linear dependency chain (chain.yaml).
+///
+/// Verifies components are printed in dependency order: libs, core, periphery.
+#[test]
+fn compose_dump_command_chain() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("compose_dump_command_chain")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| copy_compose_fixture("chain.yaml", ctx))
+        .test(&["compose", "chain.yaml", "--dump-command"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);

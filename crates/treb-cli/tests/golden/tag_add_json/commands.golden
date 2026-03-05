@@ -1,9 +1,9 @@
 === cmd 0: [tag --json --add v3-release mainnet/42220/FPMM:v<VERSION>] ===
 {
-  "deploymentId": "mainnet/42220/FPMM:v<VERSION>",
   "action": "add",
+  "deploymentId": "mainnet/42220/FPMM:v<VERSION>",
+  "tag": "v3-release",
   "tags": [
     "v3-release"
-  ],
-  "tag": "v3-release"
+  ]
 }

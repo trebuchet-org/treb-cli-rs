@@ -1,0 +1,118 @@
+{
+  "project": "treb-cli-rs",
+  "branchName": "feat/M1-P07-compose-command-completion",
+  "description": "Complete the treb compose command with Phase 3/5 styled output (stage indicators, colored status, gas aggregation), --debug and --dump-command flags, enhanced verbose mode, and updated golden file coverage.",
+  "userStories": [
+    {
+      "id": "P7-US-001",
+      "title": "Gas Aggregation in Component Results",
+      "description": "As a developer, I want gas_used threaded from PipelineResult through ComponentResultEntry and ComposeTotals so that per-component and total gas usage is tracked and serialized in JSON output.",
+      "acceptanceCriteria": [
+        "ComponentResultEntry has gas_used: u64 field populated from PipelineResult.gas_used",
+        "ComposeTotals has gas_used: u64 field summed across all components",
+        "JSON output includes gasUsed in both component entries and totals (via serde camelCase)",
+        "Skipped and not-executed components have gas_used: 0",
+        "Existing compute_totals unit tests updated for new gas_used field",
+        "cargo check -p treb-cli passes",
+        "cargo test -p treb-cli -- compose unit tests pass"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "P7-US-002",
+      "title": "Stage Progress Indicators and Styled Dry-Run Output",
+      "description": "As a developer, I want compose execution to show emoji stage indicators and a styled dry-run banner so that progress is visually consistent with the run command.",
+      "acceptanceCriteria": [
+        "Compose execution shows emoji stage indicators for orchestration start, per-component execution, completion, and skipping via print_stage()",
+        "Dry-run mode shows a styled warning banner before the plan via print_warning_banner()",
+        "Broadcast confirmation uses aligned key-value display via eprint_kv()",
+        "--json mode suppresses all stage output (existing !json guards maintained)",
+        "All stage output goes to stderr; result data to stdout",
+        "cargo check -p treb-cli passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "P7-US-003",
+      "title": "Debug Mode and Dump Command Flag",
+      "description": "As a developer, I want --debug and --dump-command CLI flags on the compose command so that I can inspect per-component forge commands and save debug logs, matching the run command patterns.",
+      "acceptanceCriteria": [
+        "CLI argument parsing accepts --debug and --dump-command flags on compose command",
+        "--dump-command prints per-component forge commands in topological order and exits without execution",
+        "--dump-command respects resume skip set (skipped components shown with comment)",
+        "--debug creates per-component debug log files in .treb/debug-compose-<timestamp>/ directory",
+        "--debug prints directory path after execution",
+        "cargo check -p treb-cli passes",
+        "CLI arg test in cli_compose.rs updated for new flags"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "P7-US-004",
+      "title": "Styled Component Result Display",
+      "description": "As a developer, I want compose results to show color-coded status per component (green success, red failed, yellow skipped, gray not-executed) with gas usage so that results are easy to scan visually.",
+      "acceptanceCriteria": [
+        "Human output shows colored status per component with appropriate icons (checkmark, cross, skip arrow, dash)",
+        "Gas usage displayed per component (when non-zero) and in totals using format_gas()",
+        "Failed component error message shows indented below component name",
+        "Color output gated on color::is_color_enabled() using styled() pattern",
+        "display_compose_json() unchanged; JSON output still uses print_json()",
+        "cargo check -p treb-cli passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "P7-US-005",
+      "title": "Styled Dry-Run Plan Display",
+      "description": "As a developer, I want the dry-run plan to show styled component names, script paths, and step numbers with color so that the plan is easier to read.",
+      "acceptanceCriteria": [
+        "Dry-run plan shows styled component names (bold/LABEL), script paths (MUTED), and step numbers (bold) when color is enabled",
+        "Skipped entries are visually distinct with WARNING color and (skipped) suffix",
+        "Plain output (no color) maintains backward-compatible format for golden files",
+        "cargo check -p treb-cli passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "P7-US-006",
+      "title": "Verbose Mode Enhancement",
+      "description": "As a developer, I want --verbose to show aligned pre-execution context (script, namespace, RPC, chain ID, sig, verify) and post-execution summary per component so that I can inspect execution details.",
+      "acceptanceCriteria": [
+        "Verbose pre-execution shows aligned key-value pairs (script, namespace, RPC, chain ID, sig, verify) per component via eprint_kv()",
+        "Verbose post-execution shows deployment/transaction/gas summary per component",
+        "Resume mode verbose shows compose hash and skip count",
+        "--verbose --json suppresses all verbose output",
+        "cargo check -p treb-cli passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "P7-US-007",
+      "title": "Golden File Updates for Compose Command",
+      "description": "As a developer, I want all compose golden files regenerated to match styled output and new golden tests for dump-command so that output changes are captured and regression-tested.",
+      "acceptanceCriteria": [
+        "All existing compose golden file tests pass with updated styled output format",
+        "New compose_dump_command_simple golden test validates per-component forge command output",
+        "New compose_dump_command_chain golden test validates dependency order in dump output",
+        "JSON golden files have deterministic key ordering via sort_json_keys()/print_json()",
+        "No regressions in non-compose golden tests (run, list, show, verify)",
+        "Full test suite passes: cargo test -p treb-cli"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

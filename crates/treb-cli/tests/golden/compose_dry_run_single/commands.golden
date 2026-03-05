@@ -1,4 +1,6 @@
 === cmd 0: [compose single.yaml --dry-run] ===
+🚧 [DRY RUN] Showing execution plan only — no changes will be made.
+
 
 Orchestrating single-deploy
 Execution plan: 1 components

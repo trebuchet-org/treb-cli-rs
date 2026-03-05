@@ -1,0 +1,5 @@
+=== cmd 0: [compose simple.yaml --dump-command] ===
+# registry
+forge script script/DeployRegistry.s.sol
+# token
+forge script script/DeployToken.s.sol

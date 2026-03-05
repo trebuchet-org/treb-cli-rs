@@ -1,0 +1,7 @@
+=== cmd 0: [compose chain.yaml --dump-command] ===
+# libs
+forge script script/DeployLibs.s.sol
+# core
+forge script script/DeployCore.s.sol
+# periphery
+forge script script/DeployPeriphery.s.sol

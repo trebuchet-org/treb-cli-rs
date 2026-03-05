@@ -1,0 +1,26 @@
+=== cmd 0: [run script/Deploy.s.sol --dry-run --non-interactive --verbose --json] ===
+No files changed, compilation skipped
+{
+  "console_logs": [],
+  "deployments": [
+    {
+      "address": "0x7FA9385bE102ac3EAc297483Dd6233D62b3e1496",
+      "chain_id": 0,
+      "contract_name": "Counter",
+      "deployment_type": "SINGLETON",
+      "id": "default/0/Counter:Counter",
+      "namespace": "default"
+    }
+  ],
+  "dry_run": true,
+  "gas_used": 160053,
+  "skipped": [],
+  "success": true,
+  "transactions": [
+    {
+      "hash": "",
+      "id": "tx-<ID>",
+      "status": "SIMULATED"
+    }
+  ]
+}

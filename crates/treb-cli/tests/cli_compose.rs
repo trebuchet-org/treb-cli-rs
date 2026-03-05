@@ -6,7 +6,18 @@
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
-use std::{fs, path::Path};
+use regex::Regex;
+use std::{
+    fs,
+    hash::{DefaultHasher, Hash, Hasher},
+    path::Path,
+};
+
+/// Strip ANSI escape codes from a string for plain-text assertions.
+fn strip_ansi(s: &str) -> String {
+    let re = Regex::new(r"\x1b\[[0-9;]*m").unwrap();
+    re.replace_all(s, "").to_string()
+}
 
 fn treb() -> assert_cmd::Command {
     cargo_bin_cmd!("treb-cli")
@@ -17,6 +28,11 @@ const MINIMAL_FOUNDRY_TOML: &str = "[profile.default]\n";
 /// Path to the compose fixtures directory.
 fn fixtures_dir() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("compose")
+}
+
+fn copy_fixture_to(name: &str, dst: &Path) {
+    let src = fixtures_dir().join(name);
+    fs::copy(src, dst.join(name)).unwrap();
 }
 
 // ── Help and argument parsing ─────────────────────────────────────────
@@ -39,6 +55,8 @@ fn compose_help_shows_all_flags() {
     assert!(stdout.contains("--json"), "help should show --json");
     assert!(stdout.contains("--env"), "help should show --env");
     assert!(stdout.contains("--non-interactive"), "help should show --non-interactive");
+    assert!(stdout.contains("--debug"), "help should show --debug");
+    assert!(stdout.contains("--dump-command"), "help should show --dump-command");
 }
 
 #[test]
@@ -153,7 +171,7 @@ fn compose_dry_run_chain_shows_correct_order() {
 
     assert!(output.status.success());
 
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
 
     // Verify components appear and are in dependency order
     assert!(stderr.contains("libs"), "should show libs");
@@ -179,7 +197,7 @@ fn compose_dry_run_diamond_shows_correct_order() {
 
     assert!(output.status.success());
 
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
 
     // base must be first (step 1), top must be last (step 4)
     assert!(stderr.contains("base"), "should show base");
@@ -272,6 +290,7 @@ fn compose_all_flags_accepted() {
             "--slow",
             "--legacy",
             "--verbose",
+            "--debug",
             "--json",
             "--env",
             "FOO=bar",
@@ -307,6 +326,89 @@ fn compose_resume_flag_accepted() {
         "should not have arg parsing error: {stderr}"
     );
     assert!(output.status.success());
+}
+
+// ── Dump-command flag ──────────────────────────────────────────────────
+
+#[test]
+fn compose_dump_command_flag_accepted() {
+    let fixture = fixtures_dir().join("simple.yaml");
+
+    // --dump-command should be accepted by the parser (will fail at config
+    // resolution since there's no foundry project, but should NOT fail at
+    // arg parsing).
+    let output = treb()
+        .args(["compose", fixture.to_str().unwrap(), "--dump-command"])
+        .output()
+        .expect("failed to run compose --dump-command");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("error: unexpected argument"),
+        "should not have arg parsing error: {stderr}"
+    );
+}
+
+#[test]
+fn compose_dump_command_writes_commands_to_stdout() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
+    treb().arg("init").current_dir(tmp.path()).assert().success();
+    copy_fixture_to("simple.yaml", tmp.path());
+
+    let output = treb()
+        .args(["compose", "simple.yaml", "--dump-command"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("failed to run compose --dump-command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stdout.contains("# registry"), "stdout should include component header: {stdout}");
+    assert!(stdout.contains("forge script"), "stdout should include forge command: {stdout}");
+    assert!(stderr.trim().is_empty(), "stderr should be empty for dump-command: {stderr}");
+}
+
+#[test]
+fn compose_json_debug_does_not_emit_human_debug_line() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
+    treb().arg("init").current_dir(tmp.path()).assert().success();
+    copy_fixture_to("simple.yaml", tmp.path());
+
+    let compose_path = tmp.path().join("simple.yaml");
+    let compose_contents = fs::read_to_string(&compose_path).unwrap();
+    let mut hasher = DefaultHasher::new();
+    compose_contents.hash(&mut hasher);
+    let compose_hash = format!("{:016x}", hasher.finish());
+
+    let state_path = tmp.path().join(".treb").join("compose-state.json");
+    fs::write(
+        &state_path,
+        serde_json::to_string_pretty(&serde_json::json!({
+            "compose_hash": compose_hash,
+            "completed": ["registry", "token"]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let output = treb()
+        .args(["compose", "simple.yaml", "--resume", "--json", "--debug"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("failed to run compose --resume --json --debug");
+
+    assert!(output.status.success());
+    let _: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("Debug logs saved to"),
+        "stderr should not include debug-path line in json mode: {stderr}"
+    );
+    assert!(stderr.trim().is_empty(), "stderr should be empty in json mode: {stderr}");
 }
 
 // ── Compose without init (non-dry-run) ────────────────────────────────

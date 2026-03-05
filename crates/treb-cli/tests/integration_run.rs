@@ -172,6 +172,34 @@ async fn run_verbose() {
     run_integration_test(&test, &ctx);
 }
 
+/// Verbose + JSON mode should emit JSON only (no verbose human output).
+///
+/// Verifies `--verbose --json` does not print key/value verbose lines that
+/// would break machine-readable JSON output.
+#[test]
+fn run_verbose_json() {
+    let ctx = TestContext::new("project");
+
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("run_verbose_json")
+        .setup(&["init"])
+        .test(&[
+            "run",
+            "script/Deploy.s.sol",
+            "--dry-run",
+            "--non-interactive",
+            "--verbose",
+            "--json",
+        ])
+        .extra_normalizer(Box::new(path_normalizer))
+        .extra_normalizer(Box::new(CompilerOutputNormalizer))
+        .extra_normalizer(Box::new(GasNormalizer))
+        .extra_normalizer(Box::new(DurationNormalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
 /// Dump command — prints equivalent forge script CLI command and exits.
 ///
 /// Verifies that `--dump-command` outputs the forge command and exits without executing.
