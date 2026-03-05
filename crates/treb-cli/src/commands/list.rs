@@ -8,6 +8,7 @@ use treb_core::types::{Deployment, DeploymentType};
 use treb_registry::Registry;
 
 use crate::output;
+use crate::ui::badge;
 use crate::ui::color;
 use crate::ui::tree::TreeNode;
 
@@ -120,15 +121,32 @@ fn type_sort_key(dt: &DeploymentType) -> u8 {
 
 /// Format a deployment entry label for tree display.
 ///
-/// - Empty label: `ContractName 0xABCD...EFGH`
-/// - Non-empty label: `ContractName:label 0xABCD...EFGH`
+/// Format: `ContractName[:label] address badge [fork]`
 fn format_deployment_entry(d: &Deployment) -> String {
     let addr = output::truncate_address(&d.address);
-    if d.label.is_empty() {
-        format!("{} {}", d.contract_name, addr)
+    let name_part = if d.label.is_empty() {
+        d.contract_name.clone()
     } else {
-        format!("{}:{} {}", d.contract_name, d.label, addr)
+        format!("{}:{}", d.contract_name, d.label)
+    };
+    let ver_badge = badge::verification_badge(&d.verification.verifiers);
+    let mut parts = vec![name_part, addr, ver_badge];
+    if let Some(fb) = badge::fork_badge(&d.namespace) {
+        parts.push(fb);
     }
+    parts.join(" ")
+}
+
+/// Build a TreeNode for a deployment entry, including an implementation child
+/// node when proxy_info is present.
+fn build_deployment_node(d: &Deployment) -> TreeNode {
+    let label = format_deployment_entry(d);
+    let mut node = TreeNode::new(label);
+    if let Some(ref pi) = d.proxy_info {
+        let impl_label = format!("Implementation {}", output::truncate_address(&pi.implementation));
+        node = node.child(TreeNode::new(impl_label));
+    }
+    node
 }
 
 /// Organize a flat list of deployments into a hierarchical grouping:
@@ -233,10 +251,10 @@ pub async fn run(
                     TreeNode::new(chain_id.to_string()).with_style(color::CHAIN);
                 for tg in type_groups {
                     let type_label = tg.deployment_type.to_string();
-                    let mut type_node = TreeNode::new(type_label);
+                    let type_style = color::style_for_deployment_type(tg.deployment_type.clone());
+                    let mut type_node = TreeNode::new(type_label).with_style(type_style);
                     for d in &tg.deployments {
-                        let entry_label = format_deployment_entry(d);
-                        type_node = type_node.child(TreeNode::new(entry_label));
+                        type_node = type_node.child(build_deployment_node(d));
                     }
                     chain_node = chain_node.child(type_node);
                 }
@@ -259,8 +277,8 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use std::collections::HashMap;
     use treb_core::types::{
-        ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, VerificationInfo,
-        VerificationStatus,
+        ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, ProxyInfo,
+        VerificationInfo, VerificationStatus,
     };
 
     fn make_deployment(
@@ -674,5 +692,89 @@ mod tests {
         let fork_types = &grouped["fork/42220"][&42220];
         assert_eq!(fork_types.len(), 1);
         assert_eq!(fork_types[0].deployment_type, DeploymentType::Proxy);
+    }
+
+    // -----------------------------------------------------------------------
+    // Tree node rendering tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn build_deployment_node_proxy_has_implementation_child() {
+        let mut d = make_deployment(
+            "mainnet/42220/TransparentUpgradeableProxy:FPMMFactory",
+            "mainnet",
+            42220,
+            "TransparentUpgradeableProxy",
+            "FPMMFactory",
+            DeploymentType::Proxy,
+            None,
+        );
+        d.address = "0x22A81Fc75b0d5F7cac19cABa9F0c3719b3897F03".into();
+        d.proxy_info = Some(ProxyInfo {
+            proxy_type: "UUPS".into(),
+            implementation: "0x959597fD009876e6f53EbdB2F1c1Bc3f994579dF".into(),
+            admin: String::new(),
+            history: vec![],
+        });
+
+        let node = build_deployment_node(&d);
+        let rendered = node.render();
+        let lines: Vec<&str> = rendered.lines().collect();
+
+        // Should have 2 lines: the deployment entry + implementation child
+        assert_eq!(lines.len(), 2, "proxy deployment should have 1 child node, got:\n{rendered}");
+        assert!(
+            lines[0].contains("TransparentUpgradeableProxy:FPMMFactory"),
+            "first line should contain contract name:label"
+        );
+        assert!(
+            lines[0].contains("UNVERIFIED"),
+            "first line should contain verification badge"
+        );
+        assert!(
+            lines[1].contains("Implementation"),
+            "child should be an Implementation node"
+        );
+        assert!(
+            lines[1].contains("0x9595...79dF"),
+            "child should contain truncated implementation address"
+        );
+    }
+
+    #[test]
+    fn build_deployment_node_non_proxy_has_no_children() {
+        let d = make_deployment(
+            "mainnet/42220/FPMM",
+            "mainnet",
+            42220,
+            "FPMM",
+            "",
+            DeploymentType::Singleton,
+            None,
+        );
+
+        let node = build_deployment_node(&d);
+        let rendered = node.render();
+        assert_eq!(
+            rendered.lines().count(),
+            1,
+            "non-proxy deployment should have no child nodes"
+        );
+    }
+
+    #[test]
+    fn format_entry_includes_fork_badge() {
+        let d = make_deployment(
+            "fork/42220/FPMM:dev",
+            "fork/42220",
+            42220,
+            "FPMM",
+            "dev",
+            DeploymentType::Proxy,
+            None,
+        );
+        let entry = format_deployment_entry(&d);
+        assert!(entry.contains("[fork]"), "fork-namespace entry should contain [fork] badge");
+        assert!(entry.contains("UNVERIFIED"), "entry should contain verification badge");
     }
 }
