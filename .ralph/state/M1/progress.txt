@@ -9,6 +9,8 @@ Started: Thu Mar  5 06:51:37 PM CET 2026
 - Test helpers `init_project_with_deployments` and `init_project_with_verified_deployments` in cli_verify.rs set up fixture data from treb-core fixtures
 - All verify tests pass with `cargo test -p treb-cli -- verify` (covers both cli_verify.rs and integration_verify.rs)
 - `std::env::set_var` and `std::env::remove_var` require `unsafe {}` blocks in Rust 2024 edition
+- `ui::badge::verification_badge()` / `verification_badge_styled()` for compact per-verifier status display (e.g. `e[V] s[X] b[-]`)
+- Use `styled()` helper in verify.rs for all color-gated text; progress to stderr, results to stdout
 
 ## 2026-03-05 - P6-US-001
 - What was implemented: Added test coverage for per-verifier shorthand flags. The implementation (CLI flags + resolution logic) was already in place; tests were the missing piece.
@@ -38,4 +40,34 @@ Started: Thu Mar  5 06:51:37 PM CET 2026
   - `std::env::set_var` and `std::env::remove_var` are unsafe in this Rust edition (2024) — must wrap in `unsafe {}` blocks
   - `resolve_api_key` is a private fn in verify.rs — unit tests must be in the same file's #[cfg(test)] module (same as aggregate_status)
   - The resolve_api_key function already handles: explicit key override, ETHERSCAN_API_KEY, BLOCKSCOUT_API_KEY, sourcify (no key needed)
+---
+
+## 2026-03-05 - P6-US-004
+- What was implemented: Added styled single deployment verification output — failure reason display for both build_verify_args errors and verification errors, verification_badge summary (e.g. e[V] s[X] b[-]) printed to stdout after verification loop completes.
+- Files changed:
+  - `crates/treb-cli/src/commands/verify.rs` — imported `ui::badge`, added reason display for failed verifiers (indented under verifier name), added build_verify_args error styled output, added verification_badge summary after loop
+- **Learnings for future iterations:**
+  - `verification_badge()` and `verification_badge_styled()` already exist in `ui::badge` module — no need to implement badge logic
+  - The `styled()` helper in verify.rs gates all styling on `color::is_color_enabled()` — use it consistently
+  - stderr/stdout separation: `print_stage` and `eprintln` for progress, `println` for results (badge summary)
+  - The golden file test `golden_file_round_trip` in smoke_phase3 has a pre-existing failure (version output format change) — not related to verify changes
+  - Both single-deploy and batch paths need the same styling treatment — P6-US-005 handles batch
+---
+
+## 2026-03-05 - P6-US-005
+- What was implemented: Styled batch verification output — added truncated address to progress stage, replaced simple badge column with verification_badge in summary table, added failure reason display in batch path for both build_verify_args and verification errors.
+- Files changed:
+  - `crates/treb-cli/src/commands/verify.rs` — batch progress format updated, summary table badge column replaced with verification_badge, failure reason display added
+- **Learnings for future iterations:**
+  - Summary table uses a parallel `ver_badges: Vec<String>` to track per-deployment badge strings alongside `results: Vec<VerifyOutputJson>`, zipped in the table loop
+  - Table column renamed from "Badge" to "Verifiers" — uses verification_badge format (e.g. `e[V] s[X] b[-]`) not simple checkmark symbols
+  - Both single and batch paths now have consistent styled output: print_stage for progress, reason display for failures, verification_badge for summary
+---
+
+## 2026-03-05 - P6-US-001 (re-verification)
+- What was implemented: Verified all acceptance criteria are met. Implementation (shorthand flags, verifier list resolution, run()/run_batch() accepting &[String]) was already complete from prior iterations. All 43 verify-related tests pass (17 unit + 20 cli_verify + 6 integration_verify). Typecheck passes.
+- Files changed: None (implementation already complete)
+- **Learnings for future iterations:**
+  - When review blocks a story, re-run all checks to confirm the implementation is actually complete before re-marking
+  - P6-US-001 implementation spans main.rs (flag definitions + resolution logic) and verify.rs (run/run_batch signatures)
 ---

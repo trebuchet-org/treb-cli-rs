@@ -16,8 +16,8 @@
         "Typecheck passes (cargo check -p treb-cli)"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Blocked by review B1: status was marked passed without a single-deployment run() implementation commit."
+      "passes": true,
+      "notes": ""
     },
     {
       "id": "P6-US-002",
