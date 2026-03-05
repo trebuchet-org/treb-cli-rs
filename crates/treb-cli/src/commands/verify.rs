@@ -14,9 +14,10 @@ use treb_verify::VerifyOpts;
 use crate::{
     commands::resolve::resolve_deployment,
     output,
-    ui::badge,
-    ui::color,
-    ui::selector::{fuzzy_select_deployment_id, multiselect_deployments},
+    ui::{
+        badge, color,
+        selector::{fuzzy_select_deployment_id, multiselect_deployments},
+    },
 };
 
 /// Per-verifier JSON result in the verifiers breakdown.
@@ -65,7 +66,9 @@ fn resolve_api_key(verifier: &str, explicit_key: &Option<String>) -> Option<Stri
 /// Compute aggregate verification status from per-verifier results.
 ///
 /// All VERIFIED -> Verified, all FAILED -> Failed, mixed -> Partial.
-fn aggregate_status(verifier_results: &std::collections::HashMap<String, VerifierStatus>) -> VerificationStatus {
+fn aggregate_status(
+    verifier_results: &std::collections::HashMap<String, VerifierStatus>,
+) -> VerificationStatus {
     if verifier_results.is_empty() {
         return VerificationStatus::Unverified;
     }
@@ -103,11 +106,7 @@ fn verifier_results_json(
 ///
 /// Returns the styled string when color is enabled, plain text otherwise.
 fn styled(text: &str, style: Style) -> String {
-    if color::is_color_enabled() {
-        format!("{}", text.style(style))
-    } else {
-        text.to_string()
-    }
+    if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
 }
 
 /// Run the verify command.
@@ -236,6 +235,7 @@ pub async fn run(
 
     let mut dep = registry.get_deployment(&deployment_id).unwrap().clone();
     let verifier_count = verifiers.len();
+    let mut attempted_verifiers: HashMap<String, VerifierStatus> = HashMap::new();
 
     for (vi, verifier) in verifiers.iter().enumerate() {
         let resolved_key = resolve_api_key(verifier, &verifier_api_key);
@@ -258,20 +258,15 @@ pub async fn run(
             Ok(args) => args,
             Err(e) => {
                 let reason = format!("{e:#}");
-                dep.verification.verifiers.insert(
-                    verifier.to_lowercase(),
-                    VerifierStatus {
-                        status: "FAILED".to_string(),
-                        url: String::new(),
-                        reason: reason.clone(),
-                    },
-                );
+                let status = VerifierStatus {
+                    status: "FAILED".to_string(),
+                    url: String::new(),
+                    reason: reason.clone(),
+                };
+                dep.verification.verifiers.insert(verifier.to_lowercase(), status.clone());
+                attempted_verifiers.insert(verifier.to_lowercase(), status);
                 if !json {
-                    eprintln!(
-                        "  {}: {}",
-                        verifier,
-                        styled("FAILED", color::FAILED),
-                    );
+                    eprintln!("  {}: {}", verifier, styled("FAILED", color::FAILED),);
                     eprintln!("    {}", styled(&reason, color::MUTED));
                 }
                 continue;
@@ -283,8 +278,8 @@ pub async fn run(
 
         match result {
             Ok(()) => {
-                // Set etherscan_url from first successful verification only.
-                if dep.verification.etherscan_url.is_empty() {
+                // Keep etherscan_url reserved for successful etherscan verification only.
+                if verifier == "etherscan" && dep.verification.etherscan_url.is_empty() {
                     if let Some(ref url) = explorer_url {
                         dep.verification.etherscan_url = url.clone();
                     }
@@ -292,20 +287,15 @@ pub async fn run(
                 if dep.verification.verified_at.is_none() {
                     dep.verification.verified_at = Some(Utc::now());
                 }
-                dep.verification.verifiers.insert(
-                    verifier.to_lowercase(),
-                    VerifierStatus {
-                        status: "VERIFIED".to_string(),
-                        url: explorer_url.clone().unwrap_or_default(),
-                        reason: String::new(),
-                    },
-                );
+                let status = VerifierStatus {
+                    status: "VERIFIED".to_string(),
+                    url: explorer_url.clone().unwrap_or_default(),
+                    reason: String::new(),
+                };
+                dep.verification.verifiers.insert(verifier.to_lowercase(), status.clone());
+                attempted_verifiers.insert(verifier.to_lowercase(), status);
                 if !json {
-                    eprintln!(
-                        "  {}: {}",
-                        verifier,
-                        styled("VERIFIED", color::VERIFIED),
-                    );
+                    eprintln!("  {}: {}", verifier, styled("VERIFIED", color::VERIFIED),);
                     if let Some(ref url) = explorer_url {
                         eprintln!("    {}", styled(url, color::MUTED));
                     }
@@ -313,20 +303,15 @@ pub async fn run(
             }
             Err(e) => {
                 let reason = format!("{e:#}");
-                dep.verification.verifiers.insert(
-                    verifier.to_lowercase(),
-                    VerifierStatus {
-                        status: "FAILED".to_string(),
-                        url: String::new(),
-                        reason: reason.clone(),
-                    },
-                );
+                let status = VerifierStatus {
+                    status: "FAILED".to_string(),
+                    url: String::new(),
+                    reason: reason.clone(),
+                };
+                dep.verification.verifiers.insert(verifier.to_lowercase(), status.clone());
+                attempted_verifiers.insert(verifier.to_lowercase(), status);
                 if !json {
-                    eprintln!(
-                        "  {}: {}",
-                        verifier,
-                        styled("FAILED", color::FAILED),
-                    );
+                    eprintln!("  {}: {}", verifier, styled("FAILED", color::FAILED),);
                     eprintln!("    {}", styled(&reason, color::MUTED));
                 }
             }
@@ -339,13 +324,11 @@ pub async fn run(
     }
 
     // Compute aggregate status and update registry once.
-    let agg_status = aggregate_status(&dep.verification.verifiers);
+    let agg_status = aggregate_status(&attempted_verifiers);
     dep.verification.status = agg_status.clone();
     // verified_at already set on first successful verification above.
     // Set reason from first failed verifier, if any.
-    dep.verification.reason = dep
-        .verification
-        .verifiers
+    dep.verification.reason = attempted_verifiers
         .values()
         .find(|v| v.status == "FAILED")
         .map(|v| v.reason.clone())
@@ -356,9 +339,9 @@ pub async fn run(
     // Show verification badge summary on stdout.
     if !json {
         let ver_badge = if color::is_color_enabled() {
-            badge::verification_badge_styled(&dep.verification.verifiers)
+            badge::verification_badge_styled(&attempted_verifiers)
         } else {
-            badge::verification_badge(&dep.verification.verifiers)
+            badge::verification_badge(&attempted_verifiers)
         };
         println!("  {}", ver_badge);
     }
@@ -382,14 +365,11 @@ pub async fn run(
             explorer_url: dep.verification.etherscan_url,
             reason: dep.verification.reason,
             verified_at: dep.verification.verified_at.map(|t| t.to_rfc3339()),
-            verifiers: verifier_results_json(&dep.verification.verifiers),
+            verifiers: verifier_results_json(&attempted_verifiers),
         };
         output::print_json(&out)?;
     } else if dep.verification.status == VerificationStatus::Failed {
-        bail!(
-            "verification failed for {}",
-            contract_name
-        );
+        bail!("verification failed for {}", contract_name);
     }
 
     Ok(())
@@ -478,6 +458,7 @@ async fn run_batch(
 
         let mut dep_owned = dep_snapshot;
         let verifier_count = verifiers.len();
+        let mut attempted_verifiers: HashMap<String, VerifierStatus> = HashMap::new();
 
         for (vi, verifier) in verifiers.iter().enumerate() {
             let resolved_key = resolve_api_key(verifier, &verifier_api_key);
@@ -499,20 +480,18 @@ async fn run_batch(
                 Ok(args) => args,
                 Err(e) => {
                     let reason = format!("{e:#}");
-                    dep_owned.verification.verifiers.insert(
-                        verifier.to_lowercase(),
-                        VerifierStatus {
-                            status: "FAILED".to_string(),
-                            url: String::new(),
-                            reason: reason.clone(),
-                        },
-                    );
+                    let status = VerifierStatus {
+                        status: "FAILED".to_string(),
+                        url: String::new(),
+                        reason: reason.clone(),
+                    };
+                    dep_owned
+                        .verification
+                        .verifiers
+                        .insert(verifier.to_lowercase(), status.clone());
+                    attempted_verifiers.insert(verifier.to_lowercase(), status);
                     if !json {
-                        eprintln!(
-                            "  {}: {}",
-                            verifier,
-                            styled("FAILED", color::FAILED),
-                        );
+                        eprintln!("  {}: {}", verifier, styled("FAILED", color::FAILED),);
                         eprintln!("    {}", styled(&reason, color::MUTED));
                     }
                     continue;
@@ -524,8 +503,8 @@ async fn run_batch(
 
             match result {
                 Ok(()) => {
-                    // Set etherscan_url from first successful verification only.
-                    if dep_owned.verification.etherscan_url.is_empty() {
+                    // Keep etherscan_url reserved for successful etherscan verification only.
+                    if verifier == "etherscan" && dep_owned.verification.etherscan_url.is_empty() {
                         if let Some(ref url) = explorer_url {
                             dep_owned.verification.etherscan_url = url.clone();
                         }
@@ -533,20 +512,18 @@ async fn run_batch(
                     if dep_owned.verification.verified_at.is_none() {
                         dep_owned.verification.verified_at = Some(Utc::now());
                     }
-                    dep_owned.verification.verifiers.insert(
-                        verifier.to_lowercase(),
-                        VerifierStatus {
-                            status: "VERIFIED".to_string(),
-                            url: explorer_url.clone().unwrap_or_default(),
-                            reason: String::new(),
-                        },
-                    );
+                    let status = VerifierStatus {
+                        status: "VERIFIED".to_string(),
+                        url: explorer_url.clone().unwrap_or_default(),
+                        reason: String::new(),
+                    };
+                    dep_owned
+                        .verification
+                        .verifiers
+                        .insert(verifier.to_lowercase(), status.clone());
+                    attempted_verifiers.insert(verifier.to_lowercase(), status);
                     if !json {
-                        eprintln!(
-                            "  {}: {}",
-                            verifier,
-                            styled("VERIFIED", color::VERIFIED),
-                        );
+                        eprintln!("  {}: {}", verifier, styled("VERIFIED", color::VERIFIED),);
                         if let Some(ref url) = explorer_url {
                             eprintln!("    {}", styled(url, color::MUTED));
                         }
@@ -554,20 +531,18 @@ async fn run_batch(
                 }
                 Err(e) => {
                     let reason = format!("{e:#}");
-                    dep_owned.verification.verifiers.insert(
-                        verifier.to_lowercase(),
-                        VerifierStatus {
-                            status: "FAILED".to_string(),
-                            url: String::new(),
-                            reason: reason.clone(),
-                        },
-                    );
+                    let status = VerifierStatus {
+                        status: "FAILED".to_string(),
+                        url: String::new(),
+                        reason: reason.clone(),
+                    };
+                    dep_owned
+                        .verification
+                        .verifiers
+                        .insert(verifier.to_lowercase(), status.clone());
+                    attempted_verifiers.insert(verifier.to_lowercase(), status);
                     if !json {
-                        eprintln!(
-                            "  {}: {}",
-                            verifier,
-                            styled("FAILED", color::FAILED),
-                        );
+                        eprintln!("  {}: {}", verifier, styled("FAILED", color::FAILED),);
                         eprintln!("    {}", styled(&reason, color::MUTED));
                     }
                 }
@@ -580,12 +555,10 @@ async fn run_batch(
         }
 
         // Compute aggregate status and update registry once per deployment.
-        let agg_status = aggregate_status(&dep_owned.verification.verifiers);
+        let agg_status = aggregate_status(&attempted_verifiers);
         dep_owned.verification.status = agg_status.clone();
         // verified_at already set on first successful verification above.
-        dep_owned.verification.reason = dep_owned
-            .verification
-            .verifiers
+        dep_owned.verification.reason = attempted_verifiers
             .values()
             .find(|v| v.status == "FAILED")
             .map(|v| v.reason.clone())
@@ -595,9 +568,9 @@ async fn run_batch(
 
         // Compute verification badge for summary table.
         let ver_badge = if color::is_color_enabled() {
-            badge::verification_badge_styled(&dep_owned.verification.verifiers)
+            badge::verification_badge_styled(&attempted_verifiers)
         } else {
-            badge::verification_badge(&dep_owned.verification.verifiers)
+            badge::verification_badge(&attempted_verifiers)
         };
         ver_badges.push(ver_badge);
 
@@ -618,7 +591,7 @@ async fn run_batch(
             explorer_url: dep_owned.verification.etherscan_url.clone(),
             reason: dep_owned.verification.reason.clone(),
             verified_at: dep_owned.verification.verified_at.map(|t| t.to_rfc3339()),
-            verifiers: verifier_results_json(&dep_owned.verification.verifiers),
+            verifiers: verifier_results_json(&attempted_verifiers),
         });
 
         // Rate limiting delay between deployments (skip after the last one).
@@ -655,8 +628,10 @@ async fn run_batch(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use std::sync::{Mutex, MutexGuard, OnceLock};
+    use std::{
+        collections::HashMap,
+        sync::{Mutex, MutexGuard, OnceLock},
+    };
 
     use treb_core::types::{VerificationStatus, VerifierStatus};
 
@@ -696,11 +671,13 @@ mod tests {
         fn drop(&mut self) {
             match &self.original {
                 Some(value) => {
-                    // SAFETY: Serialized by env_lock(), so no concurrent env mutation in these tests.
+                    // SAFETY: Serialized by env_lock(), so no concurrent env mutation in these
+                    // tests.
                     unsafe { std::env::set_var(self.key, value) };
                 }
                 None => {
-                    // SAFETY: Serialized by env_lock(), so no concurrent env mutation in these tests.
+                    // SAFETY: Serialized by env_lock(), so no concurrent env mutation in these
+                    // tests.
                     unsafe { std::env::remove_var(self.key) };
                 }
             }
@@ -712,15 +689,27 @@ mod tests {
         let mut verifiers = HashMap::new();
         verifiers.insert(
             "etherscan".to_string(),
-            VerifierStatus { status: "VERIFIED".to_string(), url: String::new(), reason: String::new() },
+            VerifierStatus {
+                status: "VERIFIED".to_string(),
+                url: String::new(),
+                reason: String::new(),
+            },
         );
         verifiers.insert(
             "sourcify".to_string(),
-            VerifierStatus { status: "VERIFIED".to_string(), url: String::new(), reason: String::new() },
+            VerifierStatus {
+                status: "VERIFIED".to_string(),
+                url: String::new(),
+                reason: String::new(),
+            },
         );
         verifiers.insert(
             "blockscout".to_string(),
-            VerifierStatus { status: "VERIFIED".to_string(), url: String::new(), reason: String::new() },
+            VerifierStatus {
+                status: "VERIFIED".to_string(),
+                url: String::new(),
+                reason: String::new(),
+            },
         );
         assert_eq!(aggregate_status(&verifiers), VerificationStatus::Verified);
     }
@@ -730,11 +719,19 @@ mod tests {
         let mut verifiers = HashMap::new();
         verifiers.insert(
             "etherscan".to_string(),
-            VerifierStatus { status: "FAILED".to_string(), url: String::new(), reason: "timeout".to_string() },
+            VerifierStatus {
+                status: "FAILED".to_string(),
+                url: String::new(),
+                reason: "timeout".to_string(),
+            },
         );
         verifiers.insert(
             "sourcify".to_string(),
-            VerifierStatus { status: "FAILED".to_string(), url: String::new(), reason: "not found".to_string() },
+            VerifierStatus {
+                status: "FAILED".to_string(),
+                url: String::new(),
+                reason: "not found".to_string(),
+            },
         );
         assert_eq!(aggregate_status(&verifiers), VerificationStatus::Failed);
     }
@@ -744,11 +741,19 @@ mod tests {
         let mut verifiers = HashMap::new();
         verifiers.insert(
             "etherscan".to_string(),
-            VerifierStatus { status: "VERIFIED".to_string(), url: String::new(), reason: String::new() },
+            VerifierStatus {
+                status: "VERIFIED".to_string(),
+                url: String::new(),
+                reason: String::new(),
+            },
         );
         verifiers.insert(
             "sourcify".to_string(),
-            VerifierStatus { status: "FAILED".to_string(), url: String::new(), reason: "error".to_string() },
+            VerifierStatus {
+                status: "FAILED".to_string(),
+                url: String::new(),
+                reason: "error".to_string(),
+            },
         );
         assert_eq!(aggregate_status(&verifiers), VerificationStatus::Partial);
     }
@@ -764,7 +769,11 @@ mod tests {
         let mut verifiers = HashMap::new();
         verifiers.insert(
             "etherscan".to_string(),
-            VerifierStatus { status: "VERIFIED".to_string(), url: String::new(), reason: String::new() },
+            VerifierStatus {
+                status: "VERIFIED".to_string(),
+                url: String::new(),
+                reason: String::new(),
+            },
         );
         assert_eq!(aggregate_status(&verifiers), VerificationStatus::Verified);
     }
@@ -774,7 +783,11 @@ mod tests {
         let mut verifiers = HashMap::new();
         verifiers.insert(
             "etherscan".to_string(),
-            VerifierStatus { status: "FAILED".to_string(), url: String::new(), reason: "err".to_string() },
+            VerifierStatus {
+                status: "FAILED".to_string(),
+                url: String::new(),
+                reason: "err".to_string(),
+            },
         );
         assert_eq!(aggregate_status(&verifiers), VerificationStatus::Failed);
     }
