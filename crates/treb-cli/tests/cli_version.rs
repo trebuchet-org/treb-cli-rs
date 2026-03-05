@@ -14,10 +14,12 @@ fn version_displays_expected_fields() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Version"))
-        .stdout(predicate::str::contains("Git Commit"))
-        .stdout(predicate::str::contains("Build Date"))
+        .stdout(predicate::str::contains("Commit"))
+        .stdout(predicate::str::contains("Date"))
         .stdout(predicate::str::contains("Rust Version"))
-        .stdout(predicate::str::contains("Forge Version"));
+        .stdout(predicate::str::contains("Forge Version"))
+        .stdout(predicate::str::contains("Foundry Version"))
+        .stdout(predicate::str::contains("treb-sol Commit"));
 }
 
 #[test]
@@ -32,7 +34,15 @@ fn version_json_parses_with_expected_fields() {
 
     let obj = json.as_object().expect("JSON output is not an object");
 
-    for field in ["version", "git_commit", "build_date", "rust_version", "forge_version"] {
+    for field in [
+        "version",
+        "commit",
+        "date",
+        "rustVersion",
+        "forgeVersion",
+        "foundryVersion",
+        "trebSolCommit",
+    ] {
         let val = obj.get(field).unwrap_or_else(|| panic!("missing field: {field}"));
         let s = val.as_str().unwrap_or_else(|| panic!("field {field} is not a string"));
         assert!(!s.is_empty(), "field {field} is empty");
