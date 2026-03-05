@@ -62,6 +62,9 @@ enum Commands {
         /// Enable Forge debugger
         #[arg(long)]
         debug: bool,
+        /// Print the equivalent forge script command and exit without executing
+        #[arg(long)]
+        dump_command: bool,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -436,6 +439,7 @@ async fn main() -> anyhow::Result<()> {
             verify,
             verbose,
             debug,
+            dump_command,
             json,
             env,
             target_contract,
@@ -455,6 +459,7 @@ async fn main() -> anyhow::Result<()> {
                 verify,
                 verbose,
                 debug,
+                dump_command,
                 json,
                 env,
                 target_contract,

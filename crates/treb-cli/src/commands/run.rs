@@ -3,6 +3,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     env,
+    fs,
     io::{self, BufRead, IsTerminal, Write},
     path::PathBuf,
     time::Duration,
@@ -140,6 +141,7 @@ pub async fn run(
     verify: bool,
     verbose: bool,
     debug: bool,
+    dump_command: bool,
     json: bool,
     env_vars: Vec<String>,
     target_contract: Option<String>,
@@ -202,6 +204,24 @@ pub async fn run(
     // --rpc-url overrides the network-derived URL
     if let Some(ref url) = effective_rpc_url {
         script_config.rpc_url(url);
+    }
+
+    // ── Dump command and exit ─────────────────────────────────────────
+    if dump_command {
+        let cmd_parts = script_config.to_forge_command();
+        let cmd_str = cmd_parts
+            .iter()
+            .map(|p| {
+                if p.contains(' ') || p.contains('"') {
+                    format!("'{}'", p.replace('\'', "'\\''"))
+                } else {
+                    p.clone()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        eprintln!("{}", cmd_str);
+        return Ok(());
     }
 
     // ── Resolve chain ID from RPC ──────────────────────────────────────
@@ -348,6 +368,66 @@ pub async fn run(
 
     // ── Display results ──────────────────────────────────────────────────
     display_result(&result, json)?;
+
+    // ── Debug log output ────────────────────────────────────────────────
+    if debug {
+        let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+        let log_filename = format!("debug-{}.log", timestamp);
+        let log_path = cwd.join(TREB_DIR).join(&log_filename);
+
+        let mut log_content = String::new();
+        log_content.push_str(&format!("treb run debug log — {}\n", timestamp));
+        log_content.push_str(&format!("Script: {}\n", script));
+        log_content.push_str(&format!("Sig: {}\n", sig));
+        log_content.push_str(&format!("Namespace: {}\n", resolved.namespace));
+        log_content.push_str(&format!("Chain ID: {}\n", chain_id));
+        if let Some(ref url) = effective_rpc_url {
+            log_content.push_str(&format!("RPC: {}\n", url));
+        }
+        log_content.push_str(&format!("Broadcast: {}\n", broadcast));
+        log_content.push_str(&format!("Dry run: {}\n", dry_run));
+        log_content.push_str(&format!("Success: {}\n", result.success));
+        log_content.push_str(&format!("Gas used: {}\n", result.gas_used));
+        log_content.push_str(&format!("Events decoded: {}\n", result.event_count));
+        log_content.push_str(&format!("Deployments: {}\n", result.deployments.len()));
+        log_content.push_str(&format!("Transactions: {}\n", result.transactions.len()));
+        log_content.push_str(&format!("Skipped: {}\n", result.skipped.len()));
+        log_content.push_str(&format!("Collisions: {}\n", result.collisions.len()));
+
+        if !result.console_logs.is_empty() {
+            log_content.push_str("\n--- Console Output ---\n");
+            for line in &result.console_logs {
+                log_content.push_str(line);
+                log_content.push('\n');
+            }
+        }
+
+        if !result.deployments.is_empty() {
+            log_content.push_str("\n--- Deployments ---\n");
+            for rd in &result.deployments {
+                let d = &rd.deployment;
+                log_content.push_str(&format!(
+                    "  {} {} ({}) chain={}\n",
+                    d.deployment_type, d.contract_name, d.address, d.chain_id
+                ));
+            }
+        }
+
+        if !result.transactions.is_empty() {
+            log_content.push_str("\n--- Transactions ---\n");
+            for rt in &result.transactions {
+                let tx = &rt.transaction;
+                log_content.push_str(&format!(
+                    "  {} {} ({})\n",
+                    tx.id, tx.hash, tx.status
+                ));
+            }
+        }
+
+        fs::write(&log_path, &log_content)
+            .with_context(|| format!("failed to write debug log to {}", log_path.display()))?;
+        eprintln!("Debug log saved to {}", log_path.display());
+    }
 
     Ok(())
 }
