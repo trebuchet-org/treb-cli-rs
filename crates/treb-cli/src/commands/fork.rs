@@ -458,13 +458,14 @@ pub async fn run_status(json: bool) -> anyhow::Result<()> {
     let forks = store.list_active_forks();
 
     let now = Utc::now();
-    let deployment_count = count_fork_deployments(&treb_dir);
+    let deployments = load_json_map(&treb_dir.join(DEPLOYMENTS_FILE)).unwrap_or_default();
 
     if json {
         let mut statuses = Vec::new();
         for entry in &forks {
             let running = is_port_reachable(entry.port).await;
             let uptime = format_uptime(now - entry.started_at);
+            let deployment_count = count_fork_deployments_for_chain(&deployments, entry.chain_id);
             statuses.push(serde_json::json!({
                 "network":         entry.network,
                 "rpcUrl":          entry.rpc_url,
@@ -507,6 +508,7 @@ pub async fn run_status(json: bool) -> anyhow::Result<()> {
         let fork_block =
             entry.fork_block_number.map(|b| b.to_string()).unwrap_or_else(|| "latest".into());
         let uptime = format_uptime(now - entry.started_at);
+        let deployment_count = count_fork_deployments_for_chain(&deployments, entry.chain_id);
 
         table.add_row(vec![
             styled(&entry.network, color::NAMESPACE),
@@ -696,11 +698,13 @@ fn format_uptime(duration: chrono::Duration) -> String {
     }
 }
 
-/// Count deployments in the registry whose keys start with `fork/`.
-fn count_fork_deployments(treb_dir: &Path) -> usize {
-    load_json_map(&treb_dir.join(DEPLOYMENTS_FILE))
-        .map(|m| m.keys().filter(|k| k.starts_with("fork/")).count())
-        .unwrap_or(0)
+/// Count deployments in the registry for the given fork chain namespace.
+fn count_fork_deployments_for_chain(
+    deployments: &serde_json::Map<String, serde_json::Value>,
+    chain_id: u64,
+) -> usize {
+    let prefix = format!("fork/{chain_id}/");
+    deployments.keys().filter(|k| k.starts_with(&prefix)).count()
 }
 
 fn ensure_treb_dir(treb_dir: &Path) -> anyhow::Result<()> {
