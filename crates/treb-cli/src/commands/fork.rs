@@ -19,6 +19,7 @@ use treb_registry::{
     snapshot_registry,
 };
 
+use crate::output;
 use crate::ui::color;
 
 const TREB_DIR: &str = ".treb";
@@ -171,6 +172,7 @@ pub async fn run_enter(
         .with_context(|| format!("failed to get chain ID from RPC URL: {fork_url}"))?;
 
     // Create snapshot dir and snapshot registry
+    output::print_stage("\u{1f4f8}", &format!("Snapshotting registry for '{network}'..."));
     let snapshot_dir = treb_dir.join(SNAPSHOT_BASE).join(&network);
     snapshot_registry(&treb_dir, &snapshot_dir).context("failed to snapshot registry")?;
 
@@ -205,6 +207,8 @@ pub async fn run_enter(
         })
         .context("failed to record fork history")?;
 
+    output::print_stage("\u{2705}", &format!("Fork mode entered for '{network}'."));
+
     println!("Entered fork mode for network '{network}'.");
     println!("Registry snapshot saved to {}", snapshot_dir.display());
     println!("Run `treb dev anvil start --network {network}` to start a local Anvil node.");
@@ -234,11 +238,13 @@ pub async fn run_exit(network: String) -> anyhow::Result<()> {
     let entry = store.remove_active_fork(&network).context("failed to remove fork entry")?;
 
     // Restore registry from snapshot
+    output::print_stage("\u{1f504}", &format!("Restoring registry for '{network}'..."));
     let snapshot_dir = PathBuf::from(&entry.snapshot_dir);
     restore_registry(&snapshot_dir, &treb_dir)
         .context("failed to restore registry from snapshot")?;
 
     // Remove snapshot dir
+    output::print_stage("\u{1f9f9}", &format!("Cleaning up snapshot for '{network}'..."));
     remove_snapshot(&snapshot_dir).context("failed to remove snapshot directory")?;
 
     // Add history entry
@@ -250,6 +256,8 @@ pub async fn run_exit(network: String) -> anyhow::Result<()> {
             details: None,
         })
         .context("failed to record exit history")?;
+
+    output::print_stage("\u{2705}", &format!("Fork mode exited for '{network}'."));
 
     println!("Exited fork mode for network '{network}'.");
     println!("Registry restored from snapshot.");
@@ -302,6 +310,10 @@ pub async fn run_revert(network: String, all: bool) -> anyhow::Result<()> {
 
         // Revert EVM state to the last snapshot (if we have one).
         if let Some(last_snapshot) = entry.snapshots.last() {
+            output::print_stage(
+                "\u{23ee}\u{fe0f}",
+                &format!("Reverting EVM state for '{net}'..."),
+            );
             let reverted = evm_revert_http(&client, &entry.rpc_url, &last_snapshot.snapshot_id)
                 .await
                 .with_context(|| format!("failed to revert EVM state for network '{net}'"))?;
@@ -312,19 +324,24 @@ pub async fn run_revert(network: String, all: bool) -> anyhow::Result<()> {
                     last_snapshot.snapshot_id
                 );
             }
-            println!("EVM state reverted for network '{net}'.");
         } else {
-            println!(
-                "No EVM snapshots stored for network '{net}'; skipping EVM revert (registry will still be restored)."
+            output::print_warning_banner(
+                "\u{26a0}\u{fe0f}",
+                &format!("No EVM snapshots stored for network '{net}'; skipping EVM revert (registry will still be restored)."),
             );
         }
 
         // Take a new EVM snapshot for the next revert.
+        output::print_stage("\u{1f4f8}", &format!("Taking new EVM snapshot for '{net}'..."));
         let new_snapshot_id = evm_snapshot_http(&client, &entry.rpc_url)
             .await
             .with_context(|| format!("failed to take new EVM snapshot for network '{net}'"))?;
 
         // Restore registry files from the snapshot directory.
+        output::print_stage(
+            "\u{1f504}",
+            &format!("Restoring registry for '{net}'..."),
+        );
         let snapshot_dir = PathBuf::from(&entry.snapshot_dir);
         restore_registry(&snapshot_dir, &treb_dir)
             .context("failed to restore registry from snapshot")?;
@@ -349,6 +366,8 @@ pub async fn run_revert(network: String, all: bool) -> anyhow::Result<()> {
                 details: Some(format!("new EVM snapshot: {new_snapshot_id}")),
             })
             .context("failed to record revert history")?;
+
+        output::print_stage("\u{2705}", &format!("Fork reverted for '{net}'."));
 
         println!("Reverted fork for network '{net}' to initial state.");
     }
@@ -389,29 +408,37 @@ pub async fn run_restart(network: String, fork_block_number: Option<u64>) -> any
     let blk = fork_block_number.or(entry.fork_block_number);
 
     // Reset Anvil to a fresh fork state.
+    output::print_stage(
+        "\u{1f504}",
+        &format!(
+            "Resetting Anvil for '{network}' (block: {})...",
+            blk.map_or("latest".into(), |b: u64| b.to_string())
+        ),
+    );
     anvil_reset_http(&client, &entry.rpc_url, &entry.fork_url, blk)
         .await
         .with_context(|| format!("failed to reset Anvil for network '{network}'"))?;
 
-    println!(
-        "Anvil reset to {} (block: {}).",
-        entry.fork_url,
-        blk.map_or("latest".into(), |b| b.to_string())
-    );
-
     // Re-deploy the CreateX factory.
+    output::print_stage(
+        "\u{1f3ed}",
+        &format!("Deploying CreateX factory for '{network}'..."),
+    );
     deploy_createx_http(&client, &entry.rpc_url)
         .await
         .with_context(|| format!("failed to re-deploy CreateX for network '{network}'"))?;
 
-    println!("CreateX factory re-deployed at {CREATEX_ADDRESS}.");
-
     // Take a new EVM snapshot as the fresh baseline.
+    output::print_stage("\u{1f4f8}", &format!("Taking EVM snapshot for '{network}'..."));
     let snapshot_id = evm_snapshot_http(&client, &entry.rpc_url)
         .await
         .with_context(|| format!("failed to take EVM snapshot for network '{network}'"))?;
 
     // Restore registry from snapshot.
+    output::print_stage(
+        "\u{1f504}",
+        &format!("Restoring registry for '{network}'..."),
+    );
     let snapshot_dir = PathBuf::from(&entry.snapshot_dir);
     restore_registry(&snapshot_dir, &treb_dir).context("failed to restore registry")?;
 
@@ -438,6 +465,8 @@ pub async fn run_restart(network: String, fork_block_number: Option<u64>) -> any
             details: Some(format!("Anvil reset; snapshot: {snapshot_id}")),
         })
         .context("failed to record restart history")?;
+
+    output::print_stage("\u{2705}", &format!("Fork restarted for '{network}'."));
 
     println!("Restarted fork for network '{network}'.");
     Ok(())
