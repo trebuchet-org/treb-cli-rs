@@ -272,12 +272,27 @@ fn print_dry_run_plan(compose: &ComposeFile, plan: &[PlanEntry]) {
     eprintln!("Execution Plan:");
     eprintln!("{}", "─".repeat(50));
     for entry in plan {
-        eprint!("{}. {} → {}", entry.step, entry.component, entry.script);
-        if !entry.deps.is_empty() {
-            eprint!(" (depends on: [{}])", entry.deps.join(", "));
-        }
         if entry.skipped {
-            eprint!(" (skipped)");
+            eprint!(
+                "{}. {} → {}",
+                entry.step,
+                styled(&entry.component, color::WARNING),
+                styled(&entry.script, color::MUTED),
+            );
+            if !entry.deps.is_empty() {
+                eprint!(" (depends on: [{}])", entry.deps.join(", "));
+            }
+            eprint!(" {}", styled("(skipped)", color::WARNING));
+        } else {
+            eprint!(
+                "{}. {} → {}",
+                styled(&entry.step.to_string(), color::LABEL),
+                styled(&entry.component, color::LABEL),
+                styled(&entry.script, color::MUTED),
+            );
+            if !entry.deps.is_empty() {
+                eprint!(" (depends on: [{}])", entry.deps.join(", "));
+            }
         }
         eprintln!();
     }
