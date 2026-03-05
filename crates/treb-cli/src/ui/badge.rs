@@ -80,6 +80,30 @@ fn status_style(status: &str) -> Style {
     }
 }
 
+/// Returns `Some("[fork]")` if the namespace indicates a fork deployment,
+/// or `None` otherwise.
+///
+/// A namespace is considered a fork when it starts with `"fork/"`.
+#[allow(dead_code)]
+pub fn fork_badge(namespace: &str) -> Option<String> {
+    if namespace.starts_with("fork/") {
+        Some("[fork]".to_string())
+    } else {
+        None
+    }
+}
+
+/// Returns a styled `[fork]` badge with yellow bold ANSI codes when the
+/// namespace indicates a fork deployment, or `None` otherwise.
+#[allow(dead_code)]
+pub fn fork_badge_styled(namespace: &str) -> Option<String> {
+    if namespace.starts_with("fork/") {
+        Some(format!("{}", "[fork]".style(color::FORK_BADGE)))
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,5 +190,46 @@ mod tests {
 
         let badge = verification_badge(&verifiers);
         assert!(badge.starts_with("e[-]"), "Unknown status should map to -, got: {badge}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Fork badge tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn fork_badge_returns_some_for_fork_namespace() {
+        assert_eq!(fork_badge("fork/42220"), Some("[fork]".to_string()));
+    }
+
+    #[test]
+    fn fork_badge_returns_none_for_non_fork_namespace() {
+        assert_eq!(fork_badge("mainnet"), None);
+    }
+
+    #[test]
+    fn fork_badge_returns_none_for_partial_prefix() {
+        assert_eq!(fork_badge("forked/42220"), None);
+    }
+
+    #[test]
+    fn fork_badge_styled_contains_ansi_when_color_enabled() {
+        owo_colors::set_override(true);
+
+        let styled = fork_badge_styled("fork/42220");
+        assert!(styled.is_some(), "fork_badge_styled must return Some for fork namespace");
+        let styled = styled.unwrap();
+        assert!(
+            styled.contains('\x1b'),
+            "fork_badge_styled() must contain ANSI escape codes, got: {styled:?}"
+        );
+        assert!(
+            styled.contains("[fork]"),
+            "styled badge must contain [fork] text, got: {styled:?}"
+        );
+    }
+
+    #[test]
+    fn fork_badge_styled_returns_none_for_non_fork() {
+        assert_eq!(fork_badge_styled("mainnet"), None);
     }
 }
