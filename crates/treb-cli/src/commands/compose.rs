@@ -423,18 +423,13 @@ fn display_compose_human(group: &str, results: &[ComponentResultEntry], totals: 
     }
 
     println!();
-    let gas_str = if totals.gas_used > 0 {
-        format!(", {} gas", output::format_gas(totals.gas_used))
-    } else {
-        String::new()
-    };
     println!(
-        "Totals: {} deployment{}, {} transaction{}{} | {} succeeded, {} skipped, {} failed, {} not executed",
+        "Totals: {} deployment{}, {} transaction{}, {} gas | {} succeeded, {} skipped, {} failed, {} not executed",
         totals.deployments,
         if totals.deployments == 1 { "" } else { "s" },
         totals.transactions,
         if totals.transactions == 1 { "" } else { "s" },
-        gas_str,
+        output::format_gas(totals.gas_used),
         totals.succeeded,
         totals.skipped,
         totals.failed,

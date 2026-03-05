@@ -141,7 +141,7 @@ mod tests {
         // address is left-padded with zeros in ABI encoding (occupies bytes 76..96)
         buf[76..96].copy_from_slice(safe_address.as_slice());
 
-        let expected_separator = keccak256(&buf);
+        let expected_separator = keccak256(buf);
         assert_eq!(domain.separator(), expected_separator);
     }
 
