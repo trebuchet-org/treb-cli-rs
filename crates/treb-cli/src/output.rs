@@ -74,6 +74,19 @@ pub fn truncate_address(address: &str) -> String {
     }
 }
 
+/// Format a number with comma-separated thousands (e.g., `1234567` → `"1,234,567"`).
+pub fn format_gas(n: u64) -> String {
+    let s = n.to_string();
+    let mut result = String::with_capacity(s.len() + s.len() / 3);
+    for (i, ch) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            result.push(',');
+        }
+        result.push(ch);
+    }
+    result
+}
+
 /// Format a stage progress message with emoji prefix.
 ///
 /// Returns `"emoji message"` with the message styled using the [`color::STAGE`]
@@ -97,6 +110,26 @@ pub fn print_stage(emoji: &str, message: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn format_gas_zero() {
+        assert_eq!(format_gas(0), "0");
+    }
+
+    #[test]
+    fn format_gas_small() {
+        assert_eq!(format_gas(999), "999");
+    }
+
+    #[test]
+    fn format_gas_thousands() {
+        assert_eq!(format_gas(1234), "1,234");
+    }
+
+    #[test]
+    fn format_gas_millions() {
+        assert_eq!(format_gas(1_234_567), "1,234,567");
+    }
 
     #[test]
     fn format_stage_with_color_enabled() {

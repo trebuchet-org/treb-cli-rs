@@ -218,6 +218,7 @@ impl RunPipeline {
             skipped,
             dry_run: self.context.config.dry_run,
             success: true,
+            gas_used: execution.gas_used,
             console_logs: execution.logs,
         })
     }

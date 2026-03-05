@@ -87,6 +87,8 @@ pub struct PipelineResult {
     pub dry_run: bool,
     /// Whether the pipeline completed successfully.
     pub success: bool,
+    /// Total gas used by script execution.
+    pub gas_used: u64,
     /// Decoded console.log output from script execution.
     pub console_logs: Vec<String>,
 }

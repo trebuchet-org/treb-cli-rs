@@ -313,6 +313,7 @@ struct RunOutputJson {
     deployments: Vec<DeploymentJson>,
     transactions: Vec<TransactionJson>,
     skipped: Vec<SkippedJson>,
+    gas_used: u64,
     console_logs: Vec<String>,
 }
 
@@ -385,6 +386,7 @@ fn display_result_json(result: &PipelineResult) -> anyhow::Result<()> {
                 reason: s.reason.clone(),
             })
             .collect(),
+        gas_used: result.gas_used,
         console_logs: result.console_logs.clone(),
     };
 
@@ -530,6 +532,17 @@ fn display_result_human(result: &PipelineResult) {
         println!();
     }
 
+    // Transactions
+    if !result.transactions.is_empty() {
+        println!("Transactions:");
+        for (i, rt) in result.transactions.iter().enumerate() {
+            let tx = &rt.transaction;
+            let status = tx.status.to_string();
+            println!("  {}. {} ({})", i + 1, tx.hash, status);
+        }
+        println!();
+    }
+
     // Skipped deployments
     if !result.skipped.is_empty() {
         println!("Skipped:");
@@ -577,6 +590,9 @@ fn display_result_human(result: &PipelineResult) {
         }
         if skip_count > 0 {
             parts.push(format!("{} skipped", skip_count));
+        }
+        if result.gas_used > 0 {
+            parts.push(format!("{} gas used", output::format_gas(result.gas_used)));
         }
         println!("{}", parts.join(", "));
     }
