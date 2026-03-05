@@ -7,10 +7,33 @@ use comfy_table::{Attribute, Cell, ContentArrangement, Table};
 use serde::Serialize;
 
 /// Print a value as pretty-printed JSON to stdout.
+///
+/// Recursively sorts all object keys so that output is deterministic
+/// regardless of the underlying map type (e.g. `HashMap`).
 pub fn print_json<T: Serialize>(value: &T) -> anyhow::Result<()> {
-    let json = serde_json::to_string_pretty(value)?;
+    let json_value = sort_json_keys(serde_json::to_value(value)?);
+    let json = serde_json::to_string_pretty(&json_value)?;
     println!("{json}");
     Ok(())
+}
+
+/// Recursively sort all object keys in a JSON value.
+fn sort_json_keys(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut sorted: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+            let mut entries: Vec<(String, serde_json::Value)> = map.into_iter().collect();
+            entries.sort_by(|a, b| a.0.cmp(&b.0));
+            for (k, v) in entries {
+                sorted.insert(k, sort_json_keys(v));
+            }
+            serde_json::Value::Object(sorted)
+        }
+        serde_json::Value::Array(arr) => {
+            serde_json::Value::Array(arr.into_iter().map(sort_json_keys).collect())
+        }
+        other => other,
+    }
 }
 
 /// Build a UTF-8 table with bold headers.

@@ -25,6 +25,43 @@
       "gitCommit": "f7c896cf0da6eca082cf90066d7e9510978e4659"
     },
     "verification": {
+      "status": "UNVERIFIED",
+      "verifiers": {
+        "etherscan": {
+          "status": "VERIFIED",
+          "url": "https://celoscan.io/address/0x42eddd7dC046da254A93659CA9b02f294606833D#code"
+        },
+        "sourcify": {
+          "status": "FAILED",
+          "reason": "Contract not found on Sourcify"
+        }
+      }
+    },
+    "tags": null,
+    "createdAt": "2026-03-02T19:30:12.945621099Z",
+    "updatedAt": "2026-03-02T19:30:12.948933762Z"
+  },
+  "fork/42220/MockToken": {
+    "id": "fork/42220/MockToken",
+    "namespace": "fork/42220",
+    "chainId": 42220,
+    "contractName": "MockToken",
+    "label": "",
+    "address": "0xDeaDbeefdEAdbeefdEadbEEFdeadbeEFdEaDbeeF",
+    "type": "SINGLETON",
+    "transactionId": "",
+    "deploymentStrategy": {
+      "method": "CREATE"
+    },
+    "proxyInfo": null,
+    "artifact": {
+      "path": "src/mocks/MockToken.sol",
+      "compilerVersion": "0.8.24+commit.e11b9ed9",
+      "bytecodeHash": "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      "scriptPath": "script/deploy/mocks/DeployMockToken.s.sol",
+      "gitCommit": "abc1234567890abc1234567890abc1234567890ab"
+    },
+    "verification": {
       "status": "UNVERIFIED"
     },
     "tags": null,

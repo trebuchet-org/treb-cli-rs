@@ -24,7 +24,8 @@ Bytecode Hash:  0x6b7fb93a42cf317aec80a67fcdc73ba8d75edb0be9e0bb01185e70f2028a5d
    Git Commit:  f7c896cf0da6eca082cf90066d7e9510978e4659
 
 ── Verification ──
-Status:  UNVERIFIED
+Etherscan:  VERIFIED https://celoscan.io/address/0x42eddd7dC046da254A93659CA9b02f294606833D#code
+ Sourcify:  FAILED — Contract not found on Sourcify
 
 ── Timestamps ──
 Created At:  <TIMESTAMP>

@@ -81,7 +81,7 @@ fn list_json_outputs_valid_json_array() {
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("output is not valid JSON");
     let arr = json.as_array().expect("JSON output should be an array");
-    assert_eq!(arr.len(), 3);
+    assert_eq!(arr.len(), 4);
 
     // Verify deployment objects have expected fields.
     let first = &arr[0];
