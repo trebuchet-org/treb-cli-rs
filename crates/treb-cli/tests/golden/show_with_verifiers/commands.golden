@@ -1,33 +1,31 @@
-=== cmd 0: [show FPMMFactory] ===
+=== cmd 0: [show mainnet/42220/FPMM:v<VERSION>] ===
 ── Identity ──
-       ID:  mainnet/42220/FPMMFactory:v<VERSION>
- Contract:  FPMMFactory
+       ID:  mainnet/42220/FPMM:v<VERSION>
+ Contract:  FPMM
     Label:  v<VERSION>
 Namespace:  mainnet
      Type:  SINGLETON
 
 ── On-Chain ──
 Chain ID:  42220
- Address:  0x959597fD009876e6f53EbdB2F1c1Bc3f994579dF
+ Address:  0x42eddd7dC046da254A93659CA9b02f294606833D
 
 ── Transaction ──
 Transaction ID:  
         Method:  CREATE3
-Salt:  0x32cb58b145d3f7e28c45ce4b2cc31fa94248b23f00ab81cc01eccdf4986f4073
+Salt:  0x32cb58b145d3f7e28c45ce4b2cc31fa94248b23f00a2e3014050467acb6c25eb
 Factory:  0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed
 
 ── Artifact ──
-         Path:  lib/mento-core/contracts/swap/FPMMFactory.sol
+         Path:  lib/mento-core/contracts/swap/FPMM.sol
      Compiler:  0.8.24+commit.e11b9ed9
-Bytecode Hash:  0x7c7a4e90bce79d7b7ed6e549549f3ea62f31ae8eddc9ed1ab3fe9416e63faf26
+Bytecode Hash:  0x6b7fb93a42cf317aec80a67fcdc73ba8d75edb0be9e0bb01185e70f2028a5d6a
        Script:  script/deploy/v3/DeployV3PreStage.s.sol
    Git Commit:  f7c896cf0da6eca082cf90066d7e9510978e4659
 
 ── Verification ──
-Status:  UNVERIFIED
-
-── Tags ──
-  core, v3-release
+Etherscan:  VERIFIED https://celoscan.io/address/0x42eddd7dC046da254A93659CA9b02f294606833D#code
+ Sourcify:  FAILED — Contract not found on Sourcify
 
 ── Timestamps ──
 Created At:  <TIMESTAMP>

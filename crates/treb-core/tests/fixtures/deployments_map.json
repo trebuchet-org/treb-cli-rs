@@ -96,7 +96,7 @@
     "verification": {
       "status": "UNVERIFIED"
     },
-    "tags": null,
+    "tags": ["core", "v3-release"],
     "createdAt": "2026-03-02T19:30:12.945621099Z",
     "updatedAt": "2026-03-02T19:30:12.948933762Z"
   },

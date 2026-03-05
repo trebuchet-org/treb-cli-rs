@@ -84,6 +84,36 @@ fn show_by_contract_name() {
     run_integration_test(&test, &ctx);
 }
 
+/// Show deployment with populated verifiers displays per-verifier detail lines.
+#[test]
+fn show_with_verifiers() {
+    let ctx = TestContext::new("project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("show_with_verifiers")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))
+        .test(&["show", "mainnet/42220/FPMM:v3.0.0"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// Show deployment with tags displays the Tags section.
+#[test]
+fn show_with_tags() {
+    let ctx = TestContext::new("project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("show_with_tags")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))
+        .test(&["show", "mainnet/42220/FPMMFactory:v3.0.0"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
 /// Nonexistent deployment produces an error with 'no deployment found'.
 #[test]
 fn show_nonexistent() {

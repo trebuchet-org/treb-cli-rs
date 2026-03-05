@@ -93,7 +93,10 @@
     "label": "v<VERSION>",
     "namespace": "mainnet",
     "proxyInfo": null,
-    "tags": null,
+    "tags": [
+      "core",
+      "v3-release"
+    ],
     "transactionId": "",
     "type": "SINGLETON",
     "updatedAt": "<TIMESTAMP>",
