@@ -417,6 +417,7 @@ async fn run_batch(
 
     let total = candidate_ids.len();
     let mut results: Vec<VerifyOutputJson> = Vec::new();
+    let mut ver_badges: Vec<String> = Vec::new();
 
     for (i, dep_id) in candidate_ids.iter().enumerate() {
         let dep_snapshot = registry.get_deployment(dep_id).unwrap().clone();
@@ -433,11 +434,12 @@ async fn run_batch(
             output::print_stage(
                 "\u{1f50d}",
                 &format!(
-                    "[{}/{}] {} {}",
+                    "[{}/{}] {} {} ({})",
                     i + 1,
                     total,
                     action,
                     contract_name,
+                    output::truncate_address(&address),
                 ),
             );
         }
@@ -470,7 +472,7 @@ async fn run_batch(
                         VerifierStatus {
                             status: "FAILED".to_string(),
                             url: String::new(),
-                            reason,
+                            reason: reason.clone(),
                         },
                     );
                     if !json {
@@ -479,6 +481,7 @@ async fn run_batch(
                             verifier,
                             styled("FAILED", color::FAILED),
                         );
+                        eprintln!("    {}", styled(&reason, color::MUTED));
                     }
                     continue;
                 }
@@ -524,7 +527,7 @@ async fn run_batch(
                         VerifierStatus {
                             status: "FAILED".to_string(),
                             url: String::new(),
-                            reason,
+                            reason: reason.clone(),
                         },
                     );
                     if !json {
@@ -533,6 +536,7 @@ async fn run_batch(
                             verifier,
                             styled("FAILED", color::FAILED),
                         );
+                        eprintln!("    {}", styled(&reason, color::MUTED));
                     }
                 }
             }
@@ -556,6 +560,14 @@ async fn run_batch(
             .unwrap_or_default();
 
         registry.update_deployment(dep_owned.clone())?;
+
+        // Compute verification badge for summary table.
+        let ver_badge = if color::is_color_enabled() {
+            badge::verification_badge_styled(&dep_owned.verification.verifiers)
+        } else {
+            badge::verification_badge(&dep_owned.verification.verifiers)
+        };
+        ver_badges.push(ver_badge);
 
         let agg_status_str = match dep_owned.verification.status {
             VerificationStatus::Verified => "VERIFIED",
@@ -587,25 +599,19 @@ async fn run_batch(
         output::print_json(&results)?;
     } else {
         // Print summary table.
-        let mut table = output::build_table(&["Contract", "Address", "Status", "Badge"]);
-        for r in &results {
+        let mut table = output::build_table(&["Contract", "Address", "Status", "Verifiers"]);
+        for (r, ver_badge) in results.iter().zip(ver_badges.iter()) {
             let status_styled = match r.status.as_str() {
                 "VERIFIED" => styled("VERIFIED", color::VERIFIED),
                 "FAILED" => styled("FAILED", color::FAILED),
                 "PARTIAL" => styled("PARTIAL", color::WARNING),
                 _ => r.status.clone(),
             };
-            let badge = match r.status.as_str() {
-                "VERIFIED" => styled("\u{2713}", color::VERIFIED),
-                "FAILED" => styled("\u{2717}", color::FAILED),
-                "PARTIAL" => styled("~", color::WARNING),
-                _ => styled("-", color::MUTED),
-            };
             table.add_row(vec![
                 r.contract_name.clone(),
                 output::truncate_address(&r.address),
                 status_styled,
-                badge,
+                ver_badge.clone(),
             ]);
         }
         output::print_table(&table);
