@@ -508,7 +508,7 @@ pub async fn run_status(json: bool) -> anyhow::Result<()> {
                 "status":          if running { "running" } else { "stopped" },
             }));
         }
-        println!("{}", serde_json::to_string_pretty(&statuses)?);
+        output::print_json(&statuses)?;
         return Ok(());
     }
 
@@ -576,7 +576,7 @@ pub async fn run_history(network: Option<String>, json: bool) -> anyhow::Result<
         .collect();
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&history)?);
+        output::print_json(&history)?;
         return Ok(());
     }
 
@@ -668,14 +668,11 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
     }
 
     if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "network": network,
-                "changes": changes,
-                "clean":   changes.is_empty(),
-            }))?
-        );
+        output::print_json(&serde_json::json!({
+            "network": network,
+            "changes": changes,
+            "clean":   changes.is_empty(),
+        }))?;
         return Ok(());
     }
 
