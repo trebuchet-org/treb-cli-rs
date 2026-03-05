@@ -8,5 +8,6 @@
   "reason": "",
   "status": "VERIFIED",
   "verifiedAt": "<TIMESTAMP>",
-  "verifier": "etherscan"
+  "verifier": "etherscan",
+  "verifiers": {}
 }

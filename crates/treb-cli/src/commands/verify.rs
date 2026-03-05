@@ -1,6 +1,6 @@
 //! `treb verify` command implementation.
 
-use std::{env, time::Duration};
+use std::{collections::HashMap, env, time::Duration};
 
 use anyhow::{Context, bail};
 use chrono::Utc;
@@ -19,6 +19,15 @@ use crate::{
     ui::selector::{fuzzy_select_deployment_id, multiselect_deployments},
 };
 
+/// Per-verifier JSON result in the verifiers breakdown.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VerifierResultJson {
+    status: String,
+    url: String,
+    reason: String,
+}
+
 /// JSON output for a single verification result.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +41,7 @@ struct VerifyOutputJson {
     explorer_url: String,
     reason: String,
     verified_at: Option<String>,
+    verifiers: HashMap<String, VerifierResultJson>,
 }
 
 /// Resolve the API key for a verifier.
@@ -68,6 +78,25 @@ fn aggregate_status(verifier_results: &std::collections::HashMap<String, Verifie
     } else {
         VerificationStatus::Partial
     }
+}
+
+/// Convert internal verifier status map to JSON output map.
+fn verifier_results_json(
+    verifiers: &HashMap<String, VerifierStatus>,
+) -> HashMap<String, VerifierResultJson> {
+    verifiers
+        .iter()
+        .map(|(k, v)| {
+            (
+                k.clone(),
+                VerifierResultJson {
+                    status: v.status.clone(),
+                    url: v.url.clone(),
+                    reason: v.reason.clone(),
+                },
+            )
+        })
+        .collect()
 }
 
 /// Conditionally apply an owo-colors [`Style`] to text.
@@ -165,6 +194,7 @@ pub async fn run(
     let already_verified = resolved.verification.status == VerificationStatus::Verified;
     let existing_url = resolved.verification.etherscan_url.clone();
     let existing_verified_at = resolved.verification.verified_at;
+    let existing_verifiers = resolved.verification.verifiers.clone();
 
     // Skip if already verified and not forced.
     if already_verified && !force {
@@ -180,6 +210,7 @@ pub async fn run(
                 explorer_url: existing_url,
                 reason: String::new(),
                 verified_at: existing_verified_at.map(|t| t.to_rfc3339()),
+                verifiers: verifier_results_json(&existing_verifiers),
             };
             output::print_json(&out)?;
         } else {
@@ -351,6 +382,7 @@ pub async fn run(
             explorer_url: dep.verification.etherscan_url,
             reason: dep.verification.reason,
             verified_at: dep.verification.verified_at.map(|t| t.to_rfc3339()),
+            verifiers: verifier_results_json(&dep.verification.verifiers),
         };
         output::print_json(&out)?;
     } else if dep.verification.status == VerificationStatus::Failed {
@@ -583,9 +615,10 @@ async fn run_batch(
             chain_id,
             verifier: verifiers.first().map(|s| s.as_str()).unwrap_or("etherscan").to_string(),
             status: agg_status_str.to_string(),
-            explorer_url: dep_owned.verification.etherscan_url,
-            reason: dep_owned.verification.reason,
+            explorer_url: dep_owned.verification.etherscan_url.clone(),
+            reason: dep_owned.verification.reason.clone(),
             verified_at: dep_owned.verification.verified_at.map(|t| t.to_rfc3339()),
+            verifiers: verifier_results_json(&dep_owned.verification.verifiers),
         });
 
         // Rate limiting delay between deployments (skip after the last one).
