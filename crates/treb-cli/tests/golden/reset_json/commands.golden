@@ -1,8 +1,8 @@
 === cmd 0: [reset --yes --json] ===
 {
+  "backupPath": "<PROJECT_ROOT>/.treb/backups/reset-<UNIX_TIME>",
   "removedDeployments": 3,
-  "removedTransactions": 2,
-  "removedSafeTransactions": 2,
   "removedGovernorProposals": 2,
-  "backupPath": "<PROJECT_ROOT>/.treb/backups/reset-<UNIX_TIME>"
+  "removedSafeTransactions": 2,
+  "removedTransactions": 2
 }

@@ -1,25 +1,25 @@
 === cmd 0: [compose chain.yaml --dry-run --json] ===
 [
   {
-    "step": 1,
     "component": "libs",
+    "deps": [],
     "script": "script/DeployLibs.s.sol",
-    "deps": []
+    "step": 1
   },
   {
-    "step": 2,
     "component": "core",
-    "script": "script/DeployCore.s.sol",
     "deps": [
       "libs"
-    ]
+    ],
+    "script": "script/DeployCore.s.sol",
+    "step": 2
   },
   {
-    "step": 3,
     "component": "periphery",
-    "script": "script/DeployPeriphery.s.sol",
     "deps": [
       "core"
-    ]
+    ],
+    "script": "script/DeployPeriphery.s.sol",
+    "step": 3
   }
 ]

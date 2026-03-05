@@ -1,6 +1,6 @@
 === cmd 0: [tag --json mainnet/42220/FPMM:v<VERSION>] ===
 {
-  "deploymentId": "mainnet/42220/FPMM:v<VERSION>",
   "action": "show",
+  "deploymentId": "mainnet/42220/FPMM:v<VERSION>",
   "tags": []
 }

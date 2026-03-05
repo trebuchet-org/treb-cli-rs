@@ -6,7 +6,14 @@
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
+use regex::Regex;
 use std::{fs, path::Path};
+
+/// Strip ANSI escape codes from a string for plain-text assertions.
+fn strip_ansi(s: &str) -> String {
+    let re = Regex::new(r"\x1b\[[0-9;]*m").unwrap();
+    re.replace_all(s, "").to_string()
+}
 
 fn treb() -> assert_cmd::Command {
     cargo_bin_cmd!("treb-cli")
@@ -155,7 +162,7 @@ fn compose_dry_run_chain_shows_correct_order() {
 
     assert!(output.status.success());
 
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
 
     // Verify components appear and are in dependency order
     assert!(stderr.contains("libs"), "should show libs");
@@ -181,7 +188,7 @@ fn compose_dry_run_diamond_shows_correct_order() {
 
     assert!(output.status.success());
 
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
 
     // base must be first (step 1), top must be last (step 4)
     assert!(stderr.contains("base"), "should show base");

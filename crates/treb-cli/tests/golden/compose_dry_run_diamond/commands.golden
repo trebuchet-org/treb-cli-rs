@@ -1,4 +1,6 @@
 === cmd 0: [compose diamond.yaml --dry-run] ===
+🚧 [DRY RUN] Showing execution plan only — no changes will be made.
+
 
 Orchestrating diamond-deploy
 Execution plan: 4 components

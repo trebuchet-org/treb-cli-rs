@@ -1,21 +1,21 @@
 === cmd 0: [prune --dry-run --json] ===
 [
   {
+    "chainId": 1,
     "id": "dep-1",
     "kind": "BrokenTransactionRef",
-    "reason": "deployment 'dep-1' references missing transaction 'tx-missing-1'",
-    "chainId": 1
+    "reason": "deployment 'dep-1' references missing transaction 'tx-missing-1'"
   },
   {
+    "chainId": 42220,
     "id": "dep-2",
     "kind": "BrokenTransactionRef",
-    "reason": "deployment 'dep-2' references missing transaction 'tx-missing-2'",
-    "chainId": 42220
+    "reason": "deployment 'dep-2' references missing transaction 'tx-missing-2'"
   },
   {
+    "chainId": 1,
     "id": "tx-orphan",
     "kind": "BrokenDeploymentRef",
-    "reason": "transaction 'tx-orphan' references missing deployment 'dep-gone'",
-    "chainId": 1
+    "reason": "transaction 'tx-orphan' references missing deployment 'dep-gone'"
   }
 ]

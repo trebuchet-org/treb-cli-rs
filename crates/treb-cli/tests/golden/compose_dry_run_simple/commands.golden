@@ -1,4 +1,6 @@
 === cmd 0: [compose simple.yaml --dry-run] ===
+🚧 [DRY RUN] Showing execution plan only — no changes will be made.
+
 
 Orchestrating simple-deploy
 Execution plan: 2 components
