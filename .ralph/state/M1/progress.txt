@@ -71,3 +71,15 @@ Started: Thu Mar  5 06:51:37 PM CET 2026
   - When review blocks a story, re-run all checks to confirm the implementation is actually complete before re-marking
   - P6-US-001 implementation spans main.rs (flag definitions + resolution logic) and verify.rs (run/run_batch signatures)
 ---
+
+## 2026-03-05 - P6-US-001 (review B1 fix)
+- Blocking issue addressed: Review pointed to commit `bf3627d` containing only metadata updates. Added traceability notes to PRD story pointing to implementation commit range and re-ran required checks.
+- Implementation references:
+  - `3ffe81a` (`crates/treb-cli/src/commands/verify.rs`): verify command paths already operating on verifier lists (`&[String]`)
+  - `crates/treb-cli/src/main.rs` on current branch: shorthand flag resolution (`--etherscan/--blockscout/--sourcify`) overriding `--verifier`
+  - `crates/treb-cli/tests/cli_verify.rs` on current branch: shorthand parsing coverage
+- Validation rerun:
+  - `cargo check -p treb-cli`
+  - `cargo test -p treb-cli --test cli_verify`
+  - `cargo test -p treb-cli commands::verify::tests:: -- --nocapture`
+---

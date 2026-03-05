@@ -17,7 +17,7 @@
       ],
       "priority": 1,
       "passes": true,
-      "notes": ""
+      "notes": "Implementation landed across prior commits (not bf3627d): 3ffe81a (verify.rs switched to &[String] verifiers) + test updates in cli_verify.rs on branch before story-pass metadata commit. Re-validated on 2026-03-05 with `cargo check -p treb-cli`, `cargo test -p treb-cli --test cli_verify`, and `cargo test -p treb-cli commands::verify::tests:: -- --nocapture`."
     },
     {
       "id": "P6-US-002",
