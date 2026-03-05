@@ -14,6 +14,7 @@ use treb_verify::VerifyOpts;
 use crate::{
     commands::resolve::resolve_deployment,
     output,
+    ui::badge,
     ui::color,
     ui::selector::{fuzzy_select_deployment_id, multiselect_deployments},
 };
@@ -231,9 +232,17 @@ pub async fn run(
                     VerifierStatus {
                         status: "FAILED".to_string(),
                         url: String::new(),
-                        reason,
+                        reason: reason.clone(),
                     },
                 );
+                if !json {
+                    eprintln!(
+                        "  {}: {}",
+                        verifier,
+                        styled("FAILED", color::FAILED),
+                    );
+                    eprintln!("    {}", styled(&reason, color::MUTED));
+                }
                 continue;
             }
         };
@@ -287,6 +296,7 @@ pub async fn run(
                         verifier,
                         styled("FAILED", color::FAILED),
                     );
+                    eprintln!("    {}", styled(&reason, color::MUTED));
                 }
             }
         }
@@ -311,6 +321,16 @@ pub async fn run(
         .unwrap_or_default();
 
     registry.update_deployment(dep.clone())?;
+
+    // Show verification badge summary on stdout.
+    if !json {
+        let ver_badge = if color::is_color_enabled() {
+            badge::verification_badge_styled(&dep.verification.verifiers)
+        } else {
+            badge::verification_badge(&dep.verification.verifiers)
+        };
+        println!("  {}", ver_badge);
+    }
 
     // Output.
     if json {
