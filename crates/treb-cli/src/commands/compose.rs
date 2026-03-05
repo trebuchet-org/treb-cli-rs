@@ -516,6 +516,18 @@ pub async fn run(
         HashSet::new()
     };
 
+    // ── Verbose resume context ────────────────────────────────────────
+    if verbose && !json && resume && !skip_set.is_empty() {
+        let hash_str = &compose_hash;
+        let skip_count = skip_set.len().to_string();
+        let kv_pairs: Vec<(&str, &str)> = vec![
+            ("Compose hash", hash_str),
+            ("Skipping", &skip_count),
+        ];
+        output::eprint_kv(&kv_pairs);
+        eprintln!();
+    }
+
     // Dry-run: show execution plan and exit.
     if dry_run {
         let plan = build_plan(&compose, &order, &skip_set);
@@ -766,11 +778,36 @@ pub async fn run(
 
         // Verbose per-component context.
         if verbose && !json {
-            eprintln!("  Script: {}", component.script);
-            eprintln!("  Namespace: {}", resolved.namespace);
-            if let Some(ref url) = effective_rpc_url {
-                eprintln!("  RPC: {}", url);
+            let sig_display = sig.to_string();
+            let verify_display = effective_verify.to_string();
+            let rpc_display = effective_rpc_url.clone().unwrap_or_default();
+            let chain_id_str = if !rpc_display.is_empty() {
+                let resolved_url =
+                    super::run::resolve_rpc_url_for_chain_id(&rpc_display, &cwd);
+                if let Some(url) = resolved_url {
+                    let cid = super::run::fetch_chain_id(&url).await.unwrap_or(0);
+                    if cid > 0 { cid.to_string() } else { String::new() }
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            };
+
+            let mut kv_pairs: Vec<(&str, &str)> = vec![
+                ("Script", &component.script),
+                ("Namespace", &resolved.namespace),
+            ];
+            if !rpc_display.is_empty() {
+                kv_pairs.push(("RPC", &rpc_display));
             }
+            if !chain_id_str.is_empty() {
+                kv_pairs.push(("Chain ID", &chain_id_str));
+            }
+            kv_pairs.push(("Sig", &sig_display));
+            kv_pairs.push(("Verify", &verify_display));
+            output::eprint_kv(&kv_pairs);
+            eprintln!();
         }
 
         // Build pipeline context.
@@ -801,6 +838,20 @@ pub async fn run(
                 completed += 1;
                 if !json {
                     output::print_stage("\u{2705}", &format!("[{}/{}] '{}' completed", i + 1, total, name));
+                }
+
+                // Verbose post-execution summary per component.
+                if verbose && !json {
+                    let dep_str = format!("{} deployment(s)", result.deployments.len());
+                    let tx_str = format!("{} transaction(s)", result.transactions.len());
+                    let gas_str = format!("{} gas", output::format_gas(result.gas_used));
+                    let summary_pairs: Vec<(&str, &str)> = vec![
+                        ("Deployments", &dep_str),
+                        ("Transactions", &tx_str),
+                        ("Gas", &gas_str),
+                    ];
+                    output::eprint_kv(&summary_pairs);
+                    eprintln!();
                 }
 
                 // Write per-component debug log.

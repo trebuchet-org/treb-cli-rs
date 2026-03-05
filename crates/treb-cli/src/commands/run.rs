@@ -83,7 +83,7 @@ pub fn ensure_initialized(cwd: &std::path::Path) -> anyhow::Result<()> {
 
 /// Resolve a network name to an RPC URL. If the input is already a URL, returns it directly.
 /// Falls back to looking up the name in foundry.toml [rpc_endpoints].
-fn resolve_rpc_url_for_chain_id(network_or_url: &str, cwd: &std::path::Path) -> Option<String> {
+pub(crate) fn resolve_rpc_url_for_chain_id(network_or_url: &str, cwd: &std::path::Path) -> Option<String> {
     if network_or_url.starts_with("http://") || network_or_url.starts_with("https://") {
         return Some(network_or_url.to_string());
     }
@@ -97,7 +97,7 @@ fn resolve_rpc_url_for_chain_id(network_or_url: &str, cwd: &std::path::Path) -> 
 }
 
 /// Fetch the chain ID from an RPC endpoint via `eth_chainId`.
-async fn fetch_chain_id(rpc_url: &str) -> anyhow::Result<u64> {
+pub(crate) async fn fetch_chain_id(rpc_url: &str) -> anyhow::Result<u64> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
