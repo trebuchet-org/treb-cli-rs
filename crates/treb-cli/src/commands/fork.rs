@@ -561,11 +561,18 @@ pub async fn run_history(network: Option<String>, json: bool) -> anyhow::Result<
     let mut table = crate::output::build_table(&["Timestamp", "Action", "Network", "Details"]);
 
     for entry in &history {
+        let action_style = match entry.action.as_str() {
+            "enter" => color::SUCCESS,
+            "exit" => color::WARNING,
+            "revert" => color::MUTED,
+            "restart" => color::STAGE,
+            _ => Style::new(),
+        };
         table.add_row(vec![
-            &entry.timestamp.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
-            entry.action.as_str(),
-            entry.network.as_str(),
-            entry.details.as_deref().unwrap_or("-"),
+            entry.timestamp.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+            styled(&entry.action, action_style),
+            styled(&entry.network, color::CHAIN),
+            entry.details.as_deref().unwrap_or("-").to_string(),
         ]);
     }
 
@@ -650,10 +657,17 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
 
     let mut table = crate::output::build_table(&["Change", "File", "Key"]);
     for change in &changes {
+        let change_text = change["change"].as_str().unwrap_or("");
+        let change_style = match change_text {
+            "added" => Style::new().green(),
+            "removed" => Style::new().red(),
+            "modified" => Style::new().yellow(),
+            _ => Style::new(),
+        };
         table.add_row(vec![
-            change["change"].as_str().unwrap_or(""),
-            change["file"].as_str().unwrap_or(""),
-            change["key"].as_str().unwrap_or(""),
+            styled(change_text, change_style),
+            change["file"].as_str().unwrap_or("").to_string(),
+            styled(change["key"].as_str().unwrap_or(""), color::LABEL),
         ]);
     }
     crate::output::print_table(&table);
