@@ -408,6 +408,18 @@ impl Normalizer for BlockNumberNormalizer {
     }
 }
 
+/// Normalizes debug log filenames that contain timestamps.
+/// Matches patterns like `debug-20260305-164812.log` and replaces the
+/// timestamp portion with `<DEBUG_TIMESTAMP>`.
+pub struct DebugLogNormalizer;
+
+impl Normalizer for DebugLogNormalizer {
+    fn normalize(&self, input: &str) -> String {
+        let re = Regex::new(r"debug-\d{8}-\d{6}\.log").unwrap();
+        re.replace_all(input, "debug-<DEBUG_TIMESTAMP>.log").into_owned()
+    }
+}
+
 /// Normalizes timing/duration strings in forge output.
 /// Matches patterns like `1.23s`, `456ms`, `2.5µs`.
 pub struct DurationNormalizer;
@@ -775,6 +787,24 @@ mod tests {
     fn block_number_normalizer_no_match() {
         let n = BlockNumberNormalizer;
         assert_eq!(n.normalize("deployed contract to mainnet"), "deployed contract to mainnet");
+    }
+
+    // --- DebugLogNormalizer ---
+
+    #[test]
+    fn debug_log_normalizer_replaces_timestamp() {
+        let n = DebugLogNormalizer;
+        assert_eq!(
+            n.normalize("Debug log saved to /tmp/.treb/debug-20260305-164812.log"),
+            "Debug log saved to /tmp/.treb/debug-<DEBUG_TIMESTAMP>.log"
+        );
+    }
+
+    #[test]
+    fn debug_log_normalizer_no_match() {
+        let n = DebugLogNormalizer;
+        let input = "no debug log here";
+        assert_eq!(n.normalize(input), input);
     }
 
     // --- DurationNormalizer ---

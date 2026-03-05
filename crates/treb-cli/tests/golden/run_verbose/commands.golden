@@ -1,16 +1,31 @@
 === cmd 0: [run script/Deploy.s.sol --network anvil-31337 --broadcast --non-interactive --verbose] ===
 No files changed, compilation skipped
-┌──────────┬────────────────────────────────────────────┬───────────┬───────────┬───────┐
-│ Contract ┆ Address                                    ┆ Type      ┆ Namespace ┆ Chain │
-╞══════════╪════════════════════════════════════════════╪═══════════╪═══════════╪═══════╡
-│ Counter  ┆ 0x5b73C5498c1E3b4dbA84de0F1833c4a029d90519 ┆ SINGLETON ┆ default   ┆ 31337 │
-└──────────┴────────────────────────────────────────────┴───────────┴───────────┴───────┘
+default
+\-- 31337
+    \-- SINGLETON
+        \-- Counter:Counter 0x5b73...0519 UNVERIFIED
 
-1 deployment recorded, 1 transaction
-Config source: treb.toml (v2)
-Namespace: default
-RPC: anvil-31337
-Sender [anvil]: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
-Compiling and executing script/Deploy.s.sol...
-Execution complete.
-Result: 1 deployment(s), 1 transaction(s), 0 skipped
+Transactions:
+  1.  (SIMULATED)
+
+1 deployment recorded, 1 transaction, 160,053 gas used
+ Config source:  treb.toml (v2)
+     Namespace:  default
+      Chain ID:  31337
+           RPC:  anvil-31337
+        Sender:  anvil: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+   Script path:  script/Deploy.s.sol
+  Function sig:  run()
+Broadcast mode:  broadcast
+
+🔨 Compiling and executing script/Deploy.s.sol...
+📡 Broadcasting...
+✅ Execution complete.
+
+      Events:  2 event(s) decoded
+     Console:  0 console.log line(s)
+ Deployments:  1 deployment(s)
+Transactions:  1 transaction(s)
+     Skipped:  0 skipped
+
+  Registered Counter (0x5b73...0519)
