@@ -1,5 +1,5 @@
-# Runtime state (regenerated each run)
-.state/
+# Ralph infrastructure and state (managed by installer, regenerated each run)
+.ralph/
 
 # OS files
 .DS_Store

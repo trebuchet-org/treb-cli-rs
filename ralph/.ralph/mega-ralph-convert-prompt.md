@@ -10,7 +10,7 @@ Read the PRD file at: `{{PRD_FILE}}`
 
 ## Output Format
 
-Create a `ralph/.state/prd.json` file with this exact structure:
+Create a `ralph/.ralph/current/prd.json` file with this exact structure:
 
 ```json
 {
@@ -72,7 +72,7 @@ If any story seems too large, split it into multiple smaller stories.
 
 1. Read the PRD at `{{PRD_FILE}}`
 2. Convert it to prd.json following the rules above
-3. Write the result to `ralph/.state/prd.json`
+3. Write the result to `ralph/.ralph/current/prd.json`
 4. Validate the JSON is well-formed
 
 **Important:** Only create prd.json. Do NOT implement any code. Do NOT modify the PRD. Do NOT run ralph.sh.

@@ -12,7 +12,14 @@ Converts existing PRDs to the prd.json format that Ralph uses for autonomous exe
 
 ## The Job
 
-Take a PRD (markdown file or text) and convert it to `.state/prd.json` in your ralph directory.
+Take a PRD (markdown file or text) and convert it to `.ralph/current/prd.json` in your ralph directory.
+
+**Before writing prd.json**, set up the state directory for this standalone PRD:
+
+1. Scan `plans/` for existing `P<idx>` files to auto-detect the next P-index
+2. Create `.ralph/state/P<idx>/` directory
+3. Point `.ralph/current` symlink → `state/P<idx>`
+4. Write prd.json to `.ralph/current/prd.json` (which resolves through the symlink)
 
 ---
 
@@ -234,12 +241,12 @@ Add ability to mark tasks with different statuses.
 
 **Before writing a new prd.json, check if there is an existing one from a different feature:**
 
-1. Read the current `.state/prd.json` if it exists
+1. Read the current `.ralph/current/prd.json` if it exists
 2. Check if `branchName` differs from the new feature's branch name
-3. If different AND `.state/progress.txt` has content beyond the header:
-   - Create archive folder: `archive/YYYY-MM-DD-feature-name/`
-   - Copy current `.state/prd.json` and `.state/progress.txt` to archive
-   - Reset `.state/progress.txt` with fresh header
+3. If different AND `.ralph/current/progress.txt` has content beyond the header:
+   - Create archive folder: `.ralph/archive/YYYY-MM-DD-feature-name/`
+   - Copy current `.ralph/current/prd.json` and `.ralph/current/progress.txt` to archive
+   - Reset `.ralph/current/progress.txt` with fresh header
 
 **The ralph.sh script handles this automatically** when you run it, but if you are manually updating prd.json between runs, archive first.
 
@@ -249,7 +256,7 @@ Add ability to mark tasks with different statuses.
 
 Before writing prd.json, verify:
 
-- [ ] **Previous run archived** (if .state/prd.json exists with different branchName, archive it first)
+- [ ] **Previous run archived** (if .ralph/current/prd.json exists with different branchName, archive it first)
 - [ ] Each story is completable in one iteration (small enough)
 - [ ] Stories are ordered by dependency (schema to backend to UI)
 - [ ] Every story has "Typecheck passes" as criterion

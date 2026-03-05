@@ -8,8 +8,8 @@ You MUST implement exactly ONE user story per invocation, then STOP. Do NOT cont
 
 ## Your Task
 
-1. Read the PRD at `.state/prd.json` (relative to the ralph/ directory)
-2. Read the progress log at `.state/progress.txt` (check Codebase Patterns section first)
+1. Read the PRD at `.ralph/current/prd.json` (relative to the ralph/ directory)
+2. Read the progress log at `.ralph/current/progress.txt` (check Codebase Patterns section first)
 3. Check you're on the correct branch from PRD `branchName`. If not, check it out or create from main.
 4. Pick the **highest priority** user story where `passes: false`
 5. Implement ONLY that single user story — do NOT touch other stories
@@ -17,7 +17,7 @@ You MUST implement exactly ONE user story per invocation, then STOP. Do NOT cont
 7. Update CLAUDE.md files if you discover reusable patterns (see below)
 8. If checks pass, commit ALL changes with message: `feat: [Story ID] - [Story Title]`
 9. Update the PRD to set `passes: true` for ONLY the completed story
-10. Append your progress to `.state/progress.txt`
+10. Append your progress to `.ralph/current/progress.txt`
 11. STOP — do not start the next story
 
 ## Progress Report Format

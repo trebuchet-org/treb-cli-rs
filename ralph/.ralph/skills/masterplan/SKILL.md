@@ -1,6 +1,6 @@
 ---
 name: masterplan
-description: "Plan a large multi-phase project by doing deep codebase/domain discovery first, then generating a phased MASTER_PLAN.md. Use for rewrites, ports, greenfield apps, or any project too big for a single PRD. Triggers on: masterplan, plan project, rewrite in, port to, build from scratch, multi-phase plan, big project."
+description: "Plan a large multi-phase project by doing deep codebase/domain discovery first, then generating a phased masterplan. Use for rewrites, ports, greenfield apps, or any project too big for a single PRD. Triggers on: masterplan, plan project, rewrite in, port to, build from scratch, multi-phase plan, big project."
 user-invocable: true
 ---
 
@@ -15,7 +15,7 @@ Plan large, multi-phase projects by first doing deep discovery, then breaking th
 1. Receive a high-level project description from the user
 2. **Discover**: deeply explore any reference codebases, domains, or existing code
 3. Ask 3-7 clarifying questions (with lettered options)
-4. Generate a phased `MASTER_PLAN.md`
+4. Generate a phased masterplan in `plans/`
 
 **Important:** Do NOT implement anything. Do NOT create PRDs for individual phases. Just produce the master plan.
 
@@ -183,9 +183,11 @@ For every phase, provide:
 
 ---
 
-## Step 5: Generate MASTER_PLAN.md
+## Step 5: Generate the Masterplan
 
 ### File Format
+
+Save to `ralph/plans/<YYYY-MM-DD>-M<idx>-<name>.md`. Example: `ralph/plans/2026-03-05-M1-my-project.md`
 
 ```markdown
 # Master Plan: [Project Name]
@@ -263,8 +265,10 @@ curl -sL https://raw.githubusercontent.com/mento-protocol/mega-ralph/main/instal
 ## Output
 
 - **Format:** Markdown (`.md`)
-- **Location:** `ralph/` directory (root of the ralph install)
-- **Filename:** `MASTER_PLAN.md`
+- **Location:** `ralph/plans/` directory
+- **Filename:** `<YYYY-MM-DD>-M<idx>-<name>.md` (e.g., `2026-03-05-M1-my-project.md`)
+
+Auto-detect the next M-index by scanning `plans/` for existing `M<idx>` files.
 
 ---
 
@@ -308,7 +312,7 @@ User says: "Build a project management tool with Rust backend and React frontend
 
 ## Checklist
 
-Before saving MASTER_PLAN.md:
+Before saving the masterplan:
 
 - [ ] Completed thorough discovery (read the source codebase / researched the domain)
 - [ ] Asked clarifying questions about technology, scope, and priorities
@@ -318,7 +322,7 @@ Before saving MASTER_PLAN.md:
 - [ ] No phase depends on a later phase
 - [ ] Included dependency graph and summary table
 - [ ] Used `## Phase N -- Title` heading format (parsed by mega-ralph.sh)
-- [ ] Saved to `ralph/MASTER_PLAN.md`
+- [ ] Saved to `ralph/plans/<date>-M<idx>-<name>.md`
 
 ---
 
