@@ -482,6 +482,8 @@ pub async fn run(
         if json {
             output::print_json(&plan)?;
         } else {
+            eprintln!("{}", output::format_warning_banner("\u{1f6a7}", "[DRY RUN] Showing execution plan only — no changes will be made."));
+            eprintln!();
             print_dry_run_plan(&compose, &plan);
         }
         return Ok(());
@@ -496,14 +498,23 @@ pub async fn run(
         let is_tty = io::stdin().is_terminal();
         if is_tty {
             let executing_count = order.iter().filter(|n| !skip_set.contains(*n)).count();
-            eprintln!("About to broadcast {} component(s) to the network.", executing_count);
-            eprintln!("  Compose: {}", compose.group);
+            let count_str = format!("{}", executing_count);
+            let mut kv_pairs: Vec<(&str, &str)> = vec![
+                ("Components", &count_str),
+                ("Compose", &compose.group),
+            ];
+            let ns_ref;
             if let Some(ref ns) = namespace {
-                eprintln!("  Namespace: {}", ns);
+                ns_ref = ns.clone();
+                kv_pairs.push(("Namespace", &ns_ref));
             }
+            let net_ref;
             if let Some(ref net) = network {
-                eprintln!("  Network: {}", net);
+                net_ref = net.clone();
+                kv_pairs.push(("Network", &net_ref));
             }
+            eprintln!("About to broadcast to the network.");
+            output::eprint_kv(&kv_pairs);
             eprint!("Proceed? [y/N] ");
             io::stderr().flush().ok();
 
@@ -533,19 +544,14 @@ pub async fn run(
     let mut failed_component: Option<String> = None;
 
     if !json {
-        eprintln!("Compose: {} ({} components)", compose.group, total);
+        output::print_stage("\u{1f680}", &format!("Orchestrating {} ({} components)", compose.group, total));
     }
 
     for (i, name) in order.iter().enumerate() {
         // Skip already-completed components (resume mode).
         if skip_set.contains(name) {
             if !json {
-                eprintln!(
-                    "[{}/{}] Component '{}' (skipped — already completed)",
-                    i + 1,
-                    total,
-                    name
-                );
+                output::print_stage("\u{23ed}\u{fe0f}", &format!("[{}/{}] Skipping '{}' (already completed)", i + 1, total, name));
             }
             component_results.push(ComponentResultEntry {
                 component: name.clone(),
@@ -574,7 +580,7 @@ pub async fn run(
         let component = &compose.components[name];
 
         if !json {
-            eprintln!("[{}/{}] Executing component: {}", i + 1, total, name);
+            output::print_stage("\u{1f528}", &format!("[{}/{}] Executing '{}'...", i + 1, total, name));
         }
 
         // Re-inject global env vars (reset any previous component overrides).
@@ -666,7 +672,7 @@ pub async fn run(
             Ok(result) => {
                 completed += 1;
                 if !json {
-                    eprintln!("[{}/{}] Component '{}' completed", i + 1, total, name);
+                    output::print_stage("\u{2705}", &format!("[{}/{}] '{}' completed", i + 1, total, name));
                 }
 
                 component_results.push(ComponentResultEntry {
@@ -706,6 +712,14 @@ pub async fn run(
     // ── Display results ──────────────────────────────────────────────
     let totals = compute_totals(&component_results);
     let success = failed_component.is_none();
+
+    if !json {
+        if success {
+            output::print_stage("\u{2705}", "Orchestration complete.");
+        } else {
+            output::print_stage("\u{274c}", "Orchestration failed.");
+        }
+    }
 
     if json {
         display_compose_json(&compose.group, component_results, totals, success)?;
