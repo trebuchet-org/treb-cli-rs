@@ -31,6 +31,24 @@ struct VerifyOutputJson {
     verified_at: Option<String>,
 }
 
+/// Resolve the API key for a verifier.
+///
+/// If an explicit key was provided via `--verifier-api-key`, it takes precedence.
+/// Otherwise, checks the standard environment variable for the verifier:
+///   - etherscan  -> ETHERSCAN_API_KEY
+///   - blockscout -> BLOCKSCOUT_API_KEY
+///   - sourcify   -> None (keyless)
+fn resolve_api_key(verifier: &str, explicit_key: &Option<String>) -> Option<String> {
+    if explicit_key.is_some() {
+        return explicit_key.clone();
+    }
+    match verifier {
+        "etherscan" => env::var("ETHERSCAN_API_KEY").ok(),
+        "blockscout" => env::var("BLOCKSCOUT_API_KEY").ok(),
+        _ => None,
+    }
+}
+
 /// Compute aggregate verification status from per-verifier results.
 ///
 /// All VERIFIED -> Verified, all FAILED -> Failed, mixed -> Partial.
@@ -167,11 +185,12 @@ pub async fn run(
     let verifier_count = verifiers.len();
 
     for (vi, verifier) in verifiers.iter().enumerate() {
+        let resolved_key = resolve_api_key(verifier, &verifier_api_key);
         let opts = VerifyOpts {
             verifier: verifier.clone(),
             verifier_url: verifier_url.clone(),
-            verifier_api_key: verifier_api_key.clone(),
-            etherscan_api_key: verifier_api_key.clone(),
+            verifier_api_key: resolved_key.clone(),
+            etherscan_api_key: resolved_key,
             rpc_url: None,
             force,
             watch,
@@ -365,11 +384,12 @@ async fn run_batch(
         let verifier_count = verifiers.len();
 
         for (vi, verifier) in verifiers.iter().enumerate() {
+            let resolved_key = resolve_api_key(verifier, &verifier_api_key);
             let opts = VerifyOpts {
                 verifier: verifier.clone(),
                 verifier_url: verifier_url.clone(),
-                verifier_api_key: verifier_api_key.clone(),
-                etherscan_api_key: verifier_api_key.clone(),
+                verifier_api_key: resolved_key.clone(),
+                etherscan_api_key: resolved_key,
                 rpc_url: None,
                 force,
                 watch,
