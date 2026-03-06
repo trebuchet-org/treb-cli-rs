@@ -300,9 +300,19 @@ pub fn backup_registry(project_root: &Path) -> anyhow::Result<std::path::PathBuf
     Ok(backup_dir)
 }
 
+fn targets_deployment(kind: &PruneCandidateKind) -> bool {
+    matches!(
+        kind,
+        PruneCandidateKind::BrokenTransactionRef | PruneCandidateKind::DestroyedOnChain
+    )
+}
+
 fn merge_onchain_candidates(candidates: &mut Vec<PruneCandidate>, onchain_candidates: Vec<PruneCandidate>) {
     for onchain in onchain_candidates {
-        if let Some(existing) = candidates.iter_mut().find(|c| c.id == onchain.id) {
+        if let Some(existing) = candidates
+            .iter_mut()
+            .find(|c| c.id == onchain.id && targets_deployment(&c.kind))
+        {
             if onchain.kind == PruneCandidateKind::DestroyedOnChain {
                 existing.kind = PruneCandidateKind::DestroyedOnChain;
                 existing.reason = onchain.reason;
@@ -312,6 +322,16 @@ fn merge_onchain_candidates(candidates: &mut Vec<PruneCandidate>, onchain_candid
         }
         candidates.push(onchain);
     }
+}
+
+fn validate_onchain_args(args: &PruneArgs) -> anyhow::Result<()> {
+    if args.check_onchain && args.rpc_url.is_none() {
+        bail!("--check-onchain requires --rpc-url <url>");
+    }
+    if args.check_onchain && args.network.is_none() {
+        bail!("--check-onchain requires --network <chain-id>");
+    }
+    Ok(())
 }
 
 // ── run ───────────────────────────────────────────────────────────────────────
@@ -336,10 +356,7 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
         None => None,
     };
 
-    // Validate --check-onchain / --rpc-url combination.
-    if args.check_onchain && args.rpc_url.is_none() {
-        bail!("--check-onchain requires --rpc-url <url>");
-    }
+    validate_onchain_args(&args)?;
 
     let registry = Registry::open(&cwd).context("failed to open registry")?;
     let mut candidates = find_prune_candidates(&registry, chain_id_filter, args.include_pending);
@@ -768,5 +785,51 @@ mod tests {
         assert_eq!(candidates[0].id, "dep-1");
         assert_eq!(candidates[0].kind, PruneCandidateKind::DestroyedOnChain);
         assert_eq!(candidates[0].reason, "no bytecode at address");
+    }
+
+    #[test]
+    fn merge_onchain_candidates_does_not_rewrite_transaction_candidate_with_same_id() {
+        let mut candidates = vec![PruneCandidate {
+            id: "shared-id".to_string(),
+            kind: PruneCandidateKind::BrokenDeploymentRef,
+            reason: "tx references missing deployment".to_string(),
+            chain_id: Some(1),
+        }];
+        let onchain_candidates = vec![PruneCandidate {
+            id: "shared-id".to_string(),
+            kind: PruneCandidateKind::DestroyedOnChain,
+            reason: "deployment has no bytecode".to_string(),
+            chain_id: Some(1),
+        }];
+
+        merge_onchain_candidates(&mut candidates, onchain_candidates);
+
+        assert_eq!(candidates.len(), 2);
+        assert!(
+            candidates
+                .iter()
+                .any(|c| c.kind == PruneCandidateKind::BrokenDeploymentRef)
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|c| c.kind == PruneCandidateKind::DestroyedOnChain)
+        );
+    }
+
+    #[test]
+    fn validate_onchain_args_requires_network_when_checking_onchain() {
+        let args = PruneArgs {
+            dry_run: true,
+            include_pending: false,
+            network: None,
+            yes: false,
+            check_onchain: true,
+            rpc_url: Some("http://localhost:8545".to_string()),
+            json: false,
+        };
+
+        let err = validate_onchain_args(&args).unwrap_err().to_string();
+        assert!(err.contains("--check-onchain requires --network <chain-id>"));
     }
 }
