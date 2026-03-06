@@ -123,17 +123,24 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
     // Scanning stage.
     if !args.json {
         output::print_stage("\u{1f50d}", "Scanning registry...");
+        output::print_warning_banner(
+            "\u{26a0}\u{fe0f}",
+            &format!(
+                "Warning: About to remove {} deployment(s), {} transaction(s), {} safe transaction(s), \
+                 {} governor proposal(s). A backup will be created first.",
+                deployments_to_remove.len(),
+                transactions_to_remove.len(),
+                safe_txs_to_remove.len(),
+                governor_proposals_to_remove.len(),
+            ),
+        );
     }
 
     // Confirm.
     if !args.yes {
         let message = format!(
-            "About to remove {} deployment(s), {} transaction(s), {} safe transaction(s), \
-             {} governor proposal(s). A backup will be created first. Continue?",
-            deployments_to_remove.len(),
-            transactions_to_remove.len(),
-            safe_txs_to_remove.len(),
-            governor_proposals_to_remove.len(),
+            "Remove {} total entry(s)?",
+            total,
         );
         if !crate::ui::prompt::confirm(&message, false) {
             if !args.json {

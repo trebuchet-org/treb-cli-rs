@@ -397,11 +397,18 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
     // Destructive mode: confirm, backup, then remove.
     if !args.json {
         output::print_stage("\u{1f50d}", "Scanning registry...");
+        output::print_warning_banner(
+            "\u{26a0}\u{fe0f}",
+            &format!(
+                "Warning: About to remove {} prune candidate(s). A backup will be created first.",
+                candidates.len()
+            ),
+        );
     }
 
     if !args.yes {
         let message = format!(
-            "About to remove {} entry(s). A backup will be created first. Continue?",
+            "Remove {} entry(s)?",
             candidates.len()
         );
         if !crate::ui::prompt::confirm(&message, false) {
