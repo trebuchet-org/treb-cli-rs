@@ -6,6 +6,7 @@
 use std::{
     collections::HashMap,
     env,
+    io::IsTerminal,
     path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -37,6 +38,9 @@ pub enum MigrateSubcommand {
         /// Output as JSON
         #[arg(long)]
         json: bool,
+        /// Skip confirmation prompt
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
     /// Apply versioned registry schema migrations
     ///
@@ -60,14 +64,16 @@ pub async fn run(subcommand: MigrateSubcommand) -> anyhow::Result<()> {
     }
 
     match subcommand {
-        MigrateSubcommand::Config { dry_run, json } => run_config(&cwd, dry_run, json).await,
+        MigrateSubcommand::Config { dry_run, json, yes } => {
+            run_config(&cwd, dry_run, json, yes).await
+        }
         MigrateSubcommand::Registry { dry_run } => run_registry(&cwd, dry_run).await,
     }
 }
 
 // ── run_config ────────────────────────────────────────────────────────────────
 
-async fn run_config(project_root: &Path, dry_run: bool, json: bool) -> anyhow::Result<()> {
+async fn run_config(project_root: &Path, dry_run: bool, json: bool, yes: bool) -> anyhow::Result<()> {
     if !json {
         output::print_stage("\u{1f50d}", "Detecting config format...");
     }
@@ -91,7 +97,7 @@ async fn run_config(project_root: &Path, dry_run: bool, json: bool) -> anyhow::R
             };
             let v2_toml = serialize_treb_config_v2(&v2).context("failed to serialize v2 config")?;
 
-            return write_or_print_v2(project_root, &treb_toml, &v2_toml, dry_run, json, false)
+            return write_or_print_v2(project_root, &treb_toml, &v2_toml, dry_run, json, false, yes)
                 .await;
         }
         TrebConfigFormat::V2 => {
@@ -123,7 +129,7 @@ async fn run_config(project_root: &Path, dry_run: bool, json: bool) -> anyhow::R
     let v2 = convert_v1_to_v2(&v1, &foundry_senders);
     let v2_toml = serialize_treb_config_v2(&v2).context("failed to serialize v2 config")?;
 
-    write_or_print_v2(project_root, &treb_toml, &v2_toml, dry_run, json, true).await
+    write_or_print_v2(project_root, &treb_toml, &v2_toml, dry_run, json, true, yes).await
 }
 
 /// Write v2 TOML to `treb.toml` (with backup) or print it to stdout (dry-run).
@@ -134,6 +140,7 @@ async fn write_or_print_v2(
     dry_run: bool,
     json: bool,
     treb_toml_existed: bool,
+    yes: bool,
 ) -> anyhow::Result<()> {
     if dry_run {
         if json {
@@ -145,6 +152,15 @@ async fn write_or_print_v2(
             println!("{v2_toml}");
         }
         return Ok(());
+    }
+
+    // Interactive preview + confirmation (unless --yes, --json, or non-TTY).
+    if !yes && !json && std::io::stdin().is_terminal() {
+        println!("{v2_toml}");
+        if !crate::ui::prompt::confirm("Write this config to treb.toml?", true) {
+            println!("Cancelled.");
+            return Ok(());
+        }
     }
 
     // Write backup if treb.toml already exists.
@@ -416,7 +432,7 @@ private_key = "0xDeployerKey"
 
         let original = std::fs::read_to_string(dir.path().join("treb.toml")).unwrap();
 
-        run_config(dir.path(), true, false).await.unwrap();
+        run_config(dir.path(), true, false, false).await.unwrap();
 
         // treb.toml must be unchanged
         let after = std::fs::read_to_string(dir.path().join("treb.toml")).unwrap();
@@ -441,7 +457,7 @@ private_key = "0xDeployerKey"
 
         let original = std::fs::read_to_string(dir.path().join("treb.toml")).unwrap();
 
-        run_config(dir.path(), false, false).await.unwrap();
+        run_config(dir.path(), false, false, true).await.unwrap();
 
         let after = std::fs::read_to_string(dir.path().join("treb.toml")).unwrap();
         assert_eq!(original, after, "v2 config should not be modified");
@@ -465,7 +481,7 @@ private_key = "0xDeployerKey"
 
         let original = std::fs::read_to_string(dir.path().join("treb.toml")).unwrap();
 
-        run_config(dir.path(), false, false).await.unwrap();
+        run_config(dir.path(), false, false, true).await.unwrap();
 
         // treb.toml should now be v2
         let after = std::fs::read_to_string(dir.path().join("treb.toml")).unwrap();
@@ -507,7 +523,7 @@ derivation_path = "m/44'/60'/0'/0/0"
         // v1 treb.toml with deployer only
         write_v1_treb_toml(dir.path());
 
-        run_config(dir.path(), false, false).await.unwrap();
+        run_config(dir.path(), false, false, true).await.unwrap();
 
         // Parse the resulting v2 treb.toml
         let v2 = treb_config::load_treb_config_v2(&dir.path().join("treb.toml")).unwrap();

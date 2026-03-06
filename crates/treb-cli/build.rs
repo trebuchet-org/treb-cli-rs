@@ -422,6 +422,13 @@ fn build_migrate() -> ClapCommand {
                 )
                 .arg(
                     Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"),
+                )
+                .arg(
+                    Arg::new("yes")
+                        .long("yes")
+                        .short('y')
+                        .action(ArgAction::SetTrue)
+                        .help("Skip confirmation prompt"),
                 ),
         )
         .subcommand(
