@@ -10,10 +10,11 @@ use std::{
 
 use anyhow::{Context, bail};
 use clap::Args;
+use owo_colors::{OwoColorize, Style};
 use serde::Serialize;
 use treb_registry::{REGISTRY_DIR, Registry, snapshot_registry};
 
-use crate::output;
+use crate::{output, ui::color};
 
 // ── Args ─────────────────────────────────────────────────────────────────────
 
@@ -38,6 +39,15 @@ pub struct ResetArgs {
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
+}
+
+/// Apply a color style when color is enabled, plain text otherwise.
+fn styled(text: &str, style: Style) -> String {
+    if color::is_color_enabled() {
+        format!("{}", text.style(style))
+    } else {
+        text.to_string()
+    }
 }
 
 // ── run ───────────────────────────────────────────────────────────────────────
@@ -104,8 +114,13 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
         + governor_proposals_to_remove.len();
 
     if total == 0 {
-        println!("Nothing to reset.");
+        println!("{}", styled("Nothing to reset.", color::SUCCESS));
         return Ok(());
+    }
+
+    // Scanning stage.
+    if !args.json {
+        output::print_stage("\u{1f50d}", "Scanning registry...");
     }
 
     // Confirm.
@@ -119,12 +134,17 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
             governor_proposals_to_remove.len(),
         );
         if !crate::ui::prompt::confirm(&message, false) {
-            println!("Cancelled.");
+            if !args.json {
+                println!("{}", styled("Cancelled.", color::MUTED));
+            }
             return Ok(());
         }
     }
 
     // Backup.
+    if !args.json {
+        output::print_stage("\u{1f4be}", "Creating backup...");
+    }
     let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
     let registry_dir = cwd.join(REGISTRY_DIR);
     let backup_dir = registry_dir.join(format!("backups/reset-{ts}"));
@@ -145,6 +165,11 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
         let _ = registry.remove_governor_proposal(id);
     }
 
+    // Completion stage.
+    if !args.json {
+        output::print_stage("\u{2705}", "Reset complete");
+    }
+
     if args.json {
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
@@ -163,11 +188,19 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
             backup_path: backup_dir.display().to_string(),
         })?;
     } else {
-        println!("Reset complete.");
-        println!("  Deployments removed:         {}", deployments_to_remove.len());
-        println!("  Transactions removed:        {}", transactions_to_remove.len());
-        println!("  Safe transactions removed:   {}", safe_txs_to_remove.len());
-        println!("  Governor proposals removed:  {}", governor_proposals_to_remove.len());
+        println!(
+            "{}",
+            styled(
+                &format!(
+                    "Removed {} deployment(s), {} transaction(s), {} safe transaction(s), {} governor proposal(s).",
+                    deployments_to_remove.len(),
+                    transactions_to_remove.len(),
+                    safe_txs_to_remove.len(),
+                    governor_proposals_to_remove.len(),
+                ),
+                color::SUCCESS,
+            )
+        );
         println!("Backup created at: {}", backup_dir.display());
     }
 
