@@ -1,2 +1,3 @@
 === cmd 0: [migrate config] ===
 treb.toml is already v2 format — nothing to migrate.
+🔍 Detecting config format...

@@ -1,2 +1,3 @@
 === cmd 0: [migrate config] ===
+🔍 Detecting config format...
 Error: no treb.toml found in <PROJECT_ROOT>

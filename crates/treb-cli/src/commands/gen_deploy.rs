@@ -9,11 +9,13 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use anyhow::{Context, bail};
+use anyhow::{bail, Context};
 use handlebars::Handlebars;
 use serde::Serialize;
 
-use treb_forge::{ArtifactIndex, compile_project};
+use treb_forge::{compile_project, ArtifactIndex};
+
+use crate::output;
 
 // ── Valid flag values ────────────────────────────────────────────────────
 
@@ -76,6 +78,7 @@ struct RenderContext {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct GenDeployOutput {
     contract_name: String,
     strategy: String,
@@ -676,7 +679,11 @@ fn relative_import_path(from_file: &Path, to_file: &Path) -> String {
     }
 
     let joined = parts.join("/");
-    if joined.starts_with("..") { joined } else { format!("./{joined}") }
+    if joined.starts_with("..") {
+        joined
+    } else {
+        format!("./{joined}")
+    }
 }
 
 // ── Command entry point ──────────────────────────────────────────────────
@@ -717,6 +724,9 @@ pub async fn run(
     let foundry_config =
         treb_config::load_foundry_config(&cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
 
+    if !json {
+        output::print_stage("\u{1f528}", "Compiling project...");
+    }
     let compilation = compile_project(&foundry_config).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     // Collect available names before consuming compilation output.
@@ -826,6 +836,9 @@ pub async fn run(
     };
 
     // ── Render template ──────────────────────────────────────────────────
+    if !json {
+        output::print_stage("\u{1f4dd}", "Generating deploy script...");
+    }
     let mut hbs = Handlebars::new();
     hbs.register_escape_fn(handlebars::no_escape);
     hbs.set_strict_mode(true);
@@ -871,7 +884,10 @@ pub async fn run(
         }
         fs::write(&output_path, &code)
             .with_context(|| format!("failed to write deploy script: {}", output_path.display()))?;
-        eprintln!("Generated deploy script: {}", output_path.display());
+        output::print_stage(
+            "\u{2705}",
+            &format!("Generated deploy script: {}", output_path.display()),
+        );
     }
 
     Ok(())
@@ -1758,10 +1774,10 @@ mod tests {
         };
 
         let json = serde_json::to_value(&output).unwrap();
-        assert_eq!(json["contract_name"], "Counter");
+        assert_eq!(json["contractName"], "Counter");
         assert_eq!(json["strategy"], "create");
         assert!(json["proxy"].is_null());
-        assert_eq!(json["output_path"], "script/DeployCounter.s.sol");
+        assert_eq!(json["outputPath"], "script/DeployCounter.s.sol");
         assert_eq!(json["code"], "// generated code");
     }
 
@@ -1776,6 +1792,10 @@ mod tests {
         };
 
         let json = serde_json::to_value(&output).unwrap();
+        assert_eq!(json["contractName"], "Token");
+        assert_eq!(json["strategy"], "create2");
         assert_eq!(json["proxy"], "uups");
+        assert_eq!(json["outputPath"], "script/DeployToken.s.sol");
+        assert_eq!(json["code"], "// code");
     }
 }

@@ -1,4 +1,3 @@
-=== cmd 0: [migrate config --dry-run] ===
 [accounts.deployer]
 type = "private_key"
 address = "0xDeployerAddr"
@@ -7,6 +6,3 @@ address = "0xDeployerAddr"
 deployer = "deployer"
 
 [fork]
-
-🔍 Detecting config format...
-🔄 Converting v1 config to v2...

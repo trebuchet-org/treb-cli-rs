@@ -32,6 +32,24 @@ fn write_v2_treb_toml(ctx: &TestContext) {
     std::fs::write(ctx.path().join("treb.toml"), V2_TREB_TOML).expect("write v2 treb.toml");
 }
 
+const FOUNDRY_TOML_WITH_TREB: &str = r#"[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+
+[profile.default.treb.senders.deployer]
+type = "private_key"
+address = "0xDeployerAddr"
+
+[rpc_endpoints]
+localhost = "http://localhost:8545"
+"#;
+
+fn write_foundry_with_treb_senders(ctx: &TestContext) {
+    std::fs::write(ctx.path().join("foundry.toml"), FOUNDRY_TOML_WITH_TREB)
+        .expect("write foundry.toml with treb senders");
+}
+
 // ── Config migration tests ───────────────────────────────────────────────
 
 /// Dry-run v1→v2 migration prints the v2 TOML to stdout without modifying files.
@@ -122,6 +140,44 @@ fn migrate_config_no_treb_toml() {
         .test(&["migrate", "config"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// v1→v2 migration with --yes flag skips prompts and writes directly.
+#[test]
+fn migrate_config_v1_to_v2_yes() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("migrate_config_v1_to_v2_yes")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| write_v1_treb_toml(ctx))
+        .test(&["migrate", "config", "--yes"])
+        .output_artifact("treb.toml")
+        .extra_normalizer(Box::new(path_normalizer))
+        .extra_normalizer(Box::new(EpochNormalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// v1→v2 migration with --cleanup-foundry removes treb sections from foundry.toml.
+#[test]
+fn migrate_config_cleanup_foundry() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("migrate_config_cleanup_foundry")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| {
+            write_v1_treb_toml(ctx);
+            write_foundry_with_treb_senders(ctx);
+        })
+        .test(&["migrate", "config", "--yes", "--cleanup-foundry"])
+        .output_artifact("treb.toml")
+        .output_artifact("foundry.toml")
+        .extra_normalizer(Box::new(path_normalizer))
+        .extra_normalizer(Box::new(EpochNormalizer));
 
     run_integration_test(&test, &ctx);
 }

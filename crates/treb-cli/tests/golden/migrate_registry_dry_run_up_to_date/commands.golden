@@ -1,2 +1,3 @@
 === cmd 0: [migrate registry --dry-run] ===
-Registry is up to date (version 2).
+🔍 Checking registry version...
+✅ Registry is up to date (version 2).

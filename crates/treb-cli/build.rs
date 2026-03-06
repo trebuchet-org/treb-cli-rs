@@ -422,6 +422,19 @@ fn build_migrate() -> ClapCommand {
                 )
                 .arg(
                     Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"),
+                )
+                .arg(
+                    Arg::new("yes")
+                        .long("yes")
+                        .short('y')
+                        .action(ArgAction::SetTrue)
+                        .help("Skip confirmation prompt"),
+                )
+                .arg(
+                    Arg::new("cleanup-foundry")
+                        .long("cleanup-foundry")
+                        .action(ArgAction::SetTrue)
+                        .help("Remove [profile.*.treb.*] sections from foundry.toml"),
                 ),
         )
         .subcommand(

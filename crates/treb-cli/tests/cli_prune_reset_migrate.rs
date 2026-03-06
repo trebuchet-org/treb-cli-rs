@@ -331,7 +331,7 @@ fn migrate_config_v1_rewrites_file_and_creates_backup() {
         .current_dir(tmp.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("Migration complete."));
+        .stderr(predicate::str::contains("Migration complete"));
 
     // treb.toml should now be v2 format.
     let after = fs::read_to_string(tmp.path().join("treb.toml")).unwrap();
@@ -397,5 +397,5 @@ fn migrate_registry_dry_run_on_current_version_outputs_up_to_date() {
         .current_dir(tmp.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("up to date"));
+        .stderr(predicate::str::contains("up to date"));
 }
