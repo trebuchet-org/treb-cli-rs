@@ -78,6 +78,7 @@ struct RenderContext {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct GenDeployOutput {
     contract_name: String,
     strategy: String,
@@ -1766,10 +1767,10 @@ mod tests {
         };
 
         let json = serde_json::to_value(&output).unwrap();
-        assert_eq!(json["contract_name"], "Counter");
+        assert_eq!(json["contractName"], "Counter");
         assert_eq!(json["strategy"], "create");
         assert!(json["proxy"].is_null());
-        assert_eq!(json["output_path"], "script/DeployCounter.s.sol");
+        assert_eq!(json["outputPath"], "script/DeployCounter.s.sol");
         assert_eq!(json["code"], "// generated code");
     }
 
