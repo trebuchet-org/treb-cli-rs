@@ -10,6 +10,7 @@ use std::{
 use anyhow::{Context, bail};
 use chrono::Utc;
 use clap::Subcommand;
+use owo_colors::{OwoColorize, Style};
 use tokio::net::TcpStream;
 use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
 use treb_forge::createx::createx_deployed_bytecode;
@@ -17,6 +18,9 @@ use treb_registry::{
     DEPLOYMENTS_FILE, ForkStateStore, TRANSACTIONS_FILE, remove_snapshot, restore_registry,
     snapshot_registry,
 };
+
+use crate::output;
+use crate::ui::color;
 
 const TREB_DIR: &str = ".treb";
 const SNAPSHOT_BASE: &str = "snapshots";
@@ -168,6 +172,7 @@ pub async fn run_enter(
         .with_context(|| format!("failed to get chain ID from RPC URL: {fork_url}"))?;
 
     // Create snapshot dir and snapshot registry
+    output::print_stage("\u{1f4f8}", &format!("Snapshotting registry for '{network}'..."));
     let snapshot_dir = treb_dir.join(SNAPSHOT_BASE).join(&network);
     snapshot_registry(&treb_dir, &snapshot_dir).context("failed to snapshot registry")?;
 
@@ -202,6 +207,8 @@ pub async fn run_enter(
         })
         .context("failed to record fork history")?;
 
+    output::print_stage("\u{2705}", &format!("Fork mode entered for '{network}'."));
+
     println!("Entered fork mode for network '{network}'.");
     println!("Registry snapshot saved to {}", snapshot_dir.display());
     println!("Run `treb dev anvil start --network {network}` to start a local Anvil node.");
@@ -231,11 +238,13 @@ pub async fn run_exit(network: String) -> anyhow::Result<()> {
     let entry = store.remove_active_fork(&network).context("failed to remove fork entry")?;
 
     // Restore registry from snapshot
+    output::print_stage("\u{1f504}", &format!("Restoring registry for '{network}'..."));
     let snapshot_dir = PathBuf::from(&entry.snapshot_dir);
     restore_registry(&snapshot_dir, &treb_dir)
         .context("failed to restore registry from snapshot")?;
 
     // Remove snapshot dir
+    output::print_stage("\u{1f9f9}", &format!("Cleaning up snapshot for '{network}'..."));
     remove_snapshot(&snapshot_dir).context("failed to remove snapshot directory")?;
 
     // Add history entry
@@ -247,6 +256,8 @@ pub async fn run_exit(network: String) -> anyhow::Result<()> {
             details: None,
         })
         .context("failed to record exit history")?;
+
+    output::print_stage("\u{2705}", &format!("Fork mode exited for '{network}'."));
 
     println!("Exited fork mode for network '{network}'.");
     println!("Registry restored from snapshot.");
@@ -299,6 +310,10 @@ pub async fn run_revert(network: String, all: bool) -> anyhow::Result<()> {
 
         // Revert EVM state to the last snapshot (if we have one).
         if let Some(last_snapshot) = entry.snapshots.last() {
+            output::print_stage(
+                "\u{23ee}\u{fe0f}",
+                &format!("Reverting EVM state for '{net}'..."),
+            );
             let reverted = evm_revert_http(&client, &entry.rpc_url, &last_snapshot.snapshot_id)
                 .await
                 .with_context(|| format!("failed to revert EVM state for network '{net}'"))?;
@@ -309,19 +324,24 @@ pub async fn run_revert(network: String, all: bool) -> anyhow::Result<()> {
                     last_snapshot.snapshot_id
                 );
             }
-            println!("EVM state reverted for network '{net}'.");
         } else {
-            println!(
-                "No EVM snapshots stored for network '{net}'; skipping EVM revert (registry will still be restored)."
+            output::print_warning_banner(
+                "\u{26a0}\u{fe0f}",
+                &format!("No EVM snapshots stored for network '{net}'; skipping EVM revert (registry will still be restored)."),
             );
         }
 
         // Take a new EVM snapshot for the next revert.
+        output::print_stage("\u{1f4f8}", &format!("Taking new EVM snapshot for '{net}'..."));
         let new_snapshot_id = evm_snapshot_http(&client, &entry.rpc_url)
             .await
             .with_context(|| format!("failed to take new EVM snapshot for network '{net}'"))?;
 
         // Restore registry files from the snapshot directory.
+        output::print_stage(
+            "\u{1f504}",
+            &format!("Restoring registry for '{net}'..."),
+        );
         let snapshot_dir = PathBuf::from(&entry.snapshot_dir);
         restore_registry(&snapshot_dir, &treb_dir)
             .context("failed to restore registry from snapshot")?;
@@ -346,6 +366,8 @@ pub async fn run_revert(network: String, all: bool) -> anyhow::Result<()> {
                 details: Some(format!("new EVM snapshot: {new_snapshot_id}")),
             })
             .context("failed to record revert history")?;
+
+        output::print_stage("\u{2705}", &format!("Fork reverted for '{net}'."));
 
         println!("Reverted fork for network '{net}' to initial state.");
     }
@@ -386,29 +408,37 @@ pub async fn run_restart(network: String, fork_block_number: Option<u64>) -> any
     let blk = fork_block_number.or(entry.fork_block_number);
 
     // Reset Anvil to a fresh fork state.
+    output::print_stage(
+        "\u{1f504}",
+        &format!(
+            "Resetting Anvil for '{network}' (block: {})...",
+            blk.map_or("latest".into(), |b: u64| b.to_string())
+        ),
+    );
     anvil_reset_http(&client, &entry.rpc_url, &entry.fork_url, blk)
         .await
         .with_context(|| format!("failed to reset Anvil for network '{network}'"))?;
 
-    println!(
-        "Anvil reset to {} (block: {}).",
-        entry.fork_url,
-        blk.map_or("latest".into(), |b| b.to_string())
-    );
-
     // Re-deploy the CreateX factory.
+    output::print_stage(
+        "\u{1f3ed}",
+        &format!("Deploying CreateX factory for '{network}'..."),
+    );
     deploy_createx_http(&client, &entry.rpc_url)
         .await
         .with_context(|| format!("failed to re-deploy CreateX for network '{network}'"))?;
 
-    println!("CreateX factory re-deployed at {CREATEX_ADDRESS}.");
-
     // Take a new EVM snapshot as the fresh baseline.
+    output::print_stage("\u{1f4f8}", &format!("Taking EVM snapshot for '{network}'..."));
     let snapshot_id = evm_snapshot_http(&client, &entry.rpc_url)
         .await
         .with_context(|| format!("failed to take EVM snapshot for network '{network}'"))?;
 
     // Restore registry from snapshot.
+    output::print_stage(
+        "\u{1f504}",
+        &format!("Restoring registry for '{network}'..."),
+    );
     let snapshot_dir = PathBuf::from(&entry.snapshot_dir);
     restore_registry(&snapshot_dir, &treb_dir).context("failed to restore registry")?;
 
@@ -436,6 +466,8 @@ pub async fn run_restart(network: String, fork_block_number: Option<u64>) -> any
         })
         .context("failed to record restart history")?;
 
+    output::print_stage("\u{2705}", &format!("Fork restarted for '{network}'."));
+
     println!("Restarted fork for network '{network}'.");
     Ok(())
 }
@@ -454,10 +486,15 @@ pub async fn run_status(json: bool) -> anyhow::Result<()> {
 
     let forks = store.list_active_forks();
 
+    let now = Utc::now();
+    let deployments = load_json_map(&treb_dir.join(DEPLOYMENTS_FILE)).unwrap_or_default();
+
     if json {
         let mut statuses = Vec::new();
         for entry in &forks {
             let running = is_port_reachable(entry.port).await;
+            let uptime = format_uptime(now - entry.started_at);
+            let deployment_count = count_fork_deployments_for_chain(&deployments, entry.chain_id);
             statuses.push(serde_json::json!({
                 "network":         entry.network,
                 "rpcUrl":          entry.rpc_url,
@@ -465,10 +502,13 @@ pub async fn run_status(json: bool) -> anyhow::Result<()> {
                 "chainId":         entry.chain_id,
                 "forkBlockNumber": entry.fork_block_number,
                 "startedAt":       entry.started_at,
+                "uptime":          uptime,
+                "snapshotCount":   entry.snapshots.len(),
+                "deploymentCount": deployment_count,
                 "status":          if running { "running" } else { "stopped" },
             }));
         }
-        println!("{}", serde_json::to_string_pretty(&statuses)?);
+        output::print_json(&statuses)?;
         return Ok(());
     }
 
@@ -479,28 +519,37 @@ pub async fn run_status(json: bool) -> anyhow::Result<()> {
 
     let mut table = crate::output::build_table(&[
         "Network",
+        "Chain ID",
         "RPC URL",
         "Port",
-        "Chain ID",
         "Fork Block",
         "Started At",
+        "Uptime",
+        "Snapshots",
+        "Deployments",
         "Status",
     ]);
 
     for entry in &forks {
         let running = is_port_reachable(entry.port).await;
-        let status = if running { "running" } else { "stopped" };
+        let status_text = if running { "running" } else { "stopped" };
+        let status_style = if running { color::SUCCESS } else { color::ERROR };
         let fork_block =
             entry.fork_block_number.map(|b| b.to_string()).unwrap_or_else(|| "latest".into());
+        let uptime = format_uptime(now - entry.started_at);
+        let deployment_count = count_fork_deployments_for_chain(&deployments, entry.chain_id);
 
         table.add_row(vec![
-            entry.network.as_str(),
-            entry.rpc_url.as_str(),
-            &entry.port.to_string(),
-            &entry.chain_id.to_string(),
-            fork_block.as_str(),
-            &entry.started_at.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
-            status,
+            styled(&entry.network, color::NAMESPACE),
+            entry.chain_id.to_string(),
+            entry.rpc_url.clone(),
+            entry.port.to_string(),
+            fork_block,
+            entry.started_at.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+            uptime,
+            entry.snapshots.len().to_string(),
+            deployment_count.to_string(),
+            styled(status_text, status_style),
         ]);
     }
 
@@ -527,7 +576,7 @@ pub async fn run_history(network: Option<String>, json: bool) -> anyhow::Result<
         .collect();
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&history)?);
+        output::print_json(&history)?;
         return Ok(());
     }
 
@@ -541,11 +590,18 @@ pub async fn run_history(network: Option<String>, json: bool) -> anyhow::Result<
     let mut table = crate::output::build_table(&["Timestamp", "Action", "Network", "Details"]);
 
     for entry in &history {
+        let action_style = match entry.action.as_str() {
+            "enter" => color::SUCCESS,
+            "exit" => color::WARNING,
+            "revert" => color::MUTED,
+            "restart" => color::STAGE,
+            _ => Style::new(),
+        };
         table.add_row(vec![
-            &entry.timestamp.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
-            entry.action.as_str(),
-            entry.network.as_str(),
-            entry.details.as_deref().unwrap_or("-"),
+            entry.timestamp.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+            styled(&entry.action, action_style),
+            styled(&entry.network, color::CHAIN),
+            entry.details.as_deref().unwrap_or("-").to_string(),
         ]);
     }
 
@@ -612,14 +668,11 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
     }
 
     if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "network": network,
-                "changes": changes,
-                "clean":   changes.is_empty(),
-            }))?
-        );
+        output::print_json(&serde_json::json!({
+            "network": network,
+            "changes": changes,
+            "clean":   changes.is_empty(),
+        }))?;
         return Ok(());
     }
 
@@ -630,10 +683,17 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
 
     let mut table = crate::output::build_table(&["Change", "File", "Key"]);
     for change in &changes {
+        let change_text = change["change"].as_str().unwrap_or("");
+        let change_style = match change_text {
+            "added" => Style::new().green(),
+            "removed" => Style::new().red(),
+            "modified" => Style::new().yellow(),
+            _ => Style::new(),
+        };
         table.add_row(vec![
-            change["change"].as_str().unwrap_or(""),
-            change["file"].as_str().unwrap_or(""),
-            change["key"].as_str().unwrap_or(""),
+            styled(change_text, change_style),
+            change["file"].as_str().unwrap_or("").to_string(),
+            styled(change["key"].as_str().unwrap_or(""), color::LABEL),
         ]);
     }
     crate::output::print_table(&table);
@@ -641,6 +701,51 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+fn styled(text: &str, style: Style) -> String {
+    if color::is_color_enabled() {
+        format!("{}", text.style(style))
+    } else {
+        text.to_string()
+    }
+}
+
+/// Format a duration as a human-readable uptime string.
+///
+/// Examples: `"2h 15m"`, `"3d 1h"`, `"< 1m"`, `"45m"`.
+fn format_uptime(duration: chrono::Duration) -> String {
+    let total_secs = duration.num_seconds().max(0);
+    let days = total_secs / 86400;
+    let hours = (total_secs % 86400) / 3600;
+    let minutes = (total_secs % 3600) / 60;
+
+    if days > 0 {
+        if hours > 0 {
+            format!("{days}d {hours}h")
+        } else {
+            format!("{days}d")
+        }
+    } else if hours > 0 {
+        if minutes > 0 {
+            format!("{hours}h {minutes}m")
+        } else {
+            format!("{hours}h")
+        }
+    } else if minutes > 0 {
+        format!("{minutes}m")
+    } else {
+        "< 1m".to_string()
+    }
+}
+
+/// Count deployments in the registry for the given fork chain namespace.
+fn count_fork_deployments_for_chain(
+    deployments: &serde_json::Map<String, serde_json::Value>,
+    chain_id: u64,
+) -> usize {
+    let prefix = format!("fork/{chain_id}/");
+    deployments.keys().filter(|k| k.starts_with(&prefix)).count()
+}
 
 fn ensure_treb_dir(treb_dir: &Path) -> anyhow::Result<()> {
     if !treb_dir.exists() {
@@ -1159,5 +1264,55 @@ mod tests {
             .chain(snapshot_map.keys().filter(|k| !current_map.contains_key(*k)))
             .collect();
         assert!(changes.is_empty(), "expected no changes: {changes:?}");
+    }
+
+    // ── format_uptime tests ──────────────────────────────────────────────
+
+    #[test]
+    fn format_uptime_less_than_one_minute() {
+        let dur = chrono::Duration::seconds(30);
+        assert_eq!(super::format_uptime(dur), "< 1m");
+    }
+
+    #[test]
+    fn format_uptime_zero() {
+        let dur = chrono::Duration::seconds(0);
+        assert_eq!(super::format_uptime(dur), "< 1m");
+    }
+
+    #[test]
+    fn format_uptime_negative() {
+        let dur = chrono::Duration::seconds(-10);
+        assert_eq!(super::format_uptime(dur), "< 1m");
+    }
+
+    #[test]
+    fn format_uptime_minutes_only() {
+        let dur = chrono::Duration::minutes(45);
+        assert_eq!(super::format_uptime(dur), "45m");
+    }
+
+    #[test]
+    fn format_uptime_hours_and_minutes() {
+        let dur = chrono::Duration::minutes(135); // 2h 15m
+        assert_eq!(super::format_uptime(dur), "2h 15m");
+    }
+
+    #[test]
+    fn format_uptime_hours_exact() {
+        let dur = chrono::Duration::hours(3);
+        assert_eq!(super::format_uptime(dur), "3h");
+    }
+
+    #[test]
+    fn format_uptime_days_and_hours() {
+        let dur = chrono::Duration::hours(25); // 1d 1h
+        assert_eq!(super::format_uptime(dur), "1d 1h");
+    }
+
+    #[test]
+    fn format_uptime_days_exact() {
+        let dur = chrono::Duration::days(3);
+        assert_eq!(super::format_uptime(dur), "3d");
     }
 }

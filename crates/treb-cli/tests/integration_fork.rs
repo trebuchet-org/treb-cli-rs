@@ -6,13 +6,14 @@
 mod framework;
 
 use chrono::{TimeZone, Utc};
+use std::io::{Read, Write};
 use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
 use treb_registry::{DEPLOYMENTS_FILE, ForkStateStore, TRANSACTIONS_FILE};
 
 use framework::{
     context::TestContext,
     integration_test::{IntegrationTest, run_integration_test},
-    normalizer::PathNormalizer,
+    normalizer::{PathNormalizer, UptimeNormalizer},
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -77,7 +78,8 @@ fn fork_status_with_active_fork() {
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_fork_status(ctx.path()))
         .test(&["fork", "status"])
-        .extra_normalizer(Box::new(path_normalizer));
+        .extra_normalizer(Box::new(path_normalizer))
+        .extra_normalizer(Box::new(UptimeNormalizer));
 
     run_integration_test(&test, &ctx);
 }
@@ -94,7 +96,8 @@ fn fork_status_json() {
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_fork_status(ctx.path()))
         .test(&["fork", "status", "--json"])
-        .extra_normalizer(Box::new(path_normalizer));
+        .extra_normalizer(Box::new(path_normalizer))
+        .extra_normalizer(Box::new(UptimeNormalizer));
 
     run_integration_test(&test, &ctx);
 }
@@ -395,6 +398,39 @@ fn seed_fork_exit(project_root: &std::path::Path) {
     store.insert_active_fork(entry).unwrap();
 }
 
+/// Configure `foundry.toml` with a one-shot local JSON-RPC endpoint that
+/// responds to `eth_chainId` for deterministic `fork enter` golden testing.
+fn seed_fork_enter_success(project_root: &std::path::Path) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let foundry_toml = project_root.join("foundry.toml");
+    let content = std::fs::read_to_string(&foundry_toml).unwrap();
+    let updated = content.replace(
+        r#"localhost = "http://localhost:8545""#,
+        &format!(r#"localhost = "http://127.0.0.1:{port}""#),
+    );
+    std::fs::write(foundry_toml, updated).unwrap();
+
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+
+        // Read and ignore request payload.
+        let mut buf = [0_u8; 2048];
+        let _ = stream.read(&mut buf);
+
+        // Reply with eth_chainId = 0x1.
+        let body = r#"{"jsonrpc":"2.0","id":1,"result":"0x1"}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+        stream.flush().unwrap();
+    });
+}
+
 // ── fork enter: not initialized ─────────────────────────────────────────
 
 /// `treb fork enter --network mainnet` on an uninitialized project (no .treb/)
@@ -447,6 +483,24 @@ fn fork_enter_no_rpc_url() {
         .setup(&["init"])
         .test(&["fork", "enter", "--network", "mainnet"])
         .expect_err(true)
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork enter: success ──────────────────────────────────────────────────
+
+/// `treb fork enter --network localhost` with a deterministic local RPC
+/// endpoint should succeed and print stage indicators for snapshot/completion.
+#[test]
+fn fork_enter_success() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_enter_success")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_fork_enter_success(ctx.path()))
+        .test(&["fork", "enter", "--network", "localhost"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);

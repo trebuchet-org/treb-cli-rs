@@ -1,0 +1,6 @@
+=== cmd 0: [fork enter --network localhost] ===
+Entered fork mode for network 'localhost'.
+Registry snapshot saved to <PROJECT_ROOT>/.treb/snapshots/localhost
+Run `treb dev anvil start --network localhost` to start a local Anvil node.
+📸 Snapshotting registry for 'localhost'...
+✅ Fork mode entered for 'localhost'.
