@@ -153,6 +153,39 @@ async fn write_or_print_v2(
     cleanup_foundry: bool,
     source: Option<&str>,
 ) -> anyhow::Result<()> {
+    write_or_print_v2_with_prompt(
+        project_root,
+        treb_toml,
+        v2_toml,
+        dry_run,
+        json,
+        treb_toml_existed,
+        yes,
+        cleanup_foundry,
+        source,
+        std::io::stdin().is_terminal(),
+        crate::ui::prompt::confirm,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn write_or_print_v2_with_prompt<F>(
+    project_root: &Path,
+    treb_toml: &Path,
+    v2_toml: &str,
+    dry_run: bool,
+    json: bool,
+    treb_toml_existed: bool,
+    yes: bool,
+    cleanup_foundry: bool,
+    source: Option<&str>,
+    stdin_is_tty: bool,
+    confirm_prompt: F,
+) -> anyhow::Result<()>
+where
+    F: Fn(&str, bool) -> bool,
+{
     if dry_run {
         if json {
             let mut obj = serde_json::json!({
@@ -170,9 +203,9 @@ async fn write_or_print_v2(
     }
 
     // Interactive preview + confirmation (unless --yes, --json, or non-TTY).
-    if !yes && !json && std::io::stdin().is_terminal() {
+    if !yes && !json && stdin_is_tty {
         println!("{v2_toml}");
-        if !crate::ui::prompt::confirm("Write this config to treb.toml?", true) {
+        if !confirm_prompt("Write this config to treb.toml?", false) {
             println!("Cancelled.");
             return Ok(());
         }
@@ -631,6 +664,43 @@ private_key = "0xDeployerKey"
         assert_eq!(backups.len(), 1, "exactly one backup should be created");
         let backup_content = std::fs::read_to_string(backups[0].path()).unwrap();
         assert_eq!(backup_content, original, "backup should contain original v1 content");
+    }
+
+    #[tokio::test]
+    async fn write_or_print_v2_cancelled_prompt_does_not_write() {
+        let dir = TempDir::new().unwrap();
+        let treb_toml = dir.path().join("treb.toml");
+        write_v1_treb_toml(dir.path());
+        let original = std::fs::read_to_string(&treb_toml).unwrap();
+
+        write_or_print_v2_with_prompt(
+            dir.path(),
+            &treb_toml,
+            "[accounts.deployer]\ntype = \"private_key\"\n",
+            false,
+            false,
+            true,
+            false,
+            false,
+            None,
+            true,
+            |_, default| {
+                assert!(!default, "interactive migrate confirmation must default to no");
+                false
+            },
+        )
+        .await
+        .unwrap();
+
+        let after = std::fs::read_to_string(&treb_toml).unwrap();
+        assert_eq!(after, original, "cancelled prompt must not write changes");
+
+        let backups: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with("treb.toml.bak-"))
+            .collect();
+        assert!(backups.is_empty(), "cancelled prompt should not create backup files");
     }
 
     // ── run_config foundry sender migration ───────────────────────────────────
