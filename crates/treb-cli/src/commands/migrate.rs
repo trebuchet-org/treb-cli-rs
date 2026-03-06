@@ -136,6 +136,7 @@ async fn run_config(project_root: &Path, dry_run: bool, json: bool, yes: bool, c
 }
 
 /// Write v2 TOML to `treb.toml` (with backup) or print it to stdout (dry-run).
+#[allow(clippy::too_many_arguments)]
 async fn write_or_print_v2(
     project_root: &Path,
     treb_toml: &Path,
@@ -297,11 +298,17 @@ fn remove_treb_sections(content: &str) -> String {
 
 /// Check if a trimmed line is a `[profile.*.treb]` or `[profile.*.treb.*]` section header.
 fn is_treb_section_header(trimmed: &str) -> bool {
-    if !trimmed.starts_with("[profile.") || !trimmed.ends_with(']') {
+    if !trimmed.starts_with("[profile.") {
         return false;
     }
-    // Extract inner content between [ and ]
-    let inner = &trimmed[1..trimmed.len() - 1];
+
+    // Accept valid section headers with trailing inline comments, e.g.
+    // `[profile.default.treb.senders.deployer] # comment`.
+    let Some(close_idx) = trimmed.find(']') else {
+        return false;
+    };
+    // Extract inner content between [ and ].
+    let inner = &trimmed[1..close_idx];
     // Split by '.' and look for "treb" after "profile.<name>"
     let parts: Vec<&str> = inner.split('.').collect();
     // Must be at least: profile, <name>, treb
@@ -776,6 +783,30 @@ mainnet = "https://eth.example.com"
         assert_eq!(backup_content, foundry_content, "backup should contain original content");
 
         // Verify foundry.toml was cleaned
+        let cleaned = std::fs::read_to_string(dir.path().join("foundry.toml")).unwrap();
+        assert!(!cleaned.contains("[profile.default.treb"), "treb sections should be removed");
+        assert!(cleaned.contains("[profile.default]"), "non-treb sections should remain");
+        assert!(cleaned.contains("[rpc_endpoints]"), "rpc_endpoints should remain");
+    }
+
+    #[test]
+    fn cleanup_foundry_removes_treb_sections_with_inline_header_comments() {
+        let dir = TempDir::new().unwrap();
+        let foundry_content = r#"[profile.default]
+src = "src"
+
+[profile.default.treb.senders.deployer] # migrated sender
+type = "private_key"
+address = "0xAddr"
+
+[rpc_endpoints]
+mainnet = "https://eth.example.com"
+"#;
+        std::fs::write(dir.path().join("foundry.toml"), foundry_content).unwrap();
+
+        let result = cleanup_foundry_treb_sections(dir.path(), false).unwrap();
+        assert!(result.is_some(), "should return backup path when sections removed");
+
         let cleaned = std::fs::read_to_string(dir.path().join("foundry.toml")).unwrap();
         assert!(!cleaned.contains("[profile.default.treb"), "treb sections should be removed");
         assert!(cleaned.contains("[profile.default]"), "non-treb sections should remain");
