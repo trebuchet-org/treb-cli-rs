@@ -11,10 +11,11 @@ use std::{
 
 use anyhow::{Context, bail};
 use clap::Args;
+use owo_colors::{OwoColorize, Style};
 use serde::{Deserialize, Serialize};
 use treb_registry::{REGISTRY_DIR, Registry, snapshot_registry};
 
-use crate::output;
+use crate::{output, ui::color};
 
 // ── Args ─────────────────────────────────────────────────────────────────────
 
@@ -44,6 +45,15 @@ pub struct PruneArgs {
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
+}
+
+/// Apply a color style when color is enabled, plain text otherwise.
+fn styled(text: &str, style: Style) -> String {
+    if color::is_color_enabled() {
+        format!("{}", text.style(style))
+    } else {
+        text.to_string()
+    }
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -210,7 +220,11 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
     let candidates = find_prune_candidates(&registry, chain_id_filter, args.include_pending);
 
     if candidates.is_empty() {
-        println!("Nothing to prune.");
+        if args.json {
+            output::print_json(&serde_json::json!({ "candidates": [] }))?;
+        } else {
+            println!("{}", styled("Nothing to prune.", color::SUCCESS));
+        }
         return Ok(());
     }
 
@@ -219,6 +233,7 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
         if args.json {
             output::print_json(&candidates)?;
         } else {
+            output::print_stage("\u{1f50d}", "Scanning registry...");
             let mut table = output::build_table(&["ID", "Kind", "Reason", "Chain ID"]);
             for c in &candidates {
                 table.add_row(vec![
@@ -230,25 +245,38 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
             }
             output::print_table(&table);
             println!(
-                "\n{} prune candidate(s) found. Re-run without --dry-run to remove.",
-                candidates.len()
+                "\n{}",
+                styled(
+                    &format!(
+                        "{} prune candidate(s) found. Re-run without --dry-run to remove.",
+                        candidates.len()
+                    ),
+                    color::SUCCESS,
+                )
             );
         }
         return Ok(());
     }
 
     // Destructive mode: confirm, backup, then remove.
+    if !args.json {
+        output::print_stage("\u{1f50d}", "Scanning registry...");
+    }
+
     if !args.yes {
         let message = format!(
             "About to remove {} entry(s). A backup will be created first. Continue?",
             candidates.len()
         );
         if !crate::ui::prompt::confirm(&message, false) {
-            println!("Cancelled.");
+            println!("{}", styled("Cancelled.", color::MUTED));
             return Ok(());
         }
     }
 
+    if !args.json {
+        output::print_stage("\u{1f4be}", "Creating backup...");
+    }
     let backup_path = backup_registry(&cwd)?;
 
     // Re-open registry mutably for removals.
@@ -268,6 +296,10 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
                 }
             }
         }
+    }
+
+    if !args.json {
+        output::print_stage("\u{2705}", "Prune complete");
     }
 
     if args.json {
@@ -292,7 +324,13 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
             ]);
         }
         output::print_table(&table);
-        println!("\nRemoved {} entry(s).", removed.len());
+        println!(
+            "\n{}",
+            styled(
+                &format!("Removed {} entry(s).", removed.len()),
+                color::SUCCESS,
+            )
+        );
         println!("Backup created at: {}", backup_path.display());
     }
 
