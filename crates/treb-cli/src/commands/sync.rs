@@ -25,6 +25,15 @@ struct SyncOutputJson {
     errors: Vec<String>,
 }
 
+// ── Detail table row ────────────────────────────────────────────────────
+
+struct SyncDetailRow {
+    safe_tx_hash: String,
+    safe_address: String,
+    status: String,
+    confirmations: usize,
+}
+
 // ── Chain ID resolution ─────────────────────────────────────────────────
 
 /// Resolve a network name or numeric chain ID to a u64 chain ID.
@@ -118,6 +127,7 @@ pub async fn run(
     let mut newly_executed_count = 0usize;
     let mut removed_count = 0usize;
     let mut errors: Vec<String> = Vec::new();
+    let mut detail_rows: Vec<SyncDetailRow> = Vec::new();
     let synced_count = filtered.len();
 
     for ((safe_address, chain_id), local_hashes) in &groups {
@@ -184,6 +194,7 @@ pub async fn run(
                 };
 
                 let was_executed = local_stx.status == TransactionStatus::Executed;
+                let old_status_str = local_stx.status.to_string();
                 let mut updated_stx = local_stx;
 
                 // Update confirmations from the service
@@ -198,7 +209,9 @@ pub async fn run(
                     .collect();
 
                 // Update execution status if newly executed
-                if service_tx.is_executed && updated_stx.status != TransactionStatus::Executed {
+                let became_executed = service_tx.is_executed
+                    && updated_stx.status != TransactionStatus::Executed;
+                if became_executed {
                     updated_stx.status = TransactionStatus::Executed;
                     updated_stx.executed_at = service_tx.execution_date;
                     updated_stx.execution_tx_hash =
@@ -211,6 +224,16 @@ pub async fn run(
                     .update_safe_transaction(updated_stx.clone())
                     .with_context(|| format!("failed to update safe transaction {local_hash}"))?;
                 updated_count += 1;
+
+                // Track detail row for newly executed or updated transactions
+                if became_executed {
+                    detail_rows.push(SyncDetailRow {
+                        safe_tx_hash: local_hash.clone(),
+                        safe_address: safe_address.clone(),
+                        status: format!("{old_status_str} -> Executed"),
+                        confirmations: updated_stx.confirmations.len(),
+                    });
+                }
 
                 // Update linked Transaction records when safe tx becomes Executed
                 if !was_executed && updated_stx.status == TransactionStatus::Executed {
@@ -233,6 +256,12 @@ pub async fn run(
                     format!("failed to remove stale safe transaction {local_hash}")
                 })?;
                 removed_count += 1;
+                detail_rows.push(SyncDetailRow {
+                    safe_tx_hash: local_hash.clone(),
+                    safe_address: safe_address.clone(),
+                    status: "Removed".to_string(),
+                    confirmations: 0,
+                });
             }
         }
     }
@@ -248,6 +277,22 @@ pub async fn run(
             errors,
         })?;
     } else {
+        // Print per-transaction detail table when there are changes
+        if !detail_rows.is_empty() {
+            let mut table =
+                output::build_table(&["SafeTxHash", "Safe", "Status", "Confirmations"]);
+            for row in &detail_rows {
+                table.add_row(vec![
+                    output::truncate_address(&row.safe_tx_hash),
+                    output::truncate_address(&row.safe_address),
+                    row.status.clone(),
+                    row.confirmations.to_string(),
+                ]);
+            }
+            output::print_table(&table);
+            println!();
+        }
+
         println!("{}", output::format_stage("\u{2705}", "Sync complete."));
         println!("  Safe transactions synced: {synced_count}");
         if color::is_color_enabled() {
