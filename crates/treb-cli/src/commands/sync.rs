@@ -130,6 +130,10 @@ pub async fn run(
     let mut detail_rows: Vec<SyncDetailRow> = Vec::new();
     let synced_count = filtered.len();
 
+    if !json {
+        output::print_stage("\u{2699}\u{fe0f}", "Processing safe transactions...");
+    }
+
     for ((safe_address, chain_id), local_hashes) in &groups {
         let client = match clients.get(chain_id) {
             Some(c) => c,
