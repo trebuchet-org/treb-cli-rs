@@ -280,6 +280,10 @@ pub async fn run(
     }
 
     // ── Try trace, fall back to receipt-only ─────────────────────────────
+    if !json {
+        output::print_stage("\u{1f50d}", "Tracing transaction...");
+    }
+
     let mut creations;
     let mode;
 
@@ -310,6 +314,15 @@ pub async fn run(
         }
         Err(_) => {
             mode = "receipt";
+            if !json {
+                eprintln!(
+                    "{}",
+                    output::format_warning_banner(
+                        "\u{26a0}\u{fe0f}",
+                        "debug_traceTransaction not available, using receipt-only mode"
+                    )
+                );
+            }
             creations = Vec::new();
 
             if let Some(addr) = receipt_contract_address(&receipt_result) {
@@ -345,6 +358,10 @@ pub async fn run(
     let mut registry = Registry::open(&cwd).context("failed to open registry")?;
 
     // ── Register each creation ──────────────────────────────────────────
+    if !json {
+        output::print_stage("\u{1f4dd}", "Registering deployments...");
+    }
+
     let mut registered: Vec<(RegisteredDeploymentJson, String)> = Vec::new();
 
     for (i, creation) in creations.iter().enumerate() {
@@ -482,10 +499,6 @@ pub async fn run(
             transaction_id: tx_id,
         })?;
     } else {
-        if mode == "receipt" {
-            eprintln!("Note: debug_traceTransaction not available, using receipt-only mode");
-        }
-
         let mut table = output::build_table(&["Contract", "Address", "Namespace", "Chain"]);
 
         for dep in &dep_jsons {
