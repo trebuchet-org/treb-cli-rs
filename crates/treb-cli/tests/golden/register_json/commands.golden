@@ -1,17 +1,17 @@
 === cmd 0: [register --tx-hash 0x4674c314019d10397b9275c83fdeca4351175467140b1da7443f5a483a7585cb --network anvil-31337 --json] ===
 {
-  "chain_id": 31337,
+  "chainId": 31337,
   "deployments": [
     {
       "address": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
-      "chain_id": 31337,
-      "contract_name": "Unknown",
+      "chainId": 31337,
+      "contractName": "Unknown",
       "id": "default/31337/Unknown",
       "namespace": "default"
     }
   ],
   "mode": "trace",
   "success": true,
-  "transaction_id": "tx-<ID>",
-  "tx_hash": "0x4674c314019d10397b9275c83fdeca4351175467140b1da7443f5a483a7585cb"
+  "transactionId": "tx-<ID>",
+  "txHash": "0x4674c314019d10397b9275c83fdeca4351175467140b1da7443f5a483a7585cb"
 }

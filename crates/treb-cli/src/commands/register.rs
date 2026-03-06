@@ -179,6 +179,7 @@ fn resolve_contract_name(
 // ── Output types ────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct RegisterOutputJson {
     success: bool,
     tx_hash: String,
@@ -189,6 +190,7 @@ struct RegisterOutputJson {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct RegisteredDeploymentJson {
     id: String,
     contract_name: String,
