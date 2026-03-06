@@ -1,7 +1,8 @@
 === cmd 0: [reset --yes --network 1] ===
+⚠️ Warning: About to remove 2 deployment(s), 1 transaction(s), 1 safe transaction(s), 1 governor proposal(s). A backup will be created first.
 Reset complete.
-  Deployments removed:         2
-  Transactions removed:        1
-  Safe transactions removed:   1
-  Governor proposals removed:  1
+Removed 2 deployment(s), 1 transaction(s), 1 safe transaction(s), 1 governor proposal(s).
 Backup created at: <PROJECT_ROOT>/.treb/backups/reset-<UNIX_TIME>
+🔍 Scanning registry...
+💾 Creating backup...
+✅ Reset complete

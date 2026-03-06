@@ -1,6 +1,10 @@
 === cmd 0: [tag --add v3-release mainnet/42220/FPMM:v<VERSION>] ===
 Added tag 'v3-release' to 'mainnet/42220/FPMM:v<VERSION>'
 
+Tags:
+  - v3-release
+📝 Updating tags...
+
 === cmd 1: [tag mainnet/42220/FPMM:v<VERSION>] ===
 Tags for 'mainnet/42220/FPMM:v<VERSION>':
   - v3-release
