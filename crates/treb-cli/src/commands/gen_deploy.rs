@@ -15,6 +15,8 @@ use serde::Serialize;
 
 use treb_forge::{ArtifactIndex, compile_project};
 
+use crate::output;
+
 // ── Valid flag values ────────────────────────────────────────────────────
 
 const VALID_STRATEGIES: &[&str] = &["create", "create2", "create3"];
@@ -717,6 +719,9 @@ pub async fn run(
     let foundry_config =
         treb_config::load_foundry_config(&cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
 
+    if !json {
+        output::print_stage("\u{1f528}", "Compiling project...");
+    }
     let compilation = compile_project(&foundry_config).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     // Collect available names before consuming compilation output.
@@ -826,6 +831,9 @@ pub async fn run(
     };
 
     // ── Render template ──────────────────────────────────────────────────
+    if !json {
+        output::print_stage("\u{1f4dd}", "Generating deploy script...");
+    }
     let mut hbs = Handlebars::new();
     hbs.register_escape_fn(handlebars::no_escape);
     hbs.set_strict_mode(true);
@@ -871,7 +879,7 @@ pub async fn run(
         }
         fs::write(&output_path, &code)
             .with_context(|| format!("failed to write deploy script: {}", output_path.display()))?;
-        eprintln!("Generated deploy script: {}", output_path.display());
+        output::print_stage("\u{2705}", &format!("Generated deploy script: {}", output_path.display()));
     }
 
     Ok(())
