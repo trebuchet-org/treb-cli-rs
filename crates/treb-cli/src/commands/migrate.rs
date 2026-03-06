@@ -92,6 +92,11 @@ async fn run_config(project_root: &Path, dry_run: bool, json: bool, yes: bool, c
                 bail!("no treb.toml found in {}", project_root.display());
             }
 
+            if !json {
+                eprintln!("{}", output::format_warning_banner("\u{26a0}\u{fe0f}", "No treb.toml found \u{2014} migrating senders from foundry.toml (deprecated location)."));
+                output::print_stage("\u{1f504}", "Converting foundry.toml senders to v2 config...");
+            }
+
             // Create a v2 config from foundry senders alone.
             let v2 = treb_config::TrebFileConfigV2 {
                 accounts: foundry_senders,
@@ -100,7 +105,7 @@ async fn run_config(project_root: &Path, dry_run: bool, json: bool, yes: bool, c
             };
             let v2_toml = serialize_treb_config_v2(&v2).context("failed to serialize v2 config")?;
 
-            return write_or_print_v2(project_root, &treb_toml, &v2_toml, dry_run, json, false, yes, cleanup_foundry)
+            return write_or_print_v2(project_root, &treb_toml, &v2_toml, dry_run, json, false, yes, cleanup_foundry, Some("foundry"))
                 .await;
         }
         TrebConfigFormat::V2 => {
@@ -132,7 +137,7 @@ async fn run_config(project_root: &Path, dry_run: bool, json: bool, yes: bool, c
     let v2 = convert_v1_to_v2(&v1, &foundry_senders);
     let v2_toml = serialize_treb_config_v2(&v2).context("failed to serialize v2 config")?;
 
-    write_or_print_v2(project_root, &treb_toml, &v2_toml, dry_run, json, true, yes, cleanup_foundry).await
+    write_or_print_v2(project_root, &treb_toml, &v2_toml, dry_run, json, true, yes, cleanup_foundry, None).await
 }
 
 /// Write v2 TOML to `treb.toml` (with backup) or print it to stdout (dry-run).
@@ -146,13 +151,18 @@ async fn write_or_print_v2(
     treb_toml_existed: bool,
     yes: bool,
     cleanup_foundry: bool,
+    source: Option<&str>,
 ) -> anyhow::Result<()> {
     if dry_run {
         if json {
-            output::print_json(&serde_json::json!({
+            let mut obj = serde_json::json!({
                 "dryRun": true,
                 "v2Content": v2_toml
-            }))?;
+            });
+            if let Some(src) = source {
+                obj.as_object_mut().unwrap().insert("source".to_string(), serde_json::json!(src));
+            }
+            output::print_json(&obj)?;
         } else {
             println!("{v2_toml}");
         }
@@ -194,11 +204,15 @@ async fn write_or_print_v2(
     };
 
     if json {
-        output::print_json(&serde_json::json!({
+        let mut obj = serde_json::json!({
             "status": "migrated",
             "backupPath": backup_path.as_ref().map(|p| p.display().to_string()),
             "foundryCleanupBackup": foundry_cleanup_path.as_ref().map(|p| p.display().to_string()),
-        }))?;
+        });
+        if let Some(src) = source {
+            obj.as_object_mut().unwrap().insert("source".to_string(), serde_json::json!(src));
+        }
+        output::print_json(&obj)?;
     } else {
         if let Some(bp) = &backup_path {
             println!("Backup written to: {}", bp.display());
@@ -828,6 +842,60 @@ mainnet = "https://eth.example.com"
             .filter(|e| e.file_name().to_string_lossy().starts_with("foundry.toml.bak-"))
             .collect();
         assert!(backups.is_empty(), "no backup should be created when nothing to clean");
+    }
+
+    // ── foundry-only migration path ──────────────────────────────────────────
+
+    /// Helper: write a foundry.toml with treb senders (no treb.toml needed).
+    fn write_foundry_toml_with_senders(dir: &Path) {
+        std::fs::write(
+            dir.join("foundry.toml"),
+            r#"[profile.default]
+src = "src"
+
+[profile.default.treb.senders.deployer]
+type = "private_key"
+address = "0xDeployerAddr"
+private_key = "0xDeployerKey"
+"#,
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn run_config_foundry_only_creates_v2_config() {
+        let dir = TempDir::new().unwrap();
+        write_foundry_toml_with_senders(dir.path());
+        // No treb.toml — foundry-only migration path
+
+        run_config(dir.path(), false, false, true, false).await.unwrap();
+
+        // treb.toml should now exist as v2
+        let treb_toml = dir.path().join("treb.toml");
+        assert!(treb_toml.exists(), "treb.toml should be created");
+        let v2 = treb_config::load_treb_config_v2(&treb_toml).unwrap();
+        assert!(v2.accounts.contains_key("deployer"), "deployer should be present");
+        assert_eq!(v2.accounts["deployer"].type_, Some(SenderType::PrivateKey));
+        assert_eq!(v2.accounts["deployer"].address.as_deref(), Some("0xDeployerAddr"));
+
+        // No backup should be created (treb.toml didn't exist before)
+        let backups: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with("treb.toml.bak-"))
+            .collect();
+        assert!(backups.is_empty(), "no treb.toml backup since it didn't exist");
+    }
+
+    #[tokio::test]
+    async fn run_config_foundry_only_dry_run_does_not_create_file() {
+        let dir = TempDir::new().unwrap();
+        write_foundry_toml_with_senders(dir.path());
+
+        run_config(dir.path(), true, false, false, false).await.unwrap();
+
+        // treb.toml should NOT be created
+        assert!(!dir.path().join("treb.toml").exists(), "dry-run should not create treb.toml");
     }
 
     // ── cleanup_foundry ignored in dry-run ───────────────────────────────────
