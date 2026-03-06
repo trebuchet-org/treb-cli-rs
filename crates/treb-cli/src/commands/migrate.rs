@@ -68,6 +68,10 @@ pub async fn run(subcommand: MigrateSubcommand) -> anyhow::Result<()> {
 // ── run_config ────────────────────────────────────────────────────────────────
 
 async fn run_config(project_root: &Path, dry_run: bool, json: bool) -> anyhow::Result<()> {
+    if !json {
+        output::print_stage("\u{1f50d}", "Detecting config format...");
+    }
+
     let format = detect_treb_config_format(project_root);
     let treb_toml = project_root.join("treb.toml");
 
@@ -111,6 +115,10 @@ async fn run_config(project_root: &Path, dry_run: bool, json: bool) -> anyhow::R
     // Also extract any senders from foundry.toml (deprecated location).
     let foundry_senders = extract_treb_senders_from_foundry(project_root, "default");
 
+    if !json {
+        output::print_stage("\u{1f504}", "Converting v1 config to v2...");
+    }
+
     // Convert v1 → v2, merging in foundry senders as additional accounts.
     let v2 = convert_v1_to_v2(&v1, &foundry_senders);
     let v2_toml = serialize_treb_config_v2(&v2).context("failed to serialize v2 config")?;
@@ -141,6 +149,9 @@ async fn write_or_print_v2(
 
     // Write backup if treb.toml already exists.
     let backup_path = if treb_toml_existed && treb_toml.exists() {
+        if !json {
+            output::print_stage("\u{1f4be}", "Creating backup...");
+        }
         let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
         let path = project_root.join(format!("treb.toml.bak-{ts}"));
         std::fs::copy(treb_toml, &path)
@@ -160,11 +171,10 @@ async fn write_or_print_v2(
             "backupPath": backup_path.as_ref().map(|p| p.display().to_string()),
         }))?;
     } else {
-        println!("Migration complete.");
         if let Some(bp) = &backup_path {
             println!("Backup written to: {}", bp.display());
         }
-        println!("treb.toml updated to v2 format.");
+        output::print_stage("\u{2705}", "Migration complete — treb.toml updated to v2 format.");
     }
 
     Ok(())
@@ -244,6 +254,8 @@ async fn run_registry(project_root: &Path, dry_run: bool) -> anyhow::Result<()> 
 
     use treb_registry::{REGISTRY_FILE, io::read_json_file, types::RegistryMeta};
 
+    output::print_stage("\u{1f50d}", "Checking registry version...");
+
     let registry_dir = project_root.join(REGISTRY_DIR);
     let meta_path = registry_dir.join(REGISTRY_FILE);
 
@@ -264,7 +276,7 @@ async fn run_registry(project_root: &Path, dry_run: bool) -> anyhow::Result<()> 
     }
 
     if current_version == REGISTRY_VERSION {
-        println!("Registry is up to date (version {REGISTRY_VERSION}).");
+        output::print_stage("\u{2705}", &format!("Registry is up to date (version {REGISTRY_VERSION})."));
         return Ok(());
     }
 
@@ -276,9 +288,12 @@ async fn run_registry(project_root: &Path, dry_run: bool) -> anyhow::Result<()> 
     }
 
     let report = run_migrations(&registry_dir)?;
-    println!(
-        "Registry migrated to version {}. Applied: {:?}",
-        report.current_version, report.applied
+    output::print_stage(
+        "\u{2705}",
+        &format!(
+            "Registry migrated to version {}. Applied: {:?}",
+            report.current_version, report.applied
+        ),
     );
     Ok(())
 }
