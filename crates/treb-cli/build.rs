@@ -429,6 +429,12 @@ fn build_migrate() -> ClapCommand {
                         .short('y')
                         .action(ArgAction::SetTrue)
                         .help("Skip confirmation prompt"),
+                )
+                .arg(
+                    Arg::new("cleanup-foundry")
+                        .long("cleanup-foundry")
+                        .action(ArgAction::SetTrue)
+                        .help("Remove [profile.*.treb.*] sections from foundry.toml"),
                 ),
         )
         .subcommand(

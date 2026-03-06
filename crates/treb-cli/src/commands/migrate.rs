@@ -41,6 +41,9 @@ pub enum MigrateSubcommand {
         /// Skip confirmation prompt
         #[arg(long, short = 'y')]
         yes: bool,
+        /// Remove [profile.*.treb.*] sections from foundry.toml after migration
+        #[arg(long)]
+        cleanup_foundry: bool,
     },
     /// Apply versioned registry schema migrations
     ///
@@ -64,8 +67,8 @@ pub async fn run(subcommand: MigrateSubcommand) -> anyhow::Result<()> {
     }
 
     match subcommand {
-        MigrateSubcommand::Config { dry_run, json, yes } => {
-            run_config(&cwd, dry_run, json, yes).await
+        MigrateSubcommand::Config { dry_run, json, yes, cleanup_foundry } => {
+            run_config(&cwd, dry_run, json, yes, cleanup_foundry).await
         }
         MigrateSubcommand::Registry { dry_run } => run_registry(&cwd, dry_run).await,
     }
@@ -73,7 +76,7 @@ pub async fn run(subcommand: MigrateSubcommand) -> anyhow::Result<()> {
 
 // ── run_config ────────────────────────────────────────────────────────────────
 
-async fn run_config(project_root: &Path, dry_run: bool, json: bool, yes: bool) -> anyhow::Result<()> {
+async fn run_config(project_root: &Path, dry_run: bool, json: bool, yes: bool, cleanup_foundry: bool) -> anyhow::Result<()> {
     if !json {
         output::print_stage("\u{1f50d}", "Detecting config format...");
     }
@@ -97,7 +100,7 @@ async fn run_config(project_root: &Path, dry_run: bool, json: bool, yes: bool) -
             };
             let v2_toml = serialize_treb_config_v2(&v2).context("failed to serialize v2 config")?;
 
-            return write_or_print_v2(project_root, &treb_toml, &v2_toml, dry_run, json, false, yes)
+            return write_or_print_v2(project_root, &treb_toml, &v2_toml, dry_run, json, false, yes, cleanup_foundry)
                 .await;
         }
         TrebConfigFormat::V2 => {
@@ -129,7 +132,7 @@ async fn run_config(project_root: &Path, dry_run: bool, json: bool, yes: bool) -
     let v2 = convert_v1_to_v2(&v1, &foundry_senders);
     let v2_toml = serialize_treb_config_v2(&v2).context("failed to serialize v2 config")?;
 
-    write_or_print_v2(project_root, &treb_toml, &v2_toml, dry_run, json, true, yes).await
+    write_or_print_v2(project_root, &treb_toml, &v2_toml, dry_run, json, true, yes, cleanup_foundry).await
 }
 
 /// Write v2 TOML to `treb.toml` (with backup) or print it to stdout (dry-run).
@@ -141,6 +144,7 @@ async fn write_or_print_v2(
     json: bool,
     treb_toml_existed: bool,
     yes: bool,
+    cleanup_foundry: bool,
 ) -> anyhow::Result<()> {
     if dry_run {
         if json {
@@ -181,19 +185,127 @@ async fn write_or_print_v2(
     std::fs::write(treb_toml, v2_toml)
         .with_context(|| format!("failed to write {}", treb_toml.display()))?;
 
+    // Clean up foundry.toml treb sections if requested (ignored in dry-run, which returns early above).
+    let foundry_cleanup_path = if cleanup_foundry {
+        cleanup_foundry_treb_sections(project_root, json)?
+    } else {
+        None
+    };
+
     if json {
         output::print_json(&serde_json::json!({
             "status": "migrated",
             "backupPath": backup_path.as_ref().map(|p| p.display().to_string()),
+            "foundryCleanupBackup": foundry_cleanup_path.as_ref().map(|p| p.display().to_string()),
         }))?;
     } else {
         if let Some(bp) = &backup_path {
             println!("Backup written to: {}", bp.display());
         }
+        if let Some(fp) = &foundry_cleanup_path {
+            println!("Foundry backup written to: {}", fp.display());
+        }
         output::print_stage("\u{2705}", "Migration complete — treb.toml updated to v2 format.");
     }
 
     Ok(())
+}
+
+// ── foundry.toml cleanup ─────────────────────────────────────────────────────
+
+/// Remove `[profile.*.treb.*]` sections from foundry.toml.
+///
+/// Creates a backup (`foundry.toml.bak-{timestamp}`) before modifying the file.
+/// Returns the backup path if sections were removed, or `None` if no treb
+/// sections were found.
+fn cleanup_foundry_treb_sections(
+    project_root: &Path,
+    json: bool,
+) -> anyhow::Result<Option<std::path::PathBuf>> {
+    let foundry_path = project_root.join("foundry.toml");
+    let content = std::fs::read_to_string(&foundry_path)
+        .with_context(|| format!("failed to read {}", foundry_path.display()))?;
+
+    let cleaned = remove_treb_sections(&content);
+
+    // No changes needed.
+    if cleaned == content {
+        return Ok(None);
+    }
+
+    if !json {
+        output::print_stage("\u{1f9f9}", "Cleaning up foundry.toml...");
+    }
+
+    // Create backup before modifying.
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
+    let backup_path = project_root.join(format!("foundry.toml.bak-{ts}"));
+    std::fs::copy(&foundry_path, &backup_path)
+        .with_context(|| format!("failed to create foundry.toml backup at {}", backup_path.display()))?;
+
+    // Write cleaned content.
+    std::fs::write(&foundry_path, &cleaned)
+        .with_context(|| format!("failed to write {}", foundry_path.display()))?;
+
+    Ok(Some(backup_path))
+}
+
+/// Remove all `[profile.*.treb]` and `[profile.*.treb.*]` sections (header + key/value lines)
+/// from TOML content, preserving everything else.
+fn remove_treb_sections(content: &str) -> String {
+    let mut result = String::with_capacity(content.len());
+    let mut skipping = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        if is_treb_section_header(trimmed) {
+            skipping = true;
+            continue;
+        }
+
+        if skipping {
+            if trimmed.is_empty() {
+                continue;
+            }
+            if trimmed.starts_with('[') {
+                // A new non-treb section starts — stop skipping.
+                skipping = false;
+                if !result.is_empty() && !result.ends_with("\n\n") {
+                    result.push('\n');
+                }
+                result.push_str(line);
+                result.push('\n');
+                continue;
+            }
+            // Key-value line inside a treb section — skip it.
+            continue;
+        }
+
+        // Not skipping — emit the line.
+        result.push_str(line);
+        result.push('\n');
+    }
+
+    // Trim trailing whitespace but keep a final newline.
+    let trimmed = result.trim_end();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    format!("{trimmed}\n")
+}
+
+/// Check if a trimmed line is a `[profile.*.treb]` or `[profile.*.treb.*]` section header.
+fn is_treb_section_header(trimmed: &str) -> bool {
+    if !trimmed.starts_with("[profile.") || !trimmed.ends_with(']') {
+        return false;
+    }
+    // Extract inner content between [ and ]
+    let inner = &trimmed[1..trimmed.len() - 1];
+    // Split by '.' and look for "treb" after "profile.<name>"
+    let parts: Vec<&str> = inner.split('.').collect();
+    // Must be at least: profile, <name>, treb
+    parts.len() >= 3 && parts[0] == "profile" && parts[2] == "treb"
 }
 
 // ── v1 → v2 conversion ────────────────────────────────────────────────────────
@@ -432,7 +544,7 @@ private_key = "0xDeployerKey"
 
         let original = std::fs::read_to_string(dir.path().join("treb.toml")).unwrap();
 
-        run_config(dir.path(), true, false, false).await.unwrap();
+        run_config(dir.path(), true, false, false, false).await.unwrap();
 
         // treb.toml must be unchanged
         let after = std::fs::read_to_string(dir.path().join("treb.toml")).unwrap();
@@ -457,7 +569,7 @@ private_key = "0xDeployerKey"
 
         let original = std::fs::read_to_string(dir.path().join("treb.toml")).unwrap();
 
-        run_config(dir.path(), false, false, true).await.unwrap();
+        run_config(dir.path(), false, false, true, false).await.unwrap();
 
         let after = std::fs::read_to_string(dir.path().join("treb.toml")).unwrap();
         assert_eq!(original, after, "v2 config should not be modified");
@@ -481,7 +593,7 @@ private_key = "0xDeployerKey"
 
         let original = std::fs::read_to_string(dir.path().join("treb.toml")).unwrap();
 
-        run_config(dir.path(), false, false, true).await.unwrap();
+        run_config(dir.path(), false, false, true, false).await.unwrap();
 
         // treb.toml should now be v2
         let after = std::fs::read_to_string(dir.path().join("treb.toml")).unwrap();
@@ -523,7 +635,7 @@ derivation_path = "m/44'/60'/0'/0/0"
         // v1 treb.toml with deployer only
         write_v1_treb_toml(dir.path());
 
-        run_config(dir.path(), false, false, true).await.unwrap();
+        run_config(dir.path(), false, false, true, false).await.unwrap();
 
         // Parse the resulting v2 treb.toml
         let v2 = treb_config::load_treb_config_v2(&dir.path().join("treb.toml")).unwrap();
@@ -584,5 +696,134 @@ derivation_path = "m/44'/60'/0'/0/0"
         .unwrap();
         let format = treb_config::detect_treb_config_format(dir.path());
         assert_eq!(format, treb_config::TrebConfigFormat::V2);
+    }
+
+    // ── remove_treb_sections ─────────────────────────────────────────────────
+
+    #[test]
+    fn remove_treb_sections_removes_treb_sections() {
+        let input = r#"[profile.default]
+src = "src"
+out = "out"
+
+[profile.default.treb.senders.deployer]
+type = "private_key"
+address = "0xDeployerAddr"
+
+[profile.default.treb.senders.ledger_signer]
+type = "ledger"
+address = "0xLedgerAddr"
+
+[rpc_endpoints]
+mainnet = "https://eth.example.com"
+"#;
+        let result = remove_treb_sections(input);
+        assert!(!result.contains("[profile.default.treb"), "treb sections should be removed");
+        assert!(result.contains("[profile.default]"), "profile.default should remain");
+        assert!(result.contains("src = \"src\""), "profile.default keys should remain");
+        assert!(result.contains("[rpc_endpoints]"), "rpc_endpoints should remain");
+        assert!(result.contains("mainnet"), "rpc_endpoints keys should remain");
+    }
+
+    #[test]
+    fn remove_treb_sections_no_treb_is_noop() {
+        let input = "[profile.default]\nsrc = \"src\"\n";
+        let result = remove_treb_sections(input);
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn remove_treb_sections_removes_bare_treb_section() {
+        let input = r#"[profile.default]
+src = "src"
+
+[profile.default.treb]
+some_key = "value"
+
+[rpc_endpoints]
+mainnet = "https://eth.example.com"
+"#;
+        let result = remove_treb_sections(input);
+        assert!(!result.contains("[profile.default.treb]"), "bare treb section should be removed");
+        assert!(!result.contains("some_key"), "treb keys should be removed");
+        assert!(result.contains("[rpc_endpoints]"), "other sections should remain");
+    }
+
+    // ── cleanup_foundry_treb_sections ────────────────────────────────────────
+
+    #[test]
+    fn cleanup_foundry_creates_backup_and_removes_sections() {
+        let dir = TempDir::new().unwrap();
+        let foundry_content = r#"[profile.default]
+src = "src"
+
+[profile.default.treb.senders.deployer]
+type = "private_key"
+address = "0xAddr"
+
+[rpc_endpoints]
+mainnet = "https://eth.example.com"
+"#;
+        std::fs::write(dir.path().join("foundry.toml"), foundry_content).unwrap();
+
+        let result = cleanup_foundry_treb_sections(dir.path(), false).unwrap();
+        assert!(result.is_some(), "should return backup path when sections removed");
+
+        // Verify backup exists with original content
+        let backup_path = result.unwrap();
+        assert!(backup_path.exists(), "backup file should exist");
+        let backup_content = std::fs::read_to_string(&backup_path).unwrap();
+        assert_eq!(backup_content, foundry_content, "backup should contain original content");
+
+        // Verify foundry.toml was cleaned
+        let cleaned = std::fs::read_to_string(dir.path().join("foundry.toml")).unwrap();
+        assert!(!cleaned.contains("[profile.default.treb"), "treb sections should be removed");
+        assert!(cleaned.contains("[profile.default]"), "non-treb sections should remain");
+        assert!(cleaned.contains("[rpc_endpoints]"), "rpc_endpoints should remain");
+    }
+
+    #[test]
+    fn cleanup_foundry_noop_when_no_treb_sections() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("foundry.toml"), "[profile.default]\nsrc = \"src\"\n").unwrap();
+
+        let result = cleanup_foundry_treb_sections(dir.path(), false).unwrap();
+        assert!(result.is_none(), "should return None when no treb sections to remove");
+
+        // No backup file should exist
+        let backups: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with("foundry.toml.bak-"))
+            .collect();
+        assert!(backups.is_empty(), "no backup should be created when nothing to clean");
+    }
+
+    // ── cleanup_foundry ignored in dry-run ───────────────────────────────────
+
+    #[tokio::test]
+    async fn cleanup_foundry_ignored_in_dry_run() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("foundry.toml"),
+            r#"[profile.default]
+src = "src"
+
+[profile.default.treb.senders.deployer]
+type = "private_key"
+address = "0xAddr"
+"#,
+        )
+        .unwrap();
+        write_v1_treb_toml(dir.path());
+
+        let original_foundry = std::fs::read_to_string(dir.path().join("foundry.toml")).unwrap();
+
+        // dry_run=true, cleanup_foundry=true
+        run_config(dir.path(), true, false, false, true).await.unwrap();
+
+        // foundry.toml must be unchanged
+        let after_foundry = std::fs::read_to_string(dir.path().join("foundry.toml")).unwrap();
+        assert_eq!(original_foundry, after_foundry, "dry-run should not modify foundry.toml");
     }
 }
