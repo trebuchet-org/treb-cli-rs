@@ -6,15 +6,16 @@
 use std::{
     env,
     path::Path,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, bail};
 use clap::Args;
+use owo_colors::{OwoColorize, Style};
 use serde::{Deserialize, Serialize};
 use treb_registry::{REGISTRY_DIR, Registry, snapshot_registry};
 
-use crate::output;
+use crate::{output, ui::color};
 
 // ── Args ─────────────────────────────────────────────────────────────────────
 
@@ -41,9 +42,26 @@ pub struct PruneArgs {
     #[arg(long, short = 'y')]
     pub yes: bool,
 
+    /// Check on-chain bytecode for deployed contracts (requires --rpc-url)
+    #[arg(long)]
+    pub check_onchain: bool,
+
+    /// RPC URL for on-chain bytecode checks
+    #[arg(long)]
+    pub rpc_url: Option<String>,
+
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
+}
+
+/// Apply a color style when color is enabled, plain text otherwise.
+fn styled(text: &str, style: Style) -> String {
+    if color::is_color_enabled() {
+        format!("{}", text.style(style))
+    } else {
+        text.to_string()
+    }
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -170,6 +188,104 @@ pub fn find_prune_candidates(
     candidates
 }
 
+// ── on-chain bytecode check ──────────────────────────────────────────────────
+
+/// Check deployments on-chain via `eth_getCode` and return candidates for
+/// contracts whose bytecode is empty (`0x` or `0x0`), indicating the contract
+/// has been destroyed or was never deployed at that address.
+///
+/// RPC failures for individual addresses are reported as warnings on stderr
+/// rather than fatal errors.
+pub async fn find_onchain_prune_candidates(
+    registry: &Registry,
+    chain_id_filter: Option<u64>,
+    rpc_url: &str,
+) -> Vec<PruneCandidate> {
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Warning: failed to build HTTP client: {e}");
+            return Vec::new();
+        }
+    };
+
+    let mut candidates = Vec::new();
+
+    for dep in registry.list_deployments() {
+        // Apply chain filter.
+        if let Some(filter_id) = chain_id_filter {
+            if dep.chain_id != filter_id {
+                continue;
+            }
+        }
+
+        let address = &dep.address;
+        if address.is_empty() {
+            continue;
+        }
+
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "eth_getCode",
+            "params": [address, "latest"],
+            "id": 1
+        });
+
+        let resp = match client.post(rpc_url).json(&body).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!(
+                    "Warning: eth_getCode failed for {} ({}): {}",
+                    dep.id, address, e
+                );
+                continue;
+            }
+        };
+
+        let json: serde_json::Value = match resp.json().await {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!(
+                    "Warning: invalid response for eth_getCode on {} ({}): {}",
+                    dep.id, address, e
+                );
+                continue;
+            }
+        };
+
+        if let Some(error) = json.get("error") {
+            eprintln!(
+                "Warning: RPC error for eth_getCode on {} ({}): {}",
+                dep.id, address, error
+            );
+            continue;
+        }
+
+        let code = json
+            .get("result")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0x");
+
+        // Empty bytecode: "0x" or "0x0" means no contract at that address.
+        if code == "0x" || code == "0x0" {
+            candidates.push(PruneCandidate {
+                id: dep.id.clone(),
+                kind: PruneCandidateKind::DestroyedOnChain,
+                reason: format!(
+                    "deployment '{}' at {} has no on-chain bytecode",
+                    dep.id, address
+                ),
+                chain_id: Some(dep.chain_id),
+            });
+        }
+    }
+
+    candidates
+}
+
 // ── backup ────────────────────────────────────────────────────────────────────
 
 /// Create a timestamped backup of the registry under `.treb/backups/prune-<ts>/`.
@@ -182,6 +298,40 @@ pub fn backup_registry(project_root: &Path) -> anyhow::Result<std::path::PathBuf
     snapshot_registry(&registry_dir, &backup_dir)
         .with_context(|| format!("failed to create prune backup at {}", backup_dir.display()))?;
     Ok(backup_dir)
+}
+
+fn targets_deployment(kind: &PruneCandidateKind) -> bool {
+    matches!(
+        kind,
+        PruneCandidateKind::BrokenTransactionRef | PruneCandidateKind::DestroyedOnChain
+    )
+}
+
+fn merge_onchain_candidates(candidates: &mut Vec<PruneCandidate>, onchain_candidates: Vec<PruneCandidate>) {
+    for onchain in onchain_candidates {
+        if let Some(existing) = candidates
+            .iter_mut()
+            .find(|c| c.id == onchain.id && targets_deployment(&c.kind))
+        {
+            if onchain.kind == PruneCandidateKind::DestroyedOnChain {
+                existing.kind = PruneCandidateKind::DestroyedOnChain;
+                existing.reason = onchain.reason;
+                existing.chain_id = onchain.chain_id;
+            }
+            continue;
+        }
+        candidates.push(onchain);
+    }
+}
+
+fn validate_onchain_args(args: &PruneArgs) -> anyhow::Result<()> {
+    if args.check_onchain && args.rpc_url.is_none() {
+        bail!("--check-onchain requires --rpc-url <url>");
+    }
+    if args.check_onchain && args.network.is_none() {
+        bail!("--check-onchain requires --network <chain-id>");
+    }
+    Ok(())
 }
 
 // ── run ───────────────────────────────────────────────────────────────────────
@@ -206,11 +356,28 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
         None => None,
     };
 
+    validate_onchain_args(&args)?;
+
     let registry = Registry::open(&cwd).context("failed to open registry")?;
-    let candidates = find_prune_candidates(&registry, chain_id_filter, args.include_pending);
+    let mut candidates = find_prune_candidates(&registry, chain_id_filter, args.include_pending);
+
+    // On-chain bytecode verification (only when --check-onchain is set).
+    if args.check_onchain {
+        let rpc_url = args.rpc_url.as_deref().unwrap(); // safe: validated above
+        let onchain_candidates =
+            find_onchain_prune_candidates(&registry, chain_id_filter, rpc_url).await;
+
+        // Merge on-chain candidates and preserve DestroyedOnChain classification
+        // when cross-reference checks flagged the same deployment ID.
+        merge_onchain_candidates(&mut candidates, onchain_candidates);
+    }
 
     if candidates.is_empty() {
-        println!("Nothing to prune.");
+        if args.json {
+            output::print_json(&serde_json::json!({ "candidates": [] }))?;
+        } else {
+            println!("{}", styled("Nothing to prune.", color::SUCCESS));
+        }
         return Ok(());
     }
 
@@ -219,6 +386,7 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
         if args.json {
             output::print_json(&candidates)?;
         } else {
+            output::print_stage("\u{1f50d}", "Scanning registry...");
             let mut table = output::build_table(&["ID", "Kind", "Reason", "Chain ID"]);
             for c in &candidates {
                 table.add_row(vec![
@@ -230,25 +398,47 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
             }
             output::print_table(&table);
             println!(
-                "\n{} prune candidate(s) found. Re-run without --dry-run to remove.",
-                candidates.len()
+                "\n{}",
+                styled(
+                    &format!(
+                        "{} prune candidate(s) found. Re-run without --dry-run to remove.",
+                        candidates.len()
+                    ),
+                    color::SUCCESS,
+                )
             );
         }
         return Ok(());
     }
 
     // Destructive mode: confirm, backup, then remove.
+    if !args.json {
+        output::print_stage("\u{1f50d}", "Scanning registry...");
+        output::print_warning_banner(
+            "\u{26a0}\u{fe0f}",
+            &format!(
+                "Warning: About to remove {} prune candidate(s). A backup will be created first.",
+                candidates.len()
+            ),
+        );
+    }
+
     if !args.yes {
         let message = format!(
-            "About to remove {} entry(s). A backup will be created first. Continue?",
+            "Remove {} entry(s)?",
             candidates.len()
         );
         if !crate::ui::prompt::confirm(&message, false) {
-            println!("Cancelled.");
+            if !args.json {
+                println!("{}", styled("Cancelled.", color::MUTED));
+            }
             return Ok(());
         }
     }
 
+    if !args.json {
+        output::print_stage("\u{1f4be}", "Creating backup...");
+    }
     let backup_path = backup_registry(&cwd)?;
 
     // Re-open registry mutably for removals.
@@ -268,6 +458,10 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
                 }
             }
         }
+    }
+
+    if !args.json {
+        output::print_stage("\u{2705}", "Prune complete");
     }
 
     if args.json {
@@ -292,7 +486,13 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
             ]);
         }
         output::print_table(&table);
-        println!("\nRemoved {} entry(s).", removed.len());
+        println!(
+            "\n{}",
+            styled(
+                &format!("Removed {} entry(s).", removed.len()),
+                color::SUCCESS,
+            )
+        );
         println!("Backup created at: {}", backup_path.display());
     }
 
@@ -562,5 +762,74 @@ mod tests {
             registry.get_deployment("dep-1").is_some(),
             "dep-1 should still exist after dry-run (no removal performed)"
         );
+    }
+
+    #[test]
+    fn merge_onchain_candidates_upgrades_existing_kind_for_same_id() {
+        let mut candidates = vec![PruneCandidate {
+            id: "dep-1".to_string(),
+            kind: PruneCandidateKind::BrokenTransactionRef,
+            reason: "broken tx ref".to_string(),
+            chain_id: Some(1),
+        }];
+        let onchain_candidates = vec![PruneCandidate {
+            id: "dep-1".to_string(),
+            kind: PruneCandidateKind::DestroyedOnChain,
+            reason: "no bytecode at address".to_string(),
+            chain_id: Some(1),
+        }];
+
+        merge_onchain_candidates(&mut candidates, onchain_candidates);
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].id, "dep-1");
+        assert_eq!(candidates[0].kind, PruneCandidateKind::DestroyedOnChain);
+        assert_eq!(candidates[0].reason, "no bytecode at address");
+    }
+
+    #[test]
+    fn merge_onchain_candidates_does_not_rewrite_transaction_candidate_with_same_id() {
+        let mut candidates = vec![PruneCandidate {
+            id: "shared-id".to_string(),
+            kind: PruneCandidateKind::BrokenDeploymentRef,
+            reason: "tx references missing deployment".to_string(),
+            chain_id: Some(1),
+        }];
+        let onchain_candidates = vec![PruneCandidate {
+            id: "shared-id".to_string(),
+            kind: PruneCandidateKind::DestroyedOnChain,
+            reason: "deployment has no bytecode".to_string(),
+            chain_id: Some(1),
+        }];
+
+        merge_onchain_candidates(&mut candidates, onchain_candidates);
+
+        assert_eq!(candidates.len(), 2);
+        assert!(
+            candidates
+                .iter()
+                .any(|c| c.kind == PruneCandidateKind::BrokenDeploymentRef)
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|c| c.kind == PruneCandidateKind::DestroyedOnChain)
+        );
+    }
+
+    #[test]
+    fn validate_onchain_args_requires_network_when_checking_onchain() {
+        let args = PruneArgs {
+            dry_run: true,
+            include_pending: false,
+            network: None,
+            yes: false,
+            check_onchain: true,
+            rpc_url: Some("http://localhost:8545".to_string()),
+            json: false,
+        };
+
+        let err = validate_onchain_args(&args).unwrap_err().to_string();
+        assert!(err.contains("--check-onchain requires --network <chain-id>"));
     }
 }

@@ -16,10 +16,13 @@ use treb_core::types::{
 };
 use treb_registry::Registry;
 
+use std::path::PathBuf;
+
 use framework::{
     context::TestContext,
+    golden::GoldenFile,
     integration_test::{IntegrationTest, run_integration_test},
-    normalizer::{EpochNormalizer, PathNormalizer},
+    normalizer::{EpochNormalizer, Normalizer, NormalizerChain, PathNormalizer},
 };
 
 // ── Fixture builders ─────────────────────────────────────────────────────
@@ -239,4 +242,99 @@ fn prune_uninitialized() {
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
+}
+
+// ── On-chain check tests ─────────────────────────────────────────────────
+
+/// Returns the golden file directory for this crate's tests.
+fn golden_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("golden")
+}
+
+/// Seed the registry with a clean deployment on chain 31337 whose address
+/// has no contract deployed (will be flagged by --check-onchain).
+fn seed_onchain_prune_registry(project_root: &std::path::Path, chain_id: u64) {
+    let mut registry = Registry::open(project_root).expect("registry should open");
+
+    // Clean cross-reference pair on the target chain, but the deployment
+    // address (0x0000...1234) has no contract on Anvil.
+    let mut dep = make_deployment("dep-nocode", "tx-nocode", chain_id);
+    dep.address = "0x0000000000000000000000000000000000001234".to_string();
+    registry
+        .insert_transaction(make_transaction(
+            "tx-nocode",
+            vec!["dep-nocode".to_string()],
+            chain_id,
+            TransactionStatus::Executed,
+        ))
+        .unwrap();
+    registry.insert_deployment(dep).unwrap();
+}
+
+/// Normalizer that replaces `http://127.0.0.1:<port>` with a placeholder URL.
+struct RpcUrlNormalizer;
+
+impl Normalizer for RpcUrlNormalizer {
+    fn normalize(&self, input: &str) -> String {
+        let re = regex::Regex::new(r"http://127\.0\.0\.1:\d+").unwrap();
+        re.replace_all(input, "http://127.0.0.1:<PORT>").into_owned()
+    }
+}
+
+/// --check-onchain --dry-run detects deployments with no on-chain bytecode
+/// via eth_getCode against a live Anvil node.
+#[tokio::test(flavor = "multi_thread")]
+async fn prune_check_onchain_dry_run() {
+    let ctx = match TestContext::new("minimal-project").with_anvil("local").await {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            eprintln!("Skipping prune_check_onchain_dry_run: Anvil not available ({e})");
+            return;
+        }
+    };
+
+    let anvil = ctx.anvil("local").unwrap();
+    let rpc_url = anvil.rpc_url().to_string();
+    let chain_id = anvil.chain_id();
+
+    // Setup: init project
+    ctx.run(&["init"]).success();
+
+    // Seed a deployment with no on-chain bytecode at its address
+    seed_onchain_prune_registry(ctx.path(), chain_id);
+
+    // Run prune with --check-onchain
+    let chain_str = chain_id.to_string();
+    let args = &[
+        "prune", "--check-onchain", "--rpc-url", &rpc_url, "--dry-run", "--network", &chain_str,
+    ];
+    let assertion = ctx.run(args);
+    let stdout = String::from_utf8_lossy(&assertion.get_output().stdout).to_string();
+    let stderr = String::from_utf8_lossy(&assertion.get_output().stderr).to_string();
+    assertion.success();
+
+    let mut output = format!("=== cmd 0: [{}] ===\n", args.join(" "));
+    if !stdout.is_empty() {
+        output.push_str(&stdout);
+    }
+    if !stderr.is_empty() {
+        output.push_str(&stderr);
+    }
+    output.push('\n');
+
+    // Build normalizer chain
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+    let extra_normalizers: Vec<Box<dyn Normalizer>> =
+        vec![Box::new(path_normalizer), Box::new(EpochNormalizer), Box::new(RpcUrlNormalizer)];
+    let default_chain = NormalizerChain::default_chain();
+    let normalize = |text: &str| -> String {
+        let mut normalized = default_chain.normalize(text);
+        for n in &extra_normalizers {
+            normalized = n.normalize(&normalized);
+        }
+        normalized
+    };
+
+    let golden = GoldenFile::new(golden_dir());
+    golden.compare_with_normalizer("prune_check_onchain_dry_run", "commands", &output, &normalize);
 }

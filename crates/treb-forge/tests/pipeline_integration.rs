@@ -441,7 +441,7 @@ fn dry_run_leaves_registry_unchanged() {
             },
         }],
     }];
-    let transactions = hydrate_transactions(&tx_events, &[deployment.clone()], &ctx);
+    let transactions = hydrate_transactions(&tx_events, std::slice::from_ref(&deployment), &ctx);
 
     // Build PipelineResult in dry-run mode — do NOT write to registry
     let recorded_deps: Vec<RecordedDeployment> = resolved

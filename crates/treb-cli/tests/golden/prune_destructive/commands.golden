@@ -1,4 +1,5 @@
 === cmd 0: [prune --yes] ===
+⚠️ Warning: About to remove 3 prune candidate(s). A backup will be created first.
 ┌───────────┬──────────────────────┬──────────────────────────────────────────────────────────────────┬──────────┐
 │ ID        ┆ Kind                 ┆ Reason                                                           ┆ Chain ID │
 ╞═══════════╪══════════════════════╪══════════════════════════════════════════════════════════════════╪══════════╡
@@ -11,3 +12,6 @@
 
 Removed 3 entry(s).
 Backup created at: <PROJECT_ROOT>/.treb/backups/prune-<UNIX_TIME>
+🔍 Scanning registry...
+💾 Creating backup...
+✅ Prune complete
