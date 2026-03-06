@@ -211,6 +211,7 @@ pub async fn run(
     contract_name: Option<String>,
     label: Option<String>,
     namespace: Option<String>,
+    deployment_type: Option<DeploymentType>,
     _skip_verify: bool,
     json: bool,
 ) -> anyhow::Result<()> {
@@ -404,7 +405,7 @@ pub async fn run(
             contract_name: name.clone(),
             label: dep_label,
             address: creation.address.clone(),
-            deployment_type: DeploymentType::Unknown,
+            deployment_type: deployment_type.clone().unwrap_or(DeploymentType::Unknown),
             transaction_id: tx_id.clone(),
             deployment_strategy: DeploymentStrategy {
                 method,

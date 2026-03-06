@@ -3,6 +3,20 @@ mod output;
 mod ui;
 
 use clap::{CommandFactory, Parser, Subcommand};
+use treb_core::types::DeploymentType;
+
+/// Parse a deployment type string (case-insensitive).
+fn parse_deployment_type(s: &str) -> Result<DeploymentType, String> {
+    match s.to_lowercase().as_str() {
+        "proxy" => Ok(DeploymentType::Proxy),
+        "singleton" => Ok(DeploymentType::Singleton),
+        "library" => Ok(DeploymentType::Library),
+        "unknown" => Ok(DeploymentType::Unknown),
+        _ => Err(format!(
+            "invalid deployment type '{s}'; valid values: proxy, singleton, library, unknown"
+        )),
+    }
+}
 
 /// treb — deployment orchestration for Foundry projects
 #[derive(Parser)]
@@ -240,6 +254,9 @@ enum Commands {
         /// Deployment namespace
         #[arg(long)]
         namespace: Option<String>,
+        /// Deployment type (proxy, singleton, library, unknown)
+        #[arg(long, value_parser = parse_deployment_type)]
+        deployment_type: Option<treb_core::types::DeploymentType>,
         /// Skip post-registration verification
         #[arg(long)]
         skip_verify: bool,
@@ -563,6 +580,7 @@ async fn main() -> anyhow::Result<()> {
             contract_name,
             label,
             namespace,
+            deployment_type,
             skip_verify,
             json,
         } => {
@@ -575,6 +593,7 @@ async fn main() -> anyhow::Result<()> {
                 contract_name,
                 label,
                 namespace,
+                deployment_type,
                 skip_verify,
                 json,
             )
