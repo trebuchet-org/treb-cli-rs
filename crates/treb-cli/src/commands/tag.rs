@@ -3,11 +3,13 @@
 use std::env;
 
 use anyhow::{Context, bail};
+use owo_colors::{OwoColorize, Style};
 use serde::Serialize;
 use treb_registry::Registry;
 
 use crate::{
-    commands::resolve::resolve_deployment, output, ui::selector::fuzzy_select_deployment_id,
+    commands::resolve::resolve_deployment, output,
+    ui::{color, selector::fuzzy_select_deployment_id},
 };
 
 /// JSON output for tag operations.
@@ -19,6 +21,15 @@ struct TagOutputJson {
     tags: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tag: Option<String>,
+}
+
+/// Apply a color style when color is enabled, plain text otherwise.
+fn styled(text: &str, style: Style) -> String {
+    if color::is_color_enabled() {
+        format!("{}", text.style(style))
+    } else {
+        text.to_string()
+    }
 }
 
 pub async fn run(
@@ -83,9 +94,9 @@ fn show_tags(registry: &Registry, deployment_id: &str, json: bool) -> anyhow::Re
     } else if tags.is_empty() {
         println!("No tags on '{deployment_id}'");
     } else {
-        println!("Tags for '{deployment_id}':");
+        println!("{}", styled(&format!("Tags for '{deployment_id}':"), color::STAGE));
         for tag in &tags {
-            println!("  - {tag}");
+            println!("  - {}", styled(tag, color::LABEL));
         }
     }
 
@@ -105,6 +116,10 @@ fn add_tag(
         bail!("tag '{}' already exists on deployment '{}'", tag, deployment_id);
     }
 
+    if !json {
+        output::print_stage("\u{1f4dd}", "Updating tags...");
+    }
+
     let mut dep = dep.clone();
     let mut tags = existing_tags;
     tags.push(tag.to_string());
@@ -119,7 +134,18 @@ fn add_tag(
             tag: Some(tag.to_string()),
         })?;
     } else {
-        println!("Added tag '{}' to '{}'", tag, deployment_id);
+        println!(
+            "{}",
+            styled(
+                &format!("Added tag '{tag}' to '{deployment_id}'"),
+                color::SUCCESS,
+            )
+        );
+        println!();
+        println!("{}", styled("Tags:", color::STAGE));
+        for t in &tags {
+            println!("  - {}", styled(t, color::LABEL));
+        }
     }
 
     Ok(())
@@ -138,6 +164,10 @@ fn remove_tag(
         bail!("tag '{}' not found on deployment '{}'", tag, deployment_id);
     }
 
+    if !json {
+        output::print_stage("\u{1f4dd}", "Updating tags...");
+    }
+
     let mut dep = dep.clone();
     let mut tags = existing_tags;
     tags.retain(|t| t != tag);
@@ -154,7 +184,22 @@ fn remove_tag(
             tag: Some(tag.to_string()),
         })?;
     } else {
-        println!("Removed tag '{}' from '{}'", tag, deployment_id);
+        println!(
+            "{}",
+            styled(
+                &format!("Removed tag '{tag}' from '{deployment_id}'"),
+                color::SUCCESS,
+            )
+        );
+        println!();
+        if final_tags.is_empty() {
+            println!("No tags remaining");
+        } else {
+            println!("{}", styled("Tags:", color::STAGE));
+            for t in &final_tags {
+                println!("  - {}", styled(t, color::LABEL));
+            }
+        }
     }
 
     Ok(())
