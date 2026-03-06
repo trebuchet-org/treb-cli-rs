@@ -2,15 +2,16 @@ use std::collections::HashMap;
 
 use alloy_chains::Chain;
 use anyhow::Context;
+use owo_colors::OwoColorize;
 use serde::Serialize;
 use treb_core::types::{enums::TransactionStatus, safe_transaction::Confirmation};
 use treb_registry::Registry;
 use treb_safe::{
-    SafeServiceClient,
     types::{SafeServiceMultisigResponse, SafeServiceTx},
+    SafeServiceClient,
 };
 
-use crate::output;
+use crate::{output, ui::color};
 
 // ── JSON output types ───────────────────────────────────────────────────
 
@@ -22,6 +23,15 @@ struct SyncOutputJson {
     newly_executed: usize,
     removed: usize,
     errors: Vec<String>,
+}
+
+// ── Detail table row ────────────────────────────────────────────────────
+
+struct SyncDetailRow {
+    safe_tx_hash: String,
+    safe_address: String,
+    status: String,
+    confirmations: usize,
 }
 
 // ── Chain ID resolution ─────────────────────────────────────────────────
@@ -96,6 +106,10 @@ pub async fn run(
         return Ok(());
     }
 
+    if !json {
+        output::print_stage("\u{1f50d}", "Syncing safe transactions...");
+    }
+
     // Group safe transactions by (safe_address, chain_id) for batched API calls.
     // Store the safe_tx_hash for each group so we can match responses.
     let mut groups: HashMap<(String, u64), Vec<String>> = HashMap::new();
@@ -113,7 +127,12 @@ pub async fn run(
     let mut newly_executed_count = 0usize;
     let mut removed_count = 0usize;
     let mut errors: Vec<String> = Vec::new();
+    let mut detail_rows: Vec<SyncDetailRow> = Vec::new();
     let synced_count = filtered.len();
+
+    if !json {
+        output::print_stage("\u{2699}\u{fe0f}", "Processing safe transactions...");
+    }
 
     for ((safe_address, chain_id), local_hashes) in &groups {
         let client = match clients.get(chain_id) {
@@ -129,7 +148,7 @@ pub async fn run(
                     );
                     errors.push(msg.clone());
                     if !json {
-                        eprintln!("warning: {msg}");
+                        eprintln!("{}", output::format_warning_banner("\u{26a0}\u{fe0f}", &msg));
                     }
                     continue;
                 }
@@ -160,7 +179,7 @@ pub async fn run(
                     );
                     errors.push(msg.clone());
                     if !json {
-                        eprintln!("warning: {msg}");
+                        eprintln!("{}", output::format_warning_banner("\u{26a0}\u{fe0f}", &msg));
                     }
                     continue;
                 }
@@ -179,7 +198,8 @@ pub async fn run(
                 };
 
                 let was_executed = local_stx.status == TransactionStatus::Executed;
-                let mut updated_stx = local_stx;
+                let old_status_str = local_stx.status.to_string();
+                let mut updated_stx = local_stx.clone();
 
                 // Update confirmations from the service
                 updated_stx.confirmations = service_tx
@@ -192,20 +212,47 @@ pub async fn run(
                     })
                     .collect();
 
-                // Update execution status if newly executed
-                if service_tx.is_executed && updated_stx.status != TransactionStatus::Executed {
+                // Update execution fields from service data.
+                let became_executed =
+                    service_tx.is_executed && updated_stx.status != TransactionStatus::Executed;
+                if service_tx.is_executed {
                     updated_stx.status = TransactionStatus::Executed;
                     updated_stx.executed_at = service_tx.execution_date;
                     updated_stx.execution_tx_hash =
                         service_tx.transaction_hash.clone().unwrap_or_default();
+                }
+                if became_executed {
                     newly_executed_count += 1;
                 }
 
-                // Persist updated safe transaction
-                registry
-                    .update_safe_transaction(updated_stx.clone())
-                    .with_context(|| format!("failed to update safe transaction {local_hash}"))?;
-                updated_count += 1;
+                let confirmations_changed = updated_stx.confirmations != local_stx.confirmations;
+                let status_changed = updated_stx.status != local_stx.status;
+                let executed_at_changed = updated_stx.executed_at != local_stx.executed_at;
+                let execution_tx_hash_changed =
+                    updated_stx.execution_tx_hash != local_stx.execution_tx_hash;
+                let has_changes = confirmations_changed
+                    || status_changed
+                    || executed_at_changed
+                    || execution_tx_hash_changed;
+
+                if has_changes {
+                    // Persist updated safe transaction
+                    registry.update_safe_transaction(updated_stx.clone()).with_context(|| {
+                        format!("failed to update safe transaction {local_hash}")
+                    })?;
+                    updated_count += 1;
+
+                    detail_rows.push(SyncDetailRow {
+                        safe_tx_hash: local_hash.clone(),
+                        safe_address: safe_address.clone(),
+                        status: if became_executed {
+                            format!("{old_status_str} -> Executed")
+                        } else {
+                            "Updated".to_string()
+                        },
+                        confirmations: updated_stx.confirmations.len(),
+                    });
+                }
 
                 // Update linked Transaction records when safe tx becomes Executed
                 if !was_executed && updated_stx.status == TransactionStatus::Executed {
@@ -228,6 +275,12 @@ pub async fn run(
                     format!("failed to remove stale safe transaction {local_hash}")
                 })?;
                 removed_count += 1;
+                detail_rows.push(SyncDetailRow {
+                    safe_tx_hash: local_hash.clone(),
+                    safe_address: safe_address.clone(),
+                    status: "Removed".to_string(),
+                    confirmations: 0,
+                });
             }
         }
     }
@@ -243,15 +296,39 @@ pub async fn run(
             errors,
         })?;
     } else {
-        println!("Sync complete.");
+        // Print per-transaction detail table when there are changes
+        if !detail_rows.is_empty() {
+            let mut table = output::build_table(&["SafeTxHash", "Safe", "Status", "Confirmations"]);
+            for row in &detail_rows {
+                table.add_row(vec![
+                    output::truncate_address(&row.safe_tx_hash),
+                    output::truncate_address(&row.safe_address),
+                    row.status.clone(),
+                    row.confirmations.to_string(),
+                ]);
+            }
+            output::print_table(&table);
+            println!();
+        }
+
+        println!("{}", output::format_stage("\u{2705}", "Sync complete."));
         println!("  Safe transactions synced: {synced_count}");
-        println!("  Updated:                  {updated_count}");
-        println!("  Newly executed:           {newly_executed_count}");
+        if color::is_color_enabled() {
+            println!("  Updated:                  {}", updated_count.style(color::WARNING));
+            println!("  Newly executed:           {}", newly_executed_count.style(color::SUCCESS));
+        } else {
+            println!("  Updated:                  {updated_count}");
+            println!("  Newly executed:           {newly_executed_count}");
+        }
         if clean {
             println!("  Removed (stale):          {removed_count}");
         }
         if !errors.is_empty() {
-            println!("  Errors:                   {}", errors.len());
+            if color::is_color_enabled() {
+                println!("  Errors:                   {}", errors.len().style(color::ERROR));
+            } else {
+                println!("  Errors:                   {}", errors.len());
+            }
         }
     }
 

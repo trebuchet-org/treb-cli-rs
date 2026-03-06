@@ -11,7 +11,8 @@ use chrono::Utc;
 use serde::Serialize;
 use treb_core::types::{
     ArtifactInfo, Deployment, DeploymentMethod, DeploymentStrategy, DeploymentType, Operation,
-    Transaction, TransactionStatus, VerificationInfo, VerificationStatus, generate_deployment_id,
+    ProxyInfo, Transaction, TransactionStatus, VerificationInfo, VerificationStatus,
+    generate_deployment_id,
 };
 use treb_registry::Registry;
 
@@ -147,6 +148,73 @@ fn walk_trace_calls(call: &serde_json::Value, creations: &mut Vec<TracedCreation
     }
 }
 
+// ── Proxy detection ─────────────────────────────────────────────────────
+
+/// A detected proxy+implementation pair from trace analysis.
+struct DetectedProxy {
+    proxy_address: String,
+    implementation_address: String,
+}
+
+/// Detect proxy patterns from a callTracer trace.
+///
+/// A proxy pattern is detected when a CREATE/CREATE2 call contains a
+/// DELEGATECALL subcall from the newly created address to another address
+/// (the implementation).
+fn detect_proxy_patterns(trace: &serde_json::Value) -> Vec<DetectedProxy> {
+    let mut results = Vec::new();
+    find_proxy_creates(trace, &mut results);
+    results
+}
+
+/// Walk the trace tree looking for CREATE nodes whose subcalls contain
+/// a DELEGATECALL from the created address (proxy → implementation).
+fn find_proxy_creates(call: &serde_json::Value, results: &mut Vec<DetectedProxy>) {
+    let call_type = call.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+    if call_type.eq_ignore_ascii_case("CREATE") || call_type.eq_ignore_ascii_case("CREATE2") {
+        if let Some(created_addr) = call.get("to").and_then(|v| v.as_str()) {
+            // Look for DELEGATECALL from the created address within subcalls.
+            if let Some(impl_addr) = find_delegatecall_target(call, created_addr) {
+                results.push(DetectedProxy {
+                    proxy_address: created_addr.to_string(),
+                    implementation_address: impl_addr,
+                });
+            }
+        }
+    }
+
+    // Recurse into sub-calls.
+    if let Some(calls) = call.get("calls").and_then(|v| v.as_array()) {
+        for subcall in calls {
+            find_proxy_creates(subcall, results);
+        }
+    }
+}
+
+/// Search subcalls of a node for a DELEGATECALL originating from `from_addr`.
+/// Returns the target address of the first match.
+fn find_delegatecall_target(call: &serde_json::Value, from_addr: &str) -> Option<String> {
+    if let Some(calls) = call.get("calls").and_then(|v| v.as_array()) {
+        for subcall in calls {
+            let sub_type = subcall.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            if sub_type.eq_ignore_ascii_case("DELEGATECALL") {
+                let sub_from = subcall.get("from").and_then(|v| v.as_str()).unwrap_or("");
+                if sub_from.eq_ignore_ascii_case(from_addr) {
+                    if let Some(target) = subcall.get("to").and_then(|v| v.as_str()) {
+                        return Some(target.to_string());
+                    }
+                }
+            }
+            // Recurse deeper.
+            if let Some(found) = find_delegatecall_target(subcall, from_addr) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
 // ── Contract name resolution ────────────────────────────────────────────
 
 /// Resolve the effective contract name from --contract-name or --contract.
@@ -179,6 +247,7 @@ fn resolve_contract_name(
 // ── Output types ────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct RegisterOutputJson {
     success: bool,
     tx_hash: String,
@@ -189,6 +258,7 @@ struct RegisterOutputJson {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct RegisteredDeploymentJson {
     id: String,
     contract_name: String,
@@ -209,6 +279,7 @@ pub async fn run(
     contract_name: Option<String>,
     label: Option<String>,
     namespace: Option<String>,
+    deployment_type: Option<DeploymentType>,
     _skip_verify: bool,
     json: bool,
 ) -> anyhow::Result<()> {
@@ -280,6 +351,10 @@ pub async fn run(
     }
 
     // ── Try trace, fall back to receipt-only ─────────────────────────────
+    if !json {
+        output::print_stage("\u{1f50d}", "Tracing transaction...");
+    }
+
     let mut creations;
     let mode;
 
@@ -291,10 +366,13 @@ pub async fn run(
     )
     .await;
 
+    let mut proxy_patterns: Vec<DetectedProxy> = Vec::new();
+
     match trace_result {
         Ok(trace) => {
             mode = "trace";
             creations = extract_creations_from_trace(&trace);
+            proxy_patterns = detect_proxy_patterns(&trace);
 
             // Also check receipt contractAddress (direct CREATE may appear
             // at the top level of the trace, but add it as a safety net).
@@ -310,6 +388,15 @@ pub async fn run(
         }
         Err(_) => {
             mode = "receipt";
+            if !json {
+                eprintln!(
+                    "{}",
+                    output::format_warning_banner(
+                        "\u{26a0}\u{fe0f}",
+                        "debug_traceTransaction not available, using receipt-only mode"
+                    )
+                );
+            }
             creations = Vec::new();
 
             if let Some(addr) = receipt_contract_address(&receipt_result) {
@@ -345,6 +432,10 @@ pub async fn run(
     let mut registry = Registry::open(&cwd).context("failed to open registry")?;
 
     // ── Register each creation ──────────────────────────────────────────
+    if !json {
+        output::print_stage("\u{1f4dd}", "Registering deployments...");
+    }
+
     let mut registered: Vec<(RegisteredDeploymentJson, String)> = Vec::new();
 
     for (i, creation) in creations.iter().enumerate() {
@@ -378,6 +469,28 @@ pub async fn run(
             _ => DeploymentMethod::Create,
         };
 
+        // Determine deployment type and proxy info.
+        // --deployment-type flag overrides auto-detection.
+        let detected_proxy = proxy_patterns
+            .iter()
+            .find(|p| p.proxy_address.eq_ignore_ascii_case(&creation.address));
+
+        let (effective_dep_type, effective_proxy_info) = match &deployment_type {
+            Some(dt) => (dt.clone(), None),
+            None => match detected_proxy {
+                Some(dp) => (
+                    DeploymentType::Proxy,
+                    Some(ProxyInfo {
+                        proxy_type: String::new(),
+                        implementation: dp.implementation_address.clone(),
+                        admin: String::new(),
+                        history: vec![],
+                    }),
+                ),
+                None => (DeploymentType::Unknown, None),
+            },
+        };
+
         let deployment = Deployment {
             id: deployment_id.clone(),
             namespace: effective_namespace.clone(),
@@ -385,7 +498,7 @@ pub async fn run(
             contract_name: name.clone(),
             label: dep_label,
             address: creation.address.clone(),
-            deployment_type: DeploymentType::Unknown,
+            deployment_type: effective_dep_type,
             transaction_id: tx_id.clone(),
             deployment_strategy: DeploymentStrategy {
                 method,
@@ -399,7 +512,7 @@ pub async fn run(
                 constructor_args: String::new(),
                 entropy: String::new(),
             },
-            proxy_info: None,
+            proxy_info: effective_proxy_info,
             artifact: ArtifactInfo {
                 path: String::new(),
                 compiler_version: String::new(),
@@ -482,10 +595,6 @@ pub async fn run(
             transaction_id: tx_id,
         })?;
     } else {
-        if mode == "receipt" {
-            eprintln!("Note: debug_traceTransaction not available, using receipt-only mode");
-        }
-
         let mut table = output::build_table(&["Contract", "Address", "Namespace", "Chain"]);
 
         for dep in &dep_jsons {
@@ -790,5 +899,155 @@ needs_env = "https://rpc.example.com/${API_KEY}"
             "status": "0x1"
         });
         assert_eq!(receipt_contract_address(&receipt), None);
+    }
+
+    // ── detect_proxy_patterns ──────────────────────────────────────────
+
+    #[test]
+    fn proxy_detected_create_with_delegatecall() {
+        let trace = serde_json::json!({
+            "type": "CALL",
+            "from": "0xSender",
+            "to": "0xFactory",
+            "calls": [{
+                "type": "CREATE",
+                "from": "0xFactory",
+                "to": "0xProxy",
+                "calls": [{
+                    "type": "DELEGATECALL",
+                    "from": "0xProxy",
+                    "to": "0xImplementation"
+                }]
+            }]
+        });
+        let patterns = detect_proxy_patterns(&trace);
+        assert_eq!(patterns.len(), 1);
+        assert_eq!(patterns[0].proxy_address, "0xProxy");
+        assert_eq!(patterns[0].implementation_address, "0xImplementation");
+    }
+
+    #[test]
+    fn proxy_detected_create2_with_delegatecall() {
+        let trace = serde_json::json!({
+            "type": "CALL",
+            "from": "0xSender",
+            "to": "0xFactory",
+            "calls": [{
+                "type": "CREATE2",
+                "from": "0xFactory",
+                "to": "0xProxy",
+                "calls": [{
+                    "type": "DELEGATECALL",
+                    "from": "0xProxy",
+                    "to": "0xImpl"
+                }]
+            }]
+        });
+        let patterns = detect_proxy_patterns(&trace);
+        assert_eq!(patterns.len(), 1);
+        assert_eq!(patterns[0].proxy_address, "0xProxy");
+        assert_eq!(patterns[0].implementation_address, "0xImpl");
+    }
+
+    #[test]
+    fn proxy_not_detected_without_delegatecall() {
+        let trace = serde_json::json!({
+            "type": "CALL",
+            "from": "0xSender",
+            "to": "0xFactory",
+            "calls": [{
+                "type": "CREATE",
+                "from": "0xFactory",
+                "to": "0xContract",
+                "calls": [{
+                    "type": "CALL",
+                    "from": "0xContract",
+                    "to": "0xOther"
+                }]
+            }]
+        });
+        let patterns = detect_proxy_patterns(&trace);
+        assert!(patterns.is_empty());
+    }
+
+    #[test]
+    fn proxy_not_detected_delegatecall_from_different_address() {
+        let trace = serde_json::json!({
+            "type": "CALL",
+            "from": "0xSender",
+            "to": "0xFactory",
+            "calls": [{
+                "type": "CREATE",
+                "from": "0xFactory",
+                "to": "0xContract",
+                "calls": [{
+                    "type": "DELEGATECALL",
+                    "from": "0xOtherAddress",
+                    "to": "0xImpl"
+                }]
+            }]
+        });
+        let patterns = detect_proxy_patterns(&trace);
+        assert!(patterns.is_empty());
+    }
+
+    #[test]
+    fn proxy_detected_deeply_nested_delegatecall() {
+        let trace = serde_json::json!({
+            "type": "CALL",
+            "from": "0xSender",
+            "to": "0xFactory",
+            "calls": [{
+                "type": "CREATE",
+                "from": "0xFactory",
+                "to": "0xProxy",
+                "calls": [{
+                    "type": "CALL",
+                    "from": "0xProxy",
+                    "to": "0xHelper",
+                    "calls": [{
+                        "type": "DELEGATECALL",
+                        "from": "0xProxy",
+                        "to": "0xImpl"
+                    }]
+                }]
+            }]
+        });
+        let patterns = detect_proxy_patterns(&trace);
+        assert_eq!(patterns.len(), 1);
+        assert_eq!(patterns[0].implementation_address, "0xImpl");
+    }
+
+    #[test]
+    fn proxy_no_creates_no_patterns() {
+        let trace = serde_json::json!({
+            "type": "CALL",
+            "from": "0xSender",
+            "to": "0xContract",
+            "calls": [{
+                "type": "DELEGATECALL",
+                "from": "0xContract",
+                "to": "0xImpl"
+            }]
+        });
+        let patterns = detect_proxy_patterns(&trace);
+        assert!(patterns.is_empty());
+    }
+
+    #[test]
+    fn proxy_case_insensitive_address_matching() {
+        let trace = serde_json::json!({
+            "type": "CREATE",
+            "from": "0xFactory",
+            "to": "0xAbCdEf",
+            "calls": [{
+                "type": "DELEGATECALL",
+                "from": "0xabcdef",
+                "to": "0xImpl"
+            }]
+        });
+        let patterns = detect_proxy_patterns(&trace);
+        assert_eq!(patterns.len(), 1);
+        assert_eq!(patterns[0].proxy_address, "0xAbCdEf");
     }
 }
