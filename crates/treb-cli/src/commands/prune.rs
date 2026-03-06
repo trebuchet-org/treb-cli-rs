@@ -6,7 +6,7 @@
 use std::{
     env,
     path::Path,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, bail};
@@ -41,6 +41,14 @@ pub struct PruneArgs {
     /// Skip confirmation prompt (destructive mode only)
     #[arg(long, short = 'y')]
     pub yes: bool,
+
+    /// Check on-chain bytecode for deployed contracts (requires --rpc-url)
+    #[arg(long)]
+    pub check_onchain: bool,
+
+    /// RPC URL for on-chain bytecode checks
+    #[arg(long)]
+    pub rpc_url: Option<String>,
 
     /// Output as JSON
     #[arg(long)]
@@ -180,6 +188,104 @@ pub fn find_prune_candidates(
     candidates
 }
 
+// ── on-chain bytecode check ──────────────────────────────────────────────────
+
+/// Check deployments on-chain via `eth_getCode` and return candidates for
+/// contracts whose bytecode is empty (`0x` or `0x0`), indicating the contract
+/// has been destroyed or was never deployed at that address.
+///
+/// RPC failures for individual addresses are reported as warnings on stderr
+/// rather than fatal errors.
+pub async fn find_onchain_prune_candidates(
+    registry: &Registry,
+    chain_id_filter: Option<u64>,
+    rpc_url: &str,
+) -> Vec<PruneCandidate> {
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Warning: failed to build HTTP client: {e}");
+            return Vec::new();
+        }
+    };
+
+    let mut candidates = Vec::new();
+
+    for dep in registry.list_deployments() {
+        // Apply chain filter.
+        if let Some(filter_id) = chain_id_filter {
+            if dep.chain_id != filter_id {
+                continue;
+            }
+        }
+
+        let address = &dep.address;
+        if address.is_empty() {
+            continue;
+        }
+
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "eth_getCode",
+            "params": [address, "latest"],
+            "id": 1
+        });
+
+        let resp = match client.post(rpc_url).json(&body).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!(
+                    "Warning: eth_getCode failed for {} ({}): {}",
+                    dep.id, address, e
+                );
+                continue;
+            }
+        };
+
+        let json: serde_json::Value = match resp.json().await {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!(
+                    "Warning: invalid response for eth_getCode on {} ({}): {}",
+                    dep.id, address, e
+                );
+                continue;
+            }
+        };
+
+        if let Some(error) = json.get("error") {
+            eprintln!(
+                "Warning: RPC error for eth_getCode on {} ({}): {}",
+                dep.id, address, error
+            );
+            continue;
+        }
+
+        let code = json
+            .get("result")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0x");
+
+        // Empty bytecode: "0x" or "0x0" means no contract at that address.
+        if code == "0x" || code == "0x0" {
+            candidates.push(PruneCandidate {
+                id: dep.id.clone(),
+                kind: PruneCandidateKind::DestroyedOnChain,
+                reason: format!(
+                    "deployment '{}' at {} has no on-chain bytecode",
+                    dep.id, address
+                ),
+                chain_id: Some(dep.chain_id),
+            });
+        }
+    }
+
+    candidates
+}
+
 // ── backup ────────────────────────────────────────────────────────────────────
 
 /// Create a timestamped backup of the registry under `.treb/backups/prune-<ts>/`.
@@ -216,8 +322,30 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
         None => None,
     };
 
+    // Validate --check-onchain / --rpc-url combination.
+    if args.check_onchain && args.rpc_url.is_none() {
+        bail!("--check-onchain requires --rpc-url <url>");
+    }
+
     let registry = Registry::open(&cwd).context("failed to open registry")?;
-    let candidates = find_prune_candidates(&registry, chain_id_filter, args.include_pending);
+    let mut candidates = find_prune_candidates(&registry, chain_id_filter, args.include_pending);
+
+    // On-chain bytecode verification (only when --check-onchain is set).
+    if args.check_onchain {
+        let rpc_url = args.rpc_url.as_deref().unwrap(); // safe: validated above
+        let onchain_candidates =
+            find_onchain_prune_candidates(&registry, chain_id_filter, rpc_url).await;
+
+        // Merge on-chain candidates, avoiding duplicates (a deployment already
+        // flagged by cross-ref checks should not appear twice).
+        let existing_ids: std::collections::HashSet<String> =
+            candidates.iter().map(|c| c.id.clone()).collect();
+        for c in onchain_candidates {
+            if !existing_ids.contains(&c.id) {
+                candidates.push(c);
+            }
+        }
+    }
 
     if candidates.is_empty() {
         if args.json {
