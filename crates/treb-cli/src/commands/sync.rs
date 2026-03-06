@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use alloy_chains::Chain;
 use anyhow::Context;
+use owo_colors::OwoColorize;
 use serde::Serialize;
 use treb_core::types::{enums::TransactionStatus, safe_transaction::Confirmation};
 use treb_registry::Registry;
@@ -10,7 +11,7 @@ use treb_safe::{
     types::{SafeServiceMultisigResponse, SafeServiceTx},
 };
 
-use crate::output;
+use crate::{output, ui::color};
 
 // ── JSON output types ───────────────────────────────────────────────────
 
@@ -96,6 +97,10 @@ pub async fn run(
         return Ok(());
     }
 
+    if !json {
+        output::print_stage("\u{1f50d}", "Syncing safe transactions...");
+    }
+
     // Group safe transactions by (safe_address, chain_id) for batched API calls.
     // Store the safe_tx_hash for each group so we can match responses.
     let mut groups: HashMap<(String, u64), Vec<String>> = HashMap::new();
@@ -129,7 +134,7 @@ pub async fn run(
                     );
                     errors.push(msg.clone());
                     if !json {
-                        eprintln!("warning: {msg}");
+                        eprintln!("{}", output::format_warning_banner("\u{26a0}\u{fe0f}", &msg));
                     }
                     continue;
                 }
@@ -160,7 +165,7 @@ pub async fn run(
                     );
                     errors.push(msg.clone());
                     if !json {
-                        eprintln!("warning: {msg}");
+                        eprintln!("{}", output::format_warning_banner("\u{26a0}\u{fe0f}", &msg));
                     }
                     continue;
                 }
@@ -243,15 +248,24 @@ pub async fn run(
             errors,
         })?;
     } else {
-        println!("Sync complete.");
+        println!("{}", output::format_stage("\u{2705}", "Sync complete."));
         println!("  Safe transactions synced: {synced_count}");
-        println!("  Updated:                  {updated_count}");
-        println!("  Newly executed:           {newly_executed_count}");
+        if color::is_color_enabled() {
+            println!("  Updated:                  {}", updated_count.style(color::WARNING));
+            println!("  Newly executed:           {}", newly_executed_count.style(color::SUCCESS));
+        } else {
+            println!("  Updated:                  {updated_count}");
+            println!("  Newly executed:           {newly_executed_count}");
+        }
         if clean {
             println!("  Removed (stale):          {removed_count}");
         }
         if !errors.is_empty() {
-            println!("  Errors:                   {}", errors.len());
+            if color::is_color_enabled() {
+                println!("  Errors:                   {}", errors.len().style(color::ERROR));
+            } else {
+                println!("  Errors:                   {}", errors.len());
+            }
         }
     }
 
