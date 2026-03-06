@@ -7,8 +7,8 @@ use serde::Serialize;
 use treb_core::types::{enums::TransactionStatus, safe_transaction::Confirmation};
 use treb_registry::Registry;
 use treb_safe::{
-    SafeServiceClient,
     types::{SafeServiceMultisigResponse, SafeServiceTx},
+    SafeServiceClient,
 };
 
 use crate::{output, ui::color};
@@ -199,7 +199,7 @@ pub async fn run(
 
                 let was_executed = local_stx.status == TransactionStatus::Executed;
                 let old_status_str = local_stx.status.to_string();
-                let mut updated_stx = local_stx;
+                let mut updated_stx = local_stx.clone();
 
                 // Update confirmations from the service
                 updated_stx.confirmations = service_tx
@@ -212,29 +212,44 @@ pub async fn run(
                     })
                     .collect();
 
-                // Update execution status if newly executed
-                let became_executed = service_tx.is_executed
-                    && updated_stx.status != TransactionStatus::Executed;
-                if became_executed {
+                // Update execution fields from service data.
+                let became_executed =
+                    service_tx.is_executed && updated_stx.status != TransactionStatus::Executed;
+                if service_tx.is_executed {
                     updated_stx.status = TransactionStatus::Executed;
                     updated_stx.executed_at = service_tx.execution_date;
                     updated_stx.execution_tx_hash =
                         service_tx.transaction_hash.clone().unwrap_or_default();
+                }
+                if became_executed {
                     newly_executed_count += 1;
                 }
 
-                // Persist updated safe transaction
-                registry
-                    .update_safe_transaction(updated_stx.clone())
-                    .with_context(|| format!("failed to update safe transaction {local_hash}"))?;
-                updated_count += 1;
+                let confirmations_changed = updated_stx.confirmations != local_stx.confirmations;
+                let status_changed = updated_stx.status != local_stx.status;
+                let executed_at_changed = updated_stx.executed_at != local_stx.executed_at;
+                let execution_tx_hash_changed =
+                    updated_stx.execution_tx_hash != local_stx.execution_tx_hash;
+                let has_changes = confirmations_changed
+                    || status_changed
+                    || executed_at_changed
+                    || execution_tx_hash_changed;
 
-                // Track detail row for newly executed or updated transactions
-                if became_executed {
+                if has_changes {
+                    // Persist updated safe transaction
+                    registry.update_safe_transaction(updated_stx.clone()).with_context(|| {
+                        format!("failed to update safe transaction {local_hash}")
+                    })?;
+                    updated_count += 1;
+
                     detail_rows.push(SyncDetailRow {
                         safe_tx_hash: local_hash.clone(),
                         safe_address: safe_address.clone(),
-                        status: format!("{old_status_str} -> Executed"),
+                        status: if became_executed {
+                            format!("{old_status_str} -> Executed")
+                        } else {
+                            "Updated".to_string()
+                        },
                         confirmations: updated_stx.confirmations.len(),
                     });
                 }
@@ -283,8 +298,7 @@ pub async fn run(
     } else {
         // Print per-transaction detail table when there are changes
         if !detail_rows.is_empty() {
-            let mut table =
-                output::build_table(&["SafeTxHash", "Safe", "Status", "Confirmations"]);
+            let mut table = output::build_table(&["SafeTxHash", "Safe", "Status", "Confirmations"]);
             for row in &detail_rows {
                 table.add_row(vec![
                     output::truncate_address(&row.safe_tx_hash),
