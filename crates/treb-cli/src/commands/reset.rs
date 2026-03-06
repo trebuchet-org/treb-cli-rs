@@ -114,7 +114,9 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
         + governor_proposals_to_remove.len();
 
     if total == 0 {
-        println!("{}", styled("Nothing to reset.", color::SUCCESS));
+        if !args.json {
+            println!("{}", styled("Nothing to reset.", color::SUCCESS));
+        }
         return Ok(());
     }
 
@@ -188,6 +190,7 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
             backup_path: backup_dir.display().to_string(),
         })?;
     } else {
+        println!("{}", styled("Reset complete.", color::SUCCESS));
         println!(
             "{}",
             styled(
