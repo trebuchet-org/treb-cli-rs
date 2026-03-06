@@ -269,7 +269,9 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
             candidates.len()
         );
         if !crate::ui::prompt::confirm(&message, false) {
-            println!("{}", styled("Cancelled.", color::MUTED));
+            if !args.json {
+                println!("{}", styled("Cancelled.", color::MUTED));
+            }
             return Ok(());
         }
     }
