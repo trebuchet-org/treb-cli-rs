@@ -300,6 +300,20 @@ pub fn backup_registry(project_root: &Path) -> anyhow::Result<std::path::PathBuf
     Ok(backup_dir)
 }
 
+fn merge_onchain_candidates(candidates: &mut Vec<PruneCandidate>, onchain_candidates: Vec<PruneCandidate>) {
+    for onchain in onchain_candidates {
+        if let Some(existing) = candidates.iter_mut().find(|c| c.id == onchain.id) {
+            if onchain.kind == PruneCandidateKind::DestroyedOnChain {
+                existing.kind = PruneCandidateKind::DestroyedOnChain;
+                existing.reason = onchain.reason;
+                existing.chain_id = onchain.chain_id;
+            }
+            continue;
+        }
+        candidates.push(onchain);
+    }
+}
+
 // ── run ───────────────────────────────────────────────────────────────────────
 
 /// Entry point for `treb prune`.
@@ -336,15 +350,9 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
         let onchain_candidates =
             find_onchain_prune_candidates(&registry, chain_id_filter, rpc_url).await;
 
-        // Merge on-chain candidates, avoiding duplicates (a deployment already
-        // flagged by cross-ref checks should not appear twice).
-        let existing_ids: std::collections::HashSet<String> =
-            candidates.iter().map(|c| c.id.clone()).collect();
-        for c in onchain_candidates {
-            if !existing_ids.contains(&c.id) {
-                candidates.push(c);
-            }
-        }
+        // Merge on-chain candidates and preserve DestroyedOnChain classification
+        // when cross-reference checks flagged the same deployment ID.
+        merge_onchain_candidates(&mut candidates, onchain_candidates);
     }
 
     if candidates.is_empty() {
@@ -730,5 +738,28 @@ mod tests {
             registry.get_deployment("dep-1").is_some(),
             "dep-1 should still exist after dry-run (no removal performed)"
         );
+    }
+
+    #[test]
+    fn merge_onchain_candidates_upgrades_existing_kind_for_same_id() {
+        let mut candidates = vec![PruneCandidate {
+            id: "dep-1".to_string(),
+            kind: PruneCandidateKind::BrokenTransactionRef,
+            reason: "broken tx ref".to_string(),
+            chain_id: Some(1),
+        }];
+        let onchain_candidates = vec![PruneCandidate {
+            id: "dep-1".to_string(),
+            kind: PruneCandidateKind::DestroyedOnChain,
+            reason: "no bytecode at address".to_string(),
+            chain_id: Some(1),
+        }];
+
+        merge_onchain_candidates(&mut candidates, onchain_candidates);
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].id, "dep-1");
+        assert_eq!(candidates[0].kind, PruneCandidateKind::DestroyedOnChain);
+        assert_eq!(candidates[0].reason, "no bytecode at address");
     }
 }
