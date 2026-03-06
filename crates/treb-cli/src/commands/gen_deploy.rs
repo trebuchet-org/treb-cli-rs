@@ -9,11 +9,11 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use anyhow::{Context, bail};
+use anyhow::{bail, Context};
 use handlebars::Handlebars;
 use serde::Serialize;
 
-use treb_forge::{ArtifactIndex, compile_project};
+use treb_forge::{compile_project, ArtifactIndex};
 
 use crate::output;
 
@@ -679,7 +679,11 @@ fn relative_import_path(from_file: &Path, to_file: &Path) -> String {
     }
 
     let joined = parts.join("/");
-    if joined.starts_with("..") { joined } else { format!("./{joined}") }
+    if joined.starts_with("..") {
+        joined
+    } else {
+        format!("./{joined}")
+    }
 }
 
 // ── Command entry point ──────────────────────────────────────────────────
@@ -880,7 +884,10 @@ pub async fn run(
         }
         fs::write(&output_path, &code)
             .with_context(|| format!("failed to write deploy script: {}", output_path.display()))?;
-        output::print_stage("\u{2705}", &format!("Generated deploy script: {}", output_path.display()));
+        output::print_stage(
+            "\u{2705}",
+            &format!("Generated deploy script: {}", output_path.display()),
+        );
     }
 
     Ok(())
@@ -1785,6 +1792,10 @@ mod tests {
         };
 
         let json = serde_json::to_value(&output).unwrap();
+        assert_eq!(json["contractName"], "Token");
+        assert_eq!(json["strategy"], "create2");
         assert_eq!(json["proxy"], "uups");
+        assert_eq!(json["outputPath"], "script/DeployToken.s.sol");
+        assert_eq!(json["code"], "// code");
     }
 }

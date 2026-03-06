@@ -276,9 +276,9 @@ fn gen_deploy_json_output_has_expected_fields() {
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
 
-    assert_eq!(json["contract_name"], "Counter");
+    assert_eq!(json["contractName"], "Counter");
     assert_eq!(json["strategy"], "create");
-    assert_eq!(json["output_path"], "script/DeployCounter.s.sol");
+    assert_eq!(json["outputPath"], "script/DeployCounter.s.sol");
     assert!(json["proxy"].is_null());
     assert!(json["code"].is_string());
 
@@ -303,7 +303,7 @@ fn gen_deploy_json_output_with_proxy() {
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
 
-    assert_eq!(json["contract_name"], "Counter");
+    assert_eq!(json["contractName"], "Counter");
     assert_eq!(json["strategy"], "create2");
     assert_eq!(json["proxy"], "uups");
     assert!(json["code"].as_str().unwrap().contains("UUPSUpgradeable"));
