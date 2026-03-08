@@ -1,0 +1,16 @@
+{
+  "tx-<ID>": {
+    "id": "tx-<ID>",
+    "chainId": 31337,
+    "hash": "",
+    "status": "SIMULATED",
+    "sender": "0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa",
+    "nonce": 0,
+    "deployments": [
+      "default/31337/Counter:Counter"
+    ],
+    "operations": [],
+    "environment": "default",
+    "createdAt": "<TIMESTAMP>"
+  }
+}

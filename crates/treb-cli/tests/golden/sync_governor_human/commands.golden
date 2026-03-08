@@ -1,0 +1,8 @@
+=== cmd 0: [sync] ===
+✅ Sync complete.
+  Governor proposals synced: 1
+  Governor updated:         0
+  Governor newly executed:  0
+  Errors:                   1
+🏛️ Syncing governor proposals...
+⚠️ no RPC endpoint found for chain 1 (governor 0xaaaa...aaaa)

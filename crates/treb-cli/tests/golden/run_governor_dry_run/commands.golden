@@ -1,0 +1,16 @@
+=== cmd 0: [run script/Deploy.s.sol --dry-run --non-interactive] ===
+No files changed, compilation skipped
+🚧 [DRY RUN] No changes were written to the registry.
+
+default
+\-- 0
+    \-- SINGLETON
+        \-- Counter:Counter 0x4501...a599 UNVERIFIED
+
+Transactions:
+  1.  (SIMULATED)
+
+1 deployment would be recorded, 1 transaction, 160,053 gas would be used
+🔨 Compiling and executing script/Deploy.s.sol...
+🧪 Simulating...
+✅ Execution complete.

@@ -1,0 +1,27 @@
+=== cmd 0: [run script/Deploy.s.sol --network anvil-31337 --broadcast --non-interactive --json] ===
+No files changed, compilation skipped
+{
+  "console_logs": [],
+  "deployments": [
+    {
+      "address": "0x3C952d36207c0d52743a646E7AC2649009bD358e",
+      "chain_id": 31337,
+      "contract_name": "Counter",
+      "deployment_type": "SINGLETON",
+      "id": "default/31337/Counter:Counter",
+      "namespace": "default"
+    }
+  ],
+  "dry_run": false,
+  "gas_used": 160053,
+  "governorProposals": [],
+  "skipped": [],
+  "success": true,
+  "transactions": [
+    {
+      "hash": "",
+      "id": "tx-<ID>",
+      "status": "SIMULATED"
+    }
+  ]
+}

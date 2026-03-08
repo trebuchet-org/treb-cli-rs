@@ -1,0 +1,14 @@
+=== cmd 0: [run script/Deploy.s.sol --network anvil-31337 --broadcast --non-interactive] ===
+No files changed, compilation skipped
+default
+\-- 31337
+    \-- SINGLETON
+        \-- Counter:Counter 0x3C95...358e UNVERIFIED
+
+Transactions:
+  1.  (SIMULATED)
+
+1 deployment recorded, 1 transaction, 160,053 gas used
+🔨 Compiling and executing script/Deploy.s.sol...
+🏛️ Creating governance proposal...
+✅ Execution complete.
