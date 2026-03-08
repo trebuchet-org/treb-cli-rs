@@ -1542,7 +1542,7 @@ components:
             args: None,
             verify: Some(false),
         };
-        assert_eq!(component.verify.unwrap_or(global_verify), false);
+        assert!(!component.verify.unwrap_or(global_verify));
     }
 
     #[test]
@@ -1558,7 +1558,7 @@ components:
             args: None,
             verify: None,
         };
-        assert_eq!(component.verify.unwrap_or(global_verify), true);
+        assert!(component.verify.unwrap_or(global_verify));
     }
 
     #[test]

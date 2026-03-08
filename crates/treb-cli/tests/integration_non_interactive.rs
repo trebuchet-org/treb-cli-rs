@@ -63,11 +63,11 @@ fn treb_non_interactive_env_skips_prompts() {
     let ctx = TestContext::new("project");
 
     // Init the project first.
-    ctx.run(&["init"]).success();
+    ctx.run(["init"]).success();
 
     // Run with TREB_NON_INTERACTIVE=true — should complete without hanging.
     let assertion =
-        ctx.run_with_env(&["config", "show", "--json"], [("TREB_NON_INTERACTIVE", "true")]);
+        ctx.run_with_env(["config", "show", "--json"], [("TREB_NON_INTERACTIVE", "true")]);
 
     // Capture output before consuming assertion with .success().
     let stdout = String::from_utf8_lossy(&assertion.get_output().stdout).to_string();
@@ -88,10 +88,10 @@ fn ci_env_skips_prompts() {
     let ctx = TestContext::new("project");
 
     // Init the project first.
-    ctx.run(&["init"]).success();
+    ctx.run(["init"]).success();
 
     // Run with CI=true — should complete without hanging.
-    let assertion = ctx.run_with_env(&["config", "show", "--json"], [("CI", "true")]);
+    let assertion = ctx.run_with_env(["config", "show", "--json"], [("CI", "true")]);
 
     // Capture output before consuming assertion with .success().
     let stdout = String::from_utf8_lossy(&assertion.get_output().stdout).to_string();

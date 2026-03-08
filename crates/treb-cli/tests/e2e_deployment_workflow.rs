@@ -100,7 +100,7 @@ async fn e2e_full_deployment_lifecycle() {
     let show_after = run_json(tmp.path().to_path_buf(), vec!["show".into(), dep_id.clone()]).await;
     let tags = &show_after["tags"];
     assert!(
-        tags.is_null() || tags.as_array().map_or(true, |a| a.is_empty()),
+        tags.is_null() || tags.as_array().is_none_or(|a| a.is_empty()),
         "tags should be absent or empty after removal, got: {tags}"
     );
 

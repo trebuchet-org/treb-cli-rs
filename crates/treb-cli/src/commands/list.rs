@@ -128,9 +128,18 @@ fn format_deployment_entry(d: &Deployment) -> String {
     } else {
         format!("{}:{}", d.contract_name, d.label)
     };
-    let ver_badge = badge::verification_badge(&d.verification.verifiers);
+    let ver_badge = if color::is_color_enabled() {
+        badge::verification_badge_styled(&d.verification.verifiers)
+    } else {
+        badge::verification_badge(&d.verification.verifiers)
+    };
     let mut parts = vec![name_part, addr, ver_badge];
-    if let Some(fb) = badge::fork_badge(&d.namespace) {
+    let fork_badge = if color::is_color_enabled() {
+        badge::fork_badge_styled(&d.namespace)
+    } else {
+        badge::fork_badge(&d.namespace)
+    };
+    if let Some(fb) = fork_badge {
         parts.push(fb);
     }
     parts.join(" ")
@@ -269,11 +278,53 @@ pub async fn run(
 mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
-    use std::collections::HashMap;
+    use std::{
+        collections::HashMap,
+        sync::{Mutex, MutexGuard, OnceLock},
+    };
     use treb_core::types::{
         ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, ProxyInfo,
-        VerificationInfo, VerificationStatus,
+        VerificationInfo, VerificationStatus, VerifierStatus,
     };
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().expect("env test lock poisoned")
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        old: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let old = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, old }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let old = std::env::var(key).ok();
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.old {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
 
     fn make_deployment(
         id: &str,
@@ -536,7 +587,7 @@ mod tests {
     #[test]
     fn group_single_namespace_chain_mixed_types() {
         // AC: 2 singletons + 1 proxy, all mainnet/42220
-        let deployments = vec![
+        let deployments = [
             make_deployment(
                 "mainnet/42220/FPMM",
                 "mainnet",
@@ -591,7 +642,7 @@ mod tests {
 
     #[test]
     fn group_multiple_namespaces_sorted_alphabetically() {
-        let deployments = vec![
+        let deployments = [
             make_deployment("z-ns/1/A", "z-ns", 1, "A", "", DeploymentType::Singleton, None),
             make_deployment("a-ns/1/B", "a-ns", 1, "B", "", DeploymentType::Singleton, None),
             make_deployment("m-ns/1/C", "m-ns", 1, "C", "", DeploymentType::Singleton, None),
@@ -605,7 +656,7 @@ mod tests {
 
     #[test]
     fn group_chain_ids_sorted_numerically() {
-        let deployments = vec![
+        let deployments = [
             make_deployment("ns/999/A", "ns", 999, "A", "", DeploymentType::Singleton, None),
             make_deployment("ns/1/B", "ns", 1, "B", "", DeploymentType::Singleton, None),
             make_deployment("ns/42/C", "ns", 42, "C", "", DeploymentType::Singleton, None),
@@ -619,7 +670,7 @@ mod tests {
 
     #[test]
     fn group_type_order_proxy_singleton_library() {
-        let deployments = vec![
+        let deployments = [
             make_deployment("ns/1/Lib", "ns", 1, "Lib", "", DeploymentType::Library, None),
             make_deployment("ns/1/Sing", "ns", 1, "Sing", "", DeploymentType::Singleton, None),
             make_deployment("ns/1/Prox", "ns", 1, "Prox", "", DeploymentType::Proxy, None),
@@ -636,7 +687,7 @@ mod tests {
 
     #[test]
     fn group_deployments_sorted_by_contract_name() {
-        let deployments = vec![
+        let deployments = [
             make_deployment("ns/1/Zeta", "ns", 1, "Zeta", "", DeploymentType::Singleton, None),
             make_deployment("ns/1/Alpha", "ns", 1, "Alpha", "", DeploymentType::Singleton, None),
             make_deployment("ns/1/Mid", "ns", 1, "Mid", "", DeploymentType::Singleton, None),
@@ -751,5 +802,34 @@ mod tests {
         let entry = format_deployment_entry(&d);
         assert!(entry.contains("[fork]"), "fork-namespace entry should contain [fork] badge");
         assert!(entry.contains("UNVERIFIED"), "entry should contain verification badge");
+    }
+
+    #[test]
+    fn format_entry_uses_styled_badges_when_color_enabled() {
+        let _lock = env_lock();
+        let _no_color = EnvVarGuard::unset("NO_COLOR");
+        let _term = EnvVarGuard::set("TERM", "xterm-256color");
+        owo_colors::set_override(true);
+        color::color_enabled(false);
+
+        let mut d = make_deployment(
+            "fork/42220/FPMM:dev",
+            "fork/42220",
+            42220,
+            "FPMM",
+            "dev",
+            DeploymentType::Proxy,
+            None,
+        );
+        d.verification.verifiers.insert(
+            "etherscan".into(),
+            VerifierStatus { status: "VERIFIED".into(), url: String::new(), reason: String::new() },
+        );
+
+        let entry = format_deployment_entry(&d);
+
+        assert!(entry.contains('\x1b'), "styled entry should contain ANSI codes: {entry:?}");
+        assert!(entry.contains("e[✔︎]"), "styled entry should contain Go-format verifier text");
+        assert!(entry.contains("[fork]"), "styled entry should include the fork badge text");
     }
 }

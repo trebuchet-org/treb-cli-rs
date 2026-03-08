@@ -2,6 +2,7 @@
 
 pub mod badge;
 pub mod color;
+pub mod emoji;
 pub mod interactive;
 pub mod prompt;
 pub mod selector;
@@ -92,7 +93,7 @@ mod ui_integration_tests {
         // Check deployment label content
         assert!(plain_lines[3].contains("MyProxy"), "Deployment label should contain name");
         assert!(
-            plain_lines[3].contains("e[V]"),
+            plain_lines[3].contains("e[✔︎]  s[-] b[-]"),
             "Deployment label should contain verification badge"
         );
         assert!(plain_lines[3].contains("[fork]"), "Deployment label should contain fork badge");

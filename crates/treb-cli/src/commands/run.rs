@@ -723,9 +723,18 @@ fn format_run_deployment_entry(d: &treb_core::types::Deployment) -> String {
     } else {
         format!("{}:{}", d.contract_name, d.label)
     };
-    let ver_badge = badge::verification_badge(&d.verification.verifiers);
+    let ver_badge = if color::is_color_enabled() {
+        badge::verification_badge_styled(&d.verification.verifiers)
+    } else {
+        badge::verification_badge(&d.verification.verifiers)
+    };
     let mut parts = vec![name_part, addr, ver_badge];
-    if let Some(fb) = badge::fork_badge(&d.namespace) {
+    let fork_badge = if color::is_color_enabled() {
+        badge::fork_badge_styled(&d.namespace)
+    } else {
+        badge::fork_badge(&d.namespace)
+    };
+    if let Some(fb) = fork_badge {
         parts.push(fb);
     }
     parts.join(" ")
@@ -881,8 +890,51 @@ fn display_result_human(result: &PipelineResult) {
 mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
-    use treb_core::types::{GovernorProposal, ProposalStatus};
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+    use treb_core::types::{
+        ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, GovernorProposal,
+        ProposalStatus, VerificationInfo, VerificationStatus, VerifierStatus,
+    };
     use treb_forge::in_memory_signer;
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().expect("env test lock poisoned")
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        old: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let old = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, old }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let old = std::env::var(key).ok();
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.old {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
 
     fn sample_governor_proposal() -> GovernorProposal {
         GovernorProposal {
@@ -897,6 +949,45 @@ mod tests {
             description: String::new(),
             executed_at: None,
             execution_tx_hash: String::new(),
+        }
+    }
+
+    fn sample_deployment(namespace: &str) -> treb_core::types::Deployment {
+        treb_core::types::Deployment {
+            id: format!("{namespace}/1/FPMM:dev"),
+            namespace: namespace.into(),
+            chain_id: 1,
+            contract_name: "FPMM".into(),
+            label: "dev".into(),
+            address: "0x1111111111111111111111111111111111111111".into(),
+            deployment_type: DeploymentType::Proxy,
+            transaction_id: "tx-001".into(),
+            deployment_strategy: DeploymentStrategy {
+                method: DeploymentMethod::Create,
+                salt: String::new(),
+                init_code_hash: String::new(),
+                factory: String::new(),
+                constructor_args: String::new(),
+                entropy: String::new(),
+            },
+            proxy_info: None,
+            artifact: ArtifactInfo {
+                path: "out/FPMM.json".into(),
+                compiler_version: "0.8.24".into(),
+                bytecode_hash: "0xabc".into(),
+                script_path: "script/Deploy.s.sol".into(),
+                git_commit: "abc1234".into(),
+            },
+            verification: VerificationInfo {
+                status: VerificationStatus::Unverified,
+                etherscan_url: String::new(),
+                verified_at: None,
+                reason: String::new(),
+                verifiers: Default::default(),
+            },
+            tags: None,
+            created_at: Utc.with_ymd_and_hms(2025, 1, 15, 10, 30, 0).unwrap(),
+            updated_at: Utc.with_ymd_and_hms(2025, 1, 15, 10, 30, 0).unwrap(),
         }
     }
 
@@ -1040,5 +1131,26 @@ mod tests {
             line.contains("proposer=0x70997970C51812dc3A010C7d01b50e0d17dc79C8"),
             "got: {line}"
         );
+    }
+
+    #[test]
+    fn format_run_entry_uses_styled_badges_when_color_enabled() {
+        let _lock = env_lock();
+        let _no_color = EnvVarGuard::unset("NO_COLOR");
+        let _term = EnvVarGuard::set("TERM", "xterm-256color");
+        owo_colors::set_override(true);
+        color::color_enabled(false);
+
+        let mut deployment = sample_deployment("fork/1");
+        deployment.verification.verifiers.insert(
+            "etherscan".into(),
+            VerifierStatus { status: "VERIFIED".into(), url: String::new(), reason: String::new() },
+        );
+
+        let entry = format_run_deployment_entry(&deployment);
+
+        assert!(entry.contains('\x1b'), "styled entry should contain ANSI codes: {entry:?}");
+        assert!(entry.contains("e[✔︎]"), "styled entry should contain Go-format verifier text");
+        assert!(entry.contains("[fork]"), "styled entry should include the fork badge text");
     }
 }

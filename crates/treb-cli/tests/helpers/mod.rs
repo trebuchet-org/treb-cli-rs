@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 //! Shared helpers for golden-file integration tests.
 
 use std::path::Path;

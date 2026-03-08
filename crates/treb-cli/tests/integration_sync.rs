@@ -101,7 +101,7 @@ async fn governor_sync_context(runtime_code: Bytes) -> Option<TestContext> {
         Err(err) => panic!("failed to spawn anvil: {err}"),
     };
 
-    ctx.run(&["init"]).success();
+    ctx.run(["init"]).success();
     ctx.anvil("mainnet")
         .unwrap()
         .instance()

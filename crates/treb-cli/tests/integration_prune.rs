@@ -298,7 +298,7 @@ async fn prune_check_onchain_dry_run() {
     let chain_id = anvil.chain_id();
 
     // Setup: init project
-    ctx.run(&["init"]).success();
+    ctx.run(["init"]).success();
 
     // Seed a deployment with no on-chain bytecode at its address
     seed_onchain_prune_registry(ctx.path(), chain_id);
@@ -335,5 +335,5 @@ async fn prune_check_onchain_dry_run() {
     };
 
     let golden = GoldenFile::new(golden_dir());
-    golden.compare_with_normalizer("prune_check_onchain_dry_run", "commands", &output, &normalize);
+    golden.compare_with_normalizer("prune_check_onchain_dry_run", "commands", &output, normalize);
 }

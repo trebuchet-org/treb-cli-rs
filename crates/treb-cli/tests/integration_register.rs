@@ -112,7 +112,7 @@ fn run_register_golden_test(
     let golden = GoldenFile::new(golden_dir());
 
     // Command output → commands.golden
-    golden.compare_with_normalizer(test_name, "commands", &output, &normalize);
+    golden.compare_with_normalizer(test_name, "commands", &output, normalize);
 
     // Each artifact → {stem}.golden (missing files silently skipped)
     for artifact_path in output_artifacts {
@@ -124,7 +124,7 @@ fn run_register_golden_test(
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or(artifact_path);
-            golden.compare_with_normalizer(test_name, stem, &content, &normalize);
+            golden.compare_with_normalizer(test_name, stem, &content, normalize);
         }
     }
 }
@@ -151,7 +151,7 @@ async fn register_basic() {
     };
 
     // Setup: init project
-    ctx.run(&["init"]).success();
+    ctx.run(["init"]).success();
 
     // Deploy directly on Anvil and get the real tx hash
     let rpc_url = ctx.anvil("anvil-31337").unwrap().rpc_url().to_string();
@@ -185,7 +185,7 @@ async fn register_json() {
     };
 
     // Setup: init project
-    ctx.run(&["init"]).success();
+    ctx.run(["init"]).success();
 
     // Deploy directly on Anvil and get the real tx hash
     let rpc_url = ctx.anvil("anvil-31337").unwrap().rpc_url().to_string();

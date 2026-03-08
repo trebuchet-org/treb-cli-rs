@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 //! Shared E2E test infrastructure for multi-command workflow tests.
 //!
 //! Provides reusable helpers for project setup, Anvil spawning, CLI invocation,

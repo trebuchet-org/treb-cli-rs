@@ -143,6 +143,7 @@ async fn run_anvil_start_with_entry(
     let cwd = env::current_dir().context("failed to determine current directory")?;
     let treb_dir = cwd.join(TREB_DIR);
     let instance_name = resolve_instance_name(name.as_deref(), network.as_deref());
+    let shutdown_signal = ShutdownSignal::install();
 
     let mut config = AnvilConfig::new().port(port.unwrap_or(8545));
 
@@ -212,7 +213,7 @@ async fn run_anvil_start_with_entry(
     println!("Press Ctrl+C (or send SIGTERM) to stop.");
 
     // Block until SIGINT or SIGTERM.
-    wait_for_shutdown_signal().await;
+    shutdown_signal.wait().await;
 
     println!("\nShutting down Anvil...");
 
@@ -835,20 +836,41 @@ pub(crate) fn store_fork_state_snapshot(
     }
 }
 
-/// Wait for SIGINT (Ctrl+C) or SIGTERM.
-async fn wait_for_shutdown_signal() {
-    #[cfg(unix)]
-    {
+#[cfg(unix)]
+struct ShutdownSignal {
+    sigint: tokio::signal::unix::Signal,
+    sigterm: tokio::signal::unix::Signal,
+}
+
+#[cfg(unix)]
+impl ShutdownSignal {
+    fn install() -> Self {
         use tokio::signal::unix::{SignalKind, signal};
-        let mut sigterm =
-            signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {},
-            _ = sigterm.recv() => {},
+
+        Self {
+            sigint: signal(SignalKind::interrupt()).expect("failed to install SIGINT handler"),
+            sigterm: signal(SignalKind::terminate()).expect("failed to install SIGTERM handler"),
         }
     }
-    #[cfg(not(unix))]
-    {
+
+    async fn wait(mut self) {
+        tokio::select! {
+            _ = self.sigint.recv() => {},
+            _ = self.sigterm.recv() => {},
+        }
+    }
+}
+
+#[cfg(not(unix))]
+struct ShutdownSignal;
+
+#[cfg(not(unix))]
+impl ShutdownSignal {
+    fn install() -> Self {
+        Self
+    }
+
+    async fn wait(self) {
         tokio::signal::ctrl_c().await.ok();
     }
 }

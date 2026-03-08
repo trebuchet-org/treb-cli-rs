@@ -1,14 +1,17 @@
 //! Compact verification badge formatters.
 //!
 //! Renders per-verifier status (etherscan, sourcify, blockscout) in a compact
-//! `e[V] s[-] b[-]` format for consistent display across CLI commands.
+//! `e[✔︎] s[-] b[-]` format for consistent display across CLI commands.
+//!
+//! Wide-character symbols (✔︎, ⏳) include a trailing padding space after `]`
+//! to compensate for their display width in table alignment.
 
 use std::collections::HashMap;
 
 use owo_colors::{OwoColorize, Style};
 use treb_core::types::VerifierStatus;
 
-use super::color;
+use super::{color, emoji};
 
 /// The three verifiers in display order.
 const VERIFIER_ORDER: [(&str, &str); 3] =
@@ -17,7 +20,9 @@ const VERIFIER_ORDER: [(&str, &str); 3] =
 /// Returns a compact verification badge string for the given verifiers map.
 ///
 /// - Empty map → `"UNVERIFIED"`
-/// - Non-empty map → `"e[V] s[X] b[-]"` where V=verified, X=failed, -=missing/unknown
+/// - Non-empty map → `"e[✔︎]  s[-] b[-]"` where ✔︎=verified, -=failed/missing/unknown, ⏳=pending
+///
+/// Wide-character symbols (✔︎, ⏳) include a trailing padding space for alignment.
 #[allow(dead_code)]
 pub fn verification_badge(verifiers: &HashMap<String, VerifierStatus>) -> String {
     if verifiers.is_empty() {
@@ -27,11 +32,15 @@ pub fn verification_badge(verifiers: &HashMap<String, VerifierStatus>) -> String
     VERIFIER_ORDER
         .iter()
         .map(|(key, abbrev)| {
-            let symbol = match verifiers.get(*key) {
-                Some(vs) => status_symbol(&vs.status),
-                None => "-",
+            let (symbol, wide) = match verifiers.get(*key) {
+                Some(vs) => (status_symbol(&vs.status), status_is_wide(&vs.status)),
+                None => ("-", false),
             };
-            format!("{}[{}]", abbrev, symbol)
+            if wide {
+                format!("{}[{}] ", abbrev, symbol)
+            } else {
+                format!("{}[{}]", abbrev, symbol)
+            }
         })
         .collect::<Vec<_>>()
         .join(" ")
@@ -40,9 +49,12 @@ pub fn verification_badge(verifiers: &HashMap<String, VerifierStatus>) -> String
 /// Returns a styled verification badge with ANSI color codes around each segment.
 ///
 /// Each badge segment is colored according to its status:
-/// - Verified → [`color::VERIFIED`]
-/// - Failed → [`color::FAILED`]
-/// - Missing/unknown → [`color::UNVERIFIED`]
+/// - Verified → [`color::VERIFIED`] (green)
+/// - Failed → [`color::NOT_VERIFIED`] (red)
+/// - Pending → [`color::PENDING`] (yellow)
+/// - Missing/unknown → [`color::UNVERIFIED`] (dimmed)
+///
+/// Wide-character symbols (✔︎, ⏳) include a trailing padding space for alignment.
 #[allow(dead_code)]
 pub fn verification_badge_styled(verifiers: &HashMap<String, VerifierStatus>) -> String {
     if verifiers.is_empty() {
@@ -52,22 +64,36 @@ pub fn verification_badge_styled(verifiers: &HashMap<String, VerifierStatus>) ->
     VERIFIER_ORDER
         .iter()
         .map(|(key, abbrev)| {
-            let (symbol, style) = match verifiers.get(*key) {
-                Some(vs) => (status_symbol(&vs.status), status_style(&vs.status)),
-                None => ("-", color::UNVERIFIED),
+            let (symbol, style, wide) = match verifiers.get(*key) {
+                Some(vs) => (
+                    status_symbol(&vs.status),
+                    status_style(&vs.status),
+                    status_is_wide(&vs.status),
+                ),
+                None => ("-", color::UNVERIFIED, false),
             };
             let badge = format!("{}[{}]", abbrev, symbol);
-            format!("{}", badge.style(style))
+            if wide {
+                format!("{} ", badge.style(style))
+            } else {
+                format!("{}", badge.style(style))
+            }
         })
         .collect::<Vec<_>>()
         .join(" ")
 }
 
-/// Maps a status string to its single-character symbol.
+/// Maps a status string to its Go-matching symbol.
+///
+/// - Verified → ✔︎ (U+2714+FE0E)
+/// - Failed → `-`
+/// - Pending → ⏳
+/// - Missing/unknown → `-`
 fn status_symbol(status: &str) -> &'static str {
     match status.to_uppercase().as_str() {
-        "VERIFIED" => "V",
-        "FAILED" => "X",
+        "VERIFIED" => emoji::VERIFIED_WIDE,
+        "FAILED" => "-",
+        "PENDING" => emoji::HOURGLASS,
         _ => "-",
     }
 }
@@ -76,9 +102,15 @@ fn status_symbol(status: &str) -> &'static str {
 fn status_style(status: &str) -> Style {
     match status.to_uppercase().as_str() {
         "VERIFIED" => color::VERIFIED,
-        "FAILED" => color::FAILED,
+        "FAILED" => color::NOT_VERIFIED,
+        "PENDING" => color::PENDING,
         _ => color::UNVERIFIED,
     }
+}
+
+/// Returns whether a status uses a wide-character symbol that needs trailing padding.
+fn status_is_wide(status: &str) -> bool {
+    matches!(status.to_uppercase().as_str(), "VERIFIED" | "PENDING")
 }
 
 /// Returns `Some("[fork]")` if the namespace indicates a fork deployment,
@@ -90,12 +122,14 @@ pub fn fork_badge(namespace: &str) -> Option<String> {
     if namespace.starts_with("fork/") { Some("[fork]".to_string()) } else { None }
 }
 
-/// Returns a styled `[fork]` badge with yellow bold ANSI codes when the
+/// Returns a styled `[fork]` badge with yellow ANSI codes when the
 /// namespace indicates a fork deployment, or `None` otherwise.
+///
+/// Uses [`color::FORK_INDICATOR`] (plain Yellow, matching Go `forkIndicatorStyle`).
 #[allow(dead_code)]
 pub fn fork_badge_styled(namespace: &str) -> Option<String> {
     if namespace.starts_with("fork/") {
-        Some(format!("{}", "[fork]".style(color::FORK_BADGE)))
+        Some(format!("{}", "[fork]".style(color::FORK_INDICATOR)))
     } else {
         None
     }
@@ -122,7 +156,8 @@ mod tests {
         verifiers.insert("sourcify".to_string(), make_verifier("FAILED"));
         // blockscout intentionally missing
 
-        assert_eq!(verification_badge(&verifiers), "e[V] s[X] b[-]");
+        // Verified has trailing padding space for wide ✔︎ character
+        assert_eq!(verification_badge(&verifiers), "e[✔︎]  s[-] b[-]");
     }
 
     #[test]
@@ -134,7 +169,8 @@ mod tests {
         verifiers.insert("etherscan".to_string(), make_verifier("VERIFIED"));
 
         let badge = verification_badge(&verifiers);
-        let parts: Vec<&str> = badge.split(' ').collect();
+        // Wide characters produce extra spaces; filter empty parts
+        let parts: Vec<&str> = badge.split(' ').filter(|s| !s.is_empty()).collect();
         assert!(parts[0].starts_with("e["));
         assert!(parts[1].starts_with("s["));
         assert!(parts[2].starts_with("b["));
@@ -167,13 +203,14 @@ mod tests {
     }
 
     #[test]
-    fn all_verified_renders_all_v() {
+    fn all_verified_renders_checkmarks() {
         let mut verifiers = HashMap::new();
         verifiers.insert("etherscan".to_string(), make_verifier("VERIFIED"));
         verifiers.insert("sourcify".to_string(), make_verifier("VERIFIED"));
         verifiers.insert("blockscout".to_string(), make_verifier("VERIFIED"));
 
-        assert_eq!(verification_badge(&verifiers), "e[V] s[V] b[V]");
+        // Each verified badge has trailing padding space for wide ✔︎ character
+        assert_eq!(verification_badge(&verifiers), "e[✔︎]  s[✔︎]  b[✔︎] ");
     }
 
     #[test]
@@ -183,6 +220,28 @@ mod tests {
 
         let badge = verification_badge(&verifiers);
         assert!(badge.starts_with("e[-]"), "Unknown status should map to -, got: {badge}");
+    }
+
+    #[test]
+    fn pending_status_renders_hourglass() {
+        let mut verifiers = HashMap::new();
+        verifiers.insert("etherscan".to_string(), make_verifier("PENDING"));
+
+        let badge = verification_badge(&verifiers);
+        // Pending has trailing padding space for wide ⏳ character
+        assert!(
+            badge.starts_with("e[⏳] "),
+            "Pending status should map to ⏳ with trailing space, got: {badge}"
+        );
+    }
+
+    #[test]
+    fn failed_status_renders_dash_not_x() {
+        let mut verifiers = HashMap::new();
+        verifiers.insert("etherscan".to_string(), make_verifier("FAILED"));
+
+        let badge = verification_badge(&verifiers);
+        assert!(badge.starts_with("e[-]"), "Failed status should map to -, got: {badge}");
     }
 
     // -----------------------------------------------------------------------
