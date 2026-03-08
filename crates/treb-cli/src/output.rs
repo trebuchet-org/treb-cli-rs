@@ -175,6 +175,28 @@ fn extract_tag_name(msg: &str) -> Option<&str> {
     Some(&msg[start + 1..start + 1 + end])
 }
 
+/// Match `tag 'name' already exists` and return the tag name.
+fn match_tag_already_exists(msg: &str) -> Option<&str> {
+    if !msg.starts_with("tag '") || !msg.ends_with(" already exists") {
+        return None;
+    }
+
+    let tag = extract_tag_name(msg)?;
+    let expected = format!("tag '{tag}' already exists");
+    (msg == expected).then_some(tag)
+}
+
+/// Match `tag 'name' does not exist` and return the tag name.
+fn match_tag_does_not_exist(msg: &str) -> Option<&str> {
+    if !msg.starts_with("tag '") || !msg.ends_with(" does not exist") {
+        return None;
+    }
+
+    let tag = extract_tag_name(msg)?;
+    let expected = format!("tag '{tag}' does not exist");
+    (msg == expected).then_some(tag)
+}
+
 /// Format a warning message matching Go `render/helpers.go` `FormatWarning`.
 ///
 /// Splits on `: ` and takes the last segment. Special-cases tag "already exists"
@@ -183,18 +205,10 @@ fn extract_tag_name(msg: &str) -> Option<&str> {
 pub fn format_warning(message: &str) -> String {
     let msg = extract_message(message);
 
-    let formatted = if msg.contains("already exists") {
-        if let Some(tag) = extract_tag_name(msg) {
-            format!("Deployment already has tag '{tag}'")
-        } else {
-            msg.to_string()
-        }
-    } else if msg.contains("does not exist") {
-        if let Some(tag) = extract_tag_name(msg) {
-            format!("Deployment doesn't have tag '{tag}'")
-        } else {
-            msg.to_string()
-        }
+    let formatted = if let Some(tag) = match_tag_already_exists(msg) {
+        format!("Deployment already has tag '{tag}'")
+    } else if let Some(tag) = match_tag_does_not_exist(msg) {
+        format!("Deployment doesn't have tag '{tag}'")
     } else {
         msg.to_string()
     };
@@ -379,6 +393,48 @@ mod tests {
     }
 
     #[test]
+    fn format_warning_non_tag_already_exists_falls_back() {
+        let _lock = env_lock();
+        owo_colors::set_override(false);
+        color::color_enabled(true);
+
+        let result = format_warning("Duplicate deployment: ID 'foo' already exists");
+        assert!(
+            result.contains("ID 'foo' already exists"),
+            "fallback should preserve non-tag already-exists message, got: {result}"
+        );
+        assert!(
+            !result.contains("Deployment already has tag"),
+            "non-tag message should not be rewritten, got: {result}"
+        );
+
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn format_warning_non_tag_does_not_exist_falls_back() {
+        let _lock = env_lock();
+        owo_colors::set_override(false);
+        color::color_enabled(true);
+
+        let result = format_warning(
+            "log warning: log file 'foo.log' does not exist; instance 'bar' may not have been started yet",
+        );
+        assert!(
+            result.contains(
+                "log file 'foo.log' does not exist; instance 'bar' may not have been started yet"
+            ),
+            "fallback should preserve non-tag does-not-exist message, got: {result}"
+        );
+        assert!(
+            !result.contains("Deployment doesn't have tag"),
+            "non-tag message should not be rewritten, got: {result}"
+        );
+
+        owo_colors::set_override(true);
+    }
+
+    #[test]
     fn format_warning_styled() {
         let _lock = env_lock();
         let _no_color = EnvVarGuard::unset("NO_COLOR");
@@ -468,12 +524,32 @@ mod tests {
 
     #[test]
     fn extract_message_with_separator() {
-        assert_eq!(extract_message("tag error: tag 'v1' already exists"), "tag 'v1' already exists");
+        assert_eq!(
+            extract_message("tag error: tag 'v1' already exists"),
+            "tag 'v1' already exists"
+        );
     }
 
     #[test]
     fn extract_message_without_separator() {
         assert_eq!(extract_message("some warning"), "some warning");
+    }
+
+    #[test]
+    fn match_tag_already_exists_exact() {
+        assert_eq!(match_tag_already_exists("tag 'v1' already exists"), Some("v1"));
+        assert_eq!(match_tag_already_exists("ID 'v1' already exists"), None);
+    }
+
+    #[test]
+    fn match_tag_does_not_exist_exact() {
+        assert_eq!(match_tag_does_not_exist("tag 'v1' does not exist"), Some("v1"));
+        assert_eq!(
+            match_tag_does_not_exist(
+                "log file 'v1' does not exist; instance 'bar' may not have been started yet"
+            ),
+            None
+        );
     }
 
     #[test]
