@@ -3,6 +3,8 @@
 //! Provides consistent output patterns: pretty JSON, UTF-8 tables with bold
 //! headers, aligned key-value pair printing, and stage progress indicators.
 
+use std::time::Duration;
+
 use comfy_table::{Attribute, Cell, ContentArrangement, Table};
 use owo_colors::OwoColorize;
 use serde::Serialize;
@@ -246,6 +248,45 @@ pub fn format_success(message: &str) -> String {
     } else {
         format!("{} {}", emoji::CHECK, message)
     }
+}
+
+/// Format a duration matching Go `render/fork.go` `formatDuration`.
+///
+/// - `d < 1 minute` → `"{seconds}s"` (e.g., `"45s"`)
+/// - `1 minute <= d < 1 hour` → `"{minutes}m{seconds}s"` (e.g., `"5m30s"`)
+/// - `d >= 1 hour` → `"{hours}h{minutes}m"` (e.g., `"2h15m"`)
+#[allow(dead_code)]
+pub fn format_duration(d: Duration) -> String {
+    let total_secs = d.as_secs();
+    let hours = total_secs / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let seconds = total_secs % 60;
+
+    if total_secs >= 3600 {
+        format!("{hours}h{minutes}m")
+    } else if total_secs >= 60 {
+        format!("{minutes}m{seconds}s")
+    } else {
+        format!("{seconds}s")
+    }
+}
+
+/// Format a build date matching Go `version.go` `formatBuildDate`.
+///
+/// Converts ISO 8601 format (`2025-01-26T15:04:05Z`) to `2025-01-26 15:04:05 UTC`.
+/// Returns non-ISO strings unchanged.
+#[allow(dead_code)]
+pub fn format_build_date(date: &str) -> String {
+    // Match pattern: YYYY-MM-DDTHH:MM:SSZ
+    if let Some(rest) = date.strip_suffix('Z') {
+        if let Some((date_part, time_part)) = rest.split_once('T') {
+            // Validate basic structure: date has 2 dashes, time has 2 colons
+            if date_part.matches('-').count() == 2 && time_part.matches(':').count() == 2 {
+                return format!("{date_part} {time_part} UTC");
+            }
+        }
+    }
+    date.to_string()
 }
 
 #[cfg(test)]
@@ -565,5 +606,90 @@ mod tests {
     #[test]
     fn capitalize_first_already_upper() {
         assert_eq!(capitalize_first("Already upper"), "Already upper");
+    }
+
+    // -- format_duration tests --
+
+    #[test]
+    fn format_duration_zero() {
+        assert_eq!(format_duration(Duration::from_secs(0)), "0s");
+    }
+
+    #[test]
+    fn format_duration_seconds_only() {
+        assert_eq!(format_duration(Duration::from_secs(45)), "45s");
+    }
+
+    #[test]
+    fn format_duration_one_second() {
+        assert_eq!(format_duration(Duration::from_secs(1)), "1s");
+    }
+
+    #[test]
+    fn format_duration_59_seconds() {
+        assert_eq!(format_duration(Duration::from_secs(59)), "59s");
+    }
+
+    #[test]
+    fn format_duration_exactly_one_minute() {
+        assert_eq!(format_duration(Duration::from_secs(60)), "1m0s");
+    }
+
+    #[test]
+    fn format_duration_minutes_and_seconds() {
+        assert_eq!(format_duration(Duration::from_secs(330)), "5m30s");
+    }
+
+    #[test]
+    fn format_duration_59_minutes_59_seconds() {
+        assert_eq!(format_duration(Duration::from_secs(3599)), "59m59s");
+    }
+
+    #[test]
+    fn format_duration_exactly_one_hour() {
+        assert_eq!(format_duration(Duration::from_secs(3600)), "1h0m");
+    }
+
+    #[test]
+    fn format_duration_hours_and_minutes() {
+        assert_eq!(format_duration(Duration::from_secs(8100)), "2h15m");
+    }
+
+    #[test]
+    fn format_duration_ignores_sub_second() {
+        assert_eq!(format_duration(Duration::from_millis(45_500)), "45s");
+    }
+
+    // -- format_build_date tests --
+
+    #[test]
+    fn format_build_date_iso8601() {
+        assert_eq!(
+            format_build_date("2025-01-26T15:04:05Z"),
+            "2025-01-26 15:04:05 UTC"
+        );
+    }
+
+    #[test]
+    fn format_build_date_unknown() {
+        assert_eq!(format_build_date("unknown"), "unknown");
+    }
+
+    #[test]
+    fn format_build_date_date_only() {
+        assert_eq!(format_build_date("2025-01-26"), "2025-01-26");
+    }
+
+    #[test]
+    fn format_build_date_empty() {
+        assert_eq!(format_build_date(""), "");
+    }
+
+    #[test]
+    fn format_build_date_another_iso() {
+        assert_eq!(
+            format_build_date("2024-12-31T23:59:59Z"),
+            "2024-12-31 23:59:59 UTC"
+        );
     }
 }
