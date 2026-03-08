@@ -2,31 +2,71 @@
 # trebup — installer for treb, the smart-contract deployment tool
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/scripts/trebup | sh
+#   curl -fsSL https://raw.githubusercontent.com/trebuchet-org/treb-cli-rs/main/scripts/trebup | sh
 #
 # Environment variables:
 #   TREB_VERSION     Install a specific version tag (default: latest release)
 #   TREB_INSTALL_DIR Install directory (default: ~/.local/bin)
-#   TREB_REPO        GitHub repository (default: treb-rs/treb-cli-rs)
+#   TREB_REPO        GitHub repository (default: trebuchet-org/treb-cli-rs)
 
 set -e
 
-REPO="${TREB_REPO:-treb-rs/treb-cli-rs}"
+# ---------------------------------------------------------------------------
+# Help
+# ---------------------------------------------------------------------------
+
+usage() {
+    cat <<'USAGE'
+trebup — installer for treb, the smart-contract deployment tool
+
+USAGE:
+    trebup [OPTIONS]
+
+OPTIONS:
+    -h, --help    Print this help message
+
+ENVIRONMENT VARIABLES:
+    TREB_VERSION      Install a specific version tag (default: latest release)
+    TREB_INSTALL_DIR  Install directory (default: ~/.local/bin)
+    TREB_REPO         GitHub repository (default: trebuchet-org/treb-cli-rs)
+
+EXAMPLES:
+    # Install latest version
+    curl -fsSL https://raw.githubusercontent.com/trebuchet-org/treb-cli-rs/main/scripts/trebup | sh
+
+    # Install a specific version
+    TREB_VERSION=v0.1.0 trebup
+
+    # Install to a custom directory
+    TREB_INSTALL_DIR=/usr/local/bin trebup
+USAGE
+}
+
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+    esac
+done
+
+REPO="${TREB_REPO:-trebuchet-org/treb-cli-rs}"
 BINARY="treb"
 
 # ---------------------------------------------------------------------------
 # Platform detection
 # ---------------------------------------------------------------------------
 
-detect_target() {
+detect_platform() {
     _os="$(uname -s)"
     _arch="$(uname -m)"
 
     case "$_os" in
         Linux)
             case "$_arch" in
-                x86_64)          echo "x86_64-unknown-linux-musl" ;;
-                aarch64|arm64)   echo "aarch64-unknown-linux-musl" ;;
+                x86_64)          echo "linux-amd64" ;;
+                aarch64|arm64)   echo "linux-arm64" ;;
                 *)
                     echo "Unsupported platform: $_os/$_arch" >&2
                     exit 1
@@ -35,8 +75,8 @@ detect_target() {
             ;;
         Darwin)
             case "$_arch" in
-                x86_64)          echo "x86_64-apple-darwin" ;;
-                arm64|aarch64)   echo "aarch64-apple-darwin" ;;
+                x86_64)          echo "darwin-amd64" ;;
+                arm64|aarch64)   echo "darwin-arm64" ;;
                 *)
                     echo "Unsupported platform: $_os/$_arch" >&2
                     exit 1
@@ -50,7 +90,7 @@ detect_target() {
     esac
 }
 
-TARGET="$(detect_target)"
+OS_ARCH="$(detect_platform)"
 
 # ---------------------------------------------------------------------------
 # Resolve version
@@ -82,14 +122,14 @@ mkdir -p "$INSTALL_DIR"
 # Download
 # ---------------------------------------------------------------------------
 
-ARCHIVE="treb-${VERSION}-${TARGET}.tar.gz"
-CHECKSUM_FILE="${ARCHIVE%.tar.gz}.sha256"
+ARCHIVE="treb-${VERSION}-${OS_ARCH}.tar.gz"
+CHECKSUM_FILE="treb-${VERSION}-${OS_ARCH}.sha256"
 BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
 
-echo "Downloading treb ${VERSION} for ${TARGET}..."
+echo "Downloading treb ${VERSION} for ${OS_ARCH}..."
 curl -fsSL "${BASE_URL}/${ARCHIVE}" -o "${TMP_DIR}/${ARCHIVE}"
 curl -fsSL "${BASE_URL}/${CHECKSUM_FILE}" -o "${TMP_DIR}/${CHECKSUM_FILE}"
 
@@ -118,3 +158,59 @@ install -m 755 "$BINARY" "${INSTALL_DIR}/${BINARY}"
 
 echo ""
 echo "treb ${VERSION} installed to ${INSTALL_DIR}/${BINARY}"
+
+# ---------------------------------------------------------------------------
+# Install shell completions
+# ---------------------------------------------------------------------------
+
+if [ -d "completions" ]; then
+    install_completions() {
+        _shell="$(basename "${SHELL:-}")"
+
+        case "$_shell" in
+            bash)
+                _comp_dir="${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions"
+                if [ -f "completions/treb.bash" ]; then
+                    mkdir -p "$_comp_dir"
+                    cp "completions/treb.bash" "$_comp_dir/treb"
+                    echo "Bash completions installed to $_comp_dir/treb"
+                fi
+                ;;
+            zsh)
+                _comp_dir="${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions"
+                if [ -f "completions/_treb" ]; then
+                    mkdir -p "$_comp_dir"
+                    cp "completions/_treb" "$_comp_dir/_treb"
+                    echo "Zsh completions installed to $_comp_dir/_treb"
+                fi
+                ;;
+            fish)
+                _comp_dir="${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions"
+                if [ -f "completions/treb.fish" ]; then
+                    mkdir -p "$_comp_dir"
+                    cp "completions/treb.fish" "$_comp_dir/treb.fish"
+                    echo "Fish completions installed to $_comp_dir/treb.fish"
+                fi
+                ;;
+            *)
+                echo "Shell completions available in the archive but not auto-installed for $_shell"
+                ;;
+        esac
+    }
+
+    install_completions
+fi
+
+# ---------------------------------------------------------------------------
+# PATH check
+# ---------------------------------------------------------------------------
+
+case ":$PATH:" in
+    *":${INSTALL_DIR}:"*)
+        ;;
+    *)
+        echo ""
+        echo "NOTE: ${INSTALL_DIR} is not in your PATH."
+        echo "Add it with:  export PATH=\"${INSTALL_DIR}:\$PATH\""
+        ;;
+esac
