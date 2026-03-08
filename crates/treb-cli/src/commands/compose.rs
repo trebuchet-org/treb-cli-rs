@@ -551,7 +551,9 @@ pub async fn run(
             let component = &compose.components[name];
 
             if skip_set.contains(name) {
-                println!("# {} (skipped)", name);
+                if !json {
+                    println!("# {} (skipped)", name);
+                }
                 continue;
             }
 
@@ -616,14 +618,24 @@ pub async fn run(
                 })
                 .collect::<Vec<_>>()
                 .join(" ");
-            println!("# {}", name);
-            println!("{}", cmd_str);
+            if !json {
+                println!("# {}", name);
+                println!("{}", cmd_str);
+            }
         }
         return Ok(());
     }
 
+    // ── Reject interactive broadcast in JSON mode ─────────────────────
+    let prompts_enabled = !is_non_interactive(non_interactive);
+    if json && broadcast && !dry_run && prompts_enabled {
+        bail!(
+            "interactive broadcast confirmation is not available in JSON mode; rerun with --non-interactive"
+        );
+    }
+
     // ── Broadcast confirmation (once before first component) ──────────
-    if broadcast && !is_non_interactive(non_interactive) {
+    if broadcast && prompts_enabled {
         let executing_count = order.iter().filter(|n| !skip_set.contains(*n)).count();
         let count_str = format!("{}", executing_count);
         let mut kv_pairs: Vec<(&str, &str)> =
