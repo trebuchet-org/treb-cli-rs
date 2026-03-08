@@ -279,6 +279,7 @@ pub async fn run(
 
     // Extract the deployer sender so the pipeline can detect Safe/Governor flows.
     let deployer_sender = resolved_senders.remove("deployer");
+    let is_governor_sender = deployer_sender.as_ref().map_or(false, |s| s.is_governor());
 
     let pipeline_context = PipelineContext {
         config: pipeline_config,
@@ -321,7 +322,11 @@ pub async fn run(
     let pipeline = RunPipeline::new(pipeline_context).with_script_config(script_config);
 
     if !json && !dry_run && broadcast {
-        output::print_stage("\u{1f4e1}", "Broadcasting...");
+        if is_governor_sender {
+            output::print_stage("\u{1f3db}\u{fe0f}", "Creating governance proposal...");
+        } else {
+            output::print_stage("\u{1f4e1}", "Broadcasting...");
+        }
     } else if !json && dry_run {
         output::print_stage("\u{1f9ea}", "Simulating...");
     }
@@ -443,6 +448,8 @@ struct RunOutputJson {
     skipped: Vec<SkippedJson>,
     gas_used: u64,
     console_logs: Vec<String>,
+    #[serde(rename = "governorProposals")]
+    governor_proposals: Vec<GovernorProposalJson>,
 }
 
 #[derive(Serialize)]
@@ -467,6 +474,16 @@ struct SkippedJson {
     contract_name: String,
     address: String,
     reason: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GovernorProposalJson {
+    proposal_id: String,
+    governor_address: String,
+    timelock_address: String,
+    status: String,
+    transaction_ids: Vec<String>,
 }
 
 // ── Display logic ────────────────────────────────────────────────────────
@@ -516,6 +533,17 @@ fn display_result_json(result: &PipelineResult) -> anyhow::Result<()> {
             .collect(),
         gas_used: result.gas_used,
         console_logs: result.console_logs.clone(),
+        governor_proposals: result
+            .governor_proposals
+            .iter()
+            .map(|gp| GovernorProposalJson {
+                proposal_id: gp.proposal_id.clone(),
+                governor_address: gp.governor_address.clone(),
+                timelock_address: gp.timelock_address.clone(),
+                status: gp.status.to_string(),
+                transaction_ids: gp.transaction_ids.clone(),
+            })
+            .collect(),
     };
 
     output::print_json(&output)?;
@@ -671,6 +699,32 @@ fn display_result_human(result: &PipelineResult) {
         println!();
     }
 
+    // Governor proposals
+    if !result.governor_proposals.is_empty() {
+        println!("Governor Proposals:");
+        for (i, gp) in result.governor_proposals.iter().enumerate() {
+            let action = if result.dry_run { "would be proposed" } else { "proposed" };
+            println!(
+                "  {}. {} ({})",
+                i + 1,
+                output::truncate_address(&gp.proposal_id),
+                action,
+            );
+            let mut details = vec![format!("Governor: {}", output::truncate_address(&gp.governor_address))];
+            if !gp.timelock_address.is_empty() {
+                details.push(format!("Timelock: {}", output::truncate_address(&gp.timelock_address)));
+            }
+            let tx_count = gp.transaction_ids.len();
+            details.push(format!(
+                "{} linked transaction{}",
+                tx_count,
+                if tx_count == 1 { "" } else { "s" },
+            ));
+            println!("     {}", details.join(" | "));
+        }
+        println!();
+    }
+
     // Skipped deployments
     if !result.skipped.is_empty() {
         println!("Skipped:");
@@ -695,8 +749,9 @@ fn display_result_human(result: &PipelineResult) {
     let dep_count = result.deployments.len();
     let tx_count = result.transactions.len();
     let skip_count = result.skipped.len();
+    let proposal_count = result.governor_proposals.len();
 
-    if dep_count == 0 && skip_count == 0 {
+    if dep_count == 0 && skip_count == 0 && proposal_count == 0 {
         println!("No deployments found in script output.");
     } else {
         let action = if result.dry_run { "would be recorded" } else { "recorded" };
@@ -714,6 +769,15 @@ fn display_result_human(result: &PipelineResult) {
                 "{} transaction{}",
                 tx_count,
                 if tx_count == 1 { "" } else { "s" }
+            ));
+        }
+        if proposal_count > 0 {
+            let proposal_verb = if result.dry_run { "would be proposed" } else { "proposed" };
+            parts.push(format!(
+                "{} governor proposal{} {}",
+                proposal_count,
+                if proposal_count == 1 { "" } else { "s" },
+                proposal_verb,
             ));
         }
         if skip_count > 0 {
