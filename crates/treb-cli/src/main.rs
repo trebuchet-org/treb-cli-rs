@@ -57,10 +57,10 @@ enum Commands {
         /// Deployment namespace
         #[arg(long)]
         namespace: Option<String>,
-        /// Broadcast transactions to the network
+        /// Broadcast transactions to the network (requires --non-interactive when used with --json)
         #[arg(long)]
         broadcast: bool,
-        /// Simulate execution without recording to registry
+        /// Simulate execution without making changes
         #[arg(long)]
         dry_run: bool,
         /// Send transactions one at a time
@@ -72,7 +72,7 @@ enum Commands {
         /// Verify deployed contracts on Etherscan
         #[arg(long)]
         verify: bool,
-        /// Show verbose output (labeled addresses, gas, config source)
+        /// Show verbose output
         #[arg(long, short)]
         verbose: bool,
         /// Enable Forge debugger
@@ -90,7 +90,7 @@ enum Commands {
         /// Target contract to run (when multiple contracts in script)
         #[arg(long)]
         target_contract: Option<String>,
-        /// Skip interactive confirmation prompts
+        /// Skip interactive prompts (also enabled via TREB_NON_INTERACTIVE=1, CI=true, or non-TTY stdin/stdout)
         #[arg(long)]
         non_interactive: bool,
     },
@@ -101,10 +101,10 @@ enum Commands {
     /// Alias: `ls`.
     #[command(alias = "ls")]
     List {
-        /// Filter by network name or chain ID
+        /// Network name or chain ID
         #[arg(long)]
         network: Option<String>,
-        /// Filter by namespace
+        /// Deployment namespace
         #[arg(long)]
         namespace: Option<String>,
         /// Filter by deployment type (SINGLETON, PROXY, LIBRARY)
@@ -272,7 +272,7 @@ enum Commands {
     /// API and updates the local registry with confirmations, rejections, and
     /// execution results for pending Safe multisig transactions.
     Sync {
-        /// Filter sync to a specific network name or chain ID
+        /// Network name or chain ID
         #[arg(long)]
         network: Option<String>,
         /// Remove safe transactions not found on the service
@@ -286,12 +286,18 @@ enum Commands {
         json: bool,
     },
     /// Print version information
+    ///
+    /// Displays the treb version, git commit, build date, Foundry version,
+    /// and Rust compiler version. Use `--json` for machine-readable output.
     Version {
         /// Output as JSON
         #[arg(long)]
         json: bool,
     },
     /// List available networks
+    ///
+    /// Displays all networks configured in `foundry.toml` `[rpc_endpoints]`
+    /// with their chain IDs and RPC URLs.
     Networks {
         /// Output as JSON
         #[arg(long)]
@@ -341,10 +347,10 @@ enum Commands {
         /// Foundry profile override
         #[arg(long)]
         profile: Option<String>,
-        /// Broadcast transactions to the network
+        /// Broadcast transactions to the network (requires --non-interactive when used with --json)
         #[arg(long)]
         broadcast: bool,
-        /// Print execution plan without running
+        /// Simulate execution without making changes
         #[arg(long)]
         dry_run: bool,
         /// Skip already-completed components
@@ -374,7 +380,7 @@ enum Commands {
         /// Set environment variables (KEY=VALUE, repeatable)
         #[arg(long, num_args = 1)]
         env: Vec<String>,
-        /// Skip interactive confirmation prompts
+        /// Skip interactive prompts (also enabled via TREB_NON_INTERACTIVE=1, CI=true, or non-TTY stdin/stdout)
         #[arg(long)]
         non_interactive: bool,
     },
@@ -408,7 +414,10 @@ enum Commands {
         #[command(subcommand)]
         subcommand: commands::fork::ForkSubcommand,
     },
-    /// Start a local development environment
+    /// Manage local development tools
+    ///
+    /// Provides subcommands for managing local Anvil nodes used in development
+    /// and fork-mode testing.
     Dev {
         #[command(subcommand)]
         subcommand: commands::dev::DevSubcommand,

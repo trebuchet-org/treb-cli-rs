@@ -26,7 +26,7 @@ use crate::{output, ui::color};
 them. A timestamped backup is created under `.treb/backups/` before any \
 destructive operation. Use --dry-run to preview candidates without deleting.")]
 pub struct PruneArgs {
-    /// Report prune candidates without deleting anything
+    /// Simulate execution without making changes
     #[arg(long)]
     pub dry_run: bool,
 
@@ -34,7 +34,7 @@ pub struct PruneArgs {
     #[arg(long)]
     pub include_pending: bool,
 
-    /// Filter candidates to a specific network (by chain ID)
+    /// Network name or chain ID
     #[arg(long)]
     pub network: Option<String>,
 

@@ -36,10 +36,10 @@ pub enum ForkSubcommand {
     /// `fork.json`. Run `treb dev anvil start --network <name>` after
     /// this to start a local node pointing at the forked chain.
     Enter {
-        /// Network name (must match an entry in foundry.toml [rpc_endpoints])
+        /// Network name or chain ID
         #[arg(long)]
         network: String,
-        /// Upstream RPC URL to fork (overrides foundry.toml)
+        /// Explicit RPC URL (overrides network)
         #[arg(long)]
         rpc_url: Option<String>,
         /// Fork at a specific block number
@@ -54,7 +54,7 @@ pub enum ForkSubcommand {
     /// Restores the registry to the state it was in before `fork enter` and
     /// removes the fork entry and its snapshot directory.
     Exit {
-        /// Network name to exit
+        /// Network name or chain ID
         #[arg(long)]
         network: String,
         /// Output as JSON
@@ -66,7 +66,7 @@ pub enum ForkSubcommand {
     /// Restores the registry from the snapshot taken when fork mode was entered,
     /// discarding any deployments made during the fork session.
     Revert {
-        /// Network name to revert
+        /// Network name or chain ID
         #[arg(long)]
         network: String,
         /// Revert all active forks
@@ -81,7 +81,7 @@ pub enum ForkSubcommand {
     /// Resets the local Anvil node to a fresh fork at the given block number
     /// (or at the latest block if omitted) without exiting fork mode.
     Restart {
-        /// Network name to restart
+        /// Network name or chain ID
         #[arg(long)]
         network: String,
         /// Fork block number to reset to (uses latest if omitted)
@@ -105,7 +105,7 @@ pub enum ForkSubcommand {
     /// Displays the log of fork lifecycle events (enter, exit, revert, restart)
     /// for all networks or a specific one.
     History {
-        /// Filter by network name
+        /// Network name or chain ID
         #[arg(long)]
         network: Option<String>,
         /// Output as JSON
@@ -117,7 +117,7 @@ pub enum ForkSubcommand {
     /// Shows deployments that were added or removed since fork mode was entered
     /// by comparing the current registry against the saved snapshot.
     Diff {
-        /// Network name to diff
+        /// Network name or chain ID
         #[arg(long)]
         network: String,
         /// Output as JSON

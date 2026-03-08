@@ -32,7 +32,7 @@ pub enum MigrateSubcommand {
     /// an equivalent v2 configuration. Use `--dry-run` to preview the result
     /// without modifying any files.
     Config {
-        /// Print v2 TOML to stdout without modifying any files
+        /// Simulate execution without making changes
         #[arg(long)]
         dry_run: bool,
         /// Output as JSON
@@ -50,7 +50,7 @@ pub enum MigrateSubcommand {
     /// Runs all pending schema migrations on the deployment registry. Use
     /// `--dry-run` to list pending migrations without applying them.
     Registry {
-        /// List pending migrations without applying them
+        /// Simulate execution without making changes
         #[arg(long)]
         dry_run: bool,
     },

@@ -30,7 +30,7 @@ pub enum DevSubcommand {
 pub enum AnvilSubcommand {
     /// Start a local Anvil node in the foreground
     Start {
-        /// Network name — uses the fork URL from fork state if the network is in fork mode
+        /// Network name or chain ID
         #[arg(long)]
         network: Option<String>,
         /// Port to listen on (default: 8545)
@@ -45,7 +45,7 @@ pub enum AnvilSubcommand {
     },
     /// Clean up stale Anvil entries in fork state
     Stop {
-        /// Network name to stop (stops all stale entries if not specified)
+        /// Network name or chain ID
         #[arg(long)]
         network: Option<String>,
         /// Instance name to stop
@@ -54,7 +54,7 @@ pub enum AnvilSubcommand {
     },
     /// Restart an Anvil node — stops the existing instance and starts a fresh one
     Restart {
-        /// Network name to restart
+        /// Network name or chain ID
         #[arg(long)]
         network: Option<String>,
         /// Instance name to restart
@@ -72,7 +72,7 @@ pub enum AnvilSubcommand {
         /// Output as JSON
         #[arg(long)]
         json: bool,
-        /// Filter output to a single network
+        /// Network name or chain ID
         #[arg(long)]
         network: Option<String>,
         /// Filter output to a single named instance
@@ -81,7 +81,7 @@ pub enum AnvilSubcommand {
     },
     /// Display Anvil log file contents
     Logs {
-        /// Network name for disambiguating duplicate instance names
+        /// Network name or chain ID
         #[arg(long)]
         network: Option<String>,
         /// Instance name (defaults to "default")

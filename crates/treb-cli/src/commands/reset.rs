@@ -25,11 +25,11 @@ use crate::{output, ui::color};
 optionally scoped to a specific network (by chain ID) or namespace. A timestamped \
 backup is created under `.treb/backups/` before removing any data.")]
 pub struct ResetArgs {
-    /// Filter reset to a specific network (by chain ID)
+    /// Network name or chain ID
     #[arg(long)]
     pub network: Option<String>,
 
-    /// Filter reset to a specific namespace
+    /// Deployment namespace
     #[arg(long)]
     pub namespace: Option<String>,
 
