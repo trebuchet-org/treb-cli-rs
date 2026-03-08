@@ -164,6 +164,40 @@ echo "treb ${VERSION} installed to ${INSTALL_DIR}/${BINARY}"
 # ---------------------------------------------------------------------------
 
 if [ -d "completions" ]; then
+    zsh_completion_dir() {
+        _fallback_dir="$HOME/.zsh/completions"
+        _zsh_fpath=""
+
+        if [ -n "${FPATH:-}" ]; then
+            _zsh_fpath="$(printf '%s' "$FPATH" | tr ':' '\n')"
+        elif command -v zsh >/dev/null 2>&1; then
+            if _zsh_fpath="$(zsh -ic 'print -rl -- $fpath' </dev/null 2>/dev/null)"; then
+                :
+            elif _zsh_fpath="$(zsh -fc 'print -rl -- $fpath' 2>/dev/null)"; then
+                :
+            else
+                _zsh_fpath=""
+            fi
+        fi
+
+        if [ -n "$_zsh_fpath" ]; then
+            _old_ifs=$IFS
+            IFS='
+'
+            for _dir in $_zsh_fpath; do
+                if [ -n "$_dir" ] && [ -d "$_dir" ] && [ -w "$_dir" ]; then
+                    IFS=$_old_ifs
+                    printf '%s\n' "$_dir"
+                    return 0
+                fi
+            done
+            IFS=$_old_ifs
+        fi
+
+        printf '%s\n' "$_fallback_dir"
+        return 1
+    }
+
     install_completions() {
         _shell="$(basename "${SHELL:-}")"
 
@@ -177,11 +211,24 @@ if [ -d "completions" ]; then
                 fi
                 ;;
             zsh)
-                _comp_dir="${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions"
                 if [ -f "completions/_treb" ]; then
+                    if _comp_dir="$(zsh_completion_dir)"; then
+                        _needs_setup=0
+                    else
+                        _needs_setup=1
+                    fi
+
                     mkdir -p "$_comp_dir"
                     cp "completions/_treb" "$_comp_dir/_treb"
                     echo "Zsh completions installed to $_comp_dir/_treb"
+
+                    if [ "$_needs_setup" -eq 1 ]; then
+                        echo "No writable zsh completion directory was found in fpath."
+                        echo "If ~/.zsh/completions is not already in fpath, add this to ~/.zshrc:"
+                        echo "  fpath=(~/.zsh/completions \$fpath)"
+                        echo "Then refresh completions with:"
+                        echo "  autoload -Uz compinit && compinit"
+                    fi
                 fi
                 ;;
             fish)
