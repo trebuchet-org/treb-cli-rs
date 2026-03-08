@@ -11,8 +11,7 @@ use std::collections::HashMap;
 use owo_colors::{OwoColorize, Style};
 use treb_core::types::VerifierStatus;
 
-use super::color;
-use super::emoji;
+use super::{color, emoji};
 
 /// The three verifiers in display order.
 const VERIFIER_ORDER: [(&str, &str); 3] =
@@ -242,10 +241,7 @@ mod tests {
         verifiers.insert("etherscan".to_string(), make_verifier("FAILED"));
 
         let badge = verification_badge(&verifiers);
-        assert!(
-            badge.starts_with("e[-]"),
-            "Failed status should map to -, got: {badge}"
-        );
+        assert!(badge.starts_with("e[-]"), "Failed status should map to -, got: {badge}");
     }
 
     // -----------------------------------------------------------------------
