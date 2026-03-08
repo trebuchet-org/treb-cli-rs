@@ -287,6 +287,9 @@ pub fn deployment_count(project_root: &Path) -> usize {
 
 /// Assert that lookup.json cross-references are consistent with deployments.json.
 ///
+/// Deployment IDs are the object keys in `deployments.json`; `lookup.json`
+/// only stores secondary indexes for name, address, and tag lookups.
+///
 /// Validates:
 /// - Every deployment ID appears in `byName[contractName.toLowerCase()]`
 /// - Every deployment with a non-empty address appears in `byAddress[address.toLowerCase()]`
@@ -322,12 +325,9 @@ pub fn assert_registry_consistent(project_root: &Path) {
         let address = dep["address"].as_str().unwrap_or("");
         if !address.is_empty() {
             let addr_key = address.to_lowercase();
-            let addr_id = by_address
-                .get(&addr_key)
-                .and_then(|v| v.as_str())
-                .unwrap_or_else(|| {
-                    panic!("byAddress missing key '{addr_key}' for deployment {dep_id}")
-                });
+            let addr_id = by_address.get(&addr_key).and_then(|v| v.as_str()).unwrap_or_else(|| {
+                panic!("byAddress missing key '{addr_key}' for deployment {dep_id}")
+            });
             assert_eq!(
                 addr_id, dep_id,
                 "byAddress['{addr_key}'] = '{addr_id}', expected '{dep_id}'"
@@ -341,9 +341,7 @@ pub fn assert_registry_consistent(project_root: &Path) {
                 let tag_ids = by_tag
                     .get(tag)
                     .and_then(|v| v.as_array())
-                    .unwrap_or_else(|| {
-                        panic!("byTag missing key '{tag}' for deployment {dep_id}")
-                    });
+                    .unwrap_or_else(|| panic!("byTag missing key '{tag}' for deployment {dep_id}"));
                 assert!(
                     tag_ids.iter().any(|v| v.as_str() == Some(dep_id)),
                     "byTag['{tag}'] does not contain deployment ID '{dep_id}'"
@@ -356,15 +354,15 @@ pub fn assert_registry_consistent(project_root: &Path) {
     for (name_key, ids_val) in by_name {
         for id_val in ids_val.as_array().unwrap_or(&vec![]) {
             let id = id_val.as_str().expect("byName entry must be string");
-            assert!(deps.contains_key(id), "byName['{name_key}'] references non-existent ID '{id}'");
+            assert!(
+                deps.contains_key(id),
+                "byName['{name_key}'] references non-existent ID '{id}'"
+            );
         }
     }
     for (addr_key, id_val) in by_address {
         let id = id_val.as_str().expect("byAddress entry must be string");
-        assert!(
-            deps.contains_key(id),
-            "byAddress['{addr_key}'] references non-existent ID '{id}'"
-        );
+        assert!(deps.contains_key(id), "byAddress['{addr_key}'] references non-existent ID '{id}'");
     }
     for (tag, ids_val) in by_tag {
         for id_val in ids_val.as_array().unwrap_or(&vec![]) {

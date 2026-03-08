@@ -42,7 +42,11 @@ impl Default for RegistryMeta {
     }
 }
 
-/// In-memory index for fast deployment lookups by name, address, or tag.
+/// In-memory secondary indexes for fast deployment lookups by name, address,
+/// or tag.
+///
+/// Deployment IDs remain the canonical keys in `deployments.json`; this index
+/// intentionally does not duplicate them under a separate `byId` map.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LookupIndex {

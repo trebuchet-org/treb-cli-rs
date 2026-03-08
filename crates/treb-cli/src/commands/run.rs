@@ -9,6 +9,10 @@ use std::{
 };
 
 use anyhow::{Context, bail};
+use foundry_common::{
+    Shell as FoundryShell,
+    shell::{ColorChoice, OutputFormat, OutputMode, Verbosity},
+};
 use serde::Serialize;
 use treb_config::{ResolveOpts, resolve_config};
 use treb_core::types::DeploymentType;
@@ -95,6 +99,43 @@ fn should_reject_interactive_json_broadcast(
     prompts_enabled: bool,
 ) -> bool {
     json && should_prompt_for_broadcast_confirmation(broadcast, dry_run, prompts_enabled)
+}
+
+/// Restores Foundry's global shell after temporarily silencing it.
+///
+/// `forge-script` writes compilation and broadcast chatter through this shell.
+/// `treb run --json` needs stdout reserved for the final machine-readable
+/// payload, so suppress Foundry's shell output while the pipeline runs.
+struct FoundryShellGuard {
+    output_format: OutputFormat,
+    output_mode: OutputMode,
+    color_choice: ColorChoice,
+    verbosity: Verbosity,
+}
+
+impl FoundryShellGuard {
+    fn suppress() -> Self {
+        let mut shell = FoundryShell::get();
+        let previous = Self {
+            output_format: shell.output_format(),
+            output_mode: shell.output_mode(),
+            color_choice: shell.color_choice(),
+            verbosity: shell.verbosity(),
+        };
+        *shell = FoundryShell::empty();
+        previous
+    }
+}
+
+impl Drop for FoundryShellGuard {
+    fn drop(&mut self) {
+        *FoundryShell::get() = FoundryShell::new_with(
+            self.output_format,
+            self.output_mode,
+            self.color_choice,
+            self.verbosity,
+        );
+    }
 }
 
 /// Ensure the project is initialized (foundry.toml + .treb/ exist).
@@ -373,7 +414,10 @@ pub async fn run(
         output::print_stage("\u{1f9ea}", "Simulating...");
     }
 
-    let result = pipeline.execute(&mut registry).await.context("pipeline execution failed")?;
+    let result = {
+        let _foundry_shell = json.then(FoundryShellGuard::suppress);
+        pipeline.execute(&mut registry).await.context("pipeline execution failed")?
+    };
 
     if !json {
         output::print_stage("\u{2705}", "Execution complete.");

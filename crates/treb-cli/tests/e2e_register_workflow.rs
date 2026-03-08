@@ -99,14 +99,7 @@ async fn e2e_register_from_tx_hash() {
     let hash = tx_hash.clone();
     tokio::task::spawn_blocking(move || {
         treb()
-            .args([
-                "register",
-                "--tx-hash",
-                &hash,
-                "--rpc-url",
-                &rpc,
-                "--skip-verify",
-            ])
+            .args(["register", "--tx-hash", &hash, "--rpc-url", &rpc, "--skip-verify"])
             .current_dir(&tmp_path)
             .assert()
             .success();
@@ -116,10 +109,8 @@ async fn e2e_register_from_tx_hash() {
 
     // Verify deployment appears in list.
     let deployments = assert_deployment_count(tmp.path().to_path_buf(), 1).await;
-    let dep_address = deployments[0]["address"]
-        .as_str()
-        .expect("deployment must have address")
-        .to_string();
+    let dep_address =
+        deployments[0]["address"].as_str().expect("deployment must have address").to_string();
 
     // Address must match (case-insensitive for checksummed vs lowercase).
     assert_eq!(
@@ -150,14 +141,7 @@ async fn e2e_register_tag_show_roundtrip() {
     let hash = tx_hash.clone();
     tokio::task::spawn_blocking(move || {
         treb()
-            .args([
-                "register",
-                "--tx-hash",
-                &hash,
-                "--rpc-url",
-                &rpc,
-                "--skip-verify",
-            ])
+            .args(["register", "--tx-hash", &hash, "--rpc-url", &rpc, "--skip-verify"])
             .current_dir(&tmp_path)
             .assert()
             .success();
@@ -179,11 +163,7 @@ async fn e2e_register_tag_show_roundtrip() {
         let id = dep_id.clone();
         let t = tag.to_string();
         tokio::task::spawn_blocking(move || {
-            treb()
-                .args(["tag", &id, "--add", &t])
-                .current_dir(&tmp_path)
-                .assert()
-                .success();
+            treb().args(["tag", &id, "--add", &t]).current_dir(&tmp_path).assert().success();
         })
         .await
         .unwrap();

@@ -1,5 +1,4 @@
 === cmd 0: [run script/Deploy.s.sol --dry-run --non-interactive --verbose --json] ===
-No files changed, compilation skipped
 {
   "consoleLogs": [],
   "deployments": [

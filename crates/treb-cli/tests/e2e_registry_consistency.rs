@@ -14,9 +14,9 @@ use e2e::{
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-/// After a deployment, lookup.json cross-references (byName, byAddress) must
-/// match deployments.json, and transactions.json must link back to the
-/// deployment.
+/// After a deployment, lookup.json secondary indexes (byName, byAddress) must
+/// match deployments.json, whose object keys are the canonical deployment IDs,
+/// and transactions.json must link back to the deployment.
 #[tokio::test(flavor = "multi_thread")]
 async fn e2e_registry_consistency_after_deployment() {
     let Some(anvil) = spawn_anvil_or_skip().await else {
@@ -97,11 +97,7 @@ async fn e2e_registry_consistency_after_tag() {
     let tmp_path = tmp.path().to_path_buf();
     let id = dep_id.clone();
     tokio::task::spawn_blocking(move || {
-        treb()
-            .args(["tag", &id, "--add", "stable"])
-            .current_dir(&tmp_path)
-            .assert()
-            .success();
+        treb().args(["tag", &id, "--add", "stable"]).current_dir(&tmp_path).assert().success();
     })
     .await
     .unwrap();
@@ -109,11 +105,7 @@ async fn e2e_registry_consistency_after_tag() {
     let tmp_path = tmp.path().to_path_buf();
     let id = dep_id.clone();
     tokio::task::spawn_blocking(move || {
-        treb()
-            .args(["tag", &id, "--add", "production"])
-            .current_dir(&tmp_path)
-            .assert()
-            .success();
+        treb().args(["tag", &id, "--add", "production"]).current_dir(&tmp_path).assert().success();
     })
     .await
     .unwrap();
@@ -177,8 +169,7 @@ async fn e2e_registry_consistency_after_reset() {
     assert_deployment_count(tmp.path().to_path_buf(), 1).await;
 
     // Reset everything
-    let result =
-        run_json(tmp.path().to_path_buf(), vec!["reset".into(), "--yes".into()]).await;
+    let result = run_json(tmp.path().to_path_buf(), vec!["reset".into(), "--yes".into()]).await;
     assert_eq!(result["removedDeployments"].as_u64(), Some(1));
 
     // Verify all registry files are empty/reset
@@ -246,11 +237,7 @@ async fn e2e_registry_consistency_after_fork_cycle() {
     let tmp_path = tmp.path().to_path_buf();
     let id = dep_id.clone();
     tokio::task::spawn_blocking(move || {
-        treb()
-            .args(["tag", &id, "--add", "fork-test"])
-            .current_dir(&tmp_path)
-            .assert()
-            .success();
+        treb().args(["tag", &id, "--add", "fork-test"]).current_dir(&tmp_path).assert().success();
     })
     .await
     .unwrap();
@@ -294,8 +281,7 @@ async fn e2e_registry_consistency_after_fork_cycle() {
     assert!(!snapshot_dir.exists(), "snapshot directory must be removed after exit");
 
     // Verify the fork-time tag is gone (state was restored)
-    let show_json =
-        run_json(tmp.path().to_path_buf(), vec!["show".into(), dep_id.clone()]).await;
+    let show_json = run_json(tmp.path().to_path_buf(), vec!["show".into(), dep_id.clone()]).await;
     let tags = &show_json["tags"];
     assert!(
         tags.is_null() || tags.as_array().map_or(true, |a| a.is_empty()),

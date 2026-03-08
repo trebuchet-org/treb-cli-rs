@@ -13,6 +13,7 @@ treb-registry = { workspace = true }
 treb-forge = { workspace = true }
 treb-safe = { workspace = true }
 treb-verify = { workspace = true }
+foundry-common = { workspace = true }
 serde = { workspace = true }
 chrono = { workspace = true }
 serde_json = { workspace = true }

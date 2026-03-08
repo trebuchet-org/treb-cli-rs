@@ -9,17 +9,6 @@ use e2e::{
     assert_deployment_count, run_deployment, run_json, setup_project, spawn_anvil_or_skip, treb,
 };
 
-/// Extract JSON from stdout that may have non-JSON prefix text (e.g., forge compilation output).
-fn extract_json(stdout: &[u8]) -> serde_json::Value {
-    let text = String::from_utf8_lossy(stdout);
-    let json_start = text.find('{').unwrap_or_else(|| {
-        panic!("no JSON object found in stdout:\n{text}");
-    });
-    serde_json::from_str(&text[json_start..]).unwrap_or_else(|e| {
-        panic!("invalid JSON in stdout: {e}\nstdout:\n{text}");
-    })
-}
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 /// Full deployment lifecycle: init → run → list → show → tag add → list-with-tag →
@@ -128,33 +117,19 @@ async fn e2e_run_json_output_fields() {
 
     let tmp = setup_project().await;
 
-    // Run with --json to get structured output.
-    let tmp_path = tmp.path().to_path_buf();
-    let output = tokio::task::spawn_blocking(move || {
-        treb()
-            .args([
-                "run",
-                "script/TrebDeploySimple.s.sol",
-                "--rpc-url",
-                &rpc_url,
-                "--broadcast",
-                "--non-interactive",
-                "--json",
-            ])
-            .current_dir(&tmp_path)
-            .output()
-            .unwrap()
-    })
-    .await
-    .unwrap();
-
-    assert!(
-        output.status.success(),
-        "treb run --json should exit 0:\nstderr: {}",
-        String::from_utf8_lossy(&output.stderr),
-    );
-
-    let json = extract_json(&output.stdout);
+    // The shared JSON helper should work for `run` without stripping preamble text.
+    let json = run_json(
+        tmp.path().to_path_buf(),
+        vec![
+            "run".into(),
+            "script/TrebDeploySimple.s.sol".into(),
+            "--rpc-url".into(),
+            rpc_url,
+            "--broadcast".into(),
+            "--non-interactive".into(),
+        ],
+    )
+    .await;
 
     // Validate all expected RunOutputJson fields exist with correct types.
     assert_eq!(json["success"].as_bool(), Some(true), "success must be true");
