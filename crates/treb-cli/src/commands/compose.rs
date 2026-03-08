@@ -237,6 +237,7 @@ pub fn build_execution_order(compose: &ComposeFile) -> anyhow::Result<Vec<String
 
 /// An entry in the dry-run execution plan.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PlanEntry {
     pub step: usize,
     pub component: String,
