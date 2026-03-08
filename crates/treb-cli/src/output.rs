@@ -7,7 +7,7 @@ use comfy_table::{Attribute, Cell, ContentArrangement, Table};
 use owo_colors::OwoColorize;
 use serde::Serialize;
 
-use crate::ui::color;
+use crate::ui::{color, emoji};
 
 /// Print a value as pretty-printed JSON to stdout.
 ///
@@ -142,6 +142,98 @@ pub fn print_json_error(message: &str) {
     eprintln!("{}", serde_json::to_string(&obj).unwrap());
 }
 
+// ---------------------------------------------------------------------------
+// Go-matching format helpers (render/helpers.go)
+// ---------------------------------------------------------------------------
+
+/// Extract the message portion after the last `: ` separator, or return
+/// the full input if no separator is found.
+fn extract_message(input: &str) -> &str {
+    input.rsplit_once(": ").map_or(input, |(_, msg)| msg)
+}
+
+/// Capitalize the first character of a string.
+fn capitalize_first(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(c) => {
+            let mut result = String::with_capacity(s.len());
+            for upper in c.to_uppercase() {
+                result.push(upper);
+            }
+            result.push_str(chars.as_str());
+            result
+        }
+    }
+}
+
+/// Extract a tag name from a message like `tag 'v1' already exists`.
+fn extract_tag_name(msg: &str) -> Option<&str> {
+    let start = msg.find('\'')?;
+    let end = msg[start + 1..].find('\'')?;
+    Some(&msg[start + 1..start + 1 + end])
+}
+
+/// Format a warning message matching Go `render/helpers.go` `FormatWarning`.
+///
+/// Splits on `: ` and takes the last segment. Special-cases tag "already exists"
+/// and "does not exist" messages. Falls back to `⚠️  {msg}` in yellow.
+#[allow(dead_code)]
+pub fn format_warning(message: &str) -> String {
+    let msg = extract_message(message);
+
+    let formatted = if msg.contains("already exists") {
+        if let Some(tag) = extract_tag_name(msg) {
+            format!("Deployment already has tag '{tag}'")
+        } else {
+            msg.to_string()
+        }
+    } else if msg.contains("does not exist") {
+        if let Some(tag) = extract_tag_name(msg) {
+            format!("Deployment doesn't have tag '{tag}'")
+        } else {
+            msg.to_string()
+        }
+    } else {
+        msg.to_string()
+    };
+
+    if color::is_color_enabled() {
+        format!("{}  {}", emoji::WARNING, formatted.style(color::WARNING))
+    } else {
+        format!("{}  {}", emoji::WARNING, formatted)
+    }
+}
+
+/// Format an error message matching Go `render/helpers.go` `FormatError`.
+///
+/// Splits on `: ` and takes the last segment, capitalizes the first letter,
+/// and returns `❌ {msg}` in red.
+#[allow(dead_code)]
+pub fn format_error(message: &str) -> String {
+    let msg = extract_message(message);
+    let capitalized = capitalize_first(msg);
+
+    if color::is_color_enabled() {
+        format!("{} {}", emoji::CROSS, capitalized.style(color::RED))
+    } else {
+        format!("{} {}", emoji::CROSS, capitalized)
+    }
+}
+
+/// Format a success message matching Go `render/helpers.go` `FormatSuccess`.
+///
+/// Returns `✅ {msg}` in green.
+#[allow(dead_code)]
+pub fn format_success(message: &str) -> String {
+    if color::is_color_enabled() {
+        format!("{} {}", emoji::CHECK, message.style(color::GREEN))
+    } else {
+        format!("{} {}", emoji::CHECK, message)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -235,5 +327,167 @@ mod tests {
 
         // Restore
         owo_colors::set_override(true);
+    }
+
+    // -- format_warning tests --
+
+    #[test]
+    fn format_warning_tag_already_exists() {
+        let _lock = env_lock();
+        owo_colors::set_override(false);
+        color::color_enabled(true);
+
+        let result = format_warning("tag error: tag 'v1' already exists");
+        assert!(
+            result.contains("Deployment already has tag 'v1'"),
+            "expected tag-already-exists message, got: {result}"
+        );
+        assert!(result.starts_with(emoji::WARNING), "should start with warning emoji");
+
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn format_warning_tag_does_not_exist() {
+        let _lock = env_lock();
+        owo_colors::set_override(false);
+        color::color_enabled(true);
+
+        let result = format_warning("tag error: tag 'v1' does not exist");
+        assert!(
+            result.contains("Deployment doesn't have tag 'v1'"),
+            "expected tag-does-not-exist message, got: {result}"
+        );
+
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn format_warning_fallback() {
+        let _lock = env_lock();
+        owo_colors::set_override(false);
+        color::color_enabled(true);
+
+        let result = format_warning("some warning");
+        assert!(
+            result.contains("some warning"),
+            "fallback should preserve original message, got: {result}"
+        );
+        assert!(result.starts_with(emoji::WARNING));
+
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn format_warning_styled() {
+        let _lock = env_lock();
+        let _no_color = EnvVarGuard::unset("NO_COLOR");
+        let _term = EnvVarGuard::set("TERM", "xterm-256color");
+        owo_colors::set_override(true);
+        color::color_enabled(false);
+
+        let result = format_warning("some warning");
+        assert!(result.contains("\x1b["), "styled output should contain ANSI codes");
+        assert!(result.contains("some warning"));
+    }
+
+    // -- format_error tests --
+
+    #[test]
+    fn format_error_capitalizes_message() {
+        let _lock = env_lock();
+        owo_colors::set_override(false);
+        color::color_enabled(true);
+
+        let result = format_error("cli error: something failed");
+        assert!(
+            result.contains("Something failed"),
+            "should capitalize first letter, got: {result}"
+        );
+        assert!(result.starts_with(emoji::CROSS), "should start with cross emoji");
+
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn format_error_no_separator() {
+        let _lock = env_lock();
+        owo_colors::set_override(false);
+        color::color_enabled(true);
+
+        let result = format_error("something failed");
+        assert!(
+            result.contains("Something failed"),
+            "should capitalize even without separator, got: {result}"
+        );
+
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn format_error_styled() {
+        let _lock = env_lock();
+        let _no_color = EnvVarGuard::unset("NO_COLOR");
+        let _term = EnvVarGuard::set("TERM", "xterm-256color");
+        owo_colors::set_override(true);
+        color::color_enabled(false);
+
+        let result = format_error("cli error: something failed");
+        assert!(result.contains("\x1b["), "styled output should contain ANSI codes");
+        assert!(result.contains("Something failed"));
+    }
+
+    // -- format_success tests --
+
+    #[test]
+    fn format_success_plain() {
+        let _lock = env_lock();
+        owo_colors::set_override(false);
+        color::color_enabled(true);
+
+        let result = format_success("done");
+        assert_eq!(result, format!("{} done", emoji::CHECK));
+
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn format_success_styled() {
+        let _lock = env_lock();
+        let _no_color = EnvVarGuard::unset("NO_COLOR");
+        let _term = EnvVarGuard::set("TERM", "xterm-256color");
+        owo_colors::set_override(true);
+        color::color_enabled(false);
+
+        let result = format_success("done");
+        assert!(result.contains("\x1b["), "styled output should contain ANSI codes");
+        assert!(result.contains("done"));
+    }
+
+    // -- helper function tests --
+
+    #[test]
+    fn extract_message_with_separator() {
+        assert_eq!(extract_message("tag error: tag 'v1' already exists"), "tag 'v1' already exists");
+    }
+
+    #[test]
+    fn extract_message_without_separator() {
+        assert_eq!(extract_message("some warning"), "some warning");
+    }
+
+    #[test]
+    fn capitalize_first_basic() {
+        assert_eq!(capitalize_first("something failed"), "Something failed");
+    }
+
+    #[test]
+    fn capitalize_first_empty() {
+        assert_eq!(capitalize_first(""), "");
+    }
+
+    #[test]
+    fn capitalize_first_already_upper() {
+        assert_eq!(capitalize_first("Already upper"), "Already upper");
     }
 }
