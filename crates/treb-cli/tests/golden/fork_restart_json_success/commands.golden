@@ -1,0 +1,8 @@
+=== cmd 0: [fork restart --network mainnet --json] ===
+{
+  "chainId": 1,
+  "network": "mainnet",
+  "port": <LABEL>,
+  "rpcUrl": "<LABEL>",
+  "snapshotId": "0xrestart-new"
+}

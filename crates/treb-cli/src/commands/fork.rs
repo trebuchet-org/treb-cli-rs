@@ -153,6 +153,16 @@ struct ForkRevertJson {
     network: String,
     snapshot_id: Option<String>,
     new_snapshot_id: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    instances: Vec<ForkRevertInstanceJson>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ForkRevertInstanceJson {
+    instance_name: String,
+    snapshot_id: Option<String>,
+    new_snapshot_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -163,6 +173,47 @@ struct ForkRestartJson {
     port: u16,
     rpc_url: String,
     snapshot_id: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    instances: Vec<ForkRestartInstanceJson>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ForkRestartInstanceJson {
+    instance_name: String,
+    chain_id: u64,
+    port: u16,
+    rpc_url: String,
+    snapshot_id: Option<String>,
+}
+
+fn build_fork_revert_json(
+    network: String,
+    instance_results: Vec<ForkRevertInstanceJson>,
+) -> ForkRevertJson {
+    let primary_result = instance_results.first();
+    ForkRevertJson {
+        network,
+        snapshot_id: primary_result.and_then(|result| result.snapshot_id.clone()),
+        new_snapshot_id: primary_result.and_then(|result| result.new_snapshot_id.clone()),
+        instances: if instance_results.len() > 1 { instance_results } else { Vec::new() },
+    }
+}
+
+fn build_fork_restart_json(
+    network: String,
+    fallback_chain_id: u64,
+    instance_results: Vec<ForkRestartInstanceJson>,
+) -> ForkRestartJson {
+    let primary_result = instance_results.first();
+    ForkRestartJson {
+        network,
+        chain_id: primary_result.map_or(fallback_chain_id, |result| result.chain_id),
+        port: primary_result.map_or(0, |result| result.port),
+        rpc_url: primary_result.map_or_else(String::new, |result| result.rpc_url.clone()),
+        snapshot_id: primary_result.and_then(|result| result.snapshot_id.clone()),
+        instances: if instance_results.len() > 1 { instance_results } else { Vec::new() },
+    }
 }
 
 // ── Dispatch ──────────────────────────────────────────────────────────────────
@@ -329,11 +380,7 @@ pub async fn run_exit(network: String, json: bool) -> anyhow::Result<()> {
         .context("failed to record exit history")?;
 
     if json {
-        output::print_json(&ForkExitJson {
-            network,
-            restored_entries,
-            cleaned_up: true,
-        })?;
+        output::print_json(&ForkExitJson { network, restored_entries, cleaned_up: true })?;
     } else {
         output::print_stage("\u{2705}", &format!("Fork mode exited for '{network}'."));
 
@@ -380,10 +427,12 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
             .ok_or_else(|| anyhow::anyhow!("network '{}' is not in fork mode", net))?;
         let runtime_entries: Vec<ForkEntry> =
             tracked_anvil_entries_for_network(&store, net).into_iter().cloned().collect();
-        let mut latest_snapshot_id = None;
-        let mut old_snapshot_id = None;
+        let mut instance_results: Vec<ForkRevertInstanceJson> = Vec::new();
 
         for entry in runtime_entries {
+            let instance_name = entry.resolved_instance_name().to_string();
+            let old_snapshot_id =
+                entry.snapshots.last().map(|snapshot| snapshot.snapshot_id.clone());
             if !is_port_reachable(entry.port).await {
                 bail!(
                     "Anvil node for network '{}' is not reachable at port {}; cannot revert",
@@ -393,13 +442,12 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
             }
 
             if let Some(last_snapshot) = entry.snapshots.last() {
-                old_snapshot_id = Some(last_snapshot.snapshot_id.clone());
                 if !json {
                     output::print_stage(
                         "\u{23ee}\u{fe0f}",
                         &format!(
                             "Reverting EVM state for '{net}' (instance '{}')...",
-                            entry.resolved_instance_name()
+                            instance_name
                         ),
                     );
                 }
@@ -408,15 +456,14 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
                     .with_context(|| {
                         format!(
                             "failed to revert EVM state for network '{}' (instance '{}')",
-                            net,
-                            entry.resolved_instance_name()
+                            net, instance_name
                         )
                     })?;
                 if !reverted {
                     bail!(
                         "EVM revert failed for network '{}' (instance '{}', snapshot ID: {})",
                         net,
-                        entry.resolved_instance_name(),
+                        instance_name,
                         last_snapshot.snapshot_id
                     );
                 }
@@ -425,7 +472,7 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
                     "\u{26a0}\u{fe0f}",
                     &format!(
                         "No EVM snapshots stored for network '{net}' (instance '{}'); skipping EVM revert (registry will still be restored).",
-                        entry.resolved_instance_name()
+                        instance_name
                     ),
                 );
             }
@@ -435,7 +482,7 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
                     "\u{1f4f8}",
                     &format!(
                         "Taking new EVM snapshot for '{net}' (instance '{}')...",
-                        entry.resolved_instance_name()
+                        instance_name
                     ),
                 );
             }
@@ -443,8 +490,7 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
                 evm_snapshot_http(&client, &entry.rpc_url).await.with_context(|| {
                     format!(
                         "failed to take new EVM snapshot for network '{}' (instance '{}')",
-                        net,
-                        entry.resolved_instance_name()
+                        net, instance_name
                     )
                 })?;
 
@@ -457,7 +503,11 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
                 timestamp: Utc::now(),
             });
             store.update_active_fork(updated).context("failed to update fork entry")?;
-            latest_snapshot_id = Some(new_snapshot_id);
+            instance_results.push(ForkRevertInstanceJson {
+                instance_name,
+                snapshot_id: old_snapshot_id,
+                new_snapshot_id: Some(new_snapshot_id),
+            });
         }
 
         if !json {
@@ -473,18 +523,30 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
                 action: "revert".into(),
                 network: net.clone(),
                 timestamp: Utc::now(),
-                details: latest_snapshot_id
-                    .clone()
-                    .map(|snapshot_id| format!("new EVM snapshot: {snapshot_id}")),
+                details: match instance_results.as_slice() {
+                    [] => None,
+                    [result] => result
+                        .new_snapshot_id
+                        .clone()
+                        .map(|snapshot_id| format!("new EVM snapshot: {snapshot_id}")),
+                    results => Some(format!(
+                        "new EVM snapshots: {}",
+                        results
+                            .iter()
+                            .filter_map(|result| {
+                                result.new_snapshot_id.as_ref().map(|snapshot_id| {
+                                    format!("{}={snapshot_id}", result.instance_name)
+                                })
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )),
+                },
             })
             .context("failed to record revert history")?;
 
         if json {
-            json_results.push(ForkRevertJson {
-                network: net.clone(),
-                snapshot_id: old_snapshot_id,
-                new_snapshot_id: latest_snapshot_id,
-            });
+            json_results.push(build_fork_revert_json(net.clone(), instance_results));
         } else {
             output::print_stage("\u{2705}", &format!("Fork reverted for '{net}'."));
             println!("Reverted fork for network '{net}' to initial state.");
@@ -492,7 +554,15 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
     }
 
     if json {
-        output::print_json(&json_results)?;
+        if all {
+            output::print_json(&json_results)?;
+        } else {
+            let result = json_results
+                .into_iter()
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("missing fork revert result"))?;
+            output::print_json(&result)?;
+        }
     }
 
     Ok(())
@@ -533,12 +603,10 @@ pub async fn run_restart(
 
     // Determine the block to reset to.
     let blk = fork_block_number.or(session.fork_block_number);
-    let mut latest_snapshot_id = None;
-    let mut last_port = 0u16;
-    let mut last_rpc_url = String::new();
-    let mut last_chain_id = session.chain_id;
+    let mut instance_results: Vec<ForkRestartInstanceJson> = Vec::new();
 
     for entry in &runtime_entries {
+        let instance_name = entry.resolved_instance_name().to_string();
         if !is_port_reachable(entry.port).await {
             bail!(
                 "Anvil node for network '{}' is not reachable at port {}; cannot restart",
@@ -552,7 +620,7 @@ pub async fn run_restart(
                 "\u{1f504}",
                 &format!(
                     "Resetting Anvil for '{network}' (instance '{}', block: {})...",
-                    entry.resolved_instance_name(),
+                    instance_name,
                     blk.map_or("latest".into(), |b: u64| b.to_string())
                 ),
             );
@@ -561,8 +629,7 @@ pub async fn run_restart(
             || {
                 format!(
                     "failed to reset Anvil for network '{}' (instance '{}')",
-                    network,
-                    entry.resolved_instance_name()
+                    network, instance_name
                 )
             },
         )?;
@@ -572,32 +639,27 @@ pub async fn run_restart(
                 "\u{1f3ed}",
                 &format!(
                     "Deploying CreateX factory for '{network}' (instance '{}')...",
-                    entry.resolved_instance_name()
+                    instance_name
                 ),
             );
         }
         deploy_createx_http(&client, &entry.rpc_url).await.with_context(|| {
             format!(
                 "failed to re-deploy CreateX for network '{}' (instance '{}')",
-                network,
-                entry.resolved_instance_name()
+                network, instance_name
             )
         })?;
 
         if !json {
             output::print_stage(
                 "\u{1f4f8}",
-                &format!(
-                    "Taking EVM snapshot for '{network}' (instance '{}')...",
-                    entry.resolved_instance_name()
-                ),
+                &format!("Taking EVM snapshot for '{network}' (instance '{}')...", instance_name),
             );
         }
         let snapshot_id = evm_snapshot_http(&client, &entry.rpc_url).await.with_context(|| {
             format!(
                 "failed to take EVM snapshot for network '{}' (instance '{}')",
-                network,
-                entry.resolved_instance_name()
+                network, instance_name
             )
         })?;
 
@@ -613,10 +675,13 @@ pub async fn run_restart(
             timestamp: Utc::now(),
         });
         store.update_active_fork(updated).context("failed to update fork entry")?;
-        latest_snapshot_id = Some(snapshot_id);
-        last_port = entry.port;
-        last_rpc_url = entry.rpc_url.clone();
-        last_chain_id = entry.chain_id;
+        instance_results.push(ForkRestartInstanceJson {
+            instance_name,
+            chain_id: entry.chain_id,
+            port: entry.port,
+            rpc_url: entry.rpc_url.clone(),
+            snapshot_id: Some(snapshot_id),
+        });
     }
 
     // Restore registry from snapshot.
@@ -642,20 +707,30 @@ pub async fn run_restart(
             action: "restart".into(),
             network: network.clone(),
             timestamp: Utc::now(),
-            details: latest_snapshot_id
-                .clone()
-                .map(|snapshot_id| format!("Anvil reset; snapshot: {snapshot_id}")),
+            details: match instance_results.as_slice() {
+                [] => None,
+                [result] => result
+                    .snapshot_id
+                    .clone()
+                    .map(|snapshot_id| format!("Anvil reset; snapshot: {snapshot_id}")),
+                results => Some(format!(
+                    "Anvil reset; snapshots: {}",
+                    results
+                        .iter()
+                        .filter_map(|result| {
+                            result.snapshot_id.as_ref().map(|snapshot_id| {
+                                format!("{}={snapshot_id}", result.instance_name)
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )),
+            },
         })
         .context("failed to record restart history")?;
 
     if json {
-        output::print_json(&ForkRestartJson {
-            network,
-            chain_id: last_chain_id,
-            port: last_port,
-            rpc_url: last_rpc_url,
-            snapshot_id: latest_snapshot_id,
-        })?;
+        output::print_json(&build_fork_restart_json(network, session.chain_id, instance_results))?;
     } else {
         output::print_stage("\u{2705}", &format!("Fork restarted for '{network}'."));
         println!("Restarted fork for network '{network}'.");
@@ -1154,7 +1229,7 @@ fn load_json_map(path: &Path) -> Option<serde_json::Map<String, serde_json::Valu
 
 #[cfg(test)]
 mod tests {
-    use super::ForkSubcommand;
+    use super::{ForkRestartInstanceJson, ForkRevertInstanceJson, ForkSubcommand};
     use chrono::Utc;
     use clap::{Parser, Subcommand};
     use std::{fs, path::PathBuf};
@@ -1462,6 +1537,73 @@ mod tests {
         let tracked = super::tracked_anvil_entries_for_network(&store, "mainnet");
         assert_eq!(tracked.len(), 1);
         assert_eq!(tracked[0].resolved_instance_name(), "alpha");
+    }
+
+    #[test]
+    fn build_fork_revert_json_preserves_multi_instance_results() {
+        let json = super::build_fork_revert_json(
+            "mainnet".into(),
+            vec![
+                ForkRevertInstanceJson {
+                    instance_name: "mainnet".into(),
+                    snapshot_id: Some("0xold-mainnet".into()),
+                    new_snapshot_id: Some("0xnew-mainnet".into()),
+                },
+                ForkRevertInstanceJson {
+                    instance_name: "alpha".into(),
+                    snapshot_id: Some("0xold-alpha".into()),
+                    new_snapshot_id: Some("0xnew-alpha".into()),
+                },
+            ],
+        );
+
+        assert_eq!(json.snapshot_id.as_deref(), Some("0xold-mainnet"));
+        assert_eq!(json.new_snapshot_id.as_deref(), Some("0xnew-mainnet"));
+        assert_eq!(json.instances.len(), 2);
+
+        let value = serde_json::to_value(&json).unwrap();
+        let instances = value["instances"].as_array().unwrap();
+        assert_eq!(instances.len(), 2);
+        assert_eq!(instances[1]["instanceName"], "alpha");
+        assert_eq!(instances[1]["snapshotId"], "0xold-alpha");
+        assert_eq!(instances[1]["newSnapshotId"], "0xnew-alpha");
+    }
+
+    #[test]
+    fn build_fork_restart_json_preserves_multi_instance_results() {
+        let json = super::build_fork_restart_json(
+            "mainnet".into(),
+            1,
+            vec![
+                ForkRestartInstanceJson {
+                    instance_name: "mainnet".into(),
+                    chain_id: 1,
+                    port: 18545,
+                    rpc_url: "http://127.0.0.1:18545".into(),
+                    snapshot_id: Some("0xrestart-mainnet".into()),
+                },
+                ForkRestartInstanceJson {
+                    instance_name: "alpha".into(),
+                    chain_id: 1,
+                    port: 18546,
+                    rpc_url: "http://127.0.0.1:18546".into(),
+                    snapshot_id: Some("0xrestart-alpha".into()),
+                },
+            ],
+        );
+
+        assert_eq!(json.port, 18545);
+        assert_eq!(json.rpc_url, "http://127.0.0.1:18545");
+        assert_eq!(json.snapshot_id.as_deref(), Some("0xrestart-mainnet"));
+        assert_eq!(json.instances.len(), 2);
+
+        let value = serde_json::to_value(&json).unwrap();
+        let instances = value["instances"].as_array().unwrap();
+        assert_eq!(instances.len(), 2);
+        assert_eq!(instances[1]["instanceName"], "alpha");
+        assert_eq!(instances[1]["port"], 18546);
+        assert_eq!(instances[1]["rpcUrl"], "http://127.0.0.1:18546");
+        assert_eq!(instances[1]["snapshotId"], "0xrestart-alpha");
     }
 
     // ── history filtering ─────────────────────────────────────────────────
