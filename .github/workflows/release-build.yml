@@ -17,19 +17,25 @@ jobs:
         include:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
+            os_arch: linux-amd64
             use_cross: true
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
+            os_arch: linux-arm64
             use_cross: true
           - target: x86_64-apple-darwin
             os: macos-latest
+            os_arch: darwin-amd64
             use_cross: false
           - target: aarch64-apple-darwin
             os: macos-latest
+            os_arch: darwin-arm64
             use_cross: false
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - uses: dtolnay/rust-toolchain@nightly
 
@@ -49,22 +55,48 @@ jobs:
         shell: bash
         run: |
           if [ "${{ matrix.use_cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }} --bin treb
+            cross build --release --target ${{ matrix.target }} --bin treb-cli
           else
-            cargo build --release --target ${{ matrix.target }} --bin treb
+            cargo build --release --target ${{ matrix.target }} --bin treb-cli
           fi
 
       - name: Package
         shell: bash
         run: |
-          ARCHIVE_NAME="treb-${{ github.ref_name }}-${{ matrix.target }}"
-          cp "target/${{ matrix.target }}/release/treb" treb
-          tar czf "${ARCHIVE_NAME}.tar.gz" treb
+          ARCHIVE_NAME="treb-${{ github.ref_name }}-${{ matrix.os_arch }}"
+          STAGING="staging-${ARCHIVE_NAME}"
+          TARGET_DIR="target/${{ matrix.target }}/release/build"
+          mkdir -p "${STAGING}/completions"
+          cp "target/${{ matrix.target }}/release/treb-cli" "${STAGING}/treb"
+          export TARGET_DIR
+          BUILD_DIR=$(python3 - <<'PY'
+          import glob
+          import os
+          import sys
+
+          target_dir = os.environ["TARGET_DIR"]
+          matches = glob.glob(os.path.join(target_dir, "treb-cli-*/output"))
+          if not matches:
+              sys.exit("treb-cli build metadata output not found")
+          print(os.path.dirname(max(matches, key=os.path.getmtime)))
+          PY
+          )
+          BUILD_OUTPUT="${BUILD_DIR}/output"
+          COMP_DIR="${BUILD_DIR}/out/completions"
+          if [ -d "$COMP_DIR" ]; then
+            find "$COMP_DIR" -maxdepth 1 -type f -exec cp {} "${STAGING}/completions/" \;
+          fi
+          tar czf "${ARCHIVE_NAME}.tar.gz" -C "${STAGING}" .
           if command -v sha256sum >/dev/null 2>&1; then
             sha256sum "${ARCHIVE_NAME}.tar.gz" > "${ARCHIVE_NAME}.sha256"
           else
             shasum -a 256 "${ARCHIVE_NAME}.tar.gz" > "${ARCHIVE_NAME}.sha256"
           fi
+          {
+            grep '^cargo:rustc-env=TREB_FOUNDRY_VERSION=' "$BUILD_OUTPUT"
+            grep '^cargo:rustc-env=TREB_SOL_COMMIT=' "$BUILD_OUTPUT"
+            grep '^cargo:rustc-env=TREB_RUST_VERSION=' "$BUILD_OUTPUT"
+          } > "${ARCHIVE_NAME}.build-metadata"
           echo "ARCHIVE_NAME=${ARCHIVE_NAME}" >> "$GITHUB_ENV"
 
       - name: Upload artifacts
@@ -74,3 +106,4 @@ jobs:
           path: |
             ${{ env.ARCHIVE_NAME }}.tar.gz
             ${{ env.ARCHIVE_NAME }}.sha256
+            ${{ env.ARCHIVE_NAME }}.build-metadata

@@ -47,6 +47,10 @@ fn version_json_parses_with_expected_fields() {
         let s = val.as_str().unwrap_or_else(|| panic!("field {field} is not a string"));
         assert!(!s.is_empty(), "field {field} is empty");
     }
+
+    let foundry_version =
+        obj["foundryVersion"].as_str().expect("field foundryVersion is not a string");
+    assert_ne!(foundry_version, "unknown");
 }
 
 #[test]
