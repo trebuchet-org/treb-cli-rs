@@ -551,6 +551,19 @@ fn build_completions_cmd() -> ClapCommand {
     )
 }
 
+fn workspace_foundry_version() -> Option<String> {
+    let manifest = std::fs::read_to_string("../../Cargo.toml").ok()?;
+    let manifest: toml::Value = toml::from_str(&manifest).ok()?;
+
+    manifest
+        .get("workspace")?
+        .get("dependencies")?
+        .get("foundry-config")?
+        .get("tag")?
+        .as_str()
+        .map(str::to_owned)
+}
+
 fn main() {
     // Re-run if git state changes.
     println!("cargo:rerun-if-changed=../../.git/HEAD");
@@ -584,20 +597,7 @@ fn main() {
     println!("cargo:rustc-env=TREB_BUILD_DATE={build_date}");
 
     // Foundry version: extract the pinned git tag from workspace Cargo.toml.
-    let foundry_version = std::fs::read_to_string("../../Cargo.toml")
-        .ok()
-        .and_then(|contents| {
-            // Look for: foundry-config = { git = "...", tag = "vX.Y.Z" }
-            contents
-                .lines()
-                .find(|line| line.contains("foundry-config") && line.contains("tag"))
-                .and_then(|line| {
-                    let tag_start = line.find("tag = \"")? + 7;
-                    let tag_end = line[tag_start..].find('"')? + tag_start;
-                    Some(line[tag_start..tag_end].to_string())
-                })
-        })
-        .unwrap_or_else(|| "unknown".to_string());
+    let foundry_version = workspace_foundry_version().unwrap_or_else(|| "unknown".to_string());
     println!("cargo:rustc-env=TREB_FOUNDRY_VERSION={foundry_version}");
 
     // treb-sol submodule commit hash.

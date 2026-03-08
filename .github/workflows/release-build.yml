@@ -65,22 +65,11 @@ jobs:
         run: |
           ARCHIVE_NAME="treb-${{ github.ref_name }}-${{ matrix.os_arch }}"
           STAGING="staging-${ARCHIVE_NAME}"
+          TARGET_DIR="target/${{ matrix.target }}/release/build"
           mkdir -p "${STAGING}/completions"
           cp "target/${{ matrix.target }}/release/treb-cli" "${STAGING}/treb"
-          # Copy shell completions from build output
-          COMP_DIR=$(find "target/${{ matrix.target }}/release/build" -path '*/treb-cli-*/out/completions' -type d 2>/dev/null | head -1)
-          if [ -n "$COMP_DIR" ]; then
-            cp "$COMP_DIR"/* "${STAGING}/completions/"
-          fi
-          tar czf "${ARCHIVE_NAME}.tar.gz" -C "${STAGING}" .
-          if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum "${ARCHIVE_NAME}.tar.gz" > "${ARCHIVE_NAME}.sha256"
-          else
-            shasum -a 256 "${ARCHIVE_NAME}.tar.gz" > "${ARCHIVE_NAME}.sha256"
-          fi
-          TARGET_DIR="target/${{ matrix.target }}/release/build"
           export TARGET_DIR
-          BUILD_OUTPUT=$(python3 - <<'PY'
+          BUILD_DIR=$(python3 - <<'PY'
           import glob
           import os
           import sys
@@ -89,9 +78,20 @@ jobs:
           matches = glob.glob(os.path.join(target_dir, "treb-cli-*/output"))
           if not matches:
               sys.exit("treb-cli build metadata output not found")
-          print(max(matches, key=os.path.getmtime))
+          print(os.path.dirname(max(matches, key=os.path.getmtime)))
           PY
           )
+          BUILD_OUTPUT="${BUILD_DIR}/output"
+          COMP_DIR="${BUILD_DIR}/out/completions"
+          if [ -d "$COMP_DIR" ]; then
+            find "$COMP_DIR" -maxdepth 1 -type f -exec cp {} "${STAGING}/completions/" \;
+          fi
+          tar czf "${ARCHIVE_NAME}.tar.gz" -C "${STAGING}" .
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "${ARCHIVE_NAME}.tar.gz" > "${ARCHIVE_NAME}.sha256"
+          else
+            shasum -a 256 "${ARCHIVE_NAME}.tar.gz" > "${ARCHIVE_NAME}.sha256"
+          fi
           {
             grep '^cargo:rustc-env=TREB_FOUNDRY_VERSION=' "$BUILD_OUTPUT"
             grep '^cargo:rustc-env=TREB_SOL_COMMIT=' "$BUILD_OUTPUT"
