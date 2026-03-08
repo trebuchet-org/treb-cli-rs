@@ -123,36 +123,35 @@ pub async fn run_anvil_start(
     fork_block_number_override: Option<u64>,
     name: Option<String>,
 ) -> anyhow::Result<()> {
+    run_anvil_start_with_entry(network, port, fork_block_number_override, name, None).await
+}
+
+async fn run_anvil_start_with_entry(
+    network: Option<String>,
+    port: Option<u16>,
+    fork_block_number_override: Option<u64>,
+    name: Option<String>,
+    fork_entry_override: Option<ForkEntry>,
+) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     let treb_dir = cwd.join(TREB_DIR);
     let instance_name = resolve_instance_name(name.as_deref(), network.as_deref());
 
     let mut config = AnvilConfig::new().port(port.unwrap_or(8545));
 
-    // If network is specified, look up fork entry for the fork URL.
-    let fork_entry_snapshot: Option<ForkEntry> = if let Some(ref net) = network {
-        let mut store = ForkStateStore::new(&treb_dir);
-        store.load().context("failed to load fork state")?;
+    let fork_entry_snapshot = resolve_anvil_start_entry(
+        &treb_dir,
+        network.as_deref(),
+        fork_entry_override,
+        fork_block_number_override,
+    )?;
 
-        let entry = store.get_active_fork(net).ok_or_else(|| {
-            anyhow::anyhow!(
-                "network '{}' is not in fork mode; run `treb fork enter --network {}` first",
-                net,
-                net
-            )
-        })?;
-
+    if let Some(ref entry) = fork_entry_snapshot {
         config = config.fork_url(entry.fork_url.clone());
-
-        let blk = fork_block_number_override.or(entry.fork_block_number);
-        if let Some(b) = blk {
+        if let Some(b) = entry.fork_block_number {
             config = config.fork_block_number(b);
         }
-
-        Some(entry.clone())
-    } else {
-        None
-    };
+    }
 
     // Spawn Anvil.
     let anvil = config.spawn().await.map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -414,7 +413,14 @@ pub async fn run_anvil_restart(
         .ok();
 
     // Start the new instance (blocks until SIGINT/SIGTERM).
-    run_anvil_start(Some(entry_network), restart_port, fork_block_number_override, name).await
+    run_anvil_start_with_entry(
+        Some(entry_network),
+        restart_port,
+        fork_block_number_override,
+        name,
+        Some(entry),
+    )
+    .await
 }
 
 // ── run_anvil_status ──────────────────────────────────────────────────────────
@@ -493,6 +499,34 @@ pub async fn run_anvil_status(json: bool, name: Option<String>) -> anyhow::Resul
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+fn resolve_anvil_start_entry(
+    treb_dir: &Path,
+    network: Option<&str>,
+    fork_entry_override: Option<ForkEntry>,
+    fork_block_number_override: Option<u64>,
+) -> anyhow::Result<Option<ForkEntry>> {
+    let Some(net) = network else {
+        return Ok(None);
+    };
+
+    let mut entry = if let Some(entry) = fork_entry_override {
+        entry
+    } else {
+        let mut store = ForkStateStore::new(treb_dir);
+        store.load().context("failed to load fork state")?;
+        store.get_active_fork(net).cloned().ok_or_else(|| {
+            anyhow::anyhow!(
+                "network '{}' is not in fork mode; run `treb fork enter --network {}` first",
+                net,
+                net
+            )
+        })?
+    };
+
+    entry.fork_block_number = fork_block_number_override.or(entry.fork_block_number);
+    Ok(Some(entry))
+}
 
 /// Update the fork state entry for `network` with the actual Anvil `rpc_url`,
 /// `port`, and `chain_id` after a successful spawn.
@@ -817,8 +851,7 @@ mod tests {
         let sub = parse_dev(&["anvil", "restart", "--network", "mainnet"]).unwrap();
         match sub {
             DevSubcommand::Anvil {
-                subcommand:
-                    AnvilSubcommand::Restart { network, name, port, fork_block_number },
+                subcommand: AnvilSubcommand::Restart { network, name, port, fork_block_number },
             } => {
                 assert_eq!(network.as_deref(), Some("mainnet"));
                 assert!(name.is_none());
@@ -844,8 +877,7 @@ mod tests {
         .unwrap();
         match sub {
             DevSubcommand::Anvil {
-                subcommand:
-                    AnvilSubcommand::Restart { network, port, fork_block_number, .. },
+                subcommand: AnvilSubcommand::Restart { network, port, fork_block_number, .. },
             } => {
                 assert_eq!(network.as_deref(), Some("mainnet"));
                 assert_eq!(port, Some(9001));
@@ -857,11 +889,10 @@ mod tests {
 
     #[test]
     fn parse_dev_anvil_restart_with_name() {
-        let sub = parse_dev(&["anvil", "restart", "--network", "mainnet", "--name", "alpha"]).unwrap();
+        let sub =
+            parse_dev(&["anvil", "restart", "--network", "mainnet", "--name", "alpha"]).unwrap();
         match sub {
-            DevSubcommand::Anvil {
-                subcommand: AnvilSubcommand::Restart { network, name, .. },
-            } => {
+            DevSubcommand::Anvil { subcommand: AnvilSubcommand::Restart { network, name, .. } } => {
                 assert_eq!(network.as_deref(), Some("mainnet"));
                 assert_eq!(name.as_deref(), Some("alpha"));
             }
@@ -940,6 +971,72 @@ mod tests {
         let entry_port: u16 = 0;
         let restart_port = port_override.or(if entry_port != 0 { Some(entry_port) } else { None });
         assert_eq!(restart_port, None);
+    }
+
+    #[test]
+    fn resolve_anvil_start_entry_uses_explicit_named_entry_without_default() {
+        let (_root, treb_dir) = make_treb_dir();
+
+        let mut named_entry = sample_fork_entry(&treb_dir, "mainnet");
+        named_entry.instance_name = Some("alpha".into());
+        named_entry.fork_url = "https://named.example".into();
+        named_entry.fork_block_number = Some(19_000_001);
+
+        let mut store = ForkStateStore::new(&treb_dir);
+        store.insert_active_fork(named_entry.clone()).unwrap();
+
+        let resolved =
+            resolve_anvil_start_entry(&treb_dir, Some("mainnet"), Some(named_entry.clone()), None)
+                .unwrap()
+                .unwrap();
+
+        assert_eq!(resolved.instance_name.as_deref(), Some("alpha"));
+        assert_eq!(resolved.fork_url, named_entry.fork_url);
+        assert_eq!(resolved.fork_block_number, named_entry.fork_block_number);
+    }
+
+    #[test]
+    fn resolve_anvil_start_entry_persists_fork_block_number_override() {
+        let (_root, treb_dir) = make_treb_dir();
+
+        let mut named_entry = sample_fork_entry(&treb_dir, "mainnet");
+        named_entry.instance_name = Some("alpha".into());
+        named_entry.port = 8546;
+        named_entry.pid_file = pid_file_path(&treb_dir, "alpha").to_string_lossy().into_owned();
+        named_entry.log_file = log_file_path(&treb_dir, "alpha").to_string_lossy().into_owned();
+        named_entry.fork_block_number = Some(19_000_000);
+
+        let mut store = ForkStateStore::new(&treb_dir);
+        store.insert_active_fork(named_entry.clone()).unwrap();
+
+        let updated_entry = resolve_anvil_start_entry(
+            &treb_dir,
+            Some("mainnet"),
+            Some(named_entry),
+            Some(20_000_000),
+        )
+        .unwrap()
+        .unwrap();
+
+        let pid_file = pid_file_path(&treb_dir, "alpha");
+        let log_file = log_file_path(&treb_dir, "alpha");
+        update_fork_state_with_anvil(
+            &treb_dir,
+            updated_entry,
+            "alpha",
+            "http://127.0.0.1:8546",
+            8546,
+            1,
+            &pid_file,
+            &log_file,
+        )
+        .unwrap();
+
+        let mut reloaded = ForkStateStore::new(&treb_dir);
+        reloaded.load().unwrap();
+
+        let persisted = reloaded.get_active_fork_instance("mainnet", "alpha").unwrap();
+        assert_eq!(persisted.fork_block_number, Some(20_000_000));
     }
 
     // ── resolve_instance_name tests ──────────────────────────────────────
