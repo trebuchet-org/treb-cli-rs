@@ -3,7 +3,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     env, fs,
-    io::{self, BufRead, IsTerminal, Write},
+    io::{self, BufRead, Write},
     path::PathBuf,
     time::Duration,
 };
@@ -22,11 +22,12 @@ use treb_forge::{
 };
 use treb_registry::Registry;
 
-use console::Term;
-
 use crate::{
     output,
-    ui::{badge, color, selector::fuzzy_select_network, tree::TreeNode},
+    ui::{
+        badge, color, interactive::is_non_interactive, selector::fuzzy_select_network,
+        tree::TreeNode,
+    },
 };
 
 const FOUNDRY_TOML: &str = "foundry.toml";
@@ -77,6 +78,23 @@ pub fn inject_env_vars(env_vars: &[String]) -> anyhow::Result<()> {
         unsafe { env::set_var(key, value) };
     }
     Ok(())
+}
+
+fn should_prompt_for_broadcast_confirmation(
+    broadcast: bool,
+    dry_run: bool,
+    prompts_enabled: bool,
+) -> bool {
+    broadcast && !dry_run && prompts_enabled
+}
+
+fn should_reject_interactive_json_broadcast(
+    broadcast: bool,
+    dry_run: bool,
+    json: bool,
+    prompts_enabled: bool,
+) -> bool {
+    json && should_prompt_for_broadcast_confirmation(broadcast, dry_run, prompts_enabled)
 }
 
 /// Ensure the project is initialized (foundry.toml + .treb/ exist).
@@ -173,8 +191,16 @@ pub async fn run(
     // ── Inject environment variables (before config resolution) ──────────
     inject_env_vars(&env_vars)?;
 
+    let prompts_enabled = !is_non_interactive(non_interactive);
+
+    if should_reject_interactive_json_broadcast(broadcast, dry_run, json, prompts_enabled) {
+        bail!(
+            "interactive broadcast confirmation is not available in JSON mode; rerun with --non-interactive"
+        );
+    }
+
     // ── Interactive network selection when --network is omitted ───────────
-    let network = if network.is_none() && !non_interactive && Term::stdout().is_term() {
+    let network = if network.is_none() && prompts_enabled {
         let foundry_cfg = treb_config::load_foundry_config(&cwd)
             .map_err(|e| anyhow::anyhow!("failed to load foundry config: {e}"))?;
         let endpoints = treb_config::rpc_endpoints(&foundry_cfg);
@@ -309,25 +335,22 @@ pub async fn run(
     };
 
     // ── Broadcast confirmation prompt ──────────────────────────────────
-    if broadcast && !dry_run {
-        let should_prompt = !non_interactive && io::stdin().is_terminal();
-        if should_prompt {
-            eprintln!("About to broadcast transactions to the network.");
-            eprintln!("  Script: {}", script);
-            eprintln!("  Namespace: {}", resolved.namespace);
-            if let Some(ref url) = effective_rpc_url {
-                eprintln!("  RPC: {}", url);
-            }
-            eprint!("Proceed? [y/N] ");
-            io::stderr().flush().ok();
+    if should_prompt_for_broadcast_confirmation(broadcast, dry_run, prompts_enabled) {
+        eprintln!("About to broadcast transactions to the network.");
+        eprintln!("  Script: {}", script);
+        eprintln!("  Namespace: {}", resolved.namespace);
+        if let Some(ref url) = effective_rpc_url {
+            eprintln!("  RPC: {}", url);
+        }
+        eprint!("Proceed? [y/N] ");
+        io::stderr().flush().ok();
 
-            let mut input = String::new();
-            io::stdin().lock().read_line(&mut input).ok();
-            let answer = input.trim().to_lowercase();
+        let mut input = String::new();
+        io::stdin().lock().read_line(&mut input).ok();
+        let answer = input.trim().to_lowercase();
 
-            if answer != "y" && answer != "yes" {
-                bail!("broadcast cancelled by user");
-            }
+        if answer != "y" && answer != "yes" {
+            bail!("broadcast cancelled by user");
         }
     }
 
@@ -458,6 +481,7 @@ pub async fn run(
 // ── JSON output type ─────────────────────────────────────────────────────
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct RunOutputJson {
     success: bool,
     dry_run: bool,
@@ -466,11 +490,11 @@ struct RunOutputJson {
     skipped: Vec<SkippedJson>,
     gas_used: u64,
     console_logs: Vec<String>,
-    #[serde(rename = "governorProposals")]
     governor_proposals: Vec<GovernorProposalJson>,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct DeploymentJson {
     id: String,
     contract_name: String,
@@ -481,6 +505,7 @@ struct DeploymentJson {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct TransactionJson {
     id: String,
     hash: String,
@@ -488,6 +513,7 @@ struct TransactionJson {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct SkippedJson {
     contract_name: String,
     address: String,
@@ -886,6 +912,22 @@ mod tests {
         let vars = vec!["GOOD=value".to_string(), "BAD".to_string()];
         let err = inject_env_vars(&vars).unwrap_err();
         assert!(err.to_string().contains("BAD"));
+    }
+
+    #[test]
+    fn prompt_for_broadcast_confirmation_requires_interactive_broadcast() {
+        assert!(should_prompt_for_broadcast_confirmation(true, false, true));
+        assert!(!should_prompt_for_broadcast_confirmation(true, true, true));
+        assert!(!should_prompt_for_broadcast_confirmation(true, false, false));
+        assert!(!should_prompt_for_broadcast_confirmation(false, false, true));
+    }
+
+    #[test]
+    fn interactive_json_broadcast_is_rejected_before_prompting() {
+        assert!(should_reject_interactive_json_broadcast(true, false, true, true));
+        assert!(!should_reject_interactive_json_broadcast(true, false, true, false));
+        assert!(!should_reject_interactive_json_broadcast(true, false, false, true));
+        assert!(!should_reject_interactive_json_broadcast(true, true, true, true));
     }
 
     #[test]

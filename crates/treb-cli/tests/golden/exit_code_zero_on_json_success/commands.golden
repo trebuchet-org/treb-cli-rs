@@ -1,0 +1,10 @@
+=== cmd 0: [version --json] ===
+{
+  "commit": "<SHORT_HASH>",
+  "date": "2026-03-08",
+  "forgeVersion": "forge v<VERSION> (<SHORT_HASH>)",
+  "foundryVersion": "unknown",
+  "rustVersion": "rustc 1.96.0-nightly (<SHORT_HASH> 2026-03-01)",
+  "trebSolCommit": "<SHORT_HASH>",
+  "version": "0.1.0"
+}

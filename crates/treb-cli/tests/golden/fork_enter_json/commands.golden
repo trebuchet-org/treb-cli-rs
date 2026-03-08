@@ -1,0 +1,2 @@
+=== cmd 0: [fork enter --network localhost --json] ===
+{"error":"`fork enter --json` is not supported because port, rpcUrl, snapshotId, and pid are not known until `treb dev anvil start --network localhost` runs"}

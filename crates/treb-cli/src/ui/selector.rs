@@ -3,6 +3,8 @@
 use console::Term;
 use treb_core::{Result, TrebError, types::Deployment};
 
+use super::interactive::is_non_interactive;
+
 /// Present a fuzzy-search selector for a list of deployments.
 ///
 /// Returns `Ok(None)` when the list is empty or the user aborts (Esc/q).
@@ -16,10 +18,9 @@ pub fn fuzzy_select_deployment<'a>(
         return Ok(None);
     }
 
-    let is_tty = Term::stdout().is_term();
-    if !is_tty && query.is_none() {
+    if is_non_interactive(false) && query.is_none() {
         return Err(TrebError::Cli(
-            "no TTY detected and no deployment query supplied; \
+            "non-interactive mode: no deployment query supplied; \
              pass a deployment ID or run interactively"
                 .into(),
         ));
@@ -60,10 +61,9 @@ pub fn fuzzy_select_network(networks: &[String]) -> Result<Option<&str>> {
         return Ok(None);
     }
 
-    let is_tty = Term::stdout().is_term();
-    if !is_tty {
+    if is_non_interactive(false) {
         return Err(TrebError::Cli(
-            "no TTY detected; pass --network explicitly or run interactively".into(),
+            "non-interactive mode: pass --network explicitly or run interactively".into(),
         ));
     }
 
@@ -84,10 +84,9 @@ pub fn multiselect_deployments<'a>(
     deployments: &'a [Deployment],
     prompt: &str,
 ) -> Result<Vec<&'a Deployment>> {
-    let is_tty = Term::stdout().is_term();
-    if !is_tty {
+    if is_non_interactive(false) {
         return Err(TrebError::Cli(
-            "no TTY detected; cannot display interactive multiselect".into(),
+            "non-interactive mode: cannot display interactive multiselect".into(),
         ));
     }
 

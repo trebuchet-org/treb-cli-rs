@@ -11,6 +11,7 @@ use crate::output;
 
 /// Network information for a single RPC endpoint.
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NetworkInfo {
     pub name: String,
     pub rpc_url: String,
@@ -70,8 +71,12 @@ pub async fn run(json: bool) -> anyhow::Result<()> {
     let endpoints = treb_config::rpc_endpoints(&config);
 
     if endpoints.is_empty() {
-        println!("No RPC endpoints configured in foundry.toml.");
-        println!("Add endpoints under [rpc_endpoints] in your foundry.toml.");
+        if json {
+            output::print_json(&Vec::<NetworkInfo>::new())?;
+        } else {
+            println!("No RPC endpoints configured in foundry.toml.");
+            println!("Add endpoints under [rpc_endpoints] in your foundry.toml.");
+        }
         return Ok(());
     }
 

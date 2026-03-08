@@ -1,0 +1,6 @@
+=== cmd 0: [fork exit --network mainnet --json] ===
+{
+  "cleanedUp": true,
+  "network": "mainnet",
+  "restoredEntries": 1
+}

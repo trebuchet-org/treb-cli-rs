@@ -7,7 +7,7 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
     env, fs,
     hash::{DefaultHasher, Hash, Hasher},
-    io::{self, BufRead, IsTerminal, Write},
+    io::{self, BufRead, Write},
     path::{Path, PathBuf},
 };
 
@@ -22,7 +22,10 @@ use treb_forge::{
 };
 use treb_registry::Registry;
 
-use crate::{output, ui::color};
+use crate::{
+    output,
+    ui::{color, interactive::is_non_interactive},
+};
 
 // ── Compose file schema ──────────────────────────────────────────────────
 
@@ -234,6 +237,7 @@ pub fn build_execution_order(compose: &ComposeFile) -> anyhow::Result<Vec<String
 
 /// An entry in the dry-run execution plan.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PlanEntry {
     pub step: usize,
     pub component: String,
@@ -299,6 +303,30 @@ fn print_dry_run_plan(compose: &ComposeFile, plan: &[PlanEntry]) {
     eprintln!();
 }
 
+fn should_prompt_for_broadcast_confirmation(
+    broadcast: bool,
+    dry_run: bool,
+    prompts_enabled: bool,
+    executing_count: usize,
+) -> bool {
+    broadcast && !dry_run && prompts_enabled && executing_count > 0
+}
+
+fn should_reject_interactive_json_broadcast(
+    broadcast: bool,
+    dry_run: bool,
+    json: bool,
+    prompts_enabled: bool,
+    executing_count: usize,
+) -> bool {
+    json && should_prompt_for_broadcast_confirmation(
+        broadcast,
+        dry_run,
+        prompts_enabled,
+        executing_count,
+    )
+}
+
 // ── Result aggregation ───────────────────────────────────────────────────
 
 /// Status of a component in compose results.
@@ -350,6 +378,7 @@ pub struct ComposeTotals {
 
 /// Full compose result for JSON output.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ComposeOutputJson {
     group: String,
     success: bool,
@@ -494,7 +523,7 @@ pub async fn run(
     let skip_set: HashSet<String> = if resume {
         if let Some(state) = load_compose_state()? {
             // Warn if compose file changed since the state was saved.
-            if state.compose_hash != compose_hash {
+            if state.compose_hash != compose_hash && !json {
                 eprintln!("Warning: compose file has changed since the last run; resuming anyway");
             }
             state.completed.into_iter().collect()
@@ -546,7 +575,9 @@ pub async fn run(
             let component = &compose.components[name];
 
             if skip_set.contains(name) {
-                println!("# {} (skipped)", name);
+                if !json {
+                    println!("# {} (skipped)", name);
+                }
                 continue;
             }
 
@@ -611,42 +642,61 @@ pub async fn run(
                 })
                 .collect::<Vec<_>>()
                 .join(" ");
-            println!("# {}", name);
-            println!("{}", cmd_str);
+            if !json {
+                println!("# {}", name);
+                println!("{}", cmd_str);
+            }
         }
         return Ok(());
     }
 
+    let prompts_enabled = !is_non_interactive(non_interactive);
+    let executing_count = order.iter().filter(|name| !skip_set.contains(*name)).count();
+
+    // ── Reject interactive broadcast in JSON mode ─────────────────────
+    if should_reject_interactive_json_broadcast(
+        broadcast,
+        dry_run,
+        json,
+        prompts_enabled,
+        executing_count,
+    ) {
+        bail!(
+            "interactive broadcast confirmation is not available in JSON mode; rerun with --non-interactive"
+        );
+    }
+
     // ── Broadcast confirmation (once before first component) ──────────
-    if broadcast && !non_interactive {
-        let is_tty = io::stdin().is_terminal();
-        if is_tty {
-            let executing_count = order.iter().filter(|n| !skip_set.contains(*n)).count();
-            let count_str = format!("{}", executing_count);
-            let mut kv_pairs: Vec<(&str, &str)> =
-                vec![("Components", &count_str), ("Compose", &compose.group)];
-            let ns_ref;
-            if let Some(ref ns) = namespace {
-                ns_ref = ns.clone();
-                kv_pairs.push(("Namespace", &ns_ref));
-            }
-            let net_ref;
-            if let Some(ref net) = network {
-                net_ref = net.clone();
-                kv_pairs.push(("Network", &net_ref));
-            }
-            eprintln!("About to broadcast to the network.");
-            output::eprint_kv(&kv_pairs);
-            eprint!("Proceed? [y/N] ");
-            io::stderr().flush().ok();
+    if should_prompt_for_broadcast_confirmation(
+        broadcast,
+        dry_run,
+        prompts_enabled,
+        executing_count,
+    ) {
+        let count_str = format!("{}", executing_count);
+        let mut kv_pairs: Vec<(&str, &str)> =
+            vec![("Components", &count_str), ("Compose", &compose.group)];
+        let ns_ref;
+        if let Some(ref ns) = namespace {
+            ns_ref = ns.clone();
+            kv_pairs.push(("Namespace", &ns_ref));
+        }
+        let net_ref;
+        if let Some(ref net) = network {
+            net_ref = net.clone();
+            kv_pairs.push(("Network", &net_ref));
+        }
+        eprintln!("About to broadcast to the network.");
+        output::eprint_kv(&kv_pairs);
+        eprint!("Proceed? [y/N] ");
+        io::stderr().flush().ok();
 
-            let mut input = String::new();
-            io::stdin().lock().read_line(&mut input).ok();
-            let answer = input.trim().to_lowercase();
+        let mut input = String::new();
+        io::stdin().lock().read_line(&mut input).ok();
+        let answer = input.trim().to_lowercase();
 
-            if answer != "y" && answer != "yes" {
-                bail!("broadcast cancelled by user");
-            }
+        if answer != "y" && answer != "yes" {
+            bail!("broadcast cancelled by user");
         }
     }
 
@@ -913,10 +963,12 @@ pub async fn run(
             }
             Err(e) => {
                 let error_msg = format!("{}", e);
-                eprintln!(
-                    "Component '{}' failed ({}/{} completed): {}",
-                    name, completed, total, error_msg
-                );
+                if !json {
+                    eprintln!(
+                        "Component '{}' failed ({}/{} completed): {}",
+                        name, completed, total, error_msg
+                    );
+                }
 
                 // Write per-component debug log for failure.
                 if let Some(ref dir) = debug_dir {
@@ -949,6 +1001,14 @@ pub async fn run(
     // ── Display results ──────────────────────────────────────────────
     let totals = compute_totals(&component_results);
     let success = failed_component.is_none();
+    let failure_error = failed_component.as_ref().map(|failed| {
+        anyhow::anyhow!(
+            "compose failed: component '{}' failed ({}/{} completed)",
+            failed,
+            completed,
+            total
+        )
+    });
 
     if !json {
         if success {
@@ -956,19 +1016,15 @@ pub async fn run(
         } else {
             output::print_stage("\u{274c}", "Orchestration failed.");
         }
-    }
-
-    if json {
-        display_compose_json(&compose.group, component_results, totals, success)?;
-    } else {
         display_compose_human(&compose.group, &component_results, &totals);
-    }
 
-    // Print debug directory path.
-    if !json {
         if let Some(ref dir) = debug_dir {
             eprintln!("Debug logs saved to {}", dir.display());
         }
+    } else if success {
+        // In JSON mode, execution failures bubble up to the top-level JSON
+        // error wrapper instead of mixing a result payload with stderr errors.
+        display_compose_json(&compose.group, component_results, totals, success)?;
     }
 
     // Full successful completion: delete the state file.
@@ -976,8 +1032,8 @@ pub async fn run(
         delete_compose_state();
     }
 
-    if let Some(ref failed) = failed_component {
-        bail!("compose failed: component '{}' failed ({}/{} completed)", failed, completed, total);
+    if let Some(err) = failure_error {
+        return Err(err);
     }
 
     Ok(())
@@ -1864,6 +1920,24 @@ components:
         assert_eq!(ComponentStatus::Skipped.to_string(), "skipped");
         assert_eq!(ComponentStatus::Failed.to_string(), "failed");
         assert_eq!(ComponentStatus::NotExecuted.to_string(), "not executed");
+    }
+
+    #[test]
+    fn prompt_for_broadcast_confirmation_requires_remaining_components() {
+        assert!(should_prompt_for_broadcast_confirmation(true, false, true, 1));
+        assert!(!should_prompt_for_broadcast_confirmation(true, false, true, 0));
+        assert!(!should_prompt_for_broadcast_confirmation(true, true, true, 1));
+        assert!(!should_prompt_for_broadcast_confirmation(true, false, false, 1));
+        assert!(!should_prompt_for_broadcast_confirmation(false, false, true, 1));
+    }
+
+    #[test]
+    fn interactive_json_broadcast_is_not_rejected_when_resume_is_a_no_op() {
+        assert!(should_reject_interactive_json_broadcast(true, false, true, true, 1));
+        assert!(!should_reject_interactive_json_broadcast(true, false, true, true, 0));
+        assert!(!should_reject_interactive_json_broadcast(true, false, true, false, 1));
+        assert!(!should_reject_interactive_json_broadcast(true, false, false, true, 1));
+        assert!(!should_reject_interactive_json_broadcast(true, true, true, true, 1));
     }
 
     #[test]

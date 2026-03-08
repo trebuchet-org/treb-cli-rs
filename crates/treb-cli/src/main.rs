@@ -2,6 +2,8 @@ mod commands;
 mod output;
 mod ui;
 
+use std::env;
+
 use clap::{CommandFactory, Parser, Subcommand};
 use treb_core::types::DeploymentType;
 
@@ -449,13 +451,126 @@ enum ConfigSubcommand {
     },
 }
 
+impl Commands {
+    /// Returns `true` when the parsed subcommand includes `--json`.
+    fn json_flag(&self) -> bool {
+        match self {
+            Commands::Run { json, .. }
+            | Commands::List { json, .. }
+            | Commands::Show { json, .. }
+            | Commands::Verify { json, .. }
+            | Commands::Tag { json, .. }
+            | Commands::Register { json, .. }
+            | Commands::Sync { json, .. }
+            | Commands::Version { json, .. }
+            | Commands::Networks { json, .. }
+            | Commands::GenDeploy { json, .. }
+            | Commands::Compose { json, .. } => *json,
+            Commands::Config { subcommand } => {
+                matches!(subcommand, ConfigSubcommand::Show { json: true })
+            }
+            Commands::Prune(args) => args.json,
+            Commands::Reset(args) => args.json,
+            Commands::Fork { subcommand } => subcommand.json_flag(),
+            Commands::Dev { subcommand } => subcommand.json_flag(),
+            Commands::Migrate { subcommand } => subcommand.json_flag(),
+            Commands::Init { .. } | Commands::Completions { .. } => false,
+        }
+    }
+}
+
+impl commands::fork::ForkSubcommand {
+    fn json_flag(&self) -> bool {
+        match self {
+            Self::Status { json, .. }
+            | Self::History { json, .. }
+            | Self::Diff { json, .. }
+            | Self::Enter { json, .. }
+            | Self::Exit { json, .. }
+            | Self::Revert { json, .. }
+            | Self::Restart { json, .. } => *json,
+        }
+    }
+}
+
+impl commands::migrate::MigrateSubcommand {
+    fn json_flag(&self) -> bool {
+        match self {
+            Self::Config { json, .. } => *json,
+            Self::Registry { .. } => false,
+        }
+    }
+}
+
+impl commands::dev::DevSubcommand {
+    fn json_flag(&self) -> bool {
+        match self {
+            Self::Anvil { subcommand } => subcommand.json_flag(),
+        }
+    }
+}
+
+impl commands::dev::AnvilSubcommand {
+    fn json_flag(&self) -> bool {
+        match self {
+            Self::Status { json, .. } => *json,
+            Self::Start { .. } | Self::Stop { .. } | Self::Restart { .. } | Self::Logs { .. } => {
+                false
+            }
+        }
+    }
+}
+
+fn argv_requests_flag(flag: &str) -> bool {
+    let prefix = format!("{flag}=");
+    env::args_os().skip(1).take_while(|arg| arg != "--").any(|arg| {
+        let arg = arg.to_string_lossy();
+        arg == flag || arg.starts_with(&prefix)
+    })
+}
+
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+async fn main() {
+    let no_color_requested = argv_requests_flag("--no-color");
+    ui::color::color_enabled(no_color_requested);
+
+    let json_requested = argv_requests_flag("--json");
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(err) => {
+            if json_requested
+                && !matches!(
+                    err.kind(),
+                    clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
+                )
+            {
+                output::print_json_error(&err.to_string());
+                std::process::exit(1);
+            }
+
+            err.print().expect("failed to print clap error");
+            std::process::exit(err.exit_code());
+        }
+    };
 
     // Apply color settings before any output is produced.
     ui::color::color_enabled(cli.no_color);
 
+    let json = cli.command.json_flag();
+
+    if let Err(err) = run(cli).await {
+        if json {
+            output::print_json_error(&format!("{err:#}"));
+        } else {
+            // Reproduce the exact format that `main() -> anyhow::Result<()>` uses:
+            // "Error: <debug repr>" which includes "Caused by:" chains.
+            eprintln!("Error: {err:?}");
+        }
+        std::process::exit(1);
+    }
+}
+
+async fn run(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
         Commands::Run {
             script,

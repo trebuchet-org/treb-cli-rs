@@ -2,6 +2,7 @@
 
 pub mod badge;
 pub mod color;
+pub mod interactive;
 pub mod prompt;
 pub mod selector;
 pub mod terminal;

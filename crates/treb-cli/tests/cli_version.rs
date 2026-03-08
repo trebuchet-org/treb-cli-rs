@@ -48,3 +48,19 @@ fn version_json_parses_with_expected_fields() {
         assert!(!s.is_empty(), "field {field} is empty");
     }
 }
+
+#[test]
+fn version_json_invalid_flag_returns_json_error_and_exit_code_one() {
+    let output = treb()
+        .args(["version", "--json", "--definitely-invalid-flag"])
+        .output()
+        .expect("failed to run treb version --json with invalid flag");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty(), "stdout should stay empty on clap parse errors in json mode");
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stderr).expect("stderr should be valid JSON");
+    let error = json["error"].as_str().expect("json error should be a string");
+    assert!(error.contains("--definitely-invalid-flag"), "unexpected json error: {error}");
+}

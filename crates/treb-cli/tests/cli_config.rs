@@ -54,8 +54,8 @@ fn config_show_json_is_valid() {
     assert_eq!(obj["namespace"], "default");
     assert!(obj.contains_key("network"));
     assert!(obj.contains_key("profile"));
-    assert!(obj.contains_key("config_source"));
-    assert!(obj.contains_key("project_root"));
+    assert!(obj.contains_key("configSource"));
+    assert!(obj.contains_key("projectRoot"));
     assert!(obj.contains_key("senders"));
 }
 

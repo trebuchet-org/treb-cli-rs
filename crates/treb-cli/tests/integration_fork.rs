@@ -13,7 +13,7 @@ use treb_registry::{DEPLOYMENTS_FILE, ForkStateStore, TRANSACTIONS_FILE};
 use framework::{
     context::TestContext,
     integration_test::{IntegrationTest, run_integration_test},
-    normalizer::{PathNormalizer, UptimeNormalizer},
+    normalizer::{LabelNormalizer, PathNormalizer, UptimeNormalizer},
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -434,6 +434,145 @@ fn seed_fork_enter_success(project_root: &std::path::Path) -> std::io::Result<()
     Ok(())
 }
 
+fn read_http_request(stream: &mut std::net::TcpStream) -> std::io::Result<String> {
+    stream.set_read_timeout(Some(std::time::Duration::from_millis(250)))?;
+
+    let mut buf = Vec::new();
+    let mut chunk = [0_u8; 2048];
+    loop {
+        match stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                buf.extend_from_slice(&chunk[..n]);
+
+                let Some(headers_end) = buf.windows(4).position(|window| window == b"\r\n\r\n")
+                else {
+                    continue;
+                };
+                let body_start = headers_end + 4;
+                let headers = String::from_utf8_lossy(&buf[..headers_end]);
+                let content_length = headers
+                    .lines()
+                    .find_map(|line| {
+                        line.split_once(':').and_then(|(name, value)| {
+                            if name.eq_ignore_ascii_case("content-length") {
+                                value.trim().parse::<usize>().ok()
+                            } else {
+                                None
+                            }
+                        })
+                    })
+                    .unwrap_or(0);
+
+                if buf.len() >= body_start + content_length {
+                    break;
+                }
+            }
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                break;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
+fn spawn_json_rpc_server<F>(mut handler: F) -> std::io::Result<u16>
+where
+    F: FnMut(&serde_json::Value) -> serde_json::Value + Send + 'static,
+{
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    listener.set_nonblocking(true)?;
+    let port = listener.local_addr()?.port();
+
+    std::thread::spawn(move || {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    let request = read_http_request(&mut stream).unwrap();
+                    if request.is_empty() {
+                        continue;
+                    }
+
+                    let body = request.split("\r\n\r\n").nth(1).unwrap_or("");
+                    if body.is_empty() {
+                        continue;
+                    }
+
+                    let json: serde_json::Value = serde_json::from_str(body).unwrap();
+                    let response_body = serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": json.get("id").cloned().unwrap_or_else(|| serde_json::json!(1)),
+                        "result": handler(&json),
+                    })
+                    .to_string();
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        response_body.len(),
+                        response_body
+                    );
+                    stream.write_all(response.as_bytes()).unwrap();
+                    stream.flush().unwrap();
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(err) => panic!("json-rpc fixture accept failed: {err}"),
+            }
+        }
+    });
+
+    Ok(port)
+}
+
+fn seed_fork_revert_json_success(project_root: &std::path::Path, port: u16) -> std::io::Result<()> {
+    let treb_dir = project_root.join(".treb");
+    let mut entry = sample_fork_entry(&treb_dir);
+    entry.rpc_url = format!("http://127.0.0.1:{port}");
+    entry.port = port;
+    entry.snapshots.push(treb_core::types::fork::SnapshotEntry {
+        index: 0,
+        snapshot_id: "0xrevert-old".to_string(),
+        command: "enter".to_string(),
+        timestamp: Utc.with_ymd_and_hms(2026, 1, 15, 10, 31, 0).unwrap(),
+    });
+
+    let snapshot_dir = std::path::PathBuf::from(&entry.snapshot_dir);
+    std::fs::create_dir_all(&snapshot_dir)?;
+    std::fs::write(treb_dir.join(DEPLOYMENTS_FILE), r#"{"Counter_1": {"address": "0xaaa"}}"#)?;
+    std::fs::write(snapshot_dir.join(DEPLOYMENTS_FILE), r#"{"Counter_1": {"address": "0xaaa"}}"#)?;
+
+    let mut store = ForkStateStore::new(&treb_dir);
+    store.insert_active_fork(entry).unwrap();
+    Ok(())
+}
+
+fn seed_fork_restart_json_success(
+    project_root: &std::path::Path,
+    port: u16,
+) -> std::io::Result<()> {
+    let treb_dir = project_root.join(".treb");
+    let mut entry = sample_fork_entry(&treb_dir);
+    entry.rpc_url = format!("http://127.0.0.1:{port}");
+    entry.port = port;
+
+    let snapshot_dir = std::path::PathBuf::from(&entry.snapshot_dir);
+    std::fs::create_dir_all(&snapshot_dir)?;
+    std::fs::write(treb_dir.join(DEPLOYMENTS_FILE), r#"{"Counter_1": {"address": "0xaaa"}}"#)?;
+    std::fs::write(snapshot_dir.join(DEPLOYMENTS_FILE), r#"{"Counter_1": {"address": "0xaaa"}}"#)?;
+
+    let mut store = ForkStateStore::new(&treb_dir);
+    store.insert_active_fork(entry).unwrap();
+    Ok(())
+}
+
 // ── fork enter: not initialized ─────────────────────────────────────────
 
 /// `treb fork enter --network mainnet` on an uninitialized project (no .treb/)
@@ -637,6 +776,129 @@ fn fork_restart_port_unreachable() {
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_fork_status(ctx.path()))
         .test(&["fork", "restart", "--network", "mainnet"])
+        .expect_err(true)
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork enter: JSON output ─────────────────────────────────────────────
+
+/// `treb fork enter --network localhost --json` should return a structured
+/// JSON error because runtime-only fields are unavailable until anvil starts.
+#[test]
+fn fork_enter_json() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_enter_json")
+        .setup(&["init"])
+        .test(&["fork", "enter", "--network", "localhost", "--json"])
+        .expect_err(true)
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork exit: JSON output ──────────────────────────────────────────────
+
+/// `treb fork exit --network mainnet --json` should emit valid JSON with
+/// camelCase field names (network, restoredEntries, cleanedUp).
+#[test]
+fn fork_exit_json() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_exit_json")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_fork_exit(ctx.path()))
+        .test(&["fork", "exit", "--network", "mainnet", "--json"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork revert: JSON output ────────────────────────────────────────────
+
+/// `treb fork revert --network mainnet --json` should emit valid JSON with
+/// network, snapshotId, and newSnapshotId fields on the success path.
+#[test]
+fn fork_revert_json_success() {
+    let port = match spawn_json_rpc_server(|request| match request["method"].as_str().unwrap() {
+        "evm_revert" => serde_json::json!(true),
+        "evm_snapshot" => serde_json::json!("0xrevert-new"),
+        other => panic!("unexpected JSON-RPC method for revert fixture: {other}"),
+    }) {
+        Ok(port) => port,
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return,
+        Err(err) => panic!("seed fork revert success: {err}"),
+    };
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_revert_json_success")
+        .setup(&["init"])
+        .post_setup_hook(move |ctx| seed_fork_revert_json_success(ctx.path(), port).unwrap())
+        .test(&["fork", "revert", "--network", "mainnet", "--json"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// `treb fork revert --network mainnet --all --json` with no active forks
+/// should output an empty JSON array.
+#[test]
+fn fork_revert_json_no_active() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_revert_json_no_active")
+        .setup(&["init"])
+        .test(&["fork", "revert", "--network", "mainnet", "--all", "--json"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork restart: JSON error (not forked) ───────────────────────────────
+
+/// `treb fork restart --network mainnet --json` should emit valid JSON with
+/// network, chainId, port, rpcUrl, and snapshotId fields on the success path.
+#[test]
+fn fork_restart_json_success() {
+    let port = match spawn_json_rpc_server(|request| match request["method"].as_str().unwrap() {
+        "anvil_reset" | "anvil_setCode" => serde_json::Value::Null,
+        "evm_snapshot" => serde_json::json!("0xrestart-new"),
+        other => panic!("unexpected JSON-RPC method for restart fixture: {other}"),
+    }) {
+        Ok(port) => port,
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return,
+        Err(err) => panic!("seed fork restart success: {err}"),
+    };
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_restart_json_success")
+        .setup(&["init"])
+        .post_setup_hook(move |ctx| seed_fork_restart_json_success(ctx.path(), port).unwrap())
+        .test(&["fork", "restart", "--network", "mainnet", "--json"])
+        .extra_normalizer(Box::new(path_normalizer))
+        .extra_normalizer(Box::new(LabelNormalizer::new(format!("http://127.0.0.1:{port}"))))
+        .extra_normalizer(Box::new(LabelNormalizer::new(port.to_string())));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// `treb fork restart --network mainnet --json` when mainnet is not forked
+/// should output a JSON error to stderr.
+#[test]
+fn fork_restart_json_not_forked() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_restart_json_not_forked")
+        .setup(&["init"])
+        .test(&["fork", "restart", "--network", "mainnet", "--json"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
