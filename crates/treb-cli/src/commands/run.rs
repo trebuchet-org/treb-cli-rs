@@ -481,6 +481,7 @@ pub async fn run(
 // ── JSON output type ─────────────────────────────────────────────────────
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct RunOutputJson {
     success: bool,
     dry_run: bool,
@@ -489,11 +490,11 @@ struct RunOutputJson {
     skipped: Vec<SkippedJson>,
     gas_used: u64,
     console_logs: Vec<String>,
-    #[serde(rename = "governorProposals")]
     governor_proposals: Vec<GovernorProposalJson>,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct DeploymentJson {
     id: String,
     contract_name: String,
@@ -504,6 +505,7 @@ struct DeploymentJson {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct TransactionJson {
     id: String,
     hash: String,
@@ -511,6 +513,7 @@ struct TransactionJson {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct SkippedJson {
     contract_name: String,
     address: String,

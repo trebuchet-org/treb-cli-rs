@@ -73,8 +73,8 @@ fn networks_json_parses_with_expected_fields() {
     for entry in arr {
         let obj = entry.as_object().expect("entry is not an object");
         assert!(obj.contains_key("name"), "missing field: name");
-        assert!(obj.contains_key("rpc_url"), "missing field: rpc_url");
-        assert!(obj.contains_key("chain_id"), "missing field: chain_id");
+        assert!(obj.contains_key("rpcUrl"), "missing field: rpcUrl");
+        assert!(obj.contains_key("chainId"), "missing field: chainId");
         assert!(obj.contains_key("status"), "missing field: status");
     }
 }

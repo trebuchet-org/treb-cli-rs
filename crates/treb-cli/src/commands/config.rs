@@ -16,6 +16,7 @@ const TREB_DIR: &str = ".treb";
 // ── config show ──────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ConfigShowOutput {
     pub namespace: String,
     pub network: Option<String>,

@@ -11,6 +11,7 @@ use crate::output;
 
 /// Network information for a single RPC endpoint.
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NetworkInfo {
     pub name: String,
     pub rpc_url: String,

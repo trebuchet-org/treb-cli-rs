@@ -353,6 +353,7 @@ pub struct ComposeTotals {
 
 /// Full compose result for JSON output.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ComposeOutputJson {
     group: String,
     success: bool,
