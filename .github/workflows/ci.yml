@@ -61,3 +61,30 @@ jobs:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
+
+  smoke:
+    name: smoke test
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Build binary
+        run: cargo build --bin treb-cli
+      - name: Validate version JSON
+        run: |
+          JSON=$(./target/debug/treb-cli version --json)
+          echo "$JSON"
+          echo "$JSON" | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          for field in ['version', 'commit', 'foundryVersion', 'trebSolCommit']:
+              val = data.get(field, '')
+              assert isinstance(val, str), f'{field} is not a string'
+              assert val, f'{field} is empty'
+              assert val != 'unknown', f'{field} is unknown'
+          print('All metadata fields validated successfully')
+          "
