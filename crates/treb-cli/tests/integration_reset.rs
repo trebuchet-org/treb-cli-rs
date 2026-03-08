@@ -23,7 +23,12 @@ use framework::{
 
 // ── Fixture builders ─────────────────────────────────────────────────────
 
-fn make_deployment(id: &str, chain_id: u64, namespace: &str) -> treb_core::types::Deployment {
+fn make_deployment(
+    id: &str,
+    chain_id: u64,
+    namespace: &str,
+    transaction_id: &str,
+) -> treb_core::types::Deployment {
     let ts = Utc::now();
     treb_core::types::Deployment {
         id: id.to_string(),
@@ -33,7 +38,7 @@ fn make_deployment(id: &str, chain_id: u64, namespace: &str) -> treb_core::types
         label: "v1".to_string(),
         address: format!("0x{:040x}", 1u64),
         deployment_type: DeploymentType::Singleton,
-        transaction_id: String::new(),
+        transaction_id: transaction_id.to_string(),
         deployment_strategy: DeploymentStrategy {
             method: DeploymentMethod::Create,
             salt: String::new(),
@@ -63,7 +68,11 @@ fn make_deployment(id: &str, chain_id: u64, namespace: &str) -> treb_core::types
     }
 }
 
-fn make_transaction(id: &str, chain_id: u64) -> treb_core::types::Transaction {
+fn make_transaction(
+    id: &str,
+    chain_id: u64,
+    deployments: &[&str],
+) -> treb_core::types::Transaction {
     let ts = Utc::now();
     treb_core::types::Transaction {
         id: id.to_string(),
@@ -73,7 +82,7 @@ fn make_transaction(id: &str, chain_id: u64) -> treb_core::types::Transaction {
         block_number: 1000,
         sender: "0x56fD3F2bEE130e9867942D0F463a16fBE49B8d81".to_string(),
         nonce: 0,
-        deployments: vec![],
+        deployments: deployments.iter().map(|id| (*id).to_string()).collect(),
         operations: vec![],
         safe_context: None,
         environment: "testnet".to_string(),
@@ -81,7 +90,11 @@ fn make_transaction(id: &str, chain_id: u64) -> treb_core::types::Transaction {
     }
 }
 
-fn make_safe_transaction(hash: &str, chain_id: u64) -> treb_core::types::SafeTransaction {
+fn make_safe_transaction(
+    hash: &str,
+    chain_id: u64,
+    transaction_ids: &[&str],
+) -> treb_core::types::SafeTransaction {
     let ts = Utc::now();
     treb_core::types::SafeTransaction {
         safe_tx_hash: hash.to_string(),
@@ -95,7 +108,7 @@ fn make_safe_transaction(hash: &str, chain_id: u64) -> treb_core::types::SafeTra
             data: "0x".to_string(),
             operation: 0,
         }],
-        transaction_ids: vec![],
+        transaction_ids: transaction_ids.iter().map(|id| (*id).to_string()).collect(),
         proposed_by: "0x0000000000000000000000000000000000000003".to_string(),
         proposed_at: ts,
         confirmations: vec![],
@@ -104,7 +117,11 @@ fn make_safe_transaction(hash: &str, chain_id: u64) -> treb_core::types::SafeTra
     }
 }
 
-fn make_governor_proposal(id: &str, chain_id: u64) -> treb_core::types::GovernorProposal {
+fn make_governor_proposal(
+    id: &str,
+    chain_id: u64,
+    transaction_ids: &[&str],
+) -> treb_core::types::GovernorProposal {
     let ts = Utc::now();
     treb_core::types::GovernorProposal {
         proposal_id: id.to_string(),
@@ -112,7 +129,7 @@ fn make_governor_proposal(id: &str, chain_id: u64) -> treb_core::types::Governor
         timelock_address: String::new(),
         chain_id,
         status: ProposalStatus::Pending,
-        transaction_ids: vec![],
+        transaction_ids: transaction_ids.iter().map(|id| (*id).to_string()).collect(),
         proposed_by: "0x0000000000000000000000000000000000000005".to_string(),
         proposed_at: ts,
         description: String::new(),
@@ -137,21 +154,46 @@ fn seed_reset_registry(project_root: &std::path::Path) {
     let mut registry = Registry::open(project_root).expect("registry should open");
 
     // Deployments
-    registry.insert_deployment(make_deployment("dep-1", 1, "default")).unwrap();
-    registry.insert_deployment(make_deployment("dep-2", 1, "staging")).unwrap();
-    registry.insert_deployment(make_deployment("dep-3", 42220, "default")).unwrap();
+    registry.insert_deployment(make_deployment("dep-1", 1, "default", "")).unwrap();
+    registry.insert_deployment(make_deployment("dep-2", 1, "staging", "")).unwrap();
+    registry.insert_deployment(make_deployment("dep-3", 42220, "default", "")).unwrap();
 
     // Transactions
-    registry.insert_transaction(make_transaction("tx-1", 1)).unwrap();
-    registry.insert_transaction(make_transaction("tx-2", 42220)).unwrap();
+    registry.insert_transaction(make_transaction("tx-1", 1, &[])).unwrap();
+    registry.insert_transaction(make_transaction("tx-2", 42220, &[])).unwrap();
 
     // Safe transactions
-    registry.insert_safe_transaction(make_safe_transaction("safe-tx-1", 1)).unwrap();
-    registry.insert_safe_transaction(make_safe_transaction("safe-tx-2", 42220)).unwrap();
+    registry.insert_safe_transaction(make_safe_transaction("safe-tx-1", 1, &[])).unwrap();
+    registry.insert_safe_transaction(make_safe_transaction("safe-tx-2", 42220, &[])).unwrap();
 
     // Governor proposals
-    registry.insert_governor_proposal(make_governor_proposal("gov-1", 1)).unwrap();
-    registry.insert_governor_proposal(make_governor_proposal("gov-2", 42220)).unwrap();
+    registry.insert_governor_proposal(make_governor_proposal("gov-1", 1, &[])).unwrap();
+    registry.insert_governor_proposal(make_governor_proposal("gov-2", 42220, &[])).unwrap();
+}
+
+/// Seed namespace-scoped reset fixtures with linked entries in two namespaces.
+fn seed_namespace_reset_registry(project_root: &std::path::Path) {
+    let mut registry = Registry::open(project_root).expect("registry should open");
+
+    registry.insert_deployment(make_deployment("dep-default", 1, "default", "tx-default")).unwrap();
+    registry.insert_deployment(make_deployment("dep-staging", 1, "staging", "tx-staging")).unwrap();
+
+    registry.insert_transaction(make_transaction("tx-default", 1, &["dep-default"])).unwrap();
+    registry.insert_transaction(make_transaction("tx-staging", 1, &["dep-staging"])).unwrap();
+
+    registry
+        .insert_safe_transaction(make_safe_transaction("safe-tx-default", 1, &["tx-default"]))
+        .unwrap();
+    registry
+        .insert_safe_transaction(make_safe_transaction("safe-tx-staging", 1, &["tx-staging"]))
+        .unwrap();
+
+    registry
+        .insert_governor_proposal(make_governor_proposal("gov-default", 1, &["tx-default"]))
+        .unwrap();
+    registry
+        .insert_governor_proposal(make_governor_proposal("gov-staging", 1, &["tx-staging"]))
+        .unwrap();
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────
@@ -196,7 +238,7 @@ fn reset_namespace_filter() {
 
     let test = IntegrationTest::new("reset_namespace_filter")
         .setup(&["init"])
-        .post_setup_hook(|ctx| seed_reset_registry(ctx.path()))
+        .post_setup_hook(|ctx| seed_namespace_reset_registry(ctx.path()))
         .test(&["reset", "--yes", "--namespace", "staging"])
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(EpochNormalizer));

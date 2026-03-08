@@ -1,5 +1,4 @@
 === cmd 0: [run script/GovernorProposal.s.sol --network anvil-31337 --broadcast --non-interactive --json] ===
-No files changed, compilation skipped
 {
   "consoleLogs": [],
   "deployments": [],
