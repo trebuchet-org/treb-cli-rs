@@ -7,7 +7,7 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
     env, fs,
     hash::{DefaultHasher, Hash, Hasher},
-    io::{self, BufRead, IsTerminal, Write},
+    io::{self, BufRead, Write},
     path::{Path, PathBuf},
 };
 
@@ -22,7 +22,7 @@ use treb_forge::{
 };
 use treb_registry::Registry;
 
-use crate::{output, ui::color};
+use crate::{output, ui::{color, interactive::is_non_interactive}};
 
 // ── Compose file schema ──────────────────────────────────────────────────
 
@@ -618,35 +618,32 @@ pub async fn run(
     }
 
     // ── Broadcast confirmation (once before first component) ──────────
-    if broadcast && !non_interactive {
-        let is_tty = io::stdin().is_terminal();
-        if is_tty {
-            let executing_count = order.iter().filter(|n| !skip_set.contains(*n)).count();
-            let count_str = format!("{}", executing_count);
-            let mut kv_pairs: Vec<(&str, &str)> =
-                vec![("Components", &count_str), ("Compose", &compose.group)];
-            let ns_ref;
-            if let Some(ref ns) = namespace {
-                ns_ref = ns.clone();
-                kv_pairs.push(("Namespace", &ns_ref));
-            }
-            let net_ref;
-            if let Some(ref net) = network {
-                net_ref = net.clone();
-                kv_pairs.push(("Network", &net_ref));
-            }
-            eprintln!("About to broadcast to the network.");
-            output::eprint_kv(&kv_pairs);
-            eprint!("Proceed? [y/N] ");
-            io::stderr().flush().ok();
+    if broadcast && !is_non_interactive(non_interactive) {
+        let executing_count = order.iter().filter(|n| !skip_set.contains(*n)).count();
+        let count_str = format!("{}", executing_count);
+        let mut kv_pairs: Vec<(&str, &str)> =
+            vec![("Components", &count_str), ("Compose", &compose.group)];
+        let ns_ref;
+        if let Some(ref ns) = namespace {
+            ns_ref = ns.clone();
+            kv_pairs.push(("Namespace", &ns_ref));
+        }
+        let net_ref;
+        if let Some(ref net) = network {
+            net_ref = net.clone();
+            kv_pairs.push(("Network", &net_ref));
+        }
+        eprintln!("About to broadcast to the network.");
+        output::eprint_kv(&kv_pairs);
+        eprint!("Proceed? [y/N] ");
+        io::stderr().flush().ok();
 
-            let mut input = String::new();
-            io::stdin().lock().read_line(&mut input).ok();
-            let answer = input.trim().to_lowercase();
+        let mut input = String::new();
+        io::stdin().lock().read_line(&mut input).ok();
+        let answer = input.trim().to_lowercase();
 
-            if answer != "y" && answer != "yes" {
-                bail!("broadcast cancelled by user");
-            }
+        if answer != "y" && answer != "yes" {
+            bail!("broadcast cancelled by user");
         }
     }
 

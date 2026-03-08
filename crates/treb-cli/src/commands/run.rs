@@ -3,7 +3,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     env, fs,
-    io::{self, BufRead, IsTerminal, Write},
+    io::{self, BufRead, Write},
     path::PathBuf,
     time::Duration,
 };
@@ -22,11 +22,14 @@ use treb_forge::{
 };
 use treb_registry::Registry;
 
-use console::Term;
-
 use crate::{
     output,
-    ui::{badge, color, selector::fuzzy_select_network, tree::TreeNode},
+    ui::{
+        badge, color,
+        interactive::is_non_interactive,
+        selector::fuzzy_select_network,
+        tree::TreeNode,
+    },
 };
 
 const FOUNDRY_TOML: &str = "foundry.toml";
@@ -174,7 +177,7 @@ pub async fn run(
     inject_env_vars(&env_vars)?;
 
     // ── Interactive network selection when --network is omitted ───────────
-    let network = if network.is_none() && !non_interactive && Term::stdout().is_term() {
+    let network = if network.is_none() && !is_non_interactive(non_interactive) {
         let foundry_cfg = treb_config::load_foundry_config(&cwd)
             .map_err(|e| anyhow::anyhow!("failed to load foundry config: {e}"))?;
         let endpoints = treb_config::rpc_endpoints(&foundry_cfg);
@@ -310,8 +313,7 @@ pub async fn run(
 
     // ── Broadcast confirmation prompt ──────────────────────────────────
     if broadcast && !dry_run {
-        let should_prompt = !non_interactive && io::stdin().is_terminal();
-        if should_prompt {
+        if !is_non_interactive(non_interactive) {
             eprintln!("About to broadcast transactions to the network.");
             eprintln!("  Script: {}", script);
             eprintln!("  Namespace: {}", resolved.namespace);

@@ -2,13 +2,14 @@
 
 use console::Term;
 
+use super::interactive::is_non_interactive;
+
 /// Show a yes/no confirmation prompt.
 ///
-/// In non-TTY environments (e.g. CI, pipes) the `default` value is returned
-/// immediately without prompting.
+/// In non-interactive environments (CI, pipes, `TREB_NON_INTERACTIVE=true`)
+/// the `default` value is returned immediately without prompting.
 pub fn confirm(message: &str, default: bool) -> bool {
-    let is_tty = Term::stdout().is_term();
-    if !is_tty {
+    if is_non_interactive(false) {
         return default;
     }
 
