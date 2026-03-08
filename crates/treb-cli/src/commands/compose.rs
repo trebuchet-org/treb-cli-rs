@@ -303,6 +303,30 @@ fn print_dry_run_plan(compose: &ComposeFile, plan: &[PlanEntry]) {
     eprintln!();
 }
 
+fn should_prompt_for_broadcast_confirmation(
+    broadcast: bool,
+    dry_run: bool,
+    prompts_enabled: bool,
+    executing_count: usize,
+) -> bool {
+    broadcast && !dry_run && prompts_enabled && executing_count > 0
+}
+
+fn should_reject_interactive_json_broadcast(
+    broadcast: bool,
+    dry_run: bool,
+    json: bool,
+    prompts_enabled: bool,
+    executing_count: usize,
+) -> bool {
+    json && should_prompt_for_broadcast_confirmation(
+        broadcast,
+        dry_run,
+        prompts_enabled,
+        executing_count,
+    )
+}
+
 // ── Result aggregation ───────────────────────────────────────────────────
 
 /// Status of a component in compose results.
@@ -626,17 +650,29 @@ pub async fn run(
         return Ok(());
     }
 
-    // ── Reject interactive broadcast in JSON mode ─────────────────────
     let prompts_enabled = !is_non_interactive(non_interactive);
-    if json && broadcast && !dry_run && prompts_enabled {
+    let executing_count = order.iter().filter(|name| !skip_set.contains(*name)).count();
+
+    // ── Reject interactive broadcast in JSON mode ─────────────────────
+    if should_reject_interactive_json_broadcast(
+        broadcast,
+        dry_run,
+        json,
+        prompts_enabled,
+        executing_count,
+    ) {
         bail!(
             "interactive broadcast confirmation is not available in JSON mode; rerun with --non-interactive"
         );
     }
 
     // ── Broadcast confirmation (once before first component) ──────────
-    if broadcast && prompts_enabled {
-        let executing_count = order.iter().filter(|n| !skip_set.contains(*n)).count();
+    if should_prompt_for_broadcast_confirmation(
+        broadcast,
+        dry_run,
+        prompts_enabled,
+        executing_count,
+    ) {
         let count_str = format!("{}", executing_count);
         let mut kv_pairs: Vec<(&str, &str)> =
             vec![("Components", &count_str), ("Compose", &compose.group)];
@@ -1878,6 +1914,24 @@ components:
         assert_eq!(ComponentStatus::Skipped.to_string(), "skipped");
         assert_eq!(ComponentStatus::Failed.to_string(), "failed");
         assert_eq!(ComponentStatus::NotExecuted.to_string(), "not executed");
+    }
+
+    #[test]
+    fn prompt_for_broadcast_confirmation_requires_remaining_components() {
+        assert!(should_prompt_for_broadcast_confirmation(true, false, true, 1));
+        assert!(!should_prompt_for_broadcast_confirmation(true, false, true, 0));
+        assert!(!should_prompt_for_broadcast_confirmation(true, true, true, 1));
+        assert!(!should_prompt_for_broadcast_confirmation(true, false, false, 1));
+        assert!(!should_prompt_for_broadcast_confirmation(false, false, true, 1));
+    }
+
+    #[test]
+    fn interactive_json_broadcast_is_not_rejected_when_resume_is_a_no_op() {
+        assert!(should_reject_interactive_json_broadcast(true, false, true, true, 1));
+        assert!(!should_reject_interactive_json_broadcast(true, false, true, true, 0));
+        assert!(!should_reject_interactive_json_broadcast(true, false, true, false, 1));
+        assert!(!should_reject_interactive_json_broadcast(true, false, false, true, 1));
+        assert!(!should_reject_interactive_json_broadcast(true, true, true, true, 1));
     }
 
     #[test]
