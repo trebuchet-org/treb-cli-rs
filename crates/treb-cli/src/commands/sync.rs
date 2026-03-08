@@ -1,10 +1,13 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
 use alloy_chains::Chain;
 use anyhow::Context;
+use chrono::Utc;
 use owo_colors::OwoColorize;
 use serde::Serialize;
-use treb_core::types::{enums::TransactionStatus, safe_transaction::Confirmation};
+use treb_core::types::{ProposalStatus, enums::TransactionStatus, safe_transaction::Confirmation};
+use treb_forge::{is_terminal, query_proposal_state};
 use treb_registry::Registry;
 use treb_safe::{
     SafeServiceClient,
@@ -22,6 +25,10 @@ struct SyncOutputJson {
     updated: usize,
     newly_executed: usize,
     removed: usize,
+    governor_synced: usize,
+    governor_updated: usize,
+    governor_newly_executed: usize,
+    governor_removed: usize,
     errors: Vec<String>,
 }
 
@@ -47,6 +54,57 @@ fn resolve_chain_id(network: &str) -> anyhow::Result<u64> {
     let chain: Chain =
         network.parse().map_err(|_| anyhow::anyhow!("unknown network: {network}"))?;
     Ok(chain.id())
+}
+
+// ── RPC URL resolution for governor sync ────────────────────────────────
+
+/// Resolve RPC URLs for a set of chain IDs by probing foundry.toml endpoints.
+///
+/// Iterates over configured `[rpc_endpoints]`, calls `eth_chainId` on each,
+/// and builds a chain_id → URL map for the requested chains.
+async fn resolve_rpc_urls(
+    cwd: &std::path::Path,
+    needed_chains: &HashSet<u64>,
+    debug: bool,
+) -> HashMap<u64, String> {
+    let config = match treb_config::load_foundry_config(cwd) {
+        Ok(c) => c,
+        Err(_) => return HashMap::new(),
+    };
+    let endpoints = treb_config::rpc_endpoints(&config);
+
+    let mut rpc_map: HashMap<u64, String> = HashMap::new();
+
+    for (name, url) in &endpoints {
+        if url.contains("${") {
+            continue; // skip unresolved env var references
+        }
+        if rpc_map.len() == needed_chains.len() {
+            break; // found all needed chains
+        }
+
+        if debug {
+            eprintln!("[debug] probing RPC endpoint '{name}' for chain ID...");
+        }
+
+        match super::run::fetch_chain_id(url).await {
+            Ok(chain_id) => {
+                if needed_chains.contains(&chain_id) && !rpc_map.contains_key(&chain_id) {
+                    if debug {
+                        eprintln!("[debug] endpoint '{name}' → chain {chain_id}");
+                    }
+                    rpc_map.insert(chain_id, url.clone());
+                }
+            }
+            Err(e) => {
+                if debug {
+                    eprintln!("[debug] failed to probe endpoint '{name}': {e}");
+                }
+            }
+        }
+    }
+
+    rpc_map
 }
 
 // ── Main implementation ─────────────────────────────────────────────────
@@ -80,7 +138,7 @@ pub async fn run(
 
     // List all safe transactions, optionally filtered by chain
     let safe_txs = registry.list_safe_transactions();
-    let filtered: Vec<_> = safe_txs
+    let safe_filtered: Vec<_> = safe_txs
         .into_iter()
         .filter(|stx| match chain_filter {
             Some(cid) => stx.chain_id == cid,
@@ -88,53 +146,73 @@ pub async fn run(
         })
         .collect();
 
-    if filtered.is_empty() {
+    // List non-terminal governor proposals, optionally filtered by chain
+    let gov_proposals = registry.list_governor_proposals();
+    let gov_filtered: Vec<_> = gov_proposals
+        .into_iter()
+        .filter(|p| match chain_filter {
+            Some(cid) => p.chain_id == cid,
+            None => true,
+        })
+        .filter(|p| !is_terminal(&p.status))
+        .cloned()
+        .collect();
+
+    if safe_filtered.is_empty() && gov_filtered.is_empty() {
         if json {
             output::print_json(&SyncOutputJson {
                 synced: 0,
                 updated: 0,
                 newly_executed: 0,
                 removed: 0,
+                governor_synced: 0,
+                governor_updated: 0,
+                governor_newly_executed: 0,
+                governor_removed: 0,
                 errors: vec![],
             })?;
         } else {
             match &network {
-                Some(name) => println!("No safe transactions found for network {name}."),
-                None => println!("No safe transactions in the registry."),
+                Some(name) => {
+                    println!("No safe transactions or governor proposals found for network {name}.")
+                }
+                None => println!("No safe transactions or governor proposals in the registry."),
             }
         }
         return Ok(());
     }
-
-    if !json {
-        output::print_stage("\u{1f50d}", "Syncing safe transactions...");
-    }
-
-    // Group safe transactions by (safe_address, chain_id) for batched API calls.
-    // Store the safe_tx_hash for each group so we can match responses.
-    let mut groups: HashMap<(String, u64), Vec<String>> = HashMap::new();
-    for stx in &filtered {
-        groups
-            .entry((stx.safe_address.clone(), stx.chain_id))
-            .or_default()
-            .push(stx.safe_tx_hash.clone());
-    }
-
-    // Cache SafeServiceClient instances per chain_id to avoid redundant construction.
-    let mut clients: HashMap<u64, SafeServiceClient> = HashMap::new();
 
     let mut updated_count = 0usize;
     let mut newly_executed_count = 0usize;
     let mut removed_count = 0usize;
     let mut errors: Vec<String> = Vec::new();
     let mut detail_rows: Vec<SyncDetailRow> = Vec::new();
-    let synced_count = filtered.len();
+    let synced_count = safe_filtered.len();
 
-    if !json {
-        output::print_stage("\u{2699}\u{fe0f}", "Processing safe transactions...");
-    }
+    // ── Safe transaction sync ───────────────────────────────────────────
 
-    for ((safe_address, chain_id), local_hashes) in &groups {
+    if !safe_filtered.is_empty() {
+        if !json {
+            output::print_stage("\u{1f50d}", "Syncing safe transactions...");
+        }
+
+        // Group safe transactions by (safe_address, chain_id) for batched API calls.
+        let mut groups: HashMap<(String, u64), Vec<String>> = HashMap::new();
+        for stx in &safe_filtered {
+            groups
+                .entry((stx.safe_address.clone(), stx.chain_id))
+                .or_default()
+                .push(stx.safe_tx_hash.clone());
+        }
+
+        // Cache SafeServiceClient instances per chain_id to avoid redundant construction.
+        let mut clients: HashMap<u64, SafeServiceClient> = HashMap::new();
+
+        if !json {
+            output::print_stage("\u{2699}\u{fe0f}", "Processing safe transactions...");
+        }
+
+        for ((safe_address, chain_id), local_hashes) in &groups {
         let client = match clients.get(chain_id) {
             Some(c) => c,
             None => match SafeServiceClient::new(*chain_id) {
@@ -284,6 +362,122 @@ pub async fn run(
             }
         }
     }
+    } // end if !safe_filtered.is_empty()
+
+    // ── Governor proposal sync ──────────────────────────────────────────
+
+    let gov_synced_count = gov_filtered.len();
+    let mut gov_updated_count = 0usize;
+    let mut gov_newly_executed_count = 0usize;
+    let mut gov_removed_count = 0usize;
+
+    if !gov_filtered.is_empty() {
+        if !json {
+            output::print_stage("\u{1f3db}\u{fe0f}", "Syncing governor proposals...");
+        }
+
+        // Resolve RPC URLs for needed chain_ids from foundry.toml endpoints
+        let needed_chains: HashSet<u64> = gov_filtered.iter().map(|p| p.chain_id).collect();
+        let rpc_map = resolve_rpc_urls(&cwd, &needed_chains, debug).await;
+
+        let http_client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .context("failed to build HTTP client")?;
+
+        for proposal in &gov_filtered {
+            let rpc_url = match rpc_map.get(&proposal.chain_id) {
+                Some(url) => url,
+                None => {
+                    let msg = format!(
+                        "no RPC endpoint found for chain {} (governor {})",
+                        proposal.chain_id,
+                        output::truncate_address(&proposal.governor_address)
+                    );
+                    errors.push(msg.clone());
+                    if !json {
+                        eprintln!("{}", output::format_warning_banner("\u{26a0}\u{fe0f}", &msg));
+                    }
+                    continue;
+                }
+            };
+
+            if debug {
+                eprintln!(
+                    "[debug] querying Governor state for proposal {} on {}",
+                    output::truncate_address(&proposal.proposal_id),
+                    output::truncate_address(&proposal.governor_address),
+                );
+            }
+
+            match query_proposal_state(
+                &http_client,
+                rpc_url,
+                &proposal.governor_address,
+                &proposal.proposal_id,
+            )
+            .await
+            {
+                Ok(new_status) => {
+                    if new_status != proposal.status {
+                        let mut updated = proposal.clone();
+                        updated.status = new_status.clone();
+
+                        let became_executed = new_status == ProposalStatus::Executed;
+                        if became_executed {
+                            updated.executed_at = Some(Utc::now());
+                            gov_newly_executed_count += 1;
+                        }
+
+                        registry
+                            .update_governor_proposal(updated.clone())
+                            .map_err(|e| anyhow::anyhow!("{e}"))?;
+                        gov_updated_count += 1;
+
+                        // Cascade: update linked Transaction records when proposal is executed
+                        if became_executed {
+                            for tx_id in &updated.transaction_ids {
+                                if let Some(tx) = registry.get_transaction(tx_id) {
+                                    let mut tx = tx.clone();
+                                    if tx.status != TransactionStatus::Executed {
+                                        tx.status = TransactionStatus::Executed;
+                                        tx.hash = updated.execution_tx_hash.clone();
+                                        registry
+                                            .update_transaction(tx)
+                                            .map_err(|e| anyhow::anyhow!("{e}"))?;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    let err_str = e.to_string();
+                    if clean && err_str.contains("call reverted") {
+                        // --clean: remove proposals whose governor contract is unreachable
+                        registry
+                            .remove_governor_proposal(&proposal.proposal_id)
+                            .map_err(|e| anyhow::anyhow!("{e}"))?;
+                        gov_removed_count += 1;
+                    } else {
+                        let msg = format!(
+                            "governor {} (chain {}): {}",
+                            output::truncate_address(&proposal.governor_address),
+                            proposal.chain_id,
+                            err_str
+                        );
+                        errors.push(msg.clone());
+                        if !json {
+                            eprintln!(
+                                "{}",
+                                output::format_warning_banner("\u{26a0}\u{fe0f}", &msg)
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // ── Output ──────────────────────────────────────────────────────────
 
@@ -293,6 +487,10 @@ pub async fn run(
             updated: updated_count,
             newly_executed: newly_executed_count,
             removed: removed_count,
+            governor_synced: gov_synced_count,
+            governor_updated: gov_updated_count,
+            governor_newly_executed: gov_newly_executed_count,
+            governor_removed: gov_removed_count,
             errors,
         })?;
     } else {
@@ -312,20 +510,50 @@ pub async fn run(
         }
 
         println!("{}", output::format_stage("\u{2705}", "Sync complete."));
-        println!("  Safe transactions synced: {synced_count}");
-        if color::is_color_enabled() {
-            println!("  Updated:                  {}", updated_count.style(color::WARNING));
-            println!("  Newly executed:           {}", newly_executed_count.style(color::SUCCESS));
-        } else {
-            println!("  Updated:                  {updated_count}");
-            println!("  Newly executed:           {newly_executed_count}");
+        if synced_count > 0 {
+            println!("  Safe transactions synced: {synced_count}");
+            if color::is_color_enabled() {
+                println!(
+                    "  Updated:                  {}",
+                    updated_count.style(color::WARNING)
+                );
+                println!(
+                    "  Newly executed:           {}",
+                    newly_executed_count.style(color::SUCCESS)
+                );
+            } else {
+                println!("  Updated:                  {updated_count}");
+                println!("  Newly executed:           {newly_executed_count}");
+            }
+            if clean {
+                println!("  Removed (stale):          {removed_count}");
+            }
         }
-        if clean {
-            println!("  Removed (stale):          {removed_count}");
+        if gov_synced_count > 0 {
+            println!("  Governor proposals synced: {gov_synced_count}");
+            if color::is_color_enabled() {
+                println!(
+                    "  Governor updated:         {}",
+                    gov_updated_count.style(color::WARNING)
+                );
+                println!(
+                    "  Governor newly executed:  {}",
+                    gov_newly_executed_count.style(color::SUCCESS)
+                );
+            } else {
+                println!("  Governor updated:         {gov_updated_count}");
+                println!("  Governor newly executed:  {gov_newly_executed_count}");
+            }
+            if clean {
+                println!("  Governor removed:         {gov_removed_count}");
+            }
         }
         if !errors.is_empty() {
             if color::is_color_enabled() {
-                println!("  Errors:                   {}", errors.len().style(color::ERROR));
+                println!(
+                    "  Errors:                   {}",
+                    errors.len().style(color::ERROR)
+                );
             } else {
                 println!("  Errors:                   {}", errors.len());
             }
@@ -503,6 +731,10 @@ mod tests {
             updated: 3,
             newly_executed: 1,
             removed: 0,
+            governor_synced: 2,
+            governor_updated: 1,
+            governor_newly_executed: 0,
+            governor_removed: 0,
             errors: vec!["some error".into()],
         };
         let json = serde_json::to_string(&output).unwrap();
@@ -510,6 +742,10 @@ mod tests {
         assert!(json.contains("\"updated\":3"));
         assert!(json.contains("\"newlyExecuted\":1"));
         assert!(json.contains("\"removed\":0"));
+        assert!(json.contains("\"governorSynced\":2"));
+        assert!(json.contains("\"governorUpdated\":1"));
+        assert!(json.contains("\"governorNewlyExecuted\":0"));
+        assert!(json.contains("\"governorRemoved\":0"));
         assert!(json.contains("some error"));
     }
 }
