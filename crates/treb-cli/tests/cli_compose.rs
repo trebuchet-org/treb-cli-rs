@@ -24,6 +24,7 @@ fn treb() -> assert_cmd::Command {
 }
 
 const MINIMAL_FOUNDRY_TOML: &str = "[profile.default]\n";
+const COMPOSE_EXEC_FOUNDRY_TOML: &str = "[profile.default]\nscript = \"script\"\n\n[rpc_endpoints]\nlocalhost = \"http://localhost:8545\"\n";
 
 /// Path to the compose fixtures directory.
 fn fixtures_dir() -> std::path::PathBuf {
@@ -445,6 +446,47 @@ fn compose_resume_json_error_stderr_remains_valid_json_when_state_hash_is_stale(
     assert!(
         !stderr.contains("compose file has changed"),
         "stderr should not include resume warning in json mode: {stderr}"
+    );
+}
+
+#[test]
+fn compose_json_execution_failure_emits_only_wrapped_json_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join("script")).unwrap();
+    fs::write(tmp.path().join("foundry.toml"), COMPOSE_EXEC_FOUNDRY_TOML).unwrap();
+
+    treb().arg("init").current_dir(tmp.path()).assert().success();
+
+    fs::write(
+        tmp.path().join("broken.yaml"),
+        "group: broken\ncomponents:\n  missing:\n    script: script/NonExistent.s.sol\n",
+    )
+    .unwrap();
+
+    let output = treb()
+        .args(["compose", "broken.yaml", "--network", "localhost", "--json", "--non-interactive"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("failed to run compose execution failure --json");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        output.stdout.is_empty(),
+        "stdout should stay empty on compose execution failure in json mode"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let json: serde_json::Value =
+        serde_json::from_str(&stderr).expect("stderr should be valid JSON");
+    let error = json["error"].as_str().expect("json error should be a string");
+
+    assert!(
+        error.contains("compose failed: component 'missing' failed (0/1 completed)"),
+        "unexpected error: {error}"
+    );
+    assert!(
+        !stderr.contains("Component 'missing' failed"),
+        "stderr should not include per-component human-readable lines: {stderr}"
     );
 }
 

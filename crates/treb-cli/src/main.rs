@@ -2,6 +2,8 @@ mod commands;
 mod output;
 mod ui;
 
+use std::env;
+
 use clap::{CommandFactory, Parser, Subcommand};
 use treb_core::types::DeploymentType;
 
@@ -519,9 +521,37 @@ impl commands::dev::AnvilSubcommand {
     }
 }
 
+fn argv_requests_flag(flag: &str) -> bool {
+    let prefix = format!("{flag}=");
+    env::args_os().skip(1).take_while(|arg| arg != "--").any(|arg| {
+        let arg = arg.to_string_lossy();
+        arg == flag || arg.starts_with(&prefix)
+    })
+}
+
 #[tokio::main]
 async fn main() {
-    let cli = Cli::parse();
+    let no_color_requested = argv_requests_flag("--no-color");
+    ui::color::color_enabled(no_color_requested);
+
+    let json_requested = argv_requests_flag("--json");
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(err) => {
+            if json_requested
+                && !matches!(
+                    err.kind(),
+                    clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
+                )
+            {
+                output::print_json_error(&err.to_string());
+                std::process::exit(1);
+            }
+
+            err.print().expect("failed to print clap error");
+            std::process::exit(err.exit_code());
+        }
+    };
 
     // Apply color settings before any output is produced.
     ui::color::color_enabled(cli.no_color);

@@ -1,6 +1,6 @@
 === cmd 0: [fork revert --network mainnet --json] ===
 {
   "network": "mainnet",
-  "newSnapshotId": null,
-  "snapshotId": null
+  "newSnapshotId": "0xrevert-new",
+  "snapshotId": "0xrevert-old"
 }

@@ -130,17 +130,6 @@ pub enum ForkSubcommand {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ForkEnterJson {
-    network: String,
-    chain_id: u64,
-    port: u16,
-    rpc_url: String,
-    snapshot_id: Option<String>,
-    pid: u32,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 struct ForkExitJson {
     network: String,
     restored_entries: usize,
@@ -153,16 +142,6 @@ struct ForkRevertJson {
     network: String,
     snapshot_id: Option<String>,
     new_snapshot_id: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    instances: Vec<ForkRevertInstanceJson>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ForkRevertInstanceJson {
-    instance_name: String,
-    snapshot_id: Option<String>,
-    new_snapshot_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -173,47 +152,6 @@ struct ForkRestartJson {
     port: u16,
     rpc_url: String,
     snapshot_id: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    instances: Vec<ForkRestartInstanceJson>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ForkRestartInstanceJson {
-    instance_name: String,
-    chain_id: u64,
-    port: u16,
-    rpc_url: String,
-    snapshot_id: Option<String>,
-}
-
-fn build_fork_revert_json(
-    network: String,
-    instance_results: Vec<ForkRevertInstanceJson>,
-) -> ForkRevertJson {
-    let primary_result = instance_results.first();
-    ForkRevertJson {
-        network,
-        snapshot_id: primary_result.and_then(|result| result.snapshot_id.clone()),
-        new_snapshot_id: primary_result.and_then(|result| result.new_snapshot_id.clone()),
-        instances: if instance_results.len() > 1 { instance_results } else { Vec::new() },
-    }
-}
-
-fn build_fork_restart_json(
-    network: String,
-    fallback_chain_id: u64,
-    instance_results: Vec<ForkRestartInstanceJson>,
-) -> ForkRestartJson {
-    let primary_result = instance_results.first();
-    ForkRestartJson {
-        network,
-        chain_id: primary_result.map_or(fallback_chain_id, |result| result.chain_id),
-        port: primary_result.map_or(0, |result| result.port),
-        rpc_url: primary_result.map_or_else(String::new, |result| result.rpc_url.clone()),
-        snapshot_id: primary_result.and_then(|result| result.snapshot_id.clone()),
-        instances: if instance_results.len() > 1 { instance_results } else { Vec::new() },
-    }
 }
 
 // ── Dispatch ──────────────────────────────────────────────────────────────────
@@ -253,6 +191,13 @@ pub async fn run_enter(
     let treb_dir = cwd.join(TREB_DIR);
 
     ensure_treb_dir(&treb_dir)?;
+
+    if json {
+        bail!(
+            "`fork enter --json` is not supported because port, rpcUrl, snapshotId, and pid are not known until `treb dev anvil start --network {}` runs",
+            network
+        );
+    }
 
     // Load fork state and check not already forked (before any HTTP calls)
     let mut store = ForkStateStore::new(&treb_dir);
@@ -313,22 +258,11 @@ pub async fn run_enter(
         })
         .context("failed to record fork history")?;
 
-    if json {
-        output::print_json(&ForkEnterJson {
-            network,
-            chain_id,
-            port: 0,
-            rpc_url: String::new(),
-            snapshot_id: None,
-            pid: 0,
-        })?;
-    } else {
-        output::print_stage("\u{2705}", &format!("Fork mode entered for '{network}'."));
+    output::print_stage("\u{2705}", &format!("Fork mode entered for '{network}'."));
 
-        println!("Entered fork mode for network '{network}'.");
-        println!("Registry snapshot saved to {}", snapshot_dir.display());
-        println!("Run `treb dev anvil start --network {network}` to start a local Anvil node.");
-    }
+    println!("Entered fork mode for network '{network}'.");
+    println!("Registry snapshot saved to {}", snapshot_dir.display());
+    println!("Run `treb dev anvil start --network {network}` to start a local Anvil node.");
 
     Ok(())
 }
@@ -425,9 +359,22 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
         let session = resolve_fork_session_entry(&store, net)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("network '{}' is not in fork mode", net))?;
-        let runtime_entries: Vec<ForkEntry> =
-            tracked_anvil_entries_for_network(&store, net).into_iter().cloned().collect();
-        let mut instance_results: Vec<ForkRevertInstanceJson> = Vec::new();
+        let runtime_entries: Vec<ForkEntry> = if json {
+            primary_tracked_anvil_entry(&store, net).into_iter().cloned().collect()
+        } else {
+            tracked_anvil_entries_for_network(&store, net).into_iter().cloned().collect()
+        };
+        if json && runtime_entries.is_empty() {
+            bail!(
+                "network '{}' has no tracked Anvil instances; cannot emit JSON revert result; start one first with `treb dev anvil start --network {}`",
+                net,
+                net
+            );
+        }
+
+        let mut json_snapshot_id = None;
+        let mut json_new_snapshot_id = None;
+        let mut history_snapshots: Vec<(String, String)> = Vec::new();
 
         for entry in runtime_entries {
             let instance_name = entry.resolved_instance_name().to_string();
@@ -503,11 +450,12 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
                 timestamp: Utc::now(),
             });
             store.update_active_fork(updated).context("failed to update fork entry")?;
-            instance_results.push(ForkRevertInstanceJson {
-                instance_name,
-                snapshot_id: old_snapshot_id,
-                new_snapshot_id: Some(new_snapshot_id),
-            });
+
+            history_snapshots.push((instance_name, new_snapshot_id.clone()));
+            if json {
+                json_snapshot_id = old_snapshot_id;
+                json_new_snapshot_id = Some(new_snapshot_id);
+            }
         }
 
         if !json {
@@ -523,21 +471,16 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
                 action: "revert".into(),
                 network: net.clone(),
                 timestamp: Utc::now(),
-                details: match instance_results.as_slice() {
+                details: match history_snapshots.as_slice() {
                     [] => None,
-                    [result] => result
-                        .new_snapshot_id
-                        .clone()
-                        .map(|snapshot_id| format!("new EVM snapshot: {snapshot_id}")),
-                    results => Some(format!(
+                    [(_, snapshot_id)] => Some(format!("new EVM snapshot: {snapshot_id}")),
+                    snapshots => Some(format!(
                         "new EVM snapshots: {}",
-                        results
+                        snapshots
                             .iter()
-                            .filter_map(|result| {
-                                result.new_snapshot_id.as_ref().map(|snapshot_id| {
-                                    format!("{}={snapshot_id}", result.instance_name)
-                                })
-                            })
+                            .map(|(instance_name, snapshot_id)| format!(
+                                "{instance_name}={snapshot_id}"
+                            ))
                             .collect::<Vec<_>>()
                             .join(", ")
                     )),
@@ -546,7 +489,11 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
             .context("failed to record revert history")?;
 
         if json {
-            json_results.push(build_fork_revert_json(net.clone(), instance_results));
+            json_results.push(ForkRevertJson {
+                network: net.clone(),
+                snapshot_id: json_snapshot_id,
+                new_snapshot_id: json_new_snapshot_id,
+            });
         } else {
             output::print_stage("\u{2705}", &format!("Fork reverted for '{net}'."));
             println!("Reverted fork for network '{net}' to initial state.");
@@ -589,8 +536,11 @@ pub async fn run_restart(
     let session = resolve_fork_session_entry(&store, &network)
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("network '{}' is not in fork mode", network))?;
-    let runtime_entries: Vec<ForkEntry> =
-        tracked_anvil_entries_for_network(&store, &network).into_iter().cloned().collect();
+    let runtime_entries: Vec<ForkEntry> = if json {
+        primary_tracked_anvil_entry(&store, &network).into_iter().cloned().collect()
+    } else {
+        tracked_anvil_entries_for_network(&store, &network).into_iter().cloned().collect()
+    };
     if runtime_entries.is_empty() {
         bail!(
             "network '{}' has no tracked Anvil instances; start one first with `treb dev anvil start --network {}`",
@@ -603,7 +553,8 @@ pub async fn run_restart(
 
     // Determine the block to reset to.
     let blk = fork_block_number.or(session.fork_block_number);
-    let mut instance_results: Vec<ForkRestartInstanceJson> = Vec::new();
+    let mut json_result = None;
+    let mut history_snapshots: Vec<(String, String)> = Vec::new();
 
     for entry in &runtime_entries {
         let instance_name = entry.resolved_instance_name().to_string();
@@ -675,13 +626,17 @@ pub async fn run_restart(
             timestamp: Utc::now(),
         });
         store.update_active_fork(updated).context("failed to update fork entry")?;
-        instance_results.push(ForkRestartInstanceJson {
-            instance_name,
-            chain_id: entry.chain_id,
-            port: entry.port,
-            rpc_url: entry.rpc_url.clone(),
-            snapshot_id: Some(snapshot_id),
-        });
+
+        history_snapshots.push((instance_name.clone(), snapshot_id.clone()));
+        if json {
+            json_result = Some(ForkRestartJson {
+                network: network.clone(),
+                chain_id: entry.chain_id,
+                port: entry.port,
+                rpc_url: entry.rpc_url.clone(),
+                snapshot_id: Some(snapshot_id),
+            });
+        }
     }
 
     // Restore registry from snapshot.
@@ -707,21 +662,16 @@ pub async fn run_restart(
             action: "restart".into(),
             network: network.clone(),
             timestamp: Utc::now(),
-            details: match instance_results.as_slice() {
+            details: match history_snapshots.as_slice() {
                 [] => None,
-                [result] => result
-                    .snapshot_id
-                    .clone()
-                    .map(|snapshot_id| format!("Anvil reset; snapshot: {snapshot_id}")),
-                results => Some(format!(
+                [(_, snapshot_id)] => Some(format!("Anvil reset; snapshot: {snapshot_id}")),
+                snapshots => Some(format!(
                     "Anvil reset; snapshots: {}",
-                    results
+                    snapshots
                         .iter()
-                        .filter_map(|result| {
-                            result.snapshot_id.as_ref().map(|snapshot_id| {
-                                format!("{}={snapshot_id}", result.instance_name)
-                            })
-                        })
+                        .map(|(instance_name, snapshot_id)| format!(
+                            "{instance_name}={snapshot_id}"
+                        ))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )),
@@ -730,7 +680,8 @@ pub async fn run_restart(
         .context("failed to record restart history")?;
 
     if json {
-        output::print_json(&build_fork_restart_json(network, session.chain_id, instance_results))?;
+        let result = json_result.ok_or_else(|| anyhow::anyhow!("missing fork restart result"))?;
+        output::print_json(&result)?;
     } else {
         output::print_stage("\u{2705}", &format!("Fork restarted for '{network}'."));
         println!("Restarted fork for network '{network}'.");
@@ -1229,7 +1180,7 @@ fn load_json_map(path: &Path) -> Option<serde_json::Map<String, serde_json::Valu
 
 #[cfg(test)]
 mod tests {
-    use super::{ForkRestartInstanceJson, ForkRevertInstanceJson, ForkSubcommand};
+    use super::ForkSubcommand;
     use chrono::Utc;
     use clap::{Parser, Subcommand};
     use std::{fs, path::PathBuf};
@@ -1540,70 +1491,23 @@ mod tests {
     }
 
     #[test]
-    fn build_fork_revert_json_preserves_multi_instance_results() {
-        let json = super::build_fork_revert_json(
-            "mainnet".into(),
-            vec![
-                ForkRevertInstanceJson {
-                    instance_name: "mainnet".into(),
-                    snapshot_id: Some("0xold-mainnet".into()),
-                    new_snapshot_id: Some("0xnew-mainnet".into()),
-                },
-                ForkRevertInstanceJson {
-                    instance_name: "alpha".into(),
-                    snapshot_id: Some("0xold-alpha".into()),
-                    new_snapshot_id: Some("0xnew-alpha".into()),
-                },
-            ],
-        );
+    fn primary_tracked_anvil_entry_prefers_default_named_order() {
+        let (_root, treb_dir) = make_treb_dir();
+        let mut store = ForkStateStore::new(&treb_dir);
 
-        assert_eq!(json.snapshot_id.as_deref(), Some("0xold-mainnet"));
-        assert_eq!(json.new_snapshot_id.as_deref(), Some("0xnew-mainnet"));
-        assert_eq!(json.instances.len(), 2);
+        let mut beta = sample_named_entry(&treb_dir, "mainnet", "beta");
+        beta.port = 18546;
+        beta.rpc_url = "http://127.0.0.1:18546".into();
 
-        let value = serde_json::to_value(&json).unwrap();
-        let instances = value["instances"].as_array().unwrap();
-        assert_eq!(instances.len(), 2);
-        assert_eq!(instances[1]["instanceName"], "alpha");
-        assert_eq!(instances[1]["snapshotId"], "0xold-alpha");
-        assert_eq!(instances[1]["newSnapshotId"], "0xnew-alpha");
-    }
+        let mut alpha = sample_named_entry(&treb_dir, "mainnet", "alpha");
+        alpha.port = 18545;
+        alpha.rpc_url = "http://127.0.0.1:18545".into();
 
-    #[test]
-    fn build_fork_restart_json_preserves_multi_instance_results() {
-        let json = super::build_fork_restart_json(
-            "mainnet".into(),
-            1,
-            vec![
-                ForkRestartInstanceJson {
-                    instance_name: "mainnet".into(),
-                    chain_id: 1,
-                    port: 18545,
-                    rpc_url: "http://127.0.0.1:18545".into(),
-                    snapshot_id: Some("0xrestart-mainnet".into()),
-                },
-                ForkRestartInstanceJson {
-                    instance_name: "alpha".into(),
-                    chain_id: 1,
-                    port: 18546,
-                    rpc_url: "http://127.0.0.1:18546".into(),
-                    snapshot_id: Some("0xrestart-alpha".into()),
-                },
-            ],
-        );
+        store.insert_active_fork(beta).unwrap();
+        store.insert_active_fork(alpha).unwrap();
 
-        assert_eq!(json.port, 18545);
-        assert_eq!(json.rpc_url, "http://127.0.0.1:18545");
-        assert_eq!(json.snapshot_id.as_deref(), Some("0xrestart-mainnet"));
-        assert_eq!(json.instances.len(), 2);
-
-        let value = serde_json::to_value(&json).unwrap();
-        let instances = value["instances"].as_array().unwrap();
-        assert_eq!(instances.len(), 2);
-        assert_eq!(instances[1]["instanceName"], "alpha");
-        assert_eq!(instances[1]["port"], 18546);
-        assert_eq!(instances[1]["rpcUrl"], "http://127.0.0.1:18546");
-        assert_eq!(instances[1]["snapshotId"], "0xrestart-alpha");
+        let primary = super::primary_tracked_anvil_entry(&store, "mainnet").unwrap();
+        assert_eq!(primary.resolved_instance_name(), "alpha");
     }
 
     // ── history filtering ─────────────────────────────────────────────────

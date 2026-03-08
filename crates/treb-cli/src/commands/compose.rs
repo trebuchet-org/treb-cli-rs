@@ -963,10 +963,12 @@ pub async fn run(
             }
             Err(e) => {
                 let error_msg = format!("{}", e);
-                eprintln!(
-                    "Component '{}' failed ({}/{} completed): {}",
-                    name, completed, total, error_msg
-                );
+                if !json {
+                    eprintln!(
+                        "Component '{}' failed ({}/{} completed): {}",
+                        name, completed, total, error_msg
+                    );
+                }
 
                 // Write per-component debug log for failure.
                 if let Some(ref dir) = debug_dir {
@@ -999,6 +1001,14 @@ pub async fn run(
     // ── Display results ──────────────────────────────────────────────
     let totals = compute_totals(&component_results);
     let success = failed_component.is_none();
+    let failure_error = failed_component.as_ref().map(|failed| {
+        anyhow::anyhow!(
+            "compose failed: component '{}' failed ({}/{} completed)",
+            failed,
+            completed,
+            total
+        )
+    });
 
     if !json {
         if success {
@@ -1006,19 +1016,15 @@ pub async fn run(
         } else {
             output::print_stage("\u{274c}", "Orchestration failed.");
         }
-    }
-
-    if json {
-        display_compose_json(&compose.group, component_results, totals, success)?;
-    } else {
         display_compose_human(&compose.group, &component_results, &totals);
-    }
 
-    // Print debug directory path.
-    if !json {
         if let Some(ref dir) = debug_dir {
             eprintln!("Debug logs saved to {}", dir.display());
         }
+    } else if success {
+        // In JSON mode, execution failures bubble up to the top-level JSON
+        // error wrapper instead of mixing a result payload with stderr errors.
+        display_compose_json(&compose.group, component_results, totals, success)?;
     }
 
     // Full successful completion: delete the state file.
@@ -1026,8 +1032,8 @@ pub async fn run(
         delete_compose_state();
     }
 
-    if let Some(ref failed) = failed_component {
-        bail!("compose failed: component '{}' failed ({}/{} completed)", failed, completed, total);
+    if let Some(err) = failure_error {
+        return Err(err);
     }
 
     Ok(())

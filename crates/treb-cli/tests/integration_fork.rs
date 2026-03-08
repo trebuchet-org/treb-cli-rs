@@ -532,11 +532,17 @@ where
     Ok(port)
 }
 
-fn seed_fork_revert_json_success(project_root: &std::path::Path) -> std::io::Result<()> {
+fn seed_fork_revert_json_success(project_root: &std::path::Path, port: u16) -> std::io::Result<()> {
     let treb_dir = project_root.join(".treb");
     let mut entry = sample_fork_entry(&treb_dir);
-    entry.rpc_url.clear();
-    entry.port = 0;
+    entry.rpc_url = format!("http://127.0.0.1:{port}");
+    entry.port = port;
+    entry.snapshots.push(treb_core::types::fork::SnapshotEntry {
+        index: 0,
+        snapshot_id: "0xrevert-old".to_string(),
+        command: "enter".to_string(),
+        timestamp: Utc.with_ymd_and_hms(2026, 1, 15, 10, 31, 0).unwrap(),
+    });
 
     let snapshot_dir = std::path::PathBuf::from(&entry.snapshot_dir);
     std::fs::create_dir_all(&snapshot_dir)?;
@@ -778,22 +784,17 @@ fn fork_restart_port_unreachable() {
 
 // ── fork enter: JSON output ─────────────────────────────────────────────
 
-/// `treb fork enter --network localhost --json` should emit valid JSON with
-/// camelCase field names (network, chainId, port, rpcUrl, snapshotId, pid).
+/// `treb fork enter --network localhost --json` should return a structured
+/// JSON error because runtime-only fields are unavailable until anvil starts.
 #[test]
 fn fork_enter_json() {
     let ctx = TestContext::new("minimal-project");
-    if let Err(err) = seed_fork_enter_success(ctx.path()) {
-        if err.kind() == std::io::ErrorKind::PermissionDenied {
-            return;
-        }
-        panic!("seed fork enter success: {err}");
-    }
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("fork_enter_json")
         .setup(&["init"])
         .test(&["fork", "enter", "--network", "localhost", "--json"])
+        .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
@@ -817,18 +818,27 @@ fn fork_exit_json() {
     run_integration_test(&test, &ctx);
 }
 
-// ── fork revert: JSON output (no active forks) ─────────────────────────
+// ── fork revert: JSON output ────────────────────────────────────────────
 
 /// `treb fork revert --network mainnet --json` should emit valid JSON with
 /// network, snapshotId, and newSnapshotId fields on the success path.
 #[test]
 fn fork_revert_json_success() {
+    let port = match spawn_json_rpc_server(|request| match request["method"].as_str().unwrap() {
+        "evm_revert" => serde_json::json!(true),
+        "evm_snapshot" => serde_json::json!("0xrevert-new"),
+        other => panic!("unexpected JSON-RPC method for revert fixture: {other}"),
+    }) {
+        Ok(port) => port,
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return,
+        Err(err) => panic!("seed fork revert success: {err}"),
+    };
     let ctx = TestContext::new("minimal-project");
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("fork_revert_json_success")
         .setup(&["init"])
-        .post_setup_hook(|ctx| seed_fork_revert_json_success(ctx.path()).unwrap())
+        .post_setup_hook(move |ctx| seed_fork_revert_json_success(ctx.path(), port).unwrap())
         .test(&["fork", "revert", "--network", "mainnet", "--json"])
         .extra_normalizer(Box::new(path_normalizer));
 
