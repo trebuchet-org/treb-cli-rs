@@ -17,6 +17,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
       - name: Download all release artifacts
         uses: actions/download-artifact@v4
         with:
@@ -28,13 +38,37 @@ jobs:
       - name: List downloaded artifacts
         run: ls -la dist/
 
+      - name: Gather build metadata
+        id: meta
+        run: |
+          echo "foundry_version=$(forge --version | head -1)" >> "$GITHUB_OUTPUT"
+          echo "treb_sol_commit=$(git -C lib/treb-sol rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "rust_version=$(rustc --version)" >> "$GITHUB_OUTPUT"
+
+      - name: Consolidate checksums
+        run: |
+          cd dist
+          cat *.sha256 | sort > checksums.txt
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.event.workflow_run.head_branch }}
         run: |
+          BODY=$(cat <<EOF
+          ## Build Info
+
+          | Field | Value |
+          |-------|-------|
+          | Foundry | \`${{ steps.meta.outputs.foundry_version }}\` |
+          | treb-sol | \`${{ steps.meta.outputs.treb_sol_commit }}\` |
+          | Rust | \`${{ steps.meta.outputs.rust_version }}\` |
+          EOF
+          )
+
           gh release create "$TAG" \
             --title "treb $TAG" \
+            --notes "$BODY" \
             --generate-notes \
-            dist/*.tar.gz dist/*.sha256
+            dist/*.tar.gz dist/*.sha256 dist/checksums.txt
