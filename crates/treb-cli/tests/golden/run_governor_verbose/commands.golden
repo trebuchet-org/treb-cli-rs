@@ -1,0 +1,30 @@
+=== cmd 0: [run script/GovernorProposal.s.sol --network anvil-31337 --broadcast --non-interactive --verbose] ===
+No files changed, compilation skipped
+Transactions:
+  1.  (SIMULATED)
+
+Governor Proposals:
+  1. 42 (proposed)
+     Governor: 0xaAaA...aaAa | Timelock: 0xbBbB...BBbB | Status: pending | 1 linked transaction
+
+1 transaction, 1 governor proposal proposed, 35,948 gas used
+ Config source:  treb.toml (v2)
+     Namespace:  default
+      Chain ID:  31337
+           RPC:  anvil-31337
+        Sender:  anvil: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+        Sender:  deployer: governor=0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa timelock=0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB proposer=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+   Script path:  script/GovernorProposal.s.sol
+  Function sig:  run()
+Broadcast mode:  broadcast
+
+🔨 Compiling and executing script/GovernorProposal.s.sol...
+🏛️ Creating governance proposal...
+✅ Execution complete.
+
+            Events:  2 event(s) decoded
+           Console:  0 console.log line(s)
+       Deployments:  0 deployment(s)
+      Transactions:  1 transaction(s)
+Governor proposals:  1 governor proposal(s)
+           Skipped:  0 skipped

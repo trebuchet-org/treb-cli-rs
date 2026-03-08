@@ -1,0 +1,21 @@
+{
+  "tx-0x0001": {
+    "id": "tx-0x0001",
+    "chainId": 1,
+    "hash": "",
+    "status": "EXECUTED",
+    "sender": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "nonce": 0,
+    "deployments": [],
+    "operations": [
+      {
+        "type": "CALL",
+        "target": "0x1000000000000000000000000000000000000000",
+        "method": "setValue",
+        "result": {}
+      }
+    ],
+    "environment": "default",
+    "createdAt": "<TIMESTAMP>"
+  }
+}

@@ -295,10 +295,11 @@ anvil = "anvil"
 deployer = "governance"
 "#;
 
+const GOVERNOR_SCRIPT: &str = "script/GovernorProposal.s.sol";
+
 /// Broadcast with governor sender — human output.
 ///
-/// Verifies "Creating governance proposal..." stage message appears
-/// instead of "Broadcasting...".
+/// Verifies populated governor proposal output and registry persistence.
 #[tokio::test(flavor = "multi_thread")]
 async fn run_governor_human() {
     let ctx =
@@ -313,13 +314,13 @@ async fn run_governor_human() {
         .setup(&["init"])
         .test(&[
             "run",
-            "script/Deploy.s.sol",
+            GOVERNOR_SCRIPT,
             "--network",
             "anvil-31337",
             "--broadcast",
             "--non-interactive",
         ])
-        .output_artifact(".treb/deployments.json")
+        .output_artifact(".treb/governor-txs.json")
         .output_artifact(".treb/transactions.json")
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(CompilerOutputNormalizer))
@@ -332,8 +333,7 @@ async fn run_governor_human() {
 
 /// Broadcast with governor sender — JSON output.
 ///
-/// Verifies JSON structure is correct with governor sender, including
-/// empty `governorProposals` array.
+/// Verifies JSON structure is correct with populated governor proposal data.
 #[tokio::test(flavor = "multi_thread")]
 async fn run_governor_json() {
     let ctx =
@@ -348,7 +348,7 @@ async fn run_governor_json() {
         .setup(&["init"])
         .test(&[
             "run",
-            "script/Deploy.s.sol",
+            GOVERNOR_SCRIPT,
             "--network",
             "anvil-31337",
             "--broadcast",
@@ -365,7 +365,7 @@ async fn run_governor_json() {
 }
 
 /// Dry-run with governor sender — verifies governor config doesn't break
-/// the dry-run path.
+/// the dry-run path and uses proposal wording.
 #[test]
 fn run_governor_dry_run() {
     let ctx = TestContext::new("project");
@@ -377,15 +377,42 @@ fn run_governor_dry_run() {
             std::fs::write(ctx.path().join("treb.toml"), GOVERNOR_TREB_TOML).unwrap();
         })
         .setup(&["init"])
-        .test(&[
-            "run",
-            "script/Deploy.s.sol",
-            "--dry-run",
-            "--non-interactive",
-        ])
+        .test(&["run", GOVERNOR_SCRIPT, "--dry-run", "--non-interactive"])
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(CompilerOutputNormalizer))
         .extra_normalizer(Box::new(GasNormalizer))
+        .extra_normalizer(Box::new(DurationNormalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// Verbose governor broadcast shows governor sender context and proposal counts.
+#[tokio::test(flavor = "multi_thread")]
+async fn run_governor_verbose() {
+    let ctx =
+        TestContext::new("project").with_anvil("anvil-31337").await.expect("failed to spawn anvil");
+
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("run_governor_verbose")
+        .pre_setup_hook(|ctx| {
+            std::fs::write(ctx.path().join("treb.toml"), GOVERNOR_TREB_TOML).unwrap();
+        })
+        .setup(&["init"])
+        .test(&[
+            "run",
+            GOVERNOR_SCRIPT,
+            "--network",
+            "anvil-31337",
+            "--broadcast",
+            "--non-interactive",
+            "--verbose",
+        ])
+        .output_artifact(".treb/governor-txs.json")
+        .extra_normalizer(Box::new(path_normalizer))
+        .extra_normalizer(Box::new(CompilerOutputNormalizer))
+        .extra_normalizer(Box::new(GasNormalizer))
+        .extra_normalizer(Box::new(BlockNumberNormalizer))
         .extra_normalizer(Box::new(DurationNormalizer));
 
     run_integration_test(&test, &ctx);

@@ -18,7 +18,7 @@ use treb_forge::{
         resolve_git_commit,
     },
     script::build_script_config_with_senders,
-    sender::resolve_all_senders,
+    sender::{ResolvedSender, resolve_all_senders},
 };
 use treb_registry::Registry;
 
@@ -46,6 +46,24 @@ pub fn parse_env_var(s: &str) -> anyhow::Result<(&str, &str)> {
         bail!("invalid --env value '{}': key cannot be empty", s);
     }
     Ok((key, value))
+}
+
+fn format_verbose_sender(role: &str, sender: &ResolvedSender) -> String {
+    match sender {
+        ResolvedSender::Governor { governor_address, timelock_address, proposer } => {
+            let timelock = timelock_address
+                .map(|address| address.to_string())
+                .unwrap_or_else(|| "none".to_string());
+            format!(
+                "{}: governor={} timelock={} proposer={}",
+                role,
+                governor_address,
+                timelock,
+                proposer.sender_address()
+            )
+        }
+        _ => format!("{}: {}", role, sender.sender_address()),
+    }
 }
 
 /// Inject `--env KEY=VALUE` pairs into the process environment.
@@ -252,10 +270,9 @@ pub async fn run(
             ("RPC", rpc_display),
         ];
         // Collect sender lines
-        let sender_lines: Vec<String> = resolved_senders
-            .iter()
-            .map(|(role, s)| format!("{}: {:?}", role, s.sender_address()))
-            .collect();
+        let mut sender_lines: Vec<String> =
+            resolved_senders.iter().map(|(role, s)| format_verbose_sender(role, s)).collect();
+        sender_lines.sort();
         for line in &sender_lines {
             kv_pairs.push(("Sender", line));
         }
@@ -347,12 +364,14 @@ pub async fn run(
         let console_str = format!("{} console.log line(s)", result.console_logs.len());
         let dep_str = format!("{} deployment(s)", result.deployments.len());
         let tx_str = format!("{} transaction(s)", result.transactions.len());
+        let proposal_str = format!("{} governor proposal(s)", result.governor_proposals.len());
         let skip_str = format!("{} skipped", result.skipped.len());
         let summary_pairs: Vec<(&str, &str)> = vec![
             ("Events", &event_str),
             ("Console", &console_str),
             ("Deployments", &dep_str),
             ("Transactions", &tx_str),
+            ("Governor proposals", &proposal_str),
             ("Skipped", &skip_str),
         ];
         output::eprint_kv(&summary_pairs);
@@ -793,6 +812,7 @@ mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
     use treb_core::types::{GovernorProposal, ProposalStatus};
+    use treb_forge::in_memory_signer;
 
     fn sample_governor_proposal() -> GovernorProposal {
         GovernorProposal {
@@ -899,5 +919,40 @@ mod tests {
             "details should show an explicit placeholder when timelock is absent: {details}"
         );
         assert!(details.contains("Status: pending"), "details should include status: {details}");
+    }
+
+    #[test]
+    fn format_verbose_sender_includes_governor_context() {
+        let proposer = ResolvedSender::InMemory(in_memory_signer(0).unwrap());
+        let sender = ResolvedSender::Governor {
+            governor_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".parse().unwrap(),
+            timelock_address: Some("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".parse().unwrap()),
+            proposer: Box::new(proposer),
+        };
+
+        let line = format_verbose_sender("deployer", &sender);
+
+        assert_eq!(
+            line,
+            "deployer: governor=0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa timelock=0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB proposer=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+        );
+    }
+
+    #[test]
+    fn format_verbose_sender_uses_none_for_missing_timelock() {
+        let proposer = ResolvedSender::InMemory(in_memory_signer(1).unwrap());
+        let sender = ResolvedSender::Governor {
+            governor_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".parse().unwrap(),
+            timelock_address: None,
+            proposer: Box::new(proposer),
+        };
+
+        let line = format_verbose_sender("deployer", &sender);
+
+        assert!(line.contains("timelock=none"), "got: {line}");
+        assert!(
+            line.contains("proposer=0x70997970C51812dc3A010C7d01b50e0d17dc79C8"),
+            "got: {line}"
+        );
     }
 }

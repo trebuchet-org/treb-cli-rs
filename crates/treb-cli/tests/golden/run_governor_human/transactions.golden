@@ -6,9 +6,7 @@
     "status": "SIMULATED",
     "sender": "0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa",
     "nonce": 0,
-    "deployments": [
-      "default/31337/Counter:Counter"
-    ],
+    "deployments": [],
     "operations": [],
     "environment": "default",
     "createdAt": "<TIMESTAMP>"

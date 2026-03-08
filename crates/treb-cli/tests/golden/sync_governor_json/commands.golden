@@ -1,12 +1,10 @@
 === cmd 0: [sync --json] ===
 {
-  "errors": [
-    "no RPC endpoint found for chain 1 (governor 0xaaaa...aaaa)"
-  ],
-  "governorNewlyExecuted": 0,
+  "errors": [],
+  "governorNewlyExecuted": 1,
   "governorRemoved": 0,
   "governorSynced": 1,
-  "governorUpdated": 0,
+  "governorUpdated": 1,
   "newlyExecuted": 0,
   "removed": 0,
   "synced": 0,
