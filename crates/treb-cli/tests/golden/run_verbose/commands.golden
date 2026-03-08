@@ -13,7 +13,7 @@ Transactions:
      Namespace:  default
       Chain ID:  31337
            RPC:  anvil-31337
-        Sender:  anvil: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+        Sender:  anvil: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
    Script path:  script/Deploy.s.sol
   Function sig:  run()
 Broadcast mode:  broadcast
@@ -22,10 +22,11 @@ Broadcast mode:  broadcast
 📡 Broadcasting...
 ✅ Execution complete.
 
-      Events:  2 event(s) decoded
-     Console:  0 console.log line(s)
- Deployments:  1 deployment(s)
-Transactions:  1 transaction(s)
-     Skipped:  0 skipped
+            Events:  2 event(s) decoded
+           Console:  0 console.log line(s)
+       Deployments:  1 deployment(s)
+      Transactions:  1 transaction(s)
+Governor proposals:  0 governor proposal(s)
+           Skipped:  0 skipped
 
   Registered Counter (0x5b73...0519)

@@ -1,0 +1,14 @@
+{
+  "12345678901234567890": {
+    "proposalId": "12345678901234567890",
+    "governorAddress": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "timelockAddress": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "chainId": 1,
+    "status": "active",
+    "transactionIds": [
+      "tx-0x0001"
+    ],
+    "proposedBy": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "proposedAt": "<TIMESTAMP>"
+  }
+}

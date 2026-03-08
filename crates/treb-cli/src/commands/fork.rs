@@ -19,8 +19,7 @@ use treb_registry::{
     snapshot_registry,
 };
 
-use crate::output;
-use crate::ui::color;
+use crate::{output, ui::color};
 
 const TREB_DIR: &str = ".treb";
 const SNAPSHOT_BASE: &str = "snapshots";
@@ -310,10 +309,7 @@ pub async fn run_revert(network: String, all: bool) -> anyhow::Result<()> {
 
         // Revert EVM state to the last snapshot (if we have one).
         if let Some(last_snapshot) = entry.snapshots.last() {
-            output::print_stage(
-                "\u{23ee}\u{fe0f}",
-                &format!("Reverting EVM state for '{net}'..."),
-            );
+            output::print_stage("\u{23ee}\u{fe0f}", &format!("Reverting EVM state for '{net}'..."));
             let reverted = evm_revert_http(&client, &entry.rpc_url, &last_snapshot.snapshot_id)
                 .await
                 .with_context(|| format!("failed to revert EVM state for network '{net}'"))?;
@@ -327,7 +323,9 @@ pub async fn run_revert(network: String, all: bool) -> anyhow::Result<()> {
         } else {
             output::print_warning_banner(
                 "\u{26a0}\u{fe0f}",
-                &format!("No EVM snapshots stored for network '{net}'; skipping EVM revert (registry will still be restored)."),
+                &format!(
+                    "No EVM snapshots stored for network '{net}'; skipping EVM revert (registry will still be restored)."
+                ),
             );
         }
 
@@ -338,10 +336,7 @@ pub async fn run_revert(network: String, all: bool) -> anyhow::Result<()> {
             .with_context(|| format!("failed to take new EVM snapshot for network '{net}'"))?;
 
         // Restore registry files from the snapshot directory.
-        output::print_stage(
-            "\u{1f504}",
-            &format!("Restoring registry for '{net}'..."),
-        );
+        output::print_stage("\u{1f504}", &format!("Restoring registry for '{net}'..."));
         let snapshot_dir = PathBuf::from(&entry.snapshot_dir);
         restore_registry(&snapshot_dir, &treb_dir)
             .context("failed to restore registry from snapshot")?;
@@ -420,10 +415,7 @@ pub async fn run_restart(network: String, fork_block_number: Option<u64>) -> any
         .with_context(|| format!("failed to reset Anvil for network '{network}'"))?;
 
     // Re-deploy the CreateX factory.
-    output::print_stage(
-        "\u{1f3ed}",
-        &format!("Deploying CreateX factory for '{network}'..."),
-    );
+    output::print_stage("\u{1f3ed}", &format!("Deploying CreateX factory for '{network}'..."));
     deploy_createx_http(&client, &entry.rpc_url)
         .await
         .with_context(|| format!("failed to re-deploy CreateX for network '{network}'"))?;
@@ -435,10 +427,7 @@ pub async fn run_restart(network: String, fork_block_number: Option<u64>) -> any
         .with_context(|| format!("failed to take EVM snapshot for network '{network}'"))?;
 
     // Restore registry from snapshot.
-    output::print_stage(
-        "\u{1f504}",
-        &format!("Restoring registry for '{network}'..."),
-    );
+    output::print_stage("\u{1f504}", &format!("Restoring registry for '{network}'..."));
     let snapshot_dir = PathBuf::from(&entry.snapshot_dir);
     restore_registry(&snapshot_dir, &treb_dir).context("failed to restore registry")?;
 
@@ -703,11 +692,7 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 fn styled(text: &str, style: Style) -> String {
-    if color::is_color_enabled() {
-        format!("{}", text.style(style))
-    } else {
-        text.to_string()
-    }
+    if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
 }
 
 /// Format a duration as a human-readable uptime string.
@@ -720,17 +705,9 @@ fn format_uptime(duration: chrono::Duration) -> String {
     let minutes = (total_secs % 3600) / 60;
 
     if days > 0 {
-        if hours > 0 {
-            format!("{days}d {hours}h")
-        } else {
-            format!("{days}d")
-        }
+        if hours > 0 { format!("{days}d {hours}h") } else { format!("{days}d") }
     } else if hours > 0 {
-        if minutes > 0 {
-            format!("{hours}h {minutes}m")
-        } else {
-            format!("{hours}h")
-        }
+        if minutes > 0 { format!("{hours}h {minutes}m") } else { format!("{hours}h") }
     } else if minutes > 0 {
         format!("{minutes}m")
     } else {

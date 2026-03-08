@@ -9,11 +9,11 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use handlebars::Handlebars;
 use serde::Serialize;
 
-use treb_forge::{compile_project, ArtifactIndex};
+use treb_forge::{ArtifactIndex, compile_project};
 
 use crate::output;
 
@@ -679,11 +679,7 @@ fn relative_import_path(from_file: &Path, to_file: &Path) -> String {
     }
 
     let joined = parts.join("/");
-    if joined.starts_with("..") {
-        joined
-    } else {
-        format!("./{joined}")
-    }
+    if joined.starts_with("..") { joined } else { format!("./{joined}") }
 }
 
 // ── Command entry point ──────────────────────────────────────────────────

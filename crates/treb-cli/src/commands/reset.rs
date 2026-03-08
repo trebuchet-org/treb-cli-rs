@@ -43,11 +43,7 @@ pub struct ResetArgs {
 
 /// Apply a color style when color is enabled, plain text otherwise.
 fn styled(text: &str, style: Style) -> String {
-    if color::is_color_enabled() {
-        format!("{}", text.style(style))
-    } else {
-        text.to_string()
-    }
+    if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
 }
 
 // ── run ───────────────────────────────────────────────────────────────────────
@@ -138,10 +134,7 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
 
     // Confirm.
     if !args.yes {
-        let message = format!(
-            "Remove {} total entry(s)?",
-            total,
-        );
+        let message = format!("Remove {} total entry(s)?", total,);
         if !crate::ui::prompt::confirm(&message, false) {
             if !args.json {
                 println!("{}", styled("Cancelled.", color::MUTED));

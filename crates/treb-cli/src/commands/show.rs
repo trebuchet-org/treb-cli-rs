@@ -10,17 +10,12 @@ use treb_registry::Registry;
 use crate::{
     commands::resolve::resolve_deployment,
     output,
-    ui::badge,
-    ui::color,
-    ui::selector::fuzzy_select_deployment_id,
+    ui::{badge, color, selector::fuzzy_select_deployment_id},
 };
 
 /// Verifier display order with human-readable labels (matches badge::VERIFIER_ORDER).
-const VERIFIER_DISPLAY_ORDER: [(&str, &str); 3] = [
-    ("etherscan", "Etherscan"),
-    ("sourcify", "Sourcify"),
-    ("blockscout", "Blockscout"),
-];
+const VERIFIER_DISPLAY_ORDER: [(&str, &str); 3] =
+    [("etherscan", "Etherscan"), ("sourcify", "Sourcify"), ("blockscout", "Blockscout")];
 
 pub async fn run(deployment_query: Option<String>, json: bool) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
@@ -68,11 +63,7 @@ pub async fn run(deployment_query: Option<String>, json: bool) -> anyhow::Result
 ///
 /// Returns the styled string when color is enabled, plain text otherwise.
 fn styled(text: &str, style: Style) -> String {
-    if color::is_color_enabled() {
-        format!("{}", text.style(style))
-    } else {
-        text.to_string()
-    }
+    if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
 }
 
 /// Print a section header with optional STAGE styling.
@@ -98,10 +89,8 @@ fn print_deployment_details(d: &Deployment) {
         None => d.namespace.clone(),
     };
     let type_str = d.deployment_type.to_string();
-    let type_styled = styled(
-        &type_str,
-        color::style_for_deployment_type(d.deployment_type.clone()),
-    );
+    let type_styled =
+        styled(&type_str, color::style_for_deployment_type(d.deployment_type.clone()));
     output::print_kv(&[
         ("ID", &d.id),
         ("Contract", &d.contract_name),
@@ -114,10 +103,7 @@ fn print_deployment_details(d: &Deployment) {
     println!();
     print_header("On-Chain");
     let addr_styled = styled(&d.address, color::ADDRESS);
-    output::print_kv(&[
-        ("Chain ID", &d.chain_id.to_string()),
-        ("Address", &addr_styled),
-    ]);
+    output::print_kv(&[("Chain ID", &d.chain_id.to_string()), ("Address", &addr_styled)]);
 
     // Transaction
     println!();
@@ -178,10 +164,7 @@ fn print_deployment_details(d: &Deployment) {
         println!();
         print_header("Proxy Info");
         let impl_styled = styled(&proxy.implementation, color::ADDRESS);
-        output::print_kv(&[
-            ("Proxy Type", &proxy.proxy_type),
-            ("Implementation", &impl_styled),
-        ]);
+        output::print_kv(&[("Proxy Type", &proxy.proxy_type), ("Implementation", &impl_styled)]);
         if !proxy.admin.is_empty() {
             let admin_styled = styled(&proxy.admin, color::ADDRESS);
             output::print_kv(&[("Admin", &admin_styled)]);

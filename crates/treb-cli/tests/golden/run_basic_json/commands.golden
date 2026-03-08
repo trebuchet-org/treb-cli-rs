@@ -14,6 +14,7 @@ No files changed, compilation skipped
   ],
   "dry_run": false,
   "gas_used": 160053,
+  "governorProposals": [],
   "skipped": [],
   "success": true,
   "transactions": [

@@ -1,6 +1,10 @@
 === cmd 0: [sync --json] ===
 {
   "errors": [],
+  "governorNewlyExecuted": 0,
+  "governorRemoved": 0,
+  "governorSynced": 0,
+  "governorUpdated": 0,
   "newlyExecuted": 0,
   "removed": 0,
   "synced": 0,

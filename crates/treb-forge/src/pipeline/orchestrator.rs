@@ -197,8 +197,8 @@ impl RunPipeline {
 
             // Insert governor proposals (skip broadcast for Governor sender)
             if is_governor_sender {
-                for proposal in governor_proposals {
-                    registry.insert_governor_proposal(proposal)?;
+                for proposal in &governor_proposals {
+                    registry.insert_governor_proposal(proposal.clone())?;
                 }
             }
         } else {
@@ -222,6 +222,7 @@ impl RunPipeline {
             gas_used: execution.gas_used,
             event_count,
             console_logs: execution.logs,
+            governor_proposals,
         })
     }
 }

@@ -76,7 +76,13 @@ pub async fn run(subcommand: MigrateSubcommand) -> anyhow::Result<()> {
 
 // ── run_config ────────────────────────────────────────────────────────────────
 
-async fn run_config(project_root: &Path, dry_run: bool, json: bool, yes: bool, cleanup_foundry: bool) -> anyhow::Result<()> {
+async fn run_config(
+    project_root: &Path,
+    dry_run: bool,
+    json: bool,
+    yes: bool,
+    cleanup_foundry: bool,
+) -> anyhow::Result<()> {
     if !json {
         output::print_stage("\u{1f50d}", "Detecting config format...");
     }
@@ -93,7 +99,13 @@ async fn run_config(project_root: &Path, dry_run: bool, json: bool, yes: bool, c
             }
 
             if !json {
-                eprintln!("{}", output::format_warning_banner("\u{26a0}\u{fe0f}", "No treb.toml found \u{2014} migrating senders from foundry.toml (deprecated location)."));
+                eprintln!(
+                    "{}",
+                    output::format_warning_banner(
+                        "\u{26a0}\u{fe0f}",
+                        "No treb.toml found \u{2014} migrating senders from foundry.toml (deprecated location)."
+                    )
+                );
                 output::print_stage("\u{1f504}", "Converting foundry.toml senders to v2 config...");
             }
 
@@ -105,8 +117,18 @@ async fn run_config(project_root: &Path, dry_run: bool, json: bool, yes: bool, c
             };
             let v2_toml = serialize_treb_config_v2(&v2).context("failed to serialize v2 config")?;
 
-            return write_or_print_v2(project_root, &treb_toml, &v2_toml, dry_run, json, false, yes, cleanup_foundry, Some("foundry"))
-                .await;
+            return write_or_print_v2(
+                project_root,
+                &treb_toml,
+                &v2_toml,
+                dry_run,
+                json,
+                false,
+                yes,
+                cleanup_foundry,
+                Some("foundry"),
+            )
+            .await;
         }
         TrebConfigFormat::V2 => {
             if json {
@@ -137,7 +159,18 @@ async fn run_config(project_root: &Path, dry_run: bool, json: bool, yes: bool, c
     let v2 = convert_v1_to_v2(&v1, &foundry_senders);
     let v2_toml = serialize_treb_config_v2(&v2).context("failed to serialize v2 config")?;
 
-    write_or_print_v2(project_root, &treb_toml, &v2_toml, dry_run, json, true, yes, cleanup_foundry, None).await
+    write_or_print_v2(
+        project_root,
+        &treb_toml,
+        &v2_toml,
+        dry_run,
+        json,
+        true,
+        yes,
+        cleanup_foundry,
+        None,
+    )
+    .await
 }
 
 /// Write v2 TOML to `treb.toml` (with backup) or print it to stdout (dry-run).
@@ -229,12 +262,10 @@ where
     std::fs::write(treb_toml, v2_toml)
         .with_context(|| format!("failed to write {}", treb_toml.display()))?;
 
-    // Clean up foundry.toml treb sections if requested (ignored in dry-run, which returns early above).
-    let foundry_cleanup_path = if cleanup_foundry {
-        cleanup_foundry_treb_sections(project_root, json)?
-    } else {
-        None
-    };
+    // Clean up foundry.toml treb sections if requested (ignored in dry-run, which returns early
+    // above).
+    let foundry_cleanup_path =
+        if cleanup_foundry { cleanup_foundry_treb_sections(project_root, json)? } else { None };
 
     if json {
         let mut obj = serde_json::json!({
@@ -288,8 +319,9 @@ fn cleanup_foundry_treb_sections(
     // Create backup before modifying.
     let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
     let backup_path = project_root.join(format!("foundry.toml.bak-{ts}"));
-    std::fs::copy(&foundry_path, &backup_path)
-        .with_context(|| format!("failed to create foundry.toml backup at {}", backup_path.display()))?;
+    std::fs::copy(&foundry_path, &backup_path).with_context(|| {
+        format!("failed to create foundry.toml backup at {}", backup_path.display())
+    })?;
 
     // Write cleaned content.
     std::fs::write(&foundry_path, &cleaned)
@@ -458,7 +490,10 @@ async fn run_registry(project_root: &Path, dry_run: bool) -> anyhow::Result<()> 
     }
 
     if current_version == REGISTRY_VERSION {
-        output::print_stage("\u{2705}", &format!("Registry is up to date (version {REGISTRY_VERSION})."));
+        output::print_stage(
+            "\u{2705}",
+            &format!("Registry is up to date (version {REGISTRY_VERSION})."),
+        );
         return Ok(());
     }
 
@@ -900,7 +935,8 @@ mainnet = "https://eth.example.com"
     #[test]
     fn cleanup_foundry_noop_when_no_treb_sections() {
         let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("foundry.toml"), "[profile.default]\nsrc = \"src\"\n").unwrap();
+        std::fs::write(dir.path().join("foundry.toml"), "[profile.default]\nsrc = \"src\"\n")
+            .unwrap();
 
         let result = cleanup_foundry_treb_sections(dir.path(), false).unwrap();
         assert!(result.is_none(), "should return None when no treb sections to remove");

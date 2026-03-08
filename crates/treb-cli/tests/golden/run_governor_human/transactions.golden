@@ -1,0 +1,14 @@
+{
+  "tx-<ID>": {
+    "id": "tx-<ID>",
+    "chainId": 31337,
+    "hash": "",
+    "status": "SIMULATED",
+    "sender": "0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa",
+    "nonce": 0,
+    "deployments": [],
+    "operations": [],
+    "environment": "default",
+    "createdAt": "<TIMESTAMP>"
+  }
+}

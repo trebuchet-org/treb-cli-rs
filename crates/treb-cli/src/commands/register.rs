@@ -471,9 +471,8 @@ pub async fn run(
 
         // Determine deployment type and proxy info.
         // --deployment-type flag overrides auto-detection.
-        let detected_proxy = proxy_patterns
-            .iter()
-            .find(|p| p.proxy_address.eq_ignore_ascii_case(&creation.address));
+        let detected_proxy =
+            proxy_patterns.iter().find(|p| p.proxy_address.eq_ignore_ascii_case(&creation.address));
 
         let (effective_dep_type, effective_proxy_info) = match &deployment_type {
             Some(dt) => (dt.clone(), None),

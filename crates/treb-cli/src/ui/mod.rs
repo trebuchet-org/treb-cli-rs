@@ -13,10 +13,12 @@ mod ui_integration_tests {
 
     use treb_core::types::VerifierStatus;
 
-    use super::badge::{fork_badge, fork_badge_styled, verification_badge, verification_badge_styled};
-    use super::color;
-    use super::terminal::display_width;
-    use super::tree::TreeNode;
+    use super::{
+        badge::{fork_badge, fork_badge_styled, verification_badge, verification_badge_styled},
+        color,
+        terminal::display_width,
+        tree::TreeNode,
+    };
 
     /// Build a realistic 3-level tree: namespace > chain > deployment.
     /// Exercises styled labels, verification badges, and fork badges together.
@@ -28,11 +30,19 @@ mod ui_integration_tests {
         let mut verifiers = HashMap::new();
         verifiers.insert(
             "etherscan".to_string(),
-            VerifierStatus { status: "VERIFIED".to_string(), url: String::new(), reason: String::new() },
+            VerifierStatus {
+                status: "VERIFIED".to_string(),
+                url: String::new(),
+                reason: String::new(),
+            },
         );
         verifiers.insert(
             "sourcify".to_string(),
-            VerifierStatus { status: "FAILED".to_string(), url: String::new(), reason: String::new() },
+            VerifierStatus {
+                status: "FAILED".to_string(),
+                url: String::new(),
+                reason: String::new(),
+            },
         );
         let badge_plain = verification_badge(&verifiers);
         let badge_styled = verification_badge_styled(&verifiers);
@@ -80,7 +90,10 @@ mod ui_integration_tests {
 
         // Check deployment label content
         assert!(plain_lines[3].contains("MyProxy"), "Deployment label should contain name");
-        assert!(plain_lines[3].contains("e[V]"), "Deployment label should contain verification badge");
+        assert!(
+            plain_lines[3].contains("e[V]"),
+            "Deployment label should contain verification badge"
+        );
         assert!(plain_lines[3].contains("[fork]"), "Deployment label should contain fork badge");
 
         // Plain output must not contain ANSI
@@ -123,7 +136,11 @@ mod ui_integration_tests {
         let mut verifiers = HashMap::new();
         verifiers.insert(
             "etherscan".to_string(),
-            VerifierStatus { status: "VERIFIED".to_string(), url: String::new(), reason: String::new() },
+            VerifierStatus {
+                status: "VERIFIED".to_string(),
+                url: String::new(),
+                reason: String::new(),
+            },
         );
         let badge_plain = verification_badge(&verifiers);
         let badge_styled = verification_badge_styled(&verifiers);

@@ -8,10 +8,7 @@ use unicode_width::UnicodeWidthStr;
 /// Falls back to 80 if the terminal width cannot be determined (e.g., non-TTY).
 #[allow(dead_code)]
 pub fn terminal_width() -> usize {
-    Term::stdout()
-        .size_checked()
-        .map(|(_, cols)| cols as usize)
-        .unwrap_or(80)
+    Term::stdout().size_checked().map(|(_, cols)| cols as usize).unwrap_or(80)
 }
 
 /// Returns the display width of a string, stripping ANSI escape codes before measuring.

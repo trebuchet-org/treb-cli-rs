@@ -2,8 +2,7 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
-    env,
-    fs,
+    env, fs,
     io::{self, BufRead, IsTerminal, Write},
     path::PathBuf,
     time::Duration,
@@ -19,7 +18,7 @@ use treb_forge::{
         resolve_git_commit,
     },
     script::build_script_config_with_senders,
-    sender::resolve_all_senders,
+    sender::{ResolvedSender, resolve_all_senders},
 };
 use treb_registry::Registry;
 
@@ -47,6 +46,24 @@ pub fn parse_env_var(s: &str) -> anyhow::Result<(&str, &str)> {
         bail!("invalid --env value '{}': key cannot be empty", s);
     }
     Ok((key, value))
+}
+
+fn format_verbose_sender(role: &str, sender: &ResolvedSender) -> String {
+    match sender {
+        ResolvedSender::Governor { governor_address, timelock_address, proposer } => {
+            let timelock = timelock_address
+                .map(|address| address.to_string())
+                .unwrap_or_else(|| "none".to_string());
+            format!(
+                "{}: governor={} timelock={} proposer={}",
+                role,
+                governor_address,
+                timelock,
+                proposer.sender_address()
+            )
+        }
+        _ => format!("{}: {}", role, sender.sender_address()),
+    }
 }
 
 /// Inject `--env KEY=VALUE` pairs into the process environment.
@@ -83,7 +100,10 @@ pub fn ensure_initialized(cwd: &std::path::Path) -> anyhow::Result<()> {
 
 /// Resolve a network name to an RPC URL. If the input is already a URL, returns it directly.
 /// Falls back to looking up the name in foundry.toml [rpc_endpoints].
-pub(crate) fn resolve_rpc_url_for_chain_id(network_or_url: &str, cwd: &std::path::Path) -> Option<String> {
+pub(crate) fn resolve_rpc_url_for_chain_id(
+    network_or_url: &str,
+    cwd: &std::path::Path,
+) -> Option<String> {
     if network_or_url.starts_with("http://") || network_or_url.starts_with("https://") {
         return Some(network_or_url.to_string());
     }
@@ -250,10 +270,9 @@ pub async fn run(
             ("RPC", rpc_display),
         ];
         // Collect sender lines
-        let sender_lines: Vec<String> = resolved_senders
-            .iter()
-            .map(|(role, s)| format!("{}: {:?}", role, s.sender_address()))
-            .collect();
+        let mut sender_lines: Vec<String> =
+            resolved_senders.iter().map(|(role, s)| format_verbose_sender(role, s)).collect();
+        sender_lines.sort();
         for line in &sender_lines {
             kv_pairs.push(("Sender", line));
         }
@@ -279,6 +298,7 @@ pub async fn run(
 
     // Extract the deployer sender so the pipeline can detect Safe/Governor flows.
     let deployer_sender = resolved_senders.remove("deployer");
+    let is_governor_sender = deployer_sender.as_ref().is_some_and(|s| s.is_governor());
 
     let pipeline_context = PipelineContext {
         config: pipeline_config,
@@ -321,7 +341,11 @@ pub async fn run(
     let pipeline = RunPipeline::new(pipeline_context).with_script_config(script_config);
 
     if !json && !dry_run && broadcast {
-        output::print_stage("\u{1f4e1}", "Broadcasting...");
+        if is_governor_sender {
+            output::print_stage("\u{1f3db}\u{fe0f}", "Creating governance proposal...");
+        } else {
+            output::print_stage("\u{1f4e1}", "Broadcasting...");
+        }
     } else if !json && dry_run {
         output::print_stage("\u{1f9ea}", "Simulating...");
     }
@@ -340,12 +364,14 @@ pub async fn run(
         let console_str = format!("{} console.log line(s)", result.console_logs.len());
         let dep_str = format!("{} deployment(s)", result.deployments.len());
         let tx_str = format!("{} transaction(s)", result.transactions.len());
+        let proposal_str = format!("{} governor proposal(s)", result.governor_proposals.len());
         let skip_str = format!("{} skipped", result.skipped.len());
         let summary_pairs: Vec<(&str, &str)> = vec![
             ("Events", &event_str),
             ("Console", &console_str),
             ("Deployments", &dep_str),
             ("Transactions", &tx_str),
+            ("Governor proposals", &proposal_str),
             ("Skipped", &skip_str),
         ];
         output::eprint_kv(&summary_pairs);
@@ -417,10 +443,7 @@ pub async fn run(
             log_content.push_str("\n--- Transactions ---\n");
             for rt in &result.transactions {
                 let tx = &rt.transaction;
-                log_content.push_str(&format!(
-                    "  {} {} ({})\n",
-                    tx.id, tx.hash, tx.status
-                ));
+                log_content.push_str(&format!("  {} {} ({})\n", tx.id, tx.hash, tx.status));
             }
         }
 
@@ -443,6 +466,8 @@ struct RunOutputJson {
     skipped: Vec<SkippedJson>,
     gas_used: u64,
     console_logs: Vec<String>,
+    #[serde(rename = "governorProposals")]
+    governor_proposals: Vec<GovernorProposalJson>,
 }
 
 #[derive(Serialize)]
@@ -467,6 +492,16 @@ struct SkippedJson {
     contract_name: String,
     address: String,
     reason: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GovernorProposalJson {
+    proposal_id: String,
+    governor_address: String,
+    timelock_address: String,
+    status: String,
+    transaction_ids: Vec<String>,
 }
 
 // ── Display logic ────────────────────────────────────────────────────────
@@ -516,10 +551,39 @@ fn display_result_json(result: &PipelineResult) -> anyhow::Result<()> {
             .collect(),
         gas_used: result.gas_used,
         console_logs: result.console_logs.clone(),
+        governor_proposals: result
+            .governor_proposals
+            .iter()
+            .map(|gp| GovernorProposalJson {
+                proposal_id: gp.proposal_id.clone(),
+                governor_address: gp.governor_address.clone(),
+                timelock_address: gp.timelock_address.clone(),
+                status: gp.status.to_string(),
+                transaction_ids: gp.transaction_ids.clone(),
+            })
+            .collect(),
     };
 
     output::print_json(&output)?;
     Ok(())
+}
+
+fn format_governor_proposal_details(gp: &treb_core::types::GovernorProposal) -> String {
+    let timelock = if gp.timelock_address.is_empty() {
+        "none".to_string()
+    } else {
+        output::truncate_address(&gp.timelock_address)
+    };
+    let tx_count = gp.transaction_ids.len();
+
+    format!(
+        "Governor: {} | Timelock: {} | Status: {} | {} linked transaction{}",
+        output::truncate_address(&gp.governor_address),
+        timelock,
+        gp.status,
+        tx_count,
+        if tx_count == 1 { "" } else { "s" },
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -553,9 +617,7 @@ fn group_recorded_deployments<'a>(
         let chain_map = result.entry(d.namespace.clone()).or_default();
         let type_groups = chain_map.entry(d.chain_id).or_default();
 
-        if let Some(group) = type_groups
-            .iter_mut()
-            .find(|g| g.deployment_type == d.deployment_type)
+        if let Some(group) = type_groups.iter_mut().find(|g| g.deployment_type == d.deployment_type)
         {
             group.deployments.push(rd);
         } else {
@@ -605,8 +667,7 @@ fn build_run_deployment_node(d: &treb_core::types::Deployment) -> TreeNode {
     let label = format_run_deployment_entry(d);
     let mut node = TreeNode::new(label);
     if let Some(ref pi) = d.proxy_info {
-        let impl_label =
-            format!("Implementation {}", output::truncate_address(&pi.implementation));
+        let impl_label = format!("Implementation {}", output::truncate_address(&pi.implementation));
         node = node.child(TreeNode::new(impl_label));
     }
     node
@@ -615,7 +676,10 @@ fn build_run_deployment_node(d: &treb_core::types::Deployment) -> TreeNode {
 fn display_result_human(result: &PipelineResult) {
     // Dry-run banner
     if result.dry_run {
-        output::print_warning_banner("\u{1f6a7}", "[DRY RUN] No changes were written to the registry.");
+        output::print_warning_banner(
+            "\u{1f6a7}",
+            "[DRY RUN] No changes were written to the registry.",
+        );
         println!();
     }
 
@@ -638,8 +702,7 @@ fn display_result_human(result: &PipelineResult) {
             first = false;
             let mut ns_node = TreeNode::new(namespace.clone()).with_style(color::NAMESPACE);
             for (chain_id, type_groups) in chains {
-                let mut chain_node =
-                    TreeNode::new(chain_id.to_string()).with_style(color::CHAIN);
+                let mut chain_node = TreeNode::new(chain_id.to_string()).with_style(color::CHAIN);
                 for tg in type_groups {
                     let type_label = tg.deployment_type.to_string();
                     let type_style = color::style_for_deployment_type(tg.deployment_type.clone());
@@ -671,6 +734,17 @@ fn display_result_human(result: &PipelineResult) {
         println!();
     }
 
+    // Governor proposals
+    if !result.governor_proposals.is_empty() {
+        println!("Governor Proposals:");
+        for (i, gp) in result.governor_proposals.iter().enumerate() {
+            let action = if result.dry_run { "would be proposed" } else { "proposed" };
+            println!("  {}. {} ({})", i + 1, output::truncate_address(&gp.proposal_id), action,);
+            println!("     {}", format_governor_proposal_details(gp));
+        }
+        println!();
+    }
+
     // Skipped deployments
     if !result.skipped.is_empty() {
         println!("Skipped:");
@@ -695,8 +769,9 @@ fn display_result_human(result: &PipelineResult) {
     let dep_count = result.deployments.len();
     let tx_count = result.transactions.len();
     let skip_count = result.skipped.len();
+    let proposal_count = result.governor_proposals.len();
 
-    if dep_count == 0 && skip_count == 0 {
+    if dep_count == 0 && skip_count == 0 && proposal_count == 0 {
         println!("No deployments found in script output.");
     } else {
         let action = if result.dry_run { "would be recorded" } else { "recorded" };
@@ -710,10 +785,15 @@ fn display_result_human(result: &PipelineResult) {
             ));
         }
         if tx_count > 0 {
+            parts.push(format!("{} transaction{}", tx_count, if tx_count == 1 { "" } else { "s" }));
+        }
+        if proposal_count > 0 {
+            let proposal_verb = if result.dry_run { "would be proposed" } else { "proposed" };
             parts.push(format!(
-                "{} transaction{}",
-                tx_count,
-                if tx_count == 1 { "" } else { "s" }
+                "{} governor proposal{} {}",
+                proposal_count,
+                if proposal_count == 1 { "" } else { "s" },
+                proposal_verb,
             ));
         }
         if skip_count > 0 {
@@ -730,6 +810,25 @@ fn display_result_human(result: &PipelineResult) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{TimeZone, Utc};
+    use treb_core::types::{GovernorProposal, ProposalStatus};
+    use treb_forge::in_memory_signer;
+
+    fn sample_governor_proposal() -> GovernorProposal {
+        GovernorProposal {
+            proposal_id: "proposal-001".into(),
+            governor_address: "0x1234567890abcdef1234567890abcdef12345678".into(),
+            timelock_address: String::new(),
+            chain_id: 1,
+            status: ProposalStatus::Pending,
+            transaction_ids: vec!["tx-001".into()],
+            proposed_by: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd".into(),
+            proposed_at: Utc.with_ymd_and_hms(2025, 4, 1, 10, 0, 0).unwrap(),
+            description: String::new(),
+            executed_at: None,
+            execution_tx_hash: String::new(),
+        }
+    }
 
     #[test]
     fn parse_env_var_valid_pair() {
@@ -787,5 +886,73 @@ mod tests {
         let vars = vec!["GOOD=value".to_string(), "BAD".to_string()];
         let err = inject_env_vars(&vars).unwrap_err();
         assert!(err.to_string().contains("BAD"));
+    }
+
+    #[test]
+    fn format_governor_proposal_details_includes_status() {
+        let mut proposal = sample_governor_proposal();
+        proposal.status = ProposalStatus::Queued;
+        proposal.timelock_address = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd".into();
+        proposal.transaction_ids = vec!["tx-001".into(), "tx-002".into()];
+
+        let details = format_governor_proposal_details(&proposal);
+
+        assert!(details.contains("Status: queued"), "details should include status: {details}");
+        assert!(
+            details.contains("Timelock: 0xabcd...abcd"),
+            "details should include the timelock address: {details}"
+        );
+        assert!(
+            details.contains("2 linked transactions"),
+            "details should include the linked transaction count: {details}"
+        );
+    }
+
+    #[test]
+    fn format_governor_proposal_details_uses_none_for_missing_timelock() {
+        let proposal = sample_governor_proposal();
+
+        let details = format_governor_proposal_details(&proposal);
+
+        assert!(
+            details.contains("Timelock: none"),
+            "details should show an explicit placeholder when timelock is absent: {details}"
+        );
+        assert!(details.contains("Status: pending"), "details should include status: {details}");
+    }
+
+    #[test]
+    fn format_verbose_sender_includes_governor_context() {
+        let proposer = ResolvedSender::InMemory(in_memory_signer(0).unwrap());
+        let sender = ResolvedSender::Governor {
+            governor_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".parse().unwrap(),
+            timelock_address: Some("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".parse().unwrap()),
+            proposer: Box::new(proposer),
+        };
+
+        let line = format_verbose_sender("deployer", &sender);
+
+        assert_eq!(
+            line,
+            "deployer: governor=0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa timelock=0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB proposer=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+        );
+    }
+
+    #[test]
+    fn format_verbose_sender_uses_none_for_missing_timelock() {
+        let proposer = ResolvedSender::InMemory(in_memory_signer(1).unwrap());
+        let sender = ResolvedSender::Governor {
+            governor_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".parse().unwrap(),
+            timelock_address: None,
+            proposer: Box::new(proposer),
+        };
+
+        let line = format_verbose_sender("deployer", &sender);
+
+        assert!(line.contains("timelock=none"), "got: {line}");
+        assert!(
+            line.contains("proposer=0x70997970C51812dc3A010C7d01b50e0d17dc79C8"),
+            "got: {line}"
+        );
     }
 }

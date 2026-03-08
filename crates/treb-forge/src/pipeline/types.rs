@@ -7,7 +7,8 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use treb_core::types::{
-    deployment::Deployment, safe_transaction::SafeTransaction, transaction::Transaction,
+    GovernorProposal, deployment::Deployment, safe_transaction::SafeTransaction,
+    transaction::Transaction,
 };
 
 use crate::{events::ExtractedCollision, sender::ResolvedSender};
@@ -93,6 +94,8 @@ pub struct PipelineResult {
     pub event_count: usize,
     /// Decoded console.log output from script execution.
     pub console_logs: Vec<String>,
+    /// Governor proposals created during script execution.
+    pub governor_proposals: Vec<GovernorProposal>,
 }
 
 // ---------------------------------------------------------------------------

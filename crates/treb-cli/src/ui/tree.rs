@@ -13,11 +13,7 @@ pub struct TreeNode {
 impl TreeNode {
     /// Create a new tree node with the given label.
     pub fn new(label: impl Into<String>) -> Self {
-        Self {
-            label: label.into(),
-            style: None,
-            children: Vec::new(),
-        }
+        Self { label: label.into(), style: None, children: Vec::new() }
     }
 
     /// Set the ANSI style for this node's label and return self for chaining.
@@ -64,11 +60,8 @@ impl TreeNode {
             let connector = if is_last { "\\-- " } else { "|-- " };
             lines.push(format!("{}{}{}", prefix, connector, child.label));
 
-            let child_prefix = if is_last {
-                format!("{}    ", prefix)
-            } else {
-                format!("{}|   ", prefix)
-            };
+            let child_prefix =
+                if is_last { format!("{}    ", prefix) } else { format!("{}|   ", prefix) };
             child.render_children_plain(lines, &child_prefix);
         }
     }
@@ -80,11 +73,8 @@ impl TreeNode {
             let connector = if is_last { "\\-- " } else { "|-- " };
             lines.push(format!("{}{}{}", prefix, connector, child.styled_label()));
 
-            let child_prefix = if is_last {
-                format!("{}    ", prefix)
-            } else {
-                format!("{}|   ", prefix)
-            };
+            let child_prefix =
+                if is_last { format!("{}    ", prefix) } else { format!("{}|   ", prefix) };
             child.render_children_styled(lines, &child_prefix);
         }
     }
@@ -102,9 +92,7 @@ mod tests {
 
     #[test]
     fn two_children_render_with_prefixes() {
-        let tree = TreeNode::new("root")
-            .child(TreeNode::new("a"))
-            .child(TreeNode::new("b"));
+        let tree = TreeNode::new("root").child(TreeNode::new("a")).child(TreeNode::new("b"));
         let rendered = tree.render();
         let lines: Vec<&str> = rendered.lines().collect();
         assert_eq!(lines.len(), 3);
@@ -117,9 +105,7 @@ mod tests {
     fn three_level_nesting_has_correct_continuation_prefixes() {
         let tree = TreeNode::new("root")
             .child(
-                TreeNode::new("mid1")
-                    .child(TreeNode::new("leaf1"))
-                    .child(TreeNode::new("leaf2")),
+                TreeNode::new("mid1").child(TreeNode::new("leaf1")).child(TreeNode::new("leaf2")),
             )
             .child(TreeNode::new("mid2").child(TreeNode::new("leaf3")));
         let rendered = tree.render();
@@ -201,9 +187,7 @@ mod tests {
 
     #[test]
     fn render_styled_without_style_matches_plain() {
-        let tree = TreeNode::new("root")
-            .child(TreeNode::new("a"))
-            .child(TreeNode::new("b"));
+        let tree = TreeNode::new("root").child(TreeNode::new("a")).child(TreeNode::new("b"));
         assert_eq!(tree.render(), tree.render_styled());
     }
 }
