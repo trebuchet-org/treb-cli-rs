@@ -258,7 +258,7 @@ async fn e2e_fork_enter_deploy_exit_restores_state() {
     let show_json = run_json(tmp.path().to_path_buf(), vec!["show".into(), dep_id.clone()]).await;
     let tags = &show_json["tags"];
     assert!(
-        tags.is_null() || tags.as_array().map_or(true, |a| a.is_empty()),
+        tags.is_null() || tags.as_array().is_none_or(|a| a.is_empty()),
         "tag must be gone after fork exit, got: {tags}"
     );
 

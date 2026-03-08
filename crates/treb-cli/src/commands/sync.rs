@@ -637,15 +637,21 @@ mod tests {
     use std::{
         collections::HashMap as StdHashMap,
         io::{Read, Write},
-        sync::{Mutex, MutexGuard, OnceLock},
+        sync::OnceLock,
     };
     use tempfile::TempDir;
+    use tokio::sync::{Mutex, MutexGuard};
     use treb_core::types::{GovernorProposal, Operation, Transaction};
     use treb_safe::types::{SafeServiceConfirmation, SafeServiceMultisigResponse};
 
-    fn env_lock() -> MutexGuard<'static, ()> {
+    fn env_lock_blocking() -> MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(())).lock().expect("env test lock poisoned")
+        LOCK.get_or_init(|| Mutex::new(())).blocking_lock()
+    }
+
+    async fn env_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().await
     }
 
     struct EnvVarGuard {
@@ -764,7 +770,7 @@ mod tests {
 
     #[test]
     fn expand_rpc_endpoint_reports_missing_env_vars() {
-        let _lock = env_lock();
+        let _lock = env_lock_blocking();
         let _guard = EnvVarGuard::unset("TREB_SYNC_MISSING_RPC");
 
         let err = expand_rpc_endpoint("mainnet", "https://rpc.example/${TREB_SYNC_MISSING_RPC}")
@@ -776,7 +782,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_rpc_urls_expands_dotenv_backed_endpoints() {
-        let _lock = env_lock();
+        let _lock = env_lock().await;
         let _guard = EnvVarGuard::unset("TREB_SYNC_RPC_URL");
 
         let tmp = TempDir::new().unwrap();

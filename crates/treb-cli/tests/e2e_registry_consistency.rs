@@ -145,7 +145,7 @@ async fn e2e_registry_consistency_after_tag() {
     let by_tag = lookup["byTag"].as_object().unwrap();
     assert!(
         by_tag.get("production").is_none()
-            || by_tag["production"].as_array().map_or(true, |a| a.is_empty()),
+            || by_tag["production"].as_array().is_none_or(|a| a.is_empty()),
         "production tag should be absent or empty after removal"
     );
     let stable_ids = by_tag["stable"].as_array().expect("stable tag must still exist");
@@ -284,7 +284,7 @@ async fn e2e_registry_consistency_after_fork_cycle() {
     let show_json = run_json(tmp.path().to_path_buf(), vec!["show".into(), dep_id.clone()]).await;
     let tags = &show_json["tags"];
     assert!(
-        tags.is_null() || tags.as_array().map_or(true, |a| a.is_empty()),
+        tags.is_null() || tags.as_array().is_none_or(|a| a.is_empty()),
         "fork-test tag must be gone after fork exit, got: {tags}"
     );
 

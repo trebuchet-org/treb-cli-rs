@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub mod anvil_node;
 pub mod cleanup;
 pub mod context;

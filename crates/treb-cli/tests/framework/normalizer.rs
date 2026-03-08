@@ -326,7 +326,7 @@ pub struct PathNormalizer {
 impl PathNormalizer {
     pub fn new(paths: Vec<String>) -> Self {
         let mut paths = paths;
-        paths.sort_by(|a, b| b.len().cmp(&a.len())); // longest first
+        paths.sort_by_key(|path| std::cmp::Reverse(path.len())); // longest first
         Self { paths }
     }
 }

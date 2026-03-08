@@ -587,7 +587,7 @@ mod tests {
     #[test]
     fn group_single_namespace_chain_mixed_types() {
         // AC: 2 singletons + 1 proxy, all mainnet/42220
-        let deployments = vec![
+        let deployments = [
             make_deployment(
                 "mainnet/42220/FPMM",
                 "mainnet",
@@ -642,7 +642,7 @@ mod tests {
 
     #[test]
     fn group_multiple_namespaces_sorted_alphabetically() {
-        let deployments = vec![
+        let deployments = [
             make_deployment("z-ns/1/A", "z-ns", 1, "A", "", DeploymentType::Singleton, None),
             make_deployment("a-ns/1/B", "a-ns", 1, "B", "", DeploymentType::Singleton, None),
             make_deployment("m-ns/1/C", "m-ns", 1, "C", "", DeploymentType::Singleton, None),
@@ -656,7 +656,7 @@ mod tests {
 
     #[test]
     fn group_chain_ids_sorted_numerically() {
-        let deployments = vec![
+        let deployments = [
             make_deployment("ns/999/A", "ns", 999, "A", "", DeploymentType::Singleton, None),
             make_deployment("ns/1/B", "ns", 1, "B", "", DeploymentType::Singleton, None),
             make_deployment("ns/42/C", "ns", 42, "C", "", DeploymentType::Singleton, None),
@@ -670,7 +670,7 @@ mod tests {
 
     #[test]
     fn group_type_order_proxy_singleton_library() {
-        let deployments = vec![
+        let deployments = [
             make_deployment("ns/1/Lib", "ns", 1, "Lib", "", DeploymentType::Library, None),
             make_deployment("ns/1/Sing", "ns", 1, "Sing", "", DeploymentType::Singleton, None),
             make_deployment("ns/1/Prox", "ns", 1, "Prox", "", DeploymentType::Proxy, None),
@@ -687,7 +687,7 @@ mod tests {
 
     #[test]
     fn group_deployments_sorted_by_contract_name() {
-        let deployments = vec![
+        let deployments = [
             make_deployment("ns/1/Zeta", "ns", 1, "Zeta", "", DeploymentType::Singleton, None),
             make_deployment("ns/1/Alpha", "ns", 1, "Alpha", "", DeploymentType::Singleton, None),
             make_deployment("ns/1/Mid", "ns", 1, "Mid", "", DeploymentType::Singleton, None),

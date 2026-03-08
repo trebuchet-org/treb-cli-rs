@@ -60,7 +60,7 @@ fn migrate_config_dry_run_v1() {
 
     let test = IntegrationTest::new("migrate_config_dry_run_v1")
         .setup(&["init"])
-        .post_setup_hook(|ctx| write_v1_treb_toml(ctx))
+        .post_setup_hook(write_v1_treb_toml)
         .test(&["migrate", "config", "--dry-run"])
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -75,7 +75,7 @@ fn migrate_config_v1_to_v2() {
 
     let test = IntegrationTest::new("migrate_config_v1_to_v2")
         .setup(&["init"])
-        .post_setup_hook(|ctx| write_v1_treb_toml(ctx))
+        .post_setup_hook(write_v1_treb_toml)
         .test(&["migrate", "config"])
         .output_artifact("treb.toml")
         .extra_normalizer(Box::new(path_normalizer))
@@ -92,7 +92,7 @@ fn migrate_config_already_v2() {
 
     let test = IntegrationTest::new("migrate_config_already_v2")
         .setup(&["init"])
-        .post_setup_hook(|ctx| write_v2_treb_toml(ctx))
+        .post_setup_hook(write_v2_treb_toml)
         .test(&["migrate", "config"])
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -107,7 +107,7 @@ fn migrate_config_json_already_v2() {
 
     let test = IntegrationTest::new("migrate_config_json_already_v2")
         .setup(&["init"])
-        .post_setup_hook(|ctx| write_v2_treb_toml(ctx))
+        .post_setup_hook(write_v2_treb_toml)
         .test(&["migrate", "config", "--json"])
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -122,7 +122,7 @@ fn migrate_config_json_dry_run() {
 
     let test = IntegrationTest::new("migrate_config_json_dry_run")
         .setup(&["init"])
-        .post_setup_hook(|ctx| write_v1_treb_toml(ctx))
+        .post_setup_hook(write_v1_treb_toml)
         .test(&["migrate", "config", "--dry-run", "--json"])
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -152,7 +152,7 @@ fn migrate_config_v1_to_v2_yes() {
 
     let test = IntegrationTest::new("migrate_config_v1_to_v2_yes")
         .setup(&["init"])
-        .post_setup_hook(|ctx| write_v1_treb_toml(ctx))
+        .post_setup_hook(write_v1_treb_toml)
         .test(&["migrate", "config", "--yes"])
         .output_artifact("treb.toml")
         .extra_normalizer(Box::new(path_normalizer))

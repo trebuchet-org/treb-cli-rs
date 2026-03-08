@@ -199,7 +199,7 @@ pub fn run_integration_test(test: &IntegrationTest, ctx: &TestContext) {
 
         // 6a. Command output → commands.golden
         // Both actual output and golden file content are normalized before diffing.
-        golden.compare_with_normalizer(&test.name, "commands", &output, &normalize);
+        golden.compare_with_normalizer(&test.name, "commands", &output, normalize);
 
         // 6b. Each artifact → {stem}.golden (missing files silently skipped)
         for artifact_path in &test.output_artifacts {
@@ -211,7 +211,7 @@ pub fn run_integration_test(test: &IntegrationTest, ctx: &TestContext) {
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or(artifact_path);
-                golden.compare_with_normalizer(&test.name, stem, &content, &normalize);
+                golden.compare_with_normalizer(&test.name, stem, &content, normalize);
             }
         }
     }
