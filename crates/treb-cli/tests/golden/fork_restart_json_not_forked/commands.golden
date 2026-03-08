@@ -1,0 +1,2 @@
+=== cmd 0: [fork restart --network mainnet --json] ===
+{"error":"network 'mainnet' is not in fork mode"}

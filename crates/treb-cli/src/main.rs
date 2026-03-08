@@ -480,12 +480,13 @@ impl Commands {
 impl commands::fork::ForkSubcommand {
     fn json_flag(&self) -> bool {
         match self {
-            Self::Status { json, .. } | Self::History { json, .. } | Self::Diff { json, .. } => {
-                *json
-            }
-            Self::Enter { .. } | Self::Exit { .. } | Self::Revert { .. } | Self::Restart { .. } => {
-                false
-            }
+            Self::Status { json, .. }
+            | Self::History { json, .. }
+            | Self::Diff { json, .. }
+            | Self::Enter { json, .. }
+            | Self::Exit { json, .. }
+            | Self::Revert { json, .. }
+            | Self::Restart { json, .. } => *json,
         }
     }
 }

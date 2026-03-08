@@ -642,3 +642,79 @@ fn fork_restart_port_unreachable() {
 
     run_integration_test(&test, &ctx);
 }
+
+// ── fork enter: JSON output ─────────────────────────────────────────────
+
+/// `treb fork enter --network localhost --json` should emit valid JSON with
+/// camelCase field names (network, chainId, port, rpcUrl, snapshotId, pid).
+#[test]
+fn fork_enter_json() {
+    let ctx = TestContext::new("minimal-project");
+    if let Err(err) = seed_fork_enter_success(ctx.path()) {
+        if err.kind() == std::io::ErrorKind::PermissionDenied {
+            return;
+        }
+        panic!("seed fork enter success: {err}");
+    }
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_enter_json")
+        .setup(&["init"])
+        .test(&["fork", "enter", "--network", "localhost", "--json"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork exit: JSON output ──────────────────────────────────────────────
+
+/// `treb fork exit --network mainnet --json` should emit valid JSON with
+/// camelCase field names (network, restoredEntries, cleanedUp).
+#[test]
+fn fork_exit_json() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_exit_json")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_fork_exit(ctx.path()))
+        .test(&["fork", "exit", "--network", "mainnet", "--json"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork revert: JSON output (no active forks) ─────────────────────────
+
+/// `treb fork revert --network mainnet --all --json` with no active forks
+/// should output an empty JSON array.
+#[test]
+fn fork_revert_json_no_active() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_revert_json_no_active")
+        .setup(&["init"])
+        .test(&["fork", "revert", "--network", "mainnet", "--all", "--json"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork restart: JSON error (not forked) ───────────────────────────────
+
+/// `treb fork restart --network mainnet --json` when mainnet is not forked
+/// should output a JSON error to stderr.
+#[test]
+fn fork_restart_json_not_forked() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_restart_json_not_forked")
+        .setup(&["init"])
+        .test(&["fork", "restart", "--network", "mainnet", "--json"])
+        .expect_err(true)
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}

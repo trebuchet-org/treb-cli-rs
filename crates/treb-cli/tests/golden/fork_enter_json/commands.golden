@@ -1,0 +1,9 @@
+=== cmd 0: [fork enter --network localhost --json] ===
+{
+  "chainId": 1,
+  "network": "localhost",
+  "pid": 0,
+  "port": 0,
+  "rpcUrl": "",
+  "snapshotId": null
+}
