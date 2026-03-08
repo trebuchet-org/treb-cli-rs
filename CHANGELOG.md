@@ -16,7 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Verification**: `verify` command supporting Etherscan, Blockscout, and Sourcify with `--all`, `--watch`, and retry options
 - **Compose**: `compose` for multi-step deployment pipelines from YAML with dependency ordering, `--resume` for skipping completed components, and `--dry-run` execution plan preview
 - **Fork mode**: `fork enter`, `fork exit`, `fork revert`, `fork restart`, `fork status`, `fork history`, `fork diff` — full registry snapshotting and EVM snapshot/revert coordination
-- **Development tooling**: `dev anvil start`, `dev anvil stop`, `dev anvil restart`, `dev anvil status` — in-process Anvil node management with CreateX auto-deployment
+- **Development tooling**: `dev anvil start`, `dev anvil stop`, `dev anvil restart`, `dev anvil status`, `dev anvil logs` — in-process Anvil node management with CreateX auto-deployment
 - **Registry management**: `tag` (add/remove deployment tags), `register` (register historical deployments from transaction traces), `sync` (sync Safe transaction state from the Safe Transaction Service), `prune` (remove stale entries), `reset` (clear registry state with `--network`/`--namespace` scoping and timestamped backups)
 - **Script generation**: `gen-deploy` for generating deployment scripts from templates with strategy and proxy pattern options
 - **Safe multisig**: EIP-712 signing, transaction batching, and Safe Transaction Service integration via `treb-safe`
@@ -33,3 +33,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Configuration format**: treb.toml v1 replaced by v2 with `[accounts.*]` and `[namespaces.*]` sections; `treb migrate config` provides automated conversion
 - **Registry schema**: Versioned schema with automatic migration detection on `Registry::open()`
+
+### Fixed
+
+- No user-facing fixes were shipped in the initial `0.1.0` release.

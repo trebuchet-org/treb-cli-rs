@@ -38,7 +38,7 @@ treb — deployment orchestration CLI for Foundry projects. Rust workspace with 
 
 ## Testing
 
-**Golden file tests**: 175 snapshots in `crates/treb-cli/tests/golden/`. CLI tests compare normalized output against `.expected` files. Update with `TREB_UPDATE_GOLDEN=1`.
+**Golden file tests**: 175 snapshots in `crates/treb-cli/tests/golden/`. CLI tests compare normalized output against `.expected` files. Update with `UPDATE_GOLDEN=1`.
 
 **Test framework** (`crates/treb-cli/tests/framework/`):
 - `TrebRunner` — subprocess CLI execution
@@ -46,6 +46,13 @@ treb — deployment orchestration CLI for Foundry projects. Rust workspace with 
 - `AnvilNode` — in-process anvil management with port pooling
 - `TestWorkdir` — fixture isolation with temp directories
 - Golden/snapshot comparison with output normalization (timestamps, ports, addresses)
+
+**Shared E2E helpers** (`crates/treb-cli/tests/e2e/mod.rs`): Reusable helpers for multi-command workflow tests, including `setup_project()`, `run_deployment()`, `run_json()`, and `spawn_anvil_or_skip()`.
+
+**Anvil spawning references**:
+- `crates/treb-cli/tests/e2e/mod.rs` — `spawn_anvil_or_skip()` for workflow tests that need a transient node and must skip cleanly in restricted environments
+- `crates/treb-cli/tests/framework/anvil_node.rs` — `AnvilNode::spawn()` / `spawn_with_config()` for integration tests that manage named nodes through `TestContext`
+- `crates/treb-cli/tests/framework/context.rs` — `TestContext::with_anvil()` / `with_anvil_mapped()` for composing workdirs, runners, and Anvil instances
 
 **Async tests**: Use `#[tokio::test(flavor = "multi_thread")]` + `tokio::task::spawn_blocking` when calling blocking CLI from async context.
 
