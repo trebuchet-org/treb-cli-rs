@@ -11,6 +11,7 @@ pub mod compiler;
 pub mod console;
 pub mod createx;
 pub mod events;
+pub mod governor;
 pub mod pipeline;
 pub mod script;
 pub mod sender;
@@ -25,6 +26,7 @@ pub use broadcast::{
 pub use compiler::{CompilationOutput, compile_files, compile_project};
 pub use console::decode_console_logs;
 pub use createx::{CREATEX_ADDRESS, createx_deployed_bytecode, deploy_createx, verify_createx};
+pub use governor::{is_terminal, map_onchain_state, query_proposal_state};
 pub use pipeline::{
     ConflictType, DuplicateConflict, DuplicateStrategy, PipelineConfig, PipelineContext,
     PipelineResult, RecordedDeployment, RecordedTransaction, ResolvedDuplicates, RunPipeline,
