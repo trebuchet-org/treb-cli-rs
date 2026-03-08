@@ -4,7 +4,6 @@ use std::{collections::HashMap, env, time::Duration};
 
 use anyhow::{Context, bail};
 use chrono::Utc;
-use console::Term;
 use owo_colors::{OwoColorize, Style};
 use serde::Serialize;
 use treb_core::types::{VerificationStatus, VerifierStatus};
@@ -16,6 +15,7 @@ use crate::{
     output,
     ui::{
         badge, color,
+        interactive::is_non_interactive,
         selector::{fuzzy_select_deployment_id, multiselect_deployments},
     },
 };
@@ -407,15 +407,17 @@ async fn run_batch(
         return Ok(());
     }
 
-    // In TTY mode, let the user select a subset interactively; non-TTY verifies all.
-    let candidate_ids: Vec<String> = if Term::stdout().is_term() {
+    // Interactive selection is only available when the shared non-interactive
+    // mode checks say prompts are safe to render; otherwise verify all
+    // candidates.
+    let candidate_ids: Vec<String> = if is_non_interactive(false) {
+        candidate_deployments.iter().map(|d| d.id.clone()).collect()
+    } else {
         multiselect_deployments(&candidate_deployments, "Select deployments to verify")
             .map_err(|e| anyhow::anyhow!("{e}"))?
             .into_iter()
             .map(|d| d.id.clone())
             .collect()
-    } else {
-        candidate_deployments.iter().map(|d| d.id.clone()).collect()
     };
 
     if candidate_ids.is_empty() {

@@ -6,6 +6,7 @@
 //! 2. The `TREB_NON_INTERACTIVE` environment variable is set to `"true"` (case-insensitive).
 //! 3. The `CI` environment variable is set to `"true"` (case-insensitive).
 //! 4. Standard input is not a terminal (piped / redirected).
+//! 5. Standard output is not a terminal (redirected).
 
 use std::io::IsTerminal;
 
@@ -19,19 +20,25 @@ pub fn is_non_interactive(cli_flag: bool) -> bool {
         return true;
     }
 
-    if let Ok(val) = std::env::var("TREB_NON_INTERACTIVE") {
-        if val.eq_ignore_ascii_case("true") {
-            return true;
-        }
+    if env_requests_non_interactive() {
+        return true;
     }
 
-    if let Ok(val) = std::env::var("CI") {
-        if val.eq_ignore_ascii_case("true") {
-            return true;
-        }
-    }
+    is_non_interactive_for_terminals(
+        std::io::stdin().is_terminal(),
+        std::io::stdout().is_terminal(),
+    )
+}
 
-    !std::io::stdin().is_terminal()
+fn env_requests_non_interactive() -> bool {
+    matches!(
+        std::env::var("TREB_NON_INTERACTIVE"),
+        Ok(val) if val.eq_ignore_ascii_case("true")
+    ) || matches!(std::env::var("CI"), Ok(val) if val.eq_ignore_ascii_case("true"))
+}
+
+fn is_non_interactive_for_terminals(stdin_is_terminal: bool, stdout_is_terminal: bool) -> bool {
+    !stdin_is_terminal || !stdout_is_terminal
 }
 
 #[cfg(test)]
@@ -44,13 +51,17 @@ mod tests {
     }
 
     #[test]
-    fn non_tty_is_non_interactive() {
-        // In CI / piped test runners stdin is not a TTY, so this should be true.
-        // In an interactive terminal this test is still valid because the
-        // function falls through to the TTY check.
-        let result = is_non_interactive(false);
-        // We can't assert a specific value here because it depends on the
-        // runner environment, but we verify it doesn't panic.
-        let _ = result;
+    fn both_ttys_allow_interaction() {
+        assert!(!is_non_interactive_for_terminals(true, true));
+    }
+
+    #[test]
+    fn redirected_stdin_is_non_interactive() {
+        assert!(is_non_interactive_for_terminals(false, true));
+    }
+
+    #[test]
+    fn redirected_stdout_is_non_interactive() {
+        assert!(is_non_interactive_for_terminals(true, false));
     }
 }

@@ -25,9 +25,7 @@ use treb_registry::Registry;
 use crate::{
     output,
     ui::{
-        badge, color,
-        interactive::is_non_interactive,
-        selector::fuzzy_select_network,
+        badge, color, interactive::is_non_interactive, selector::fuzzy_select_network,
         tree::TreeNode,
     },
 };
@@ -312,24 +310,22 @@ pub async fn run(
     };
 
     // ── Broadcast confirmation prompt ──────────────────────────────────
-    if broadcast && !dry_run {
-        if !is_non_interactive(non_interactive) {
-            eprintln!("About to broadcast transactions to the network.");
-            eprintln!("  Script: {}", script);
-            eprintln!("  Namespace: {}", resolved.namespace);
-            if let Some(ref url) = effective_rpc_url {
-                eprintln!("  RPC: {}", url);
-            }
-            eprint!("Proceed? [y/N] ");
-            io::stderr().flush().ok();
+    if broadcast && !dry_run && !is_non_interactive(non_interactive) {
+        eprintln!("About to broadcast transactions to the network.");
+        eprintln!("  Script: {}", script);
+        eprintln!("  Namespace: {}", resolved.namespace);
+        if let Some(ref url) = effective_rpc_url {
+            eprintln!("  RPC: {}", url);
+        }
+        eprint!("Proceed? [y/N] ");
+        io::stderr().flush().ok();
 
-            let mut input = String::new();
-            io::stdin().lock().read_line(&mut input).ok();
-            let answer = input.trim().to_lowercase();
+        let mut input = String::new();
+        io::stdin().lock().read_line(&mut input).ok();
+        let answer = input.trim().to_lowercase();
 
-            if answer != "y" && answer != "yes" {
-                bail!("broadcast cancelled by user");
-            }
+        if answer != "y" && answer != "yes" {
+            bail!("broadcast cancelled by user");
         }
     }
 
