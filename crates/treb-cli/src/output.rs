@@ -5,6 +5,7 @@
 
 use std::time::Duration;
 
+use chrono::{DateTime, NaiveDateTime, Utc};
 use comfy_table::{Attribute, Cell, ContentArrangement, Table};
 use owo_colors::OwoColorize;
 use serde::Serialize;
@@ -277,15 +278,18 @@ pub fn format_duration(d: Duration) -> String {
 /// Returns non-ISO strings unchanged.
 #[allow(dead_code)]
 pub fn format_build_date(date: &str) -> String {
-    // Match pattern: YYYY-MM-DDTHH:MM:SSZ
-    if let Some(rest) = date.strip_suffix('Z') {
-        if let Some((date_part, time_part)) = rest.split_once('T') {
-            // Validate basic structure: date has 2 dashes, time has 2 colons
-            if date_part.matches('-').count() == 2 && time_part.matches(':').count() == 2 {
-                return format!("{date_part} {time_part} UTC");
-            }
-        }
+    if let Ok(parsed) = DateTime::parse_from_rfc3339(date) {
+        return parsed.with_timezone(&Utc).format("%Y-%m-%d %H:%M:%S UTC").to_string();
     }
+
+    if let Ok(parsed) = NaiveDateTime::parse_from_str(date, "%Y-%m-%dT%H:%MZ") {
+        return parsed.and_utc().format("%Y-%m-%d %H:%M:%S UTC").to_string();
+    }
+
+    if let Ok(parsed) = DateTime::parse_from_str(date, "%Y-%m-%dT%H:%M%:z") {
+        return parsed.with_timezone(&Utc).format("%Y-%m-%d %H:%M:%S UTC").to_string();
+    }
+
     date.to_string()
 }
 
@@ -664,10 +668,7 @@ mod tests {
 
     #[test]
     fn format_build_date_iso8601() {
-        assert_eq!(
-            format_build_date("2025-01-26T15:04:05Z"),
-            "2025-01-26 15:04:05 UTC"
-        );
+        assert_eq!(format_build_date("2025-01-26T15:04:05Z"), "2025-01-26 15:04:05 UTC");
     }
 
     #[test]
@@ -687,9 +688,26 @@ mod tests {
 
     #[test]
     fn format_build_date_another_iso() {
-        assert_eq!(
-            format_build_date("2024-12-31T23:59:59Z"),
-            "2024-12-31 23:59:59 UTC"
-        );
+        assert_eq!(format_build_date("2024-12-31T23:59:59Z"), "2024-12-31 23:59:59 UTC");
+    }
+
+    #[test]
+    fn format_build_date_iso8601_minute_precision_zulu() {
+        assert_eq!(format_build_date("2025-01-26T15:04Z"), "2025-01-26 15:04:00 UTC");
+    }
+
+    #[test]
+    fn format_build_date_iso8601_minute_precision_offset() {
+        assert_eq!(format_build_date("2025-01-26T16:04+01:00"), "2025-01-26 15:04:00 UTC");
+    }
+
+    #[test]
+    fn format_build_date_malformed_pseudo_iso_tz_suffix() {
+        assert_eq!(format_build_date("2025-01-26T15:04:05TZ"), "2025-01-26T15:04:05TZ");
+    }
+
+    #[test]
+    fn format_build_date_malformed_pseudo_iso_invalid_seconds() {
+        assert_eq!(format_build_date("2025-01-26T15:04:05.Z"), "2025-01-26T15:04:05.Z");
     }
 }
