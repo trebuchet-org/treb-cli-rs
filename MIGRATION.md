@@ -37,9 +37,9 @@ deployer = "deployer"
 
 Run `treb migrate config` to convert automatically. The command creates a timestamped backup of your existing `treb.toml` before writing the v2 format.
 
-### foundry.toml sender configuration no longer supported
+### foundry.toml sender configuration is deprecated
 
-The Go CLI allowed defining senders in `foundry.toml` under `[profile.*.treb.senders.*]`. The Rust CLI does not read senders from `foundry.toml` at runtime. Run `treb migrate config` to move these definitions into `treb.toml` v2 format, then optionally pass `--cleanup-foundry` to remove the deprecated sections from `foundry.toml`.
+The Go CLI allowed defining senders in `foundry.toml` under `[profile.*.treb.senders.*]`. The Rust CLI still falls back to those entries at runtime when no `treb.toml` is present, but that path is deprecated. Run `treb migrate config` to write them into `treb.toml` v2 format. After migration, `treb.toml` becomes the primary runtime config, and `--cleanup-foundry` can remove the deprecated sections from `foundry.toml`.
 
 ### Binary name
 
@@ -61,7 +61,13 @@ All `--json` output uses alphabetically sorted keys for deterministic output. Th
 
 ### `treb run --json` stdout
 
-When using `--json`, the final machine-readable JSON object is written to stdout. Forge compilation output may appear before the JSON object on stdout. To extract the JSON payload, search for the first `{` character or pipe through `jq` which handles leading non-JSON text.
+When using `--json`, the final machine-readable JSON object is written to stdout. Forge compilation output may appear before the JSON object on stdout. Strip everything before the first `{` before passing the payload to `jq`, for example:
+
+```sh
+treb run script/Deploy.s.sol --json \
+  | awk 'BEGIN{json=0} { if (!json) { i = index($0, "{"); if (i) { json = 1; print substr($0, i); } } else print }' \
+  | jq .
+```
 
 Errors produce `{"error": "message"}` on stderr with exit code 1.
 

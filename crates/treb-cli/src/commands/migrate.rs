@@ -14,8 +14,8 @@ use std::{
 use anyhow::{Context, bail};
 use clap::Subcommand;
 use treb_config::{
-    AccountConfig, TrebConfigFormat, detect_treb_config_format, extract_treb_senders_from_foundry,
-    load_treb_config_v1, serialize_treb_config_v2,
+    AccountConfig, NamespaceRoles, TrebConfigFormat, detect_treb_config_format,
+    extract_treb_senders_from_foundry, load_treb_config_v1, serialize_treb_config_v2,
 };
 use treb_registry::{REGISTRY_DIR, REGISTRY_VERSION, run_migrations};
 
@@ -110,11 +110,7 @@ async fn run_config(
             }
 
             // Create a v2 config from foundry senders alone.
-            let v2 = treb_config::TrebFileConfigV2 {
-                accounts: foundry_senders,
-                namespace: Default::default(),
-                fork: Default::default(),
-            };
+            let v2 = convert_foundry_senders_to_v2(foundry_senders);
             let v2_toml = serialize_treb_config_v2(&v2).context("failed to serialize v2 config")?;
 
             return write_or_print_v2(
@@ -409,7 +405,7 @@ fn convert_v1_to_v2(
     v1: &treb_config::TrebFileConfigV1,
     foundry_senders: &HashMap<String, AccountConfig>,
 ) -> treb_config::TrebFileConfigV2 {
-    use treb_config::{NamespaceRoles, TrebFileConfigV2};
+    use treb_config::TrebFileConfigV2;
 
     let mut accounts: HashMap<String, AccountConfig> = HashMap::new();
     let mut namespace: HashMap<String, NamespaceRoles> = HashMap::new();
@@ -457,6 +453,22 @@ fn convert_v1_to_v2(
     }
 
     TrebFileConfigV2 { accounts, namespace, fork: Default::default() }
+}
+
+/// Convert foundry-only sender config into a minimal v2 config with a resolvable
+/// default namespace.
+fn convert_foundry_senders_to_v2(
+    foundry_senders: HashMap<String, AccountConfig>,
+) -> treb_config::TrebFileConfigV2 {
+    let senders = foundry_senders.keys().map(|name| (name.clone(), name.clone())).collect();
+
+    let mut namespace = HashMap::new();
+    namespace.insert(
+        "default".to_string(),
+        NamespaceRoles { profile: Some("default".to_string()), senders },
+    );
+
+    treb_config::TrebFileConfigV2 { accounts: foundry_senders, namespace, fork: Default::default() }
 }
 
 // ── run_registry ──────────────────────────────────────────────────────────────
@@ -983,6 +995,15 @@ private_key = "0xDeployerKey"
         assert!(v2.accounts.contains_key("deployer"), "deployer should be present");
         assert_eq!(v2.accounts["deployer"].type_, Some(SenderType::PrivateKey));
         assert_eq!(v2.accounts["deployer"].address.as_deref(), Some("0xDeployerAddr"));
+        assert_eq!(v2.namespace["default"].profile.as_deref(), Some("default"));
+        assert_eq!(
+            v2.namespace["default"].senders.get("deployer").map(String::as_str),
+            Some("deployer")
+        );
+
+        let (profile, senders) = treb_config::resolve_namespace_v2(&v2, "default").unwrap();
+        assert_eq!(profile, "default");
+        assert_eq!(senders["deployer"].address.as_deref(), Some("0xDeployerAddr"));
 
         // No backup should be created (treb.toml didn't exist before)
         let backups: Vec<_> = std::fs::read_dir(dir.path())
