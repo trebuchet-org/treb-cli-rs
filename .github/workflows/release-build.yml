@@ -78,6 +78,25 @@ jobs:
           else
             shasum -a 256 "${ARCHIVE_NAME}.tar.gz" > "${ARCHIVE_NAME}.sha256"
           fi
+          TARGET_DIR="target/${{ matrix.target }}/release/build"
+          export TARGET_DIR
+          BUILD_OUTPUT=$(python3 - <<'PY'
+          import glob
+          import os
+          import sys
+
+          target_dir = os.environ["TARGET_DIR"]
+          matches = glob.glob(os.path.join(target_dir, "treb-cli-*/output"))
+          if not matches:
+              sys.exit("treb-cli build metadata output not found")
+          print(max(matches, key=os.path.getmtime))
+          PY
+          )
+          {
+            grep '^cargo:rustc-env=TREB_FOUNDRY_VERSION=' "$BUILD_OUTPUT"
+            grep '^cargo:rustc-env=TREB_SOL_COMMIT=' "$BUILD_OUTPUT"
+            grep '^cargo:rustc-env=TREB_RUST_VERSION=' "$BUILD_OUTPUT"
+          } > "${ARCHIVE_NAME}.build-metadata"
           echo "ARCHIVE_NAME=${ARCHIVE_NAME}" >> "$GITHUB_ENV"
 
       - name: Upload artifacts
@@ -87,3 +106,4 @@ jobs:
           path: |
             ${{ env.ARCHIVE_NAME }}.tar.gz
             ${{ env.ARCHIVE_NAME }}.sha256
+            ${{ env.ARCHIVE_NAME }}.build-metadata

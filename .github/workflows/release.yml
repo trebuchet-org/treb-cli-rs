@@ -17,16 +17,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_branch }}
-          submodules: recursive
-
-      - uses: dtolnay/rust-toolchain@nightly
-
-      - name: Install foundry
-        uses: foundry-rs/foundry-toolchain@v1
-
       - name: Download all release artifacts
         uses: actions/download-artifact@v4
         with:
@@ -41,9 +31,50 @@ jobs:
       - name: Gather build metadata
         id: meta
         run: |
-          echo "foundry_version=$(forge --version | head -1)" >> "$GITHUB_OUTPUT"
-          echo "treb_sol_commit=$(git -C lib/treb-sol rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-          echo "rust_version=$(rustc --version)" >> "$GITHUB_OUTPUT"
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import glob
+          import sys
+
+          keys = {
+              "TREB_FOUNDRY_VERSION": "foundry_version",
+              "TREB_SOL_COMMIT": "treb_sol_commit",
+              "TREB_RUST_VERSION": "rust_version",
+          }
+
+          files = sorted(glob.glob("dist/*.build-metadata"))
+          if not files:
+              print("No build metadata artifacts found", file=sys.stderr)
+              sys.exit(1)
+
+          values_by_key = {key: set() for key in keys}
+          for path in files:
+              data = {}
+              with open(path, encoding="utf-8") as handle:
+                  for line in handle:
+                      line = line.rstrip("\n")
+                      prefix = "cargo:rustc-env="
+                      if not line.startswith(prefix):
+                          continue
+                      key, value = line[len(prefix):].split("=", 1)
+                      data[key] = value
+              for key in keys:
+                  if key not in data:
+                      print(f"Missing {key} in {path}", file=sys.stderr)
+                      sys.exit(1)
+                  values_by_key[key].add(data[key])
+
+          for key, output_name in keys.items():
+              values = sorted(values_by_key[key])
+              if len(values) != 1:
+                  print(f"Inconsistent {key} across build artifacts:", file=sys.stderr)
+                  for value in values:
+                      print(f"  {value}", file=sys.stderr)
+                  sys.exit(1)
+              value = values[0]
+              print(f"{output_name}<<EOF")
+              print(value)
+              print("EOF")
+          PY
 
       - name: Consolidate checksums
         run: |
