@@ -1,6 +1,9 @@
 //! `treb dev` subcommands — manage local Anvil development nodes.
 
-use std::{env, path::Path};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
 
 use anyhow::Context;
 use chrono::Utc;
@@ -36,24 +39,45 @@ pub enum AnvilSubcommand {
         /// Block number to fork from (overrides fork state value)
         #[arg(long)]
         fork_block_number: Option<u64>,
+        /// Instance name (defaults to network name, or "default" if neither is set)
+        #[arg(long)]
+        name: Option<String>,
     },
     /// Clean up stale Anvil entries in fork state
     Stop {
         /// Network name to stop (stops all stale entries if not specified)
         #[arg(long)]
         network: Option<String>,
+        /// Instance name to stop
+        #[arg(long)]
+        name: Option<String>,
     },
     /// Restart an Anvil node (not yet implemented)
     Restart {
         /// Network name to restart
         #[arg(long)]
         network: Option<String>,
+        /// Instance name to restart
+        #[arg(long)]
+        name: Option<String>,
     },
     /// Show Anvil node status
     Status {
         /// Output as JSON
         #[arg(long)]
         json: bool,
+        /// Filter output to a single named instance
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Display Anvil log file contents
+    Logs {
+        /// Instance name (defaults to "default")
+        #[arg(long)]
+        name: Option<String>,
+        /// Continuously stream new log lines
+        #[arg(long)]
+        follow: bool,
     },
 }
 
@@ -62,15 +86,19 @@ pub enum AnvilSubcommand {
 pub async fn run(subcommand: DevSubcommand) -> anyhow::Result<()> {
     match subcommand {
         DevSubcommand::Anvil { subcommand } => match subcommand {
-            AnvilSubcommand::Start { network, port, fork_block_number } => {
-                run_anvil_start(network, port, fork_block_number).await
+            AnvilSubcommand::Start { network, port, fork_block_number, name } => {
+                run_anvil_start(network, port, fork_block_number, name).await
             }
-            AnvilSubcommand::Stop { network } => run_anvil_stop(network).await,
+            AnvilSubcommand::Stop { network, name } => run_anvil_stop(network, name).await,
             AnvilSubcommand::Restart { .. } => {
                 println!("dev anvil restart: not yet implemented");
                 Ok(())
             }
-            AnvilSubcommand::Status { json } => run_anvil_status(json).await,
+            AnvilSubcommand::Status { json, name } => run_anvil_status(json, name).await,
+            AnvilSubcommand::Logs { .. } => {
+                println!("dev anvil logs: not yet implemented");
+                Ok(())
+            }
         },
     }
 }
@@ -88,9 +116,11 @@ pub async fn run_anvil_start(
     network: Option<String>,
     port: Option<u16>,
     fork_block_number_override: Option<u64>,
+    name: Option<String>,
 ) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     let treb_dir = cwd.join(TREB_DIR);
+    let instance_name = resolve_instance_name(name.as_deref(), network.as_deref());
 
     let mut config = AnvilConfig::new().port(port.unwrap_or(8545));
 
@@ -131,10 +161,26 @@ pub async fn run_anvil_start(
     deploy_createx(&anvil).await.map_err(|e| anyhow::anyhow!("{e}"))?;
     println!("CreateX factory deployed at 0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed");
 
+    // Write PID file.
+    let pid_file_path = pid_file_path(&treb_dir, &instance_name);
+    let log_file_path = log_file_path(&treb_dir, &instance_name);
+    let pid = std::process::id();
+    fs::create_dir_all(&treb_dir).ok();
+    fs::write(&pid_file_path, pid.to_string())
+        .with_context(|| format!("failed to write PID file {}", pid_file_path.display()))?;
+
     // Update fork state with the actual rpc_url and port.
     if let (Some(net), Some(snapshot)) = (&network, fork_entry_snapshot) {
-        update_fork_state_with_anvil(&treb_dir, snapshot, &rpc_url, actual_port, chain_id)
-            .context("failed to update fork state with Anvil details")?;
+        update_fork_state_with_anvil(
+            &treb_dir,
+            snapshot,
+            &rpc_url,
+            actual_port,
+            chain_id,
+            &pid_file_path,
+            &log_file_path,
+        )
+        .context("failed to update fork state with Anvil details")?;
 
         // Take an initial EVM snapshot so `fork revert` can restore to this state.
         let snapshot_id = take_evm_snapshot_http(&rpc_url).await;
@@ -157,6 +203,9 @@ pub async fn run_anvil_start(
     wait_for_shutdown_signal().await;
 
     println!("\nShutting down Anvil...");
+
+    // Remove PID file on graceful shutdown.
+    let _ = fs::remove_file(&pid_file_path);
 
     // Add a history entry so the exit is recorded.
     if let Some(ref net) = network {
@@ -186,7 +235,7 @@ pub async fn run_anvil_start(
 ///
 /// If `--network` is supplied, only that network is checked. Otherwise all
 /// active forks are checked.
-pub async fn run_anvil_stop(network: Option<String>) -> anyhow::Result<()> {
+pub async fn run_anvil_stop(network: Option<String>, _name: Option<String>) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     let treb_dir = cwd.join(TREB_DIR);
 
@@ -238,7 +287,7 @@ pub async fn run_anvil_stop(network: Option<String>) -> anyhow::Result<()> {
 // ── run_anvil_status ──────────────────────────────────────────────────────────
 
 /// Display a table of active Anvil fork instances with live reachability status.
-pub async fn run_anvil_status(json: bool) -> anyhow::Result<()> {
+pub async fn run_anvil_status(json: bool, _name: Option<String>) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     let treb_dir = cwd.join(TREB_DIR);
 
@@ -311,15 +360,40 @@ pub(crate) fn update_fork_state_with_anvil(
     rpc_url: &str,
     port: u16,
     chain_id: u64,
+    pid_file: &Path,
+    log_file: &Path,
 ) -> anyhow::Result<()> {
     entry.rpc_url = rpc_url.to_string();
     entry.port = port;
     entry.chain_id = chain_id;
+    entry.pid_file = pid_file.to_string_lossy().into_owned();
+    entry.log_file = log_file.to_string_lossy().into_owned();
 
     let mut store = ForkStateStore::new(treb_dir);
     store.load().context("failed to load fork state")?;
     store.update_active_fork(entry).context("failed to update fork state entry")?;
     Ok(())
+}
+
+/// Resolve the instance name from explicit `--name`, the network name, or "default".
+pub(crate) fn resolve_instance_name(name: Option<&str>, network: Option<&str>) -> String {
+    if let Some(n) = name {
+        n.to_string()
+    } else if let Some(net) = network {
+        net.to_string()
+    } else {
+        "default".to_string()
+    }
+}
+
+/// Return the PID file path for the given instance name.
+pub(crate) fn pid_file_path(treb_dir: &Path, instance_name: &str) -> PathBuf {
+    treb_dir.join(format!("anvil-{instance_name}.pid"))
+}
+
+/// Return the log file path for the given instance name.
+pub(crate) fn log_file_path(treb_dir: &Path, instance_name: &str) -> PathBuf {
+    treb_dir.join(format!("anvil-{instance_name}.log"))
 }
 
 /// Check whether a port on 127.0.0.1 is currently accepting TCP connections.
@@ -437,7 +511,7 @@ mod tests {
         let sub = parse_dev(&["anvil", "start"]).unwrap();
         match sub {
             DevSubcommand::Anvil {
-                subcommand: AnvilSubcommand::Start { network, port, fork_block_number },
+                subcommand: AnvilSubcommand::Start { network, port, fork_block_number, .. },
             } => {
                 assert!(network.is_none());
                 assert!(port.is_none());
@@ -452,7 +526,7 @@ mod tests {
         let sub = parse_dev(&["anvil", "start", "--network", "mainnet", "--port", "9000"]).unwrap();
         match sub {
             DevSubcommand::Anvil {
-                subcommand: AnvilSubcommand::Start { network, port, fork_block_number },
+                subcommand: AnvilSubcommand::Start { network, port, fork_block_number, .. },
             } => {
                 assert_eq!(network.as_deref(), Some("mainnet"));
                 assert_eq!(port, Some(9000));
@@ -479,7 +553,7 @@ mod tests {
     fn parse_dev_anvil_stop_no_args() {
         let sub = parse_dev(&["anvil", "stop"]).unwrap();
         match sub {
-            DevSubcommand::Anvil { subcommand: AnvilSubcommand::Stop { network } } => {
+            DevSubcommand::Anvil { subcommand: AnvilSubcommand::Stop { network, .. } } => {
                 assert!(network.is_none());
             }
             _ => panic!("expected Dev::Anvil::Stop"),
@@ -490,7 +564,7 @@ mod tests {
     fn parse_dev_anvil_stop_with_network() {
         let sub = parse_dev(&["anvil", "stop", "--network", "sepolia"]).unwrap();
         match sub {
-            DevSubcommand::Anvil { subcommand: AnvilSubcommand::Stop { network } } => {
+            DevSubcommand::Anvil { subcommand: AnvilSubcommand::Stop { network, .. } } => {
                 assert_eq!(network.as_deref(), Some("sepolia"));
             }
             _ => panic!("expected Dev::Anvil::Stop"),
@@ -501,7 +575,7 @@ mod tests {
     fn parse_dev_anvil_status_json() {
         let sub = parse_dev(&["anvil", "status", "--json"]).unwrap();
         match sub {
-            DevSubcommand::Anvil { subcommand: AnvilSubcommand::Status { json } } => {
+            DevSubcommand::Anvil { subcommand: AnvilSubcommand::Status { json, .. } } => {
                 assert!(json);
             }
             _ => panic!("expected Dev::Anvil::Status"),
@@ -512,11 +586,75 @@ mod tests {
     fn parse_dev_anvil_status_no_json() {
         let sub = parse_dev(&["anvil", "status"]).unwrap();
         match sub {
-            DevSubcommand::Anvil { subcommand: AnvilSubcommand::Status { json } } => {
+            DevSubcommand::Anvil { subcommand: AnvilSubcommand::Status { json, .. } } => {
                 assert!(!json);
             }
             _ => panic!("expected Dev::Anvil::Status"),
         }
+    }
+
+    // ── --name clap parsing tests ────────────────────────────────────────
+
+    #[test]
+    fn parse_dev_anvil_start_with_name() {
+        let sub = parse_dev(&["anvil", "start", "--name", "my-node"]).unwrap();
+        match sub {
+            DevSubcommand::Anvil {
+                subcommand: AnvilSubcommand::Start { name, .. },
+            } => {
+                assert_eq!(name.as_deref(), Some("my-node"));
+            }
+            _ => panic!("expected Dev::Anvil::Start"),
+        }
+    }
+
+    #[test]
+    fn parse_dev_anvil_stop_with_name() {
+        let sub = parse_dev(&["anvil", "stop", "--name", "my-node"]).unwrap();
+        match sub {
+            DevSubcommand::Anvil {
+                subcommand: AnvilSubcommand::Stop { name, .. },
+            } => {
+                assert_eq!(name.as_deref(), Some("my-node"));
+            }
+            _ => panic!("expected Dev::Anvil::Stop"),
+        }
+    }
+
+    // ── resolve_instance_name tests ──────────────────────────────────────
+
+    #[test]
+    fn resolve_instance_name_explicit_name() {
+        assert_eq!(resolve_instance_name(Some("my-node"), None), "my-node");
+    }
+
+    #[test]
+    fn resolve_instance_name_from_network() {
+        assert_eq!(resolve_instance_name(None, Some("mainnet")), "mainnet");
+    }
+
+    #[test]
+    fn resolve_instance_name_default() {
+        assert_eq!(resolve_instance_name(None, None), "default");
+    }
+
+    #[test]
+    fn resolve_instance_name_explicit_overrides_network() {
+        assert_eq!(resolve_instance_name(Some("my-node"), Some("mainnet")), "my-node");
+    }
+
+    // ── pid/log file path tests ──────────────────────────────────────────
+
+    #[test]
+    fn pid_file_path_uses_instance_name() {
+        let path = pid_file_path(Path::new(".treb"), "mainnet");
+        assert_eq!(path, Path::new(".treb/anvil-mainnet.pid"));
+    }
+
+    #[test]
+    fn log_file_path_uses_instance_name() {
+        let path = log_file_path(Path::new(".treb"), "mainnet");
+        assert_eq!(path, Path::new(".treb/anvil-mainnet.log"));
     }
 
     // ── helpers ───────────────────────────────────────────────────────────
@@ -581,7 +719,9 @@ mod tests {
         let chain_id = anvil.chain_id();
 
         // Call the helper that run_anvil_start uses.
-        update_fork_state_with_anvil(&treb_dir, entry, &rpc_url, port, chain_id)
+        let pid_file = pid_file_path(&treb_dir, "local");
+        let log_file = log_file_path(&treb_dir, "local");
+        update_fork_state_with_anvil(&treb_dir, entry, &rpc_url, port, chain_id, &pid_file, &log_file)
             .expect("update_fork_state_with_anvil");
 
         // Reload and verify.
@@ -593,6 +733,26 @@ mod tests {
         assert_eq!(updated.port, port);
         assert_eq!(updated.chain_id, chain_id);
         assert!(port > 0);
+        assert_eq!(updated.pid_file, pid_file.to_string_lossy());
+        assert_eq!(updated.log_file, log_file.to_string_lossy());
+    }
+
+    // ── PID file write/remove ────────────────────────────────────────────
+
+    #[test]
+    fn pid_file_written_and_removed() {
+        let (_root, treb_dir) = make_treb_dir();
+        let pid_path = pid_file_path(&treb_dir, "test-node");
+        let pid = std::process::id();
+
+        // Write PID file.
+        fs::write(&pid_path, pid.to_string()).unwrap();
+        assert!(pid_path.exists());
+        assert_eq!(fs::read_to_string(&pid_path).unwrap(), pid.to_string());
+
+        // Remove on shutdown.
+        fs::remove_file(&pid_path).unwrap();
+        assert!(!pid_path.exists());
     }
 
     // ── status reports correctly ──────────────────────────────────────────
