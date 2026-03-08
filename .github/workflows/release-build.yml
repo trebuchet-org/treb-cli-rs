@@ -17,19 +17,25 @@ jobs:
         include:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
+            os_arch: linux-amd64
             use_cross: true
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
+            os_arch: linux-arm64
             use_cross: true
           - target: x86_64-apple-darwin
             os: macos-latest
+            os_arch: darwin-amd64
             use_cross: false
           - target: aarch64-apple-darwin
             os: macos-latest
+            os_arch: darwin-arm64
             use_cross: false
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - uses: dtolnay/rust-toolchain@nightly
 
@@ -57,9 +63,16 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          ARCHIVE_NAME="treb-${{ github.ref_name }}-${{ matrix.target }}"
-          cp "target/${{ matrix.target }}/release/treb" treb
-          tar czf "${ARCHIVE_NAME}.tar.gz" treb
+          ARCHIVE_NAME="treb-${{ github.ref_name }}-${{ matrix.os_arch }}"
+          STAGING="staging-${ARCHIVE_NAME}"
+          mkdir -p "${STAGING}/completions"
+          cp "target/${{ matrix.target }}/release/treb" "${STAGING}/treb"
+          # Copy shell completions from build output
+          COMP_DIR=$(find "target/${{ matrix.target }}/release/build" -path '*/treb-cli-*/out/completions' -type d 2>/dev/null | head -1)
+          if [ -n "$COMP_DIR" ]; then
+            cp "$COMP_DIR"/* "${STAGING}/completions/"
+          fi
+          tar czf "${ARCHIVE_NAME}.tar.gz" -C "${STAGING}" .
           if command -v sha256sum >/dev/null 2>&1; then
             sha256sum "${ARCHIVE_NAME}.tar.gz" > "${ARCHIVE_NAME}.sha256"
           else
