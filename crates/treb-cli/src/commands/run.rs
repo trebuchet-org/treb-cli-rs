@@ -80,6 +80,23 @@ pub fn inject_env_vars(env_vars: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn should_prompt_for_broadcast_confirmation(
+    broadcast: bool,
+    dry_run: bool,
+    prompts_enabled: bool,
+) -> bool {
+    broadcast && !dry_run && prompts_enabled
+}
+
+fn should_reject_interactive_json_broadcast(
+    broadcast: bool,
+    dry_run: bool,
+    json: bool,
+    prompts_enabled: bool,
+) -> bool {
+    json && should_prompt_for_broadcast_confirmation(broadcast, dry_run, prompts_enabled)
+}
+
 /// Ensure the project is initialized (foundry.toml + .treb/ exist).
 pub fn ensure_initialized(cwd: &std::path::Path) -> anyhow::Result<()> {
     if !cwd.join(FOUNDRY_TOML).exists() {
@@ -174,8 +191,16 @@ pub async fn run(
     // ── Inject environment variables (before config resolution) ──────────
     inject_env_vars(&env_vars)?;
 
+    let prompts_enabled = !is_non_interactive(non_interactive);
+
+    if should_reject_interactive_json_broadcast(broadcast, dry_run, json, prompts_enabled) {
+        bail!(
+            "interactive broadcast confirmation is not available in JSON mode; rerun with --non-interactive"
+        );
+    }
+
     // ── Interactive network selection when --network is omitted ───────────
-    let network = if network.is_none() && !is_non_interactive(non_interactive) {
+    let network = if network.is_none() && prompts_enabled {
         let foundry_cfg = treb_config::load_foundry_config(&cwd)
             .map_err(|e| anyhow::anyhow!("failed to load foundry config: {e}"))?;
         let endpoints = treb_config::rpc_endpoints(&foundry_cfg);
@@ -310,7 +335,7 @@ pub async fn run(
     };
 
     // ── Broadcast confirmation prompt ──────────────────────────────────
-    if broadcast && !dry_run && !is_non_interactive(non_interactive) {
+    if should_prompt_for_broadcast_confirmation(broadcast, dry_run, prompts_enabled) {
         eprintln!("About to broadcast transactions to the network.");
         eprintln!("  Script: {}", script);
         eprintln!("  Namespace: {}", resolved.namespace);
@@ -884,6 +909,22 @@ mod tests {
         let vars = vec!["GOOD=value".to_string(), "BAD".to_string()];
         let err = inject_env_vars(&vars).unwrap_err();
         assert!(err.to_string().contains("BAD"));
+    }
+
+    #[test]
+    fn prompt_for_broadcast_confirmation_requires_interactive_broadcast() {
+        assert!(should_prompt_for_broadcast_confirmation(true, false, true));
+        assert!(!should_prompt_for_broadcast_confirmation(true, true, true));
+        assert!(!should_prompt_for_broadcast_confirmation(true, false, false));
+        assert!(!should_prompt_for_broadcast_confirmation(false, false, true));
+    }
+
+    #[test]
+    fn interactive_json_broadcast_is_rejected_before_prompting() {
+        assert!(should_reject_interactive_json_broadcast(true, false, true, true));
+        assert!(!should_reject_interactive_json_broadcast(true, false, true, false));
+        assert!(!should_reject_interactive_json_broadcast(true, false, false, true));
+        assert!(!should_reject_interactive_json_broadcast(true, true, true, true));
     }
 
     #[test]

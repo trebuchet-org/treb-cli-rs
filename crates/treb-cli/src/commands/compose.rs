@@ -22,7 +22,10 @@ use treb_forge::{
 };
 use treb_registry::Registry;
 
-use crate::{output, ui::{color, interactive::is_non_interactive}};
+use crate::{
+    output,
+    ui::{color, interactive::is_non_interactive},
+};
 
 // ── Compose file schema ──────────────────────────────────────────────────
 
@@ -494,7 +497,7 @@ pub async fn run(
     let skip_set: HashSet<String> = if resume {
         if let Some(state) = load_compose_state()? {
             // Warn if compose file changed since the state was saved.
-            if state.compose_hash != compose_hash {
+            if state.compose_hash != compose_hash && !json {
                 eprintln!("Warning: compose file has changed since the last run; resuming anyway");
             }
             state.completed.into_iter().collect()

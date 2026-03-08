@@ -411,6 +411,43 @@ fn compose_json_debug_does_not_emit_human_debug_line() {
     assert!(stderr.trim().is_empty(), "stderr should be empty in json mode: {stderr}");
 }
 
+#[test]
+fn compose_resume_json_error_stderr_remains_valid_json_when_state_hash_is_stale() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join(".treb")).unwrap();
+    copy_fixture_to("simple.yaml", tmp.path());
+
+    fs::write(
+        tmp.path().join(".treb").join("compose-state.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "compose_hash": "0000000000000000",
+            "completed": ["registry"]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let output = treb()
+        .args(["compose", "simple.yaml", "--resume", "--json"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("failed to run compose --resume --json");
+
+    assert!(!output.status.success(), "command should fail without foundry.toml");
+    assert!(output.stdout.is_empty(), "stdout should be empty on json error");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let json: serde_json::Value =
+        serde_json::from_str(&stderr).expect("stderr should be valid JSON");
+    let error = json["error"].as_str().expect("json error should be a string");
+
+    assert!(error.contains("foundry.toml"), "unexpected error: {error}");
+    assert!(
+        !stderr.contains("compose file has changed"),
+        "stderr should not include resume warning in json mode: {stderr}"
+    );
+}
+
 // ── Compose without init (non-dry-run) ────────────────────────────────
 
 #[test]

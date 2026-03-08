@@ -464,7 +464,9 @@ impl Commands {
             | Commands::Networks { json, .. }
             | Commands::GenDeploy { json, .. }
             | Commands::Compose { json, .. } => *json,
-            Commands::Config { subcommand } => matches!(subcommand, ConfigSubcommand::Show { json: true }),
+            Commands::Config { subcommand } => {
+                matches!(subcommand, ConfigSubcommand::Show { json: true })
+            }
             Commands::Prune(args) => args.json,
             Commands::Reset(args) => args.json,
             Commands::Fork { subcommand } => subcommand.json_flag(),
@@ -478,10 +480,12 @@ impl Commands {
 impl commands::fork::ForkSubcommand {
     fn json_flag(&self) -> bool {
         match self {
-            Self::Status { json, .. }
-            | Self::History { json, .. }
-            | Self::Diff { json, .. } => *json,
-            Self::Enter { .. } | Self::Exit { .. } | Self::Revert { .. } | Self::Restart { .. } => false,
+            Self::Status { json, .. } | Self::History { json, .. } | Self::Diff { json, .. } => {
+                *json
+            }
+            Self::Enter { .. } | Self::Exit { .. } | Self::Revert { .. } | Self::Restart { .. } => {
+                false
+            }
         }
     }
 }
