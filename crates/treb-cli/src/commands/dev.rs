@@ -100,10 +100,7 @@ pub async fn run(subcommand: DevSubcommand) -> anyhow::Result<()> {
                 run_anvil_restart(network, name, port, fork_block_number).await
             }
             AnvilSubcommand::Status { json, name } => run_anvil_status(json, name).await,
-            AnvilSubcommand::Logs { .. } => {
-                println!("dev anvil logs: not yet implemented");
-                Ok(())
-            }
+            AnvilSubcommand::Logs { name, follow } => run_anvil_logs(name, follow).await,
         },
     }
 }
@@ -513,6 +510,81 @@ pub async fn run_anvil_status(json: bool, name: Option<String>) -> anyhow::Resul
 
     crate::output::print_table(&table);
     Ok(())
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+// ── run_anvil_logs ────────────────────────────────────────────────────────
+
+/// Display log file contents for an Anvil instance.
+///
+/// Resolves the instance name from `--name` (defaulting to "default"), looks up
+/// the log file path from fork state, and prints its contents. With `--follow`,
+/// continuously streams new lines as they are appended.
+pub async fn run_anvil_logs(name: Option<String>, follow: bool) -> anyhow::Result<()> {
+    let cwd = env::current_dir().context("failed to determine current directory")?;
+    let treb_dir = cwd.join(TREB_DIR);
+    let instance_name = resolve_instance_name(name.as_deref(), None);
+
+    // Try to find the log file path from fork state first.
+    let log_path = resolve_log_file_path(&treb_dir, &instance_name)?;
+
+    if !log_path.exists() {
+        bail!("log file '{}' does not exist; instance '{}' may not have been started yet", log_path.display(), instance_name);
+    }
+
+    if follow {
+        stream_log_file(&log_path).await
+    } else {
+        let contents = fs::read_to_string(&log_path)
+            .with_context(|| format!("failed to read log file '{}'", log_path.display()))?;
+        print!("{contents}");
+        Ok(())
+    }
+}
+
+/// Resolve the log file path for an instance, checking fork state first then falling
+/// back to the default path.
+fn resolve_log_file_path(treb_dir: &Path, instance_name: &str) -> anyhow::Result<PathBuf> {
+    // Try to find the log file from fork state entries.
+    let mut store = ForkStateStore::new(treb_dir);
+    if store.load().is_ok() {
+        for entry in store.list_active_forks() {
+            if entry.resolved_instance_name() == instance_name && !entry.log_file.is_empty() {
+                return Ok(PathBuf::from(&entry.log_file));
+            }
+        }
+    }
+
+    // Fall back to the default path.
+    Ok(log_file_path(treb_dir, instance_name))
+}
+
+/// Continuously stream new lines from a log file (tail -f behavior).
+async fn stream_log_file(path: &Path) -> anyhow::Result<()> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    let file = tokio::fs::File::open(path)
+        .await
+        .with_context(|| format!("failed to open log file '{}'", path.display()))?;
+    let mut reader = BufReader::new(file);
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+        match reader.read_line(&mut line).await {
+            Ok(0) => {
+                // EOF — wait briefly then check for more data.
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            Ok(_) => {
+                print!("{line}");
+            }
+            Err(e) => {
+                bail!("error reading log file: {e}");
+            }
+        }
+    }
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

@@ -1,0 +1,13 @@
+=== cmd 0: [dev anvil status --json] ===
+[
+  {
+    "chainId": 1,
+    "forkBlockNumber": null,
+    "network": "mainnet",
+    "port": 18545,
+    "rpcUrl": "http://127.0.0.1:18545",
+    "startedAt": "<TIMESTAMP>",
+    "status": "stopped",
+    "uptime": "<UPTIME>"
+  }
+]
