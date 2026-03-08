@@ -444,10 +444,13 @@ pub async fn run_anvil_status(json: bool, name: Option<String>) -> anyhow::Resul
             .collect()
     };
 
+    let now = Utc::now();
+
     if json {
         let mut statuses = Vec::new();
         for entry in &forks {
             let running = is_port_reachable(entry.port).await;
+            let uptime = format_uptime(now - entry.started_at);
             statuses.push(serde_json::json!({
                 "network":         entry.network,
                 "rpcUrl":          entry.rpc_url,
@@ -455,10 +458,11 @@ pub async fn run_anvil_status(json: bool, name: Option<String>) -> anyhow::Resul
                 "chainId":         entry.chain_id,
                 "forkBlockNumber": entry.fork_block_number,
                 "startedAt":       entry.started_at,
+                "uptime":          uptime,
                 "status":          if running { "running" } else { "stopped" },
             }));
         }
-        println!("{}", serde_json::to_string_pretty(&statuses)?);
+        crate::output::print_json(&statuses)?;
         return Ok(());
     }
 
@@ -474,23 +478,36 @@ pub async fn run_anvil_status(json: bool, name: Option<String>) -> anyhow::Resul
         "Chain ID",
         "Fork Block",
         "Started At",
+        "Uptime",
         "Status",
     ]);
 
     for entry in &forks {
         let running = is_port_reachable(entry.port).await;
-        let status = if running { "running" } else { "stopped" };
+        let status_text = if running { "running" } else { "stopped" };
+        let uptime = format_uptime(now - entry.started_at);
         let fork_block =
             entry.fork_block_number.map(|b| b.to_string()).unwrap_or_else(|| "latest".into());
 
+        let status_cell = if crate::ui::color::is_color_enabled() {
+            if running {
+                comfy_table::Cell::new(status_text).fg(comfy_table::Color::Green)
+            } else {
+                comfy_table::Cell::new(status_text).fg(comfy_table::Color::Red)
+            }
+        } else {
+            comfy_table::Cell::new(status_text)
+        };
+
         table.add_row(vec![
-            entry.network.as_str(),
-            entry.rpc_url.as_str(),
-            &entry.port.to_string(),
-            &entry.chain_id.to_string(),
-            fork_block.as_str(),
-            &entry.started_at.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
-            status,
+            comfy_table::Cell::new(&entry.network),
+            comfy_table::Cell::new(&entry.rpc_url),
+            comfy_table::Cell::new(entry.port),
+            comfy_table::Cell::new(entry.chain_id),
+            comfy_table::Cell::new(&fork_block),
+            comfy_table::Cell::new(entry.started_at.format("%Y-%m-%d %H:%M:%S UTC")),
+            comfy_table::Cell::new(&uptime),
+            status_cell,
         ]);
     }
 
@@ -690,6 +707,29 @@ async fn wait_for_shutdown_signal() {
     #[cfg(not(unix))]
     {
         tokio::signal::ctrl_c().await.ok();
+    }
+}
+
+/// Format a duration as a human-readable uptime string.
+///
+/// - Under 60 seconds: `"< 1m"`
+/// - Minutes only:      `"Xm"`
+/// - Hours + minutes:   `"Xh Ym"`
+/// - Days + hours:      `"Xd Yh"`
+fn format_uptime(duration: chrono::Duration) -> String {
+    let total_secs = duration.num_seconds().max(0);
+    let days = total_secs / 86400;
+    let hours = (total_secs % 86400) / 3600;
+    let minutes = (total_secs % 3600) / 60;
+
+    if days > 0 {
+        format!("{}d {}h", days, hours)
+    } else if hours > 0 {
+        format!("{}h {}m", hours, minutes)
+    } else if minutes > 0 {
+        format!("{}m", minutes)
+    } else {
+        "< 1m".to_string()
     }
 }
 
@@ -1236,6 +1276,42 @@ mod tests {
         // Remove on shutdown.
         fs::remove_file(&pid_path).unwrap();
         assert!(!pid_path.exists());
+    }
+
+    // ── format_uptime tests ───────────────────────────────────────────────
+
+    #[test]
+    fn format_uptime_under_60s() {
+        assert_eq!(format_uptime(chrono::Duration::seconds(0)), "< 1m");
+        assert_eq!(format_uptime(chrono::Duration::seconds(30)), "< 1m");
+        assert_eq!(format_uptime(chrono::Duration::seconds(59)), "< 1m");
+    }
+
+    #[test]
+    fn format_uptime_minutes() {
+        assert_eq!(format_uptime(chrono::Duration::seconds(60)), "1m");
+        assert_eq!(format_uptime(chrono::Duration::seconds(300)), "5m");
+        assert_eq!(format_uptime(chrono::Duration::seconds(3599)), "59m");
+    }
+
+    #[test]
+    fn format_uptime_hours_and_minutes() {
+        assert_eq!(format_uptime(chrono::Duration::seconds(3600)), "1h 0m");
+        assert_eq!(format_uptime(chrono::Duration::seconds(7260)), "2h 1m");
+        assert_eq!(format_uptime(chrono::Duration::seconds(86399)), "23h 59m");
+    }
+
+    #[test]
+    fn format_uptime_days_and_hours() {
+        assert_eq!(format_uptime(chrono::Duration::seconds(86400)), "1d 0h");
+        assert_eq!(format_uptime(chrono::Duration::seconds(90000)), "1d 1h");
+        assert_eq!(format_uptime(chrono::Duration::seconds(172800)), "2d 0h");
+    }
+
+    #[test]
+    fn format_uptime_negative_duration() {
+        // Negative durations (clock skew) should clamp to "< 1m"
+        assert_eq!(format_uptime(chrono::Duration::seconds(-10)), "< 1m");
     }
 
     // ── status reports correctly ──────────────────────────────────────────
