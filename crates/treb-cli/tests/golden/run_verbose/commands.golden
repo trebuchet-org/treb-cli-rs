@@ -1,9 +1,9 @@
 === cmd 0: [run script/Deploy.s.sol --network anvil-31337 --broadcast --non-interactive --verbose] ===
 No files changed, compilation skipped
 default
-\-- 31337
-    \-- SINGLETON
-        \-- Counter:Counter 0x5b73...0519 UNVERIFIED
+└─ 31337
+   └─ SINGLETON
+      └─ Counter:Counter 0x5b73...0519 UNVERIFIED
 
 Transactions:
   1.  (SIMULATED)

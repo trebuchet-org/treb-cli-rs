@@ -83,12 +83,12 @@ mod ui_integration_tests {
         assert_eq!(plain_lines[0], "mainnet");
 
         // Check prefix characters
-        assert!(plain_lines[1].starts_with("|-- "), "First chain should use |-- prefix");
+        assert!(plain_lines[1].starts_with("├─ "), "First chain should use ├─ prefix");
         assert!(plain_lines[1].contains("ethereum"), "First chain label");
-        assert!(plain_lines[2].starts_with("|   |-- "), "First deployment of first chain");
-        assert!(plain_lines[3].starts_with("|   \\-- "), "Last deployment of first chain");
-        assert!(plain_lines[4].starts_with("\\-- "), "Last chain should use \\-- prefix");
-        assert!(plain_lines[5].starts_with("    \\-- "), "Only child of last chain");
+        assert!(plain_lines[2].starts_with("│  ├─ "), "First deployment of first chain");
+        assert!(plain_lines[3].starts_with("│  └─ "), "Last deployment of first chain");
+        assert!(plain_lines[4].starts_with("└─ "), "Last chain should use └─ prefix");
+        assert!(plain_lines[5].starts_with("   └─ "), "Only child of last chain");
 
         // Check deployment label content
         assert!(plain_lines[3].contains("MyProxy"), "Deployment label should contain name");
@@ -117,12 +117,12 @@ mod ui_integration_tests {
 
         // Prefix characters should not be colored
         assert!(
-            styled_lines[1].starts_with("|-- "),
+            styled_lines[1].starts_with("├─ "),
             "Styled prefix must not be colored: {:?}",
             styled_lines[1]
         );
         assert!(
-            styled_lines[4].starts_with("\\-- "),
+            styled_lines[4].starts_with("└─ "),
             "Styled prefix must not be colored: {:?}",
             styled_lines[4]
         );

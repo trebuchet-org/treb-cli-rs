@@ -3,9 +3,9 @@ No files changed, compilation skipped
 🚧 [DRY RUN] No changes were written to the registry.
 
 default
-\-- 31337
-    \-- SINGLETON
-        \-- Counter:Counter 0x5b73...0519 UNVERIFIED
+└─ 31337
+   └─ SINGLETON
+      └─ Counter:Counter 0x5b73...0519 UNVERIFIED
 
 Transactions:
   1.  (SIMULATED)

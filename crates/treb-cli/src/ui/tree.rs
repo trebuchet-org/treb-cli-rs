@@ -57,11 +57,11 @@ impl TreeNode {
         let count = self.children.len();
         for (i, child) in self.children.iter().enumerate() {
             let is_last = i == count - 1;
-            let connector = if is_last { "\\-- " } else { "|-- " };
+            let connector = if is_last { "└─ " } else { "├─ " };
             lines.push(format!("{}{}{}", prefix, connector, child.label));
 
             let child_prefix =
-                if is_last { format!("{}    ", prefix) } else { format!("{}|   ", prefix) };
+                if is_last { format!("{}   ", prefix) } else { format!("{}│  ", prefix) };
             child.render_children_plain(lines, &child_prefix);
         }
     }
@@ -70,11 +70,11 @@ impl TreeNode {
         let count = self.children.len();
         for (i, child) in self.children.iter().enumerate() {
             let is_last = i == count - 1;
-            let connector = if is_last { "\\-- " } else { "|-- " };
+            let connector = if is_last { "└─ " } else { "├─ " };
             lines.push(format!("{}{}{}", prefix, connector, child.styled_label()));
 
             let child_prefix =
-                if is_last { format!("{}    ", prefix) } else { format!("{}|   ", prefix) };
+                if is_last { format!("{}   ", prefix) } else { format!("{}│  ", prefix) };
             child.render_children_styled(lines, &child_prefix);
         }
     }
@@ -97,8 +97,8 @@ mod tests {
         let lines: Vec<&str> = rendered.lines().collect();
         assert_eq!(lines.len(), 3);
         assert_eq!(lines[0], "root");
-        assert_eq!(lines[1], "|-- a");
-        assert_eq!(lines[2], "\\-- b");
+        assert_eq!(lines[1], "├─ a");
+        assert_eq!(lines[2], "└─ b");
     }
 
     #[test]
@@ -112,11 +112,11 @@ mod tests {
         let lines: Vec<&str> = rendered.lines().collect();
         assert_eq!(lines.len(), 6);
         assert_eq!(lines[0], "root");
-        assert_eq!(lines[1], "|-- mid1");
-        assert_eq!(lines[2], "|   |-- leaf1");
-        assert_eq!(lines[3], "|   \\-- leaf2");
-        assert_eq!(lines[4], "\\-- mid2");
-        assert_eq!(lines[5], "    \\-- leaf3");
+        assert_eq!(lines[1], "├─ mid1");
+        assert_eq!(lines[2], "│  ├─ leaf1");
+        assert_eq!(lines[3], "│  └─ leaf2");
+        assert_eq!(lines[4], "└─ mid2");
+        assert_eq!(lines[5], "   └─ leaf3");
     }
 
     #[test]
@@ -157,7 +157,7 @@ mod tests {
         let lines: Vec<&str> = styled.lines().collect();
         // The child line should start with the plain prefix, not an escape
         assert!(
-            lines[1].starts_with("\\-- "),
+            lines[1].starts_with("└─ "),
             "Tree prefix must not be colored, got: {:?}",
             lines[1]
         );

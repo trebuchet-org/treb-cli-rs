@@ -1,9 +1,9 @@
 === cmd 0: [list --namespace mainnet] ===
 mainnet
-\-- 42220
-    |-- PROXY
-    |   \-- TransparentUpgradeableProxy:FPMMFactory 0x22A8...7F03 UNVERIFIED
-    |       \-- Implementation 0x9595...79dF
-    \-- SINGLETON
-        |-- FPMM:v<VERSION> 0x42ed...833D e[✔︎]  s[-] b[-]
-        \-- FPMMFactory:v<VERSION> 0x9595...79dF UNVERIFIED
+└─ 42220
+   ├─ PROXY
+   │  └─ TransparentUpgradeableProxy:FPMMFactory 0x22A8...7F03 UNVERIFIED
+   │     └─ Implementation 0x9595...79dF
+   └─ SINGLETON
+      ├─ FPMM:v<VERSION> 0x42ed...833D e[✔︎]  s[-] b[-]
+      └─ FPMMFactory:v<VERSION> 0x9595...79dF UNVERIFIED
