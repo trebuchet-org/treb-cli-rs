@@ -36,6 +36,9 @@ pub struct SnapshotEntry {
 pub struct ForkEntry {
     /// Network name this fork targets.
     pub network: String,
+    /// Optional instance identifier for named Anvil instances.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_name: Option<String>,
     /// Local RPC URL of the Anvil instance.
     pub rpc_url: String,
     /// Port the Anvil instance is listening on.
@@ -73,6 +76,13 @@ pub struct ForkEntry {
     pub snapshots: Vec<SnapshotEntry>,
 }
 
+impl ForkEntry {
+    /// Resolve the effective instance name for this entry.
+    pub fn resolved_instance_name(&self) -> &str {
+        self.instance_name.as_deref().unwrap_or(&self.network)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // ForkHistoryEntry
 // ---------------------------------------------------------------------------
@@ -100,7 +110,7 @@ pub struct ForkHistoryEntry {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ForkState {
-    /// Active forks keyed by network name.
+    /// Active forks keyed by network or `network:name` for named instances.
     pub forks: HashMap<String, ForkEntry>,
     /// History of fork actions (most recent first).
     pub history: Vec<ForkHistoryEntry>,
@@ -116,6 +126,7 @@ mod tests {
         let ts = Utc.with_ymd_and_hms(2026, 3, 3, 12, 0, 0).unwrap();
         ForkEntry {
             network: "mainnet".into(),
+            instance_name: None,
             rpc_url: "http://127.0.0.1:8545".into(),
             port: 8545,
             chain_id: 1,
@@ -158,6 +169,7 @@ mod tests {
 
         // Existing fields
         assert!(obj.contains_key("network"));
+        assert!(!obj.contains_key("instanceName"));
         assert!(obj.contains_key("rpcUrl"));
         assert!(obj.contains_key("port"));
         assert!(obj.contains_key("chainId"));
@@ -177,6 +189,7 @@ mod tests {
 
         // No snake_case
         assert!(!obj.contains_key("rpc_url"));
+        assert!(!obj.contains_key("instance_name"));
         assert!(!obj.contains_key("chain_id"));
         assert!(!obj.contains_key("fork_url"));
         assert!(!obj.contains_key("fork_block_number"));
@@ -198,6 +211,14 @@ mod tests {
         let json = serde_json::to_value(&entry).unwrap();
         let obj = json.as_object().unwrap();
         assert!(!obj.contains_key("forkBlockNumber"));
+    }
+
+    #[test]
+    fn fork_entry_instance_name_serialized_when_present() {
+        let mut entry = sample_fork_entry();
+        entry.instance_name = Some("alpha".into());
+        let json = serde_json::to_value(&entry).unwrap();
+        assert_eq!(json["instanceName"], "alpha");
     }
 
     #[test]
@@ -322,6 +343,7 @@ mod tests {
         // Verify fork entry fields
         let entry = state.forks.get("mainnet").expect("mainnet fork must exist");
         assert_eq!(entry.network, "mainnet");
+        assert_eq!(entry.instance_name, None);
         assert_eq!(entry.rpc_url, "http://127.0.0.1:8545");
         assert_eq!(entry.port, 8545);
         assert_eq!(entry.chain_id, 1);

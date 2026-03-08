@@ -24,6 +24,7 @@ fn sample_fork_entry(treb_dir: &std::path::Path) -> ForkEntry {
     let snapshot_dir = treb_dir.join("snapshots").join("mainnet");
     ForkEntry {
         network: "mainnet".to_string(),
+        instance_name: None,
         rpc_url: "http://localhost:18545".to_string(),
         port: 18545,
         chain_id: 1,

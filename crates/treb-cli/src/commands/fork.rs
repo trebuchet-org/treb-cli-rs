@@ -179,6 +179,7 @@ pub async fn run_enter(
     let now = Utc::now();
     let entry = ForkEntry {
         network: network.clone(),
+        instance_name: None,
         rpc_url: String::new(),
         port: 0,
         chain_id,
@@ -1010,6 +1011,7 @@ mod tests {
         let now = Utc::now();
         ForkEntry {
             network: network.to_string(),
+            instance_name: None,
             rpc_url: String::new(),
             port: 0,
             chain_id: 1,

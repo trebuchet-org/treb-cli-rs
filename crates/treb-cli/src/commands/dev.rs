@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 use chrono::Utc;
 use clap::Subcommand;
 use tokio::net::TcpStream;
@@ -174,6 +174,7 @@ pub async fn run_anvil_start(
         update_fork_state_with_anvil(
             &treb_dir,
             snapshot,
+            &instance_name,
             &rpc_url,
             actual_port,
             chain_id,
@@ -186,7 +187,7 @@ pub async fn run_anvil_start(
         let snapshot_id = take_evm_snapshot_http(&rpc_url).await;
         match snapshot_id {
             Ok(id) => {
-                store_fork_state_snapshot(&treb_dir, net, id);
+                store_fork_state_snapshot(&treb_dir, net, &instance_name, id);
             }
             Err(e) => {
                 // Non-fatal: revert will just skip the EVM revert step.
@@ -235,49 +236,89 @@ pub async fn run_anvil_start(
 ///
 /// If `--network` is supplied, only that network is checked. Otherwise all
 /// active forks are checked.
-pub async fn run_anvil_stop(network: Option<String>, _name: Option<String>) -> anyhow::Result<()> {
+pub async fn run_anvil_stop(network: Option<String>, name: Option<String>) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     let treb_dir = cwd.join(TREB_DIR);
 
     let mut store = ForkStateStore::new(&treb_dir);
     store.load().context("failed to load fork state")?;
 
-    let networks: Vec<String> = if let Some(net) = network {
-        vec![net]
+    let targets: Vec<(String, String, u16)> = if let Some(ref requested_name) = name {
+        let instance_name = resolve_instance_name(Some(requested_name), network.as_deref());
+        resolve_named_anvil_entries(&store, network.as_deref(), &instance_name)?
+            .into_iter()
+            .map(|entry| {
+                (entry.network.clone(), entry.resolved_instance_name().to_string(), entry.port)
+            })
+            .collect()
+    } else if let Some(ref net) = network {
+        let instance_name = resolve_instance_name(None, Some(net));
+        store
+            .get_active_fork_instance(net, &instance_name)
+            .filter(|entry| is_tracked_anvil_instance(entry))
+            .map(|entry| {
+                vec![(
+                    entry.network.clone(),
+                    entry.resolved_instance_name().to_string(),
+                    entry.port,
+                )]
+            })
+            .unwrap_or_default()
     } else {
-        store.list_active_forks().into_iter().map(|e| e.network.clone()).collect()
+        store
+            .list_active_forks()
+            .into_iter()
+            .filter(|entry| is_tracked_anvil_instance(entry))
+            .map(|entry| {
+                (entry.network.clone(), entry.resolved_instance_name().to_string(), entry.port)
+            })
+            .collect()
     };
 
     let mut removed = Vec::new();
-    for net in &networks {
-        if let Some(entry) = store.get_active_fork(net) {
-            let port = entry.port;
-            if !is_port_reachable(port).await {
+    for (net, instance_name, port) in &targets {
+        if !is_port_reachable(*port).await {
+            if instance_name == net {
                 store.remove_active_fork(net).context("failed to remove fork entry")?;
-                store
-                    .add_history(ForkHistoryEntry {
-                        action: "anvil-stop".into(),
-                        network: net.clone(),
-                        timestamp: Utc::now(),
-                        details: Some(
-                            "Cleaned up stale fork state entry (port unreachable)".into(),
-                        ),
-                    })
-                    .ok();
-                removed.push(net.clone());
             } else {
-                println!("Network '{net}' is still reachable at port {port}; skipping.");
+                store
+                    .remove_active_fork_instance(net, instance_name)
+                    .context("failed to remove fork entry")?;
             }
+            store
+                .add_history(ForkHistoryEntry {
+                    action: "anvil-stop".into(),
+                    network: net.clone(),
+                    timestamp: Utc::now(),
+                    details: Some("Cleaned up stale fork state entry (port unreachable)".into()),
+                })
+                .ok();
+            removed.push((net.clone(), instance_name.clone()));
+        } else if instance_name == net {
+            println!("Network '{net}' is still reachable at port {port}; skipping.");
         } else {
-            println!("Network '{net}' is not in fork state; nothing to remove.");
+            println!(
+                "Instance '{instance_name}' for network '{net}' is still reachable at port {port}; skipping."
+            );
         }
     }
 
     if removed.is_empty() {
+        if network.is_some() && name.is_none() && targets.is_empty() {
+            let net = network.as_deref().unwrap_or_default();
+            println!("Network '{net}' has no tracked Anvil instance; nothing to remove.");
+            return Ok(());
+        }
         println!("No stale fork state entries found.");
     } else {
-        for net in &removed {
-            println!("Removed stale fork state entry for network '{net}'.");
+        for (net, instance_name) in &removed {
+            if instance_name == net {
+                println!("Removed stale fork state entry for network '{net}'.");
+            } else {
+                println!(
+                    "Removed stale fork state entry for instance '{instance_name}' on network '{net}'."
+                );
+            }
         }
     }
 
@@ -287,14 +328,23 @@ pub async fn run_anvil_stop(network: Option<String>, _name: Option<String>) -> a
 // ── run_anvil_status ──────────────────────────────────────────────────────────
 
 /// Display a table of active Anvil fork instances with live reachability status.
-pub async fn run_anvil_status(json: bool, _name: Option<String>) -> anyhow::Result<()> {
+pub async fn run_anvil_status(json: bool, name: Option<String>) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     let treb_dir = cwd.join(TREB_DIR);
 
     let mut store = ForkStateStore::new(&treb_dir);
     store.load().context("failed to load fork state")?;
 
-    let forks = store.list_active_forks();
+    let forks = if let Some(ref requested_name) = name {
+        let instance_name = resolve_instance_name(Some(requested_name), None);
+        resolve_named_anvil_entries(&store, None, &instance_name)?
+    } else {
+        store
+            .list_active_forks()
+            .into_iter()
+            .filter(|entry| is_tracked_anvil_instance(entry))
+            .collect()
+    };
 
     if json {
         let mut statuses = Vec::new();
@@ -354,15 +404,19 @@ pub async fn run_anvil_status(json: bool, _name: Option<String>) -> anyhow::Resu
 
 /// Update the fork state entry for `network` with the actual Anvil `rpc_url`,
 /// `port`, and `chain_id` after a successful spawn.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn update_fork_state_with_anvil(
     treb_dir: &Path,
     mut entry: ForkEntry,
+    instance_name: &str,
     rpc_url: &str,
     port: u16,
     chain_id: u64,
     pid_file: &Path,
     log_file: &Path,
 ) -> anyhow::Result<()> {
+    entry.instance_name =
+        if instance_name == entry.network { None } else { Some(instance_name.to_string()) };
     entry.rpc_url = rpc_url.to_string();
     entry.port = port;
     entry.chain_id = chain_id;
@@ -371,8 +425,35 @@ pub(crate) fn update_fork_state_with_anvil(
 
     let mut store = ForkStateStore::new(treb_dir);
     store.load().context("failed to load fork state")?;
-    store.update_active_fork(entry).context("failed to update fork state entry")?;
+    store.upsert_active_fork(entry).context("failed to update fork state entry")?;
     Ok(())
+}
+
+fn is_tracked_anvil_instance(entry: &ForkEntry) -> bool {
+    entry.port != 0 || !entry.pid_file.is_empty() || !entry.log_file.is_empty()
+}
+
+fn resolve_named_anvil_entries<'a>(
+    store: &'a ForkStateStore,
+    network: Option<&str>,
+    instance_name: &str,
+) -> anyhow::Result<Vec<&'a ForkEntry>> {
+    let entries: Vec<&ForkEntry> = store
+        .list_active_forks()
+        .into_iter()
+        .filter(|entry| is_tracked_anvil_instance(entry))
+        .filter(|entry| network.is_none_or(|net| entry.network == net))
+        .filter(|entry| entry.resolved_instance_name() == instance_name)
+        .collect();
+
+    if entries.is_empty() {
+        if let Some(net) = network {
+            bail!("Anvil instance '{}' for network '{}' is not tracked", instance_name, net);
+        }
+        bail!("Anvil instance '{}' is not tracked", instance_name);
+    }
+
+    Ok(entries)
 }
 
 /// Resolve the instance name from explicit `--name`, the network name, or "default".
@@ -431,11 +512,16 @@ pub(crate) async fn take_evm_snapshot_http(rpc_url: &str) -> anyhow::Result<Stri
         .ok_or_else(|| anyhow::anyhow!("unexpected evm_snapshot result: {json}"))
 }
 
-/// Store an EVM snapshot in the fork state for the given network (best-effort).
-pub(crate) fn store_fork_state_snapshot(treb_dir: &Path, network: &str, snapshot_id: String) {
+/// Store an EVM snapshot in the fork state for the given instance (best-effort).
+pub(crate) fn store_fork_state_snapshot(
+    treb_dir: &Path,
+    network: &str,
+    instance_name: &str,
+    snapshot_id: String,
+) {
     let mut store = ForkStateStore::new(treb_dir);
     if store.load().is_ok() {
-        if let Some(mut entry) = store.get_active_fork(network).cloned() {
+        if let Some(mut entry) = store.get_active_fork_instance(network, instance_name).cloned() {
             let next_index = entry.snapshots.len() as u32;
             entry.snapshots.push(treb_core::types::fork::SnapshotEntry {
                 index: next_index,
@@ -443,7 +529,7 @@ pub(crate) fn store_fork_state_snapshot(treb_dir: &Path, network: &str, snapshot
                 command: "enter".into(),
                 timestamp: chrono::Utc::now(),
             });
-            store.update_active_fork(entry).ok();
+            store.upsert_active_fork(entry).ok();
         }
     }
 }
@@ -599,9 +685,7 @@ mod tests {
     fn parse_dev_anvil_start_with_name() {
         let sub = parse_dev(&["anvil", "start", "--name", "my-node"]).unwrap();
         match sub {
-            DevSubcommand::Anvil {
-                subcommand: AnvilSubcommand::Start { name, .. },
-            } => {
+            DevSubcommand::Anvil { subcommand: AnvilSubcommand::Start { name, .. } } => {
                 assert_eq!(name.as_deref(), Some("my-node"));
             }
             _ => panic!("expected Dev::Anvil::Start"),
@@ -612,9 +696,7 @@ mod tests {
     fn parse_dev_anvil_stop_with_name() {
         let sub = parse_dev(&["anvil", "stop", "--name", "my-node"]).unwrap();
         match sub {
-            DevSubcommand::Anvil {
-                subcommand: AnvilSubcommand::Stop { name, .. },
-            } => {
+            DevSubcommand::Anvil { subcommand: AnvilSubcommand::Stop { name, .. } } => {
                 assert_eq!(name.as_deref(), Some("my-node"));
             }
             _ => panic!("expected Dev::Anvil::Stop"),
@@ -670,6 +752,7 @@ mod tests {
         let now = Utc::now();
         ForkEntry {
             network: network.to_string(),
+            instance_name: None,
             rpc_url: String::new(),
             port: 0,
             chain_id: 31337,
@@ -721,8 +804,10 @@ mod tests {
         // Call the helper that run_anvil_start uses.
         let pid_file = pid_file_path(&treb_dir, "local");
         let log_file = log_file_path(&treb_dir, "local");
-        update_fork_state_with_anvil(&treb_dir, entry, &rpc_url, port, chain_id, &pid_file, &log_file)
-            .expect("update_fork_state_with_anvil");
+        update_fork_state_with_anvil(
+            &treb_dir, entry, "local", &rpc_url, port, chain_id, &pid_file, &log_file,
+        )
+        .expect("update_fork_state_with_anvil");
 
         // Reload and verify.
         let mut store2 = ForkStateStore::new(&treb_dir);
@@ -735,6 +820,68 @@ mod tests {
         assert!(port > 0);
         assert_eq!(updated.pid_file, pid_file.to_string_lossy());
         assert_eq!(updated.log_file, log_file.to_string_lossy());
+    }
+
+    #[test]
+    fn named_anvil_updates_use_composite_key() {
+        let (_root, treb_dir) = make_treb_dir();
+        let entry = sample_fork_entry(&treb_dir, "mainnet");
+        let mut store = ForkStateStore::new(&treb_dir);
+        store.insert_active_fork(entry.clone()).unwrap();
+
+        let pid_file = pid_file_path(&treb_dir, "alpha");
+        let log_file = log_file_path(&treb_dir, "alpha");
+        update_fork_state_with_anvil(
+            &treb_dir,
+            entry,
+            "alpha",
+            "http://127.0.0.1:8546",
+            8546,
+            1,
+            &pid_file,
+            &log_file,
+        )
+        .unwrap();
+
+        let mut store2 = ForkStateStore::new(&treb_dir);
+        store2.load().unwrap();
+
+        let default_entry = store2.get_active_fork("mainnet").unwrap();
+        let named_entry = store2.get_active_fork_instance("mainnet", "alpha").unwrap();
+
+        assert_eq!(default_entry.port, 0);
+        assert_eq!(named_entry.instance_name.as_deref(), Some("alpha"));
+        assert_eq!(named_entry.port, 8546);
+        assert_eq!(named_entry.pid_file, pid_file.to_string_lossy());
+    }
+
+    #[test]
+    fn resolve_named_anvil_entries_errors_when_instance_missing() {
+        let (_root, treb_dir) = make_treb_dir();
+        let store = ForkStateStore::new(&treb_dir);
+
+        let err = resolve_named_anvil_entries(&store, None, "missing").unwrap_err();
+        assert_eq!(err.to_string(), "Anvil instance 'missing' is not tracked");
+    }
+
+    #[test]
+    fn resolve_named_anvil_entries_filters_tracked_instances() {
+        let (_root, treb_dir) = make_treb_dir();
+        let mut store = ForkStateStore::new(&treb_dir);
+
+        let placeholder = sample_fork_entry(&treb_dir, "mainnet");
+        store.insert_active_fork(placeholder).unwrap();
+
+        let mut named = sample_fork_entry(&treb_dir, "mainnet");
+        named.instance_name = Some("alpha".into());
+        named.port = 8546;
+        named.pid_file = pid_file_path(&treb_dir, "alpha").to_string_lossy().into_owned();
+        named.log_file = log_file_path(&treb_dir, "alpha").to_string_lossy().into_owned();
+        store.insert_active_fork(named).unwrap();
+
+        let entries = resolve_named_anvil_entries(&store, None, "alpha").unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].resolved_instance_name(), "alpha");
     }
 
     // ── PID file write/remove ────────────────────────────────────────────

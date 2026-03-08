@@ -23,6 +23,17 @@ const SNAPSHOT_FILES: &[&str] =
 /// Maximum number of history entries retained.
 const MAX_HISTORY: usize = 100;
 
+fn active_fork_key(network: &str, instance_name: Option<&str>) -> String {
+    match instance_name {
+        Some(name) if name != network => format!("{network}:{name}"),
+        _ => network.to_string(),
+    }
+}
+
+fn active_fork_entry_key(entry: &ForkEntry) -> String {
+    active_fork_key(&entry.network, entry.instance_name.as_deref())
+}
+
 // ── Snapshot / Restore ──────────────────────────────────────────────────────
 
 /// Copy registry JSON files from `registry_dir` to `snapshot_dir`.
@@ -97,42 +108,78 @@ impl ForkStateStore {
         with_file_lock(&self.path, || write_json_file(&self.path, &self.data))
     }
 
-    /// Get an active fork entry by network name.
+    /// Get the default active fork entry by network name.
     pub fn get_active_fork(&self, network: &str) -> Option<&ForkEntry> {
         self.data.forks.get(network)
     }
 
-    /// Insert a new active fork entry. Returns an error if the network is
-    /// already forked.
+    /// Get an active fork entry by network + instance identifier.
+    pub fn get_active_fork_instance(
+        &self,
+        network: &str,
+        instance_name: &str,
+    ) -> Option<&ForkEntry> {
+        self.data.forks.get(&active_fork_key(network, Some(instance_name)))
+    }
+
+    /// Insert a new active fork entry. Returns an error if the key is already
+    /// present.
     pub fn insert_active_fork(&mut self, entry: ForkEntry) -> Result<(), TrebError> {
-        if self.data.forks.contains_key(&entry.network) {
-            return Err(TrebError::Fork(format!("network already forked: {}", entry.network)));
+        let key = active_fork_entry_key(&entry);
+        if self.data.forks.contains_key(&key) {
+            let msg = if key == entry.network {
+                format!("network already forked: {}", entry.network)
+            } else {
+                format!("fork already tracked for key '{}'", key)
+            };
+            return Err(TrebError::Fork(msg));
         }
-        self.data.forks.insert(entry.network.clone(), entry);
+        self.data.forks.insert(key, entry);
         self.save()
     }
 
     /// Update an existing active fork entry in place.
     ///
-    /// Returns an error if the network is not actively forked.
+    /// Returns an error if the key is not actively forked.
     pub fn update_active_fork(&mut self, entry: ForkEntry) -> Result<(), TrebError> {
-        if !self.data.forks.contains_key(&entry.network) {
-            return Err(TrebError::Fork(format!(
-                "network is not actively forked: {}",
-                entry.network
-            )));
+        let key = active_fork_entry_key(&entry);
+        if !self.data.forks.contains_key(&key) {
+            return Err(TrebError::Fork(format!("fork is not actively tracked: {key}")));
         }
-        self.data.forks.insert(entry.network.clone(), entry);
+        self.data.forks.insert(key, entry);
         self.save()
     }
 
-    /// Remove an active fork entry by network name. Returns an error if the
-    /// network is not actively forked.
+    /// Insert or update an active fork entry in place.
+    pub fn upsert_active_fork(&mut self, entry: ForkEntry) -> Result<(), TrebError> {
+        let key = active_fork_entry_key(&entry);
+        self.data.forks.insert(key, entry);
+        self.save()
+    }
+
+    /// Remove the default active fork entry by network name. Returns an error
+    /// if the network is not actively forked.
     pub fn remove_active_fork(&mut self, network: &str) -> Result<ForkEntry, TrebError> {
         let entry =
-            self.data.forks.remove(network).ok_or_else(|| {
+            self.data.forks.remove(&active_fork_key(network, None)).ok_or_else(|| {
                 TrebError::Fork(format!("network is not actively forked: {network}"))
             })?;
+        self.save()?;
+        Ok(entry)
+    }
+
+    /// Remove an active fork entry by network + instance identifier.
+    pub fn remove_active_fork_instance(
+        &mut self,
+        network: &str,
+        instance_name: &str,
+    ) -> Result<ForkEntry, TrebError> {
+        let key = active_fork_key(network, Some(instance_name));
+        let entry = self
+            .data
+            .forks
+            .remove(&key)
+            .ok_or_else(|| TrebError::Fork(format!("fork is not actively tracked: {key}")))?;
         self.save()?;
         Ok(entry)
     }
@@ -166,6 +213,7 @@ mod tests {
         let ts = Utc.with_ymd_and_hms(2026, 3, 3, 12, 0, 0).unwrap();
         ForkEntry {
             network: network.into(),
+            instance_name: None,
             rpc_url: "http://127.0.0.1:8545".into(),
             port: 8545,
             chain_id: 1,
@@ -311,6 +359,28 @@ mod tests {
     }
 
     #[test]
+    fn named_instances_use_composite_keys() {
+        let dir = TempDir::new().unwrap();
+        let mut store = ForkStateStore::new(dir.path());
+
+        store.insert_active_fork(sample_fork_entry("mainnet")).unwrap();
+
+        let mut alpha = sample_fork_entry("mainnet");
+        alpha.instance_name = Some("alpha".into());
+        alpha.port = 8546;
+        store.insert_active_fork(alpha.clone()).unwrap();
+
+        let mut beta = sample_fork_entry("mainnet");
+        beta.instance_name = Some("beta".into());
+        beta.port = 8547;
+        store.insert_active_fork(beta.clone()).unwrap();
+
+        assert_eq!(store.get_active_fork("mainnet").unwrap().port, 8545);
+        assert_eq!(store.get_active_fork_instance("mainnet", "alpha"), Some(&alpha));
+        assert_eq!(store.get_active_fork_instance("mainnet", "beta"), Some(&beta));
+    }
+
+    #[test]
     fn remove_active_fork_returns_entry() {
         let dir = TempDir::new().unwrap();
         let mut store = ForkStateStore::new(dir.path());
@@ -330,6 +400,20 @@ mod tests {
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("not actively forked"), "expected 'not actively forked' in: {msg}");
+    }
+
+    #[test]
+    fn remove_named_fork_returns_entry() {
+        let dir = TempDir::new().unwrap();
+        let mut store = ForkStateStore::new(dir.path());
+
+        let mut entry = sample_fork_entry("mainnet");
+        entry.instance_name = Some("alpha".into());
+        store.insert_active_fork(entry).unwrap();
+
+        let removed = store.remove_active_fork_instance("mainnet", "alpha").unwrap();
+        assert_eq!(removed.instance_name.as_deref(), Some("alpha"));
+        assert!(store.get_active_fork_instance("mainnet", "alpha").is_none());
     }
 
     #[test]
