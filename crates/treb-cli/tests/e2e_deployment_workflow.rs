@@ -8,7 +8,6 @@ mod e2e;
 use e2e::{
     assert_deployment_count, run_deployment, run_json, setup_project, spawn_anvil_or_skip, treb,
 };
-use std::fs;
 
 /// Extract JSON from stdout that may have non-JSON prefix text (e.g., forge compilation output).
 fn extract_json(stdout: &[u8]) -> serde_json::Value {
@@ -40,36 +39,26 @@ async fn e2e_full_deployment_lifecycle() {
 
     // Step 3: list → assert exactly 1 deployment
     let deployments = assert_deployment_count(tmp.path().to_path_buf(), 1).await;
-    let dep_id = deployments[0]["id"]
+    let dep_id = deployments[0]["id"].as_str().expect("deployment must have 'id'").to_string();
+    let dep_address =
+        deployments[0]["address"].as_str().expect("deployment must have 'address'").to_string();
+    let dep_contract_name = deployments[0]["contractName"]
         .as_str()
-        .expect("deployment must have 'id'")
+        .expect("deployment must have 'contractName'")
         .to_string();
-    let dep_address = deployments[0]["address"]
-        .as_str()
-        .expect("deployment must have 'address'")
-        .to_string();
+    let dep_chain_id = deployments[0]["chainId"].as_u64().expect("deployment must have 'chainId'");
     assert!(dep_address.starts_with("0x"), "address must be 0x-prefixed");
 
     // Step 4: show <id> --json → validate fields
     let show_json = run_json(tmp.path().to_path_buf(), vec!["show".into(), dep_id.clone()]).await;
+    assert_eq!(show_json["id"].as_str().unwrap(), dep_id, "show id must match");
+    assert_eq!(show_json["address"].as_str().unwrap(), dep_address, "show address must match");
     assert_eq!(
-        show_json["id"].as_str().unwrap(),
-        dep_id,
-        "show id must match"
+        show_json["contractName"].as_str().unwrap(),
+        dep_contract_name,
+        "show contractName must match"
     );
-    assert_eq!(
-        show_json["address"].as_str().unwrap(),
-        dep_address,
-        "show address must match"
-    );
-    assert!(
-        show_json.get("contractName").is_some(),
-        "show must contain contractName"
-    );
-    assert!(
-        show_json.get("chainId").is_some(),
-        "show must contain chainId"
-    );
+    assert_eq!(show_json["chainId"].as_u64().unwrap(), dep_chain_id, "show chainId must match");
 
     // Step 5: tag add "v1.0.0"
     let tmp_path = tmp.path().to_path_buf();
@@ -85,11 +74,9 @@ async fn e2e_full_deployment_lifecycle() {
     .unwrap();
 
     // Step 6: list --tag v1.0.0 --json → exactly 1 result
-    let filtered = run_json(
-        tmp.path().to_path_buf(),
-        vec!["list".into(), "--tag".into(), "v1.0.0".into()],
-    )
-    .await;
+    let filtered =
+        run_json(tmp.path().to_path_buf(), vec!["list".into(), "--tag".into(), "v1.0.0".into()])
+            .await;
     let filtered_arr = filtered.as_array().expect("filtered list must be array");
     assert_eq!(filtered_arr.len(), 1, "exactly 1 deployment with tag v1.0.0");
     assert_eq!(
@@ -105,10 +92,7 @@ async fn e2e_full_deployment_lifecycle() {
     )
     .await;
     let empty_arr = empty.as_array().expect("empty list must be array");
-    assert!(
-        empty_arr.is_empty(),
-        "no deployments should match nonexistent tag"
-    );
+    assert!(empty_arr.is_empty(), "no deployments should match nonexistent tag");
 
     // Step 8: tag remove "v1.0.0"
     let tmp_path = tmp.path().to_path_buf();
@@ -174,15 +158,9 @@ async fn e2e_run_json_output_fields() {
 
     // Validate all expected RunOutputJson fields exist with correct types.
     assert_eq!(json["success"].as_bool(), Some(true), "success must be true");
-    assert_eq!(
-        json["dryRun"].as_bool(),
-        Some(false),
-        "dryRun must be false for broadcast run"
-    );
+    assert_eq!(json["dryRun"].as_bool(), Some(false), "dryRun must be false for broadcast run");
 
-    let deployments = json["deployments"]
-        .as_array()
-        .expect("deployments must be an array");
+    let deployments = json["deployments"].as_array().expect("deployments must be an array");
     assert_eq!(deployments.len(), 1, "exactly 1 deployment");
 
     // Validate deployment fields.
@@ -194,9 +172,7 @@ async fn e2e_run_json_output_fields() {
     assert!(dep["chainId"].is_u64(), "deployment must have chainId");
     assert!(dep["deploymentType"].is_string(), "deployment must have deploymentType");
 
-    let transactions = json["transactions"]
-        .as_array()
-        .expect("transactions must be an array");
+    let transactions = json["transactions"].as_array().expect("transactions must be an array");
     assert!(!transactions.is_empty(), "must have at least 1 transaction");
 
     // Validate transaction fields.
@@ -207,9 +183,12 @@ async fn e2e_run_json_output_fields() {
 
     assert!(json["gasUsed"].is_u64(), "gasUsed must be a number");
     assert!(json["skipped"].is_array(), "skipped must be an array");
+    assert!(json["consoleLogs"].is_array(), "consoleLogs must be an array");
+    let governor_proposals =
+        json["governorProposals"].as_array().expect("governorProposals must be an array");
     assert!(
-        json["consoleLogs"].is_array(),
-        "consoleLogs must be an array"
+        governor_proposals.is_empty(),
+        "governorProposals must be empty for a standard deployer run"
     );
 
     drop(anvil);

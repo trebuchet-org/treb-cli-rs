@@ -157,11 +157,8 @@ pub async fn setup_project() -> tempfile::TempDir {
 
     // Write the treb deploy script.
     fs::create_dir_all(tmp.path().join("script")).unwrap();
-    fs::write(
-        tmp.path().join("script").join("TrebDeploySimple.s.sol"),
-        TREB_DEPLOY_SCRIPT,
-    )
-    .unwrap();
+    fs::write(tmp.path().join("script").join("TrebDeploySimple.s.sol"), TREB_DEPLOY_SCRIPT)
+        .unwrap();
 
     // Write treb.toml with the Anvil deployer private key.
     fs::write(tmp.path().join("treb.toml"), TREB_TOML).unwrap();
@@ -202,10 +199,7 @@ pub async fn run_deployment(tmp_path: std::path::PathBuf, rpc_url: String) {
 /// Run a treb subcommand with `--json` and return the parsed JSON value.
 ///
 /// Panics if the command fails or stdout is not valid JSON.
-pub async fn run_json(
-    tmp_path: std::path::PathBuf,
-    args: Vec<String>,
-) -> serde_json::Value {
+pub async fn run_json(tmp_path: std::path::PathBuf, args: Vec<String>) -> serde_json::Value {
     let output = tokio::task::spawn_blocking(move || {
         treb()
             .args(args.iter().map(|s| s.as_str()).collect::<Vec<_>>())
@@ -241,12 +235,7 @@ pub async fn assert_deployment_count(
 ) -> Vec<serde_json::Value> {
     let json = run_json(tmp_path, vec!["list".into()]).await;
     let arr = json.as_array().expect("treb list --json must be an array");
-    assert_eq!(
-        arr.len(),
-        expected,
-        "expected {expected} deployments, got {}",
-        arr.len()
-    );
+    assert_eq!(arr.len(), expected, "expected {expected} deployments, got {}", arr.len());
     arr.clone()
 }
 
@@ -257,10 +246,7 @@ pub async fn get_deployment_id(tmp_path: std::path::PathBuf) -> String {
     let json = run_json(tmp_path, vec!["list".into()]).await;
     let arr = json.as_array().expect("treb list --json must be an array");
     assert!(!arr.is_empty(), "no deployments found");
-    arr[0]["id"]
-        .as_str()
-        .expect("deployment must have 'id' field")
-        .to_string()
+    arr[0]["id"].as_str().expect("deployment must have 'id' field").to_string()
 }
 
 // ── Registry File Readers ───────────────────────────────────────────────────
@@ -294,7 +280,5 @@ pub fn read_transactions(project_root: &Path) -> serde_json::Value {
 /// Count the number of deployments in `.treb/deployments.json`.
 pub fn deployment_count(project_root: &Path) -> usize {
     let deps = read_deployments(project_root);
-    deps.as_object()
-        .expect("deployments.json must be an object")
-        .len()
+    deps.as_object().expect("deployments.json must be an object").len()
 }
