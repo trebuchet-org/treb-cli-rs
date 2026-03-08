@@ -45,20 +45,28 @@ pub const MUTED: Style = Style::new().dimmed();
 // ---------------------------------------------------------------------------
 
 #[allow(dead_code)]
+/// Namespace background: yellow background (Go: `nsBg`).
+pub const NS_BG: Style = Style::new().on_yellow();
+
+#[allow(dead_code)]
 /// Namespace header: black text on yellow background (Go: `nsHeader`).
-pub const NS_HEADER: Style = Style::new().black().on_yellow();
+pub const NS_HEADER: Style = NS_BG.black();
 
 #[allow(dead_code)]
 /// Namespace header bold: black bold on yellow background (Go: `nsHeaderBold`).
-pub const NS_HEADER_BOLD: Style = Style::new().black().bold().on_yellow();
+pub const NS_HEADER_BOLD: Style = NS_BG.black().bold();
+
+#[allow(dead_code)]
+/// Chain background: cyan background (Go: `chainBg`).
+pub const CHAIN_BG: Style = Style::new().on_cyan();
 
 #[allow(dead_code)]
 /// Chain header: black text on cyan background (Go: `chainHeader`).
-pub const CHAIN_HEADER: Style = Style::new().black().on_cyan();
+pub const CHAIN_HEADER: Style = CHAIN_BG.black();
 
 #[allow(dead_code)]
 /// Chain header bold: black bold on cyan background (Go: `chainHeaderBold`).
-pub const CHAIN_HEADER_BOLD: Style = Style::new().black().bold().on_cyan();
+pub const CHAIN_HEADER_BOLD: Style = CHAIN_BG.black().bold();
 
 #[allow(dead_code)]
 /// Color/style for namespace labels.
@@ -329,5 +337,19 @@ mod tests {
     fn address_is_white_not_dimmed() {
         // Go: addressStyle = color.New(color.FgWhite)
         assert_eq!(format!("{:?}", ADDRESS), format!("{:?}", Style::new().white()));
+    }
+
+    #[test]
+    fn namespace_background_and_headers_match_go_palette() {
+        assert_eq!(format!("{:?}", NS_BG), format!("{:?}", Style::new().on_yellow()));
+        assert_eq!(format!("{:?}", NS_HEADER), format!("{:?}", NS_BG.black()));
+        assert_eq!(format!("{:?}", NS_HEADER_BOLD), format!("{:?}", NS_BG.black().bold()));
+    }
+
+    #[test]
+    fn chain_background_and_headers_match_go_palette() {
+        assert_eq!(format!("{:?}", CHAIN_BG), format!("{:?}", Style::new().on_cyan()));
+        assert_eq!(format!("{:?}", CHAIN_HEADER), format!("{:?}", CHAIN_BG.black()));
+        assert_eq!(format!("{:?}", CHAIN_HEADER_BOLD), format!("{:?}", CHAIN_BG.black().bold()),);
     }
 }

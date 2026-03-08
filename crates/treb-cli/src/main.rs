@@ -57,7 +57,8 @@ enum Commands {
         /// Deployment namespace
         #[arg(long)]
         namespace: Option<String>,
-        /// Broadcast transactions to the network (requires --non-interactive when used with --json)
+        /// Broadcast transactions to the network (requires --non-interactive when used with
+        /// --json)
         #[arg(long)]
         broadcast: bool,
         /// Simulate execution without making changes
@@ -90,7 +91,8 @@ enum Commands {
         /// Target contract to run (when multiple contracts in script)
         #[arg(long)]
         target_contract: Option<String>,
-        /// Skip interactive prompts (also enabled via TREB_NON_INTERACTIVE=1, CI=true, or non-TTY stdin/stdout)
+        /// Skip interactive prompts (also enabled via TREB_NON_INTERACTIVE=1, CI=true, or non-TTY
+        /// stdin/stdout)
         #[arg(long)]
         non_interactive: bool,
     },
@@ -347,7 +349,8 @@ enum Commands {
         /// Foundry profile override
         #[arg(long)]
         profile: Option<String>,
-        /// Broadcast transactions to the network (requires --non-interactive when used with --json)
+        /// Broadcast transactions to the network (requires --non-interactive when used with
+        /// --json)
         #[arg(long)]
         broadcast: bool,
         /// Simulate execution without making changes
@@ -380,7 +383,8 @@ enum Commands {
         /// Set environment variables (KEY=VALUE, repeatable)
         #[arg(long, num_args = 1)]
         env: Vec<String>,
-        /// Skip interactive prompts (also enabled via TREB_NON_INTERACTIVE=1, CI=true, or non-TTY stdin/stdout)
+        /// Skip interactive prompts (also enabled via TREB_NON_INTERACTIVE=1, CI=true, or non-TTY
+        /// stdin/stdout)
         #[arg(long)]
         non_interactive: bool,
     },
