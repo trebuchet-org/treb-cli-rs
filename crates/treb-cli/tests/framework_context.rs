@@ -29,7 +29,6 @@ fn treb_init_creates_treb_directory_structure() {
 }
 
 #[test]
-#[ignore = "requires unrestricted subprocess env handling in test sandbox"]
 fn run_with_env_delegates_correctly() {
     let ctx = TestContext::new("minimal-project");
 

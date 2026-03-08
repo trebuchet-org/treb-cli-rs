@@ -35,6 +35,7 @@ fn sample_entry(treb_dir: &Path, network: &str) -> ForkEntry {
     let now = Utc::now();
     ForkEntry {
         network: network.to_string(),
+        instance_name: None,
         rpc_url: String::new(),
         port: 0,
         chain_id: 31337,
@@ -154,6 +155,7 @@ fn fork_diff_with_no_changes() {
     let now = Utc::now();
     let entry = ForkEntry {
         network: network.to_string(),
+        instance_name: None,
         rpc_url: String::new(),
         port: 0,
         chain_id: 31337,
@@ -201,6 +203,7 @@ fn fork_exit_restores_registry() {
     let now = Utc::now();
     let entry = ForkEntry {
         network: network.to_string(),
+        instance_name: None,
         rpc_url: String::new(),
         port: 0,
         chain_id: 31337,
@@ -346,6 +349,7 @@ async fn signal_handling_sigterm_shuts_down_anvil_cleanly() {
         let now = Utc::now();
         let entry = ForkEntry {
             network: network.to_string(),
+            instance_name: None,
             rpc_url: String::new(),
             port: 0,
             chain_id: 31337,

@@ -284,8 +284,12 @@ mod tests {
         assert!(!is_terminal(&ProposalStatus::Queued));
     }
 
-    fn spawn_http_server(status_line: &str, body: &str) -> String {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    fn spawn_http_server(status_line: &str, body: &str) -> Option<String> {
+        let listener = match std::net::TcpListener::bind("127.0.0.1:0") {
+            Ok(listener) => listener,
+            Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return None,
+            Err(err) => panic!("bind test HTTP server: {err}"),
+        };
         let port = listener.local_addr().unwrap().port();
         let status_line = status_line.to_string();
         let body = body.to_string();
@@ -304,7 +308,7 @@ mod tests {
             stream.flush().unwrap();
         });
 
-        format!("http://127.0.0.1:{port}")
+        Some(format!("http://127.0.0.1:{port}"))
     }
 
     fn encoded_state_result(state: u8) -> String {
@@ -315,10 +319,12 @@ mod tests {
 
     #[tokio::test]
     async fn query_proposal_state_returns_result_payload() {
-        let rpc_url = spawn_http_server(
+        let Some(rpc_url) = spawn_http_server(
             "200 OK",
             &format!(r#"{{"jsonrpc":"2.0","id":1,"result":"{}"}}"#, encoded_state_result(5)),
-        );
+        ) else {
+            return;
+        };
         let client = reqwest::Client::new();
 
         let status = query_proposal_state(
@@ -335,10 +341,12 @@ mod tests {
 
     #[tokio::test]
     async fn query_proposal_state_preserves_non_revert_rpc_errors() {
-        let rpc_url = spawn_http_server(
+        let Some(rpc_url) = spawn_http_server(
             "200 OK",
             r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32005,"message":"rate limit exceeded"}}"#,
-        );
+        ) else {
+            return;
+        };
         let client = reqwest::Client::new();
 
         let err = query_proposal_state(
@@ -359,10 +367,12 @@ mod tests {
 
     #[tokio::test]
     async fn query_proposal_state_marks_revert_payloads_as_reverts() {
-        let rpc_url = spawn_http_server(
+        let Some(rpc_url) = spawn_http_server(
             "200 OK",
             r#"{"jsonrpc":"2.0","id":1,"error":{"code":3,"message":"execution reverted: unknown proposal id"}}"#,
-        );
+        ) else {
+            return;
+        };
         let client = reqwest::Client::new();
 
         let err = query_proposal_state(
@@ -381,10 +391,12 @@ mod tests {
 
     #[tokio::test]
     async fn query_proposal_state_includes_http_status_for_non_success_responses() {
-        let rpc_url = spawn_http_server(
+        let Some(rpc_url) = spawn_http_server(
             "429 Too Many Requests",
             r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32005,"message":"rate limit exceeded"}}"#,
-        );
+        ) else {
+            return;
+        };
         let client = reqwest::Client::new();
 
         let err = query_proposal_state(
