@@ -279,7 +279,7 @@ pub async fn run(
 
     // Extract the deployer sender so the pipeline can detect Safe/Governor flows.
     let deployer_sender = resolved_senders.remove("deployer");
-    let is_governor_sender = deployer_sender.as_ref().map_or(false, |s| s.is_governor());
+    let is_governor_sender = deployer_sender.as_ref().is_some_and(|s| s.is_governor());
 
     let pipeline_context = PipelineContext {
         config: pipeline_config,
@@ -550,6 +550,24 @@ fn display_result_json(result: &PipelineResult) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn format_governor_proposal_details(gp: &treb_core::types::GovernorProposal) -> String {
+    let timelock = if gp.timelock_address.is_empty() {
+        "none".to_string()
+    } else {
+        output::truncate_address(&gp.timelock_address)
+    };
+    let tx_count = gp.transaction_ids.len();
+
+    format!(
+        "Governor: {} | Timelock: {} | Status: {} | {} linked transaction{}",
+        output::truncate_address(&gp.governor_address),
+        timelock,
+        gp.status,
+        tx_count,
+        if tx_count == 1 { "" } else { "s" },
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Deployment grouping for tree display: namespace > chain_id > type
 // ---------------------------------------------------------------------------
@@ -710,17 +728,7 @@ fn display_result_human(result: &PipelineResult) {
                 output::truncate_address(&gp.proposal_id),
                 action,
             );
-            let mut details = vec![format!("Governor: {}", output::truncate_address(&gp.governor_address))];
-            if !gp.timelock_address.is_empty() {
-                details.push(format!("Timelock: {}", output::truncate_address(&gp.timelock_address)));
-            }
-            let tx_count = gp.transaction_ids.len();
-            details.push(format!(
-                "{} linked transaction{}",
-                tx_count,
-                if tx_count == 1 { "" } else { "s" },
-            ));
-            println!("     {}", details.join(" | "));
+            println!("     {}", format_governor_proposal_details(gp));
         }
         println!();
     }
@@ -794,6 +802,24 @@ fn display_result_human(result: &PipelineResult) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{TimeZone, Utc};
+    use treb_core::types::{GovernorProposal, ProposalStatus};
+
+    fn sample_governor_proposal() -> GovernorProposal {
+        GovernorProposal {
+            proposal_id: "proposal-001".into(),
+            governor_address: "0x1234567890abcdef1234567890abcdef12345678".into(),
+            timelock_address: String::new(),
+            chain_id: 1,
+            status: ProposalStatus::Pending,
+            transaction_ids: vec!["tx-001".into()],
+            proposed_by: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd".into(),
+            proposed_at: Utc.with_ymd_and_hms(2025, 4, 1, 10, 0, 0).unwrap(),
+            description: String::new(),
+            executed_at: None,
+            execution_tx_hash: String::new(),
+        }
+    }
 
     #[test]
     fn parse_env_var_valid_pair() {
@@ -851,5 +877,38 @@ mod tests {
         let vars = vec!["GOOD=value".to_string(), "BAD".to_string()];
         let err = inject_env_vars(&vars).unwrap_err();
         assert!(err.to_string().contains("BAD"));
+    }
+
+    #[test]
+    fn format_governor_proposal_details_includes_status() {
+        let mut proposal = sample_governor_proposal();
+        proposal.status = ProposalStatus::Queued;
+        proposal.timelock_address = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd".into();
+        proposal.transaction_ids = vec!["tx-001".into(), "tx-002".into()];
+
+        let details = format_governor_proposal_details(&proposal);
+
+        assert!(details.contains("Status: queued"), "details should include status: {details}");
+        assert!(
+            details.contains("Timelock: 0xabcd...abcd"),
+            "details should include the timelock address: {details}"
+        );
+        assert!(
+            details.contains("2 linked transactions"),
+            "details should include the linked transaction count: {details}"
+        );
+    }
+
+    #[test]
+    fn format_governor_proposal_details_uses_none_for_missing_timelock() {
+        let proposal = sample_governor_proposal();
+
+        let details = format_governor_proposal_details(&proposal);
+
+        assert!(
+            details.contains("Timelock: none"),
+            "details should show an explicit placeholder when timelock is absent: {details}"
+        );
+        assert!(details.contains("Status: pending"), "details should include status: {details}");
     }
 }
