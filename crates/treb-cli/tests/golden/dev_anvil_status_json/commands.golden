@@ -3,6 +3,7 @@
   {
     "chainId": 1,
     "forkBlockNumber": null,
+    "instanceName": "mainnet",
     "network": "mainnet",
     "port": 18545,
     "rpcUrl": "http://127.0.0.1:18545",

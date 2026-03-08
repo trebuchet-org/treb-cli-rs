@@ -72,12 +72,18 @@ pub enum AnvilSubcommand {
         /// Output as JSON
         #[arg(long)]
         json: bool,
+        /// Filter output to a single network
+        #[arg(long)]
+        network: Option<String>,
         /// Filter output to a single named instance
         #[arg(long)]
         name: Option<String>,
     },
     /// Display Anvil log file contents
     Logs {
+        /// Network name for disambiguating duplicate instance names
+        #[arg(long)]
+        network: Option<String>,
         /// Instance name (defaults to "default")
         #[arg(long)]
         name: Option<String>,
@@ -99,8 +105,12 @@ pub async fn run(subcommand: DevSubcommand) -> anyhow::Result<()> {
             AnvilSubcommand::Restart { network, name, port, fork_block_number } => {
                 run_anvil_restart(network, name, port, fork_block_number).await
             }
-            AnvilSubcommand::Status { json, name } => run_anvil_status(json, name).await,
-            AnvilSubcommand::Logs { name, follow } => run_anvil_logs(name, follow).await,
+            AnvilSubcommand::Status { json, network, name } => {
+                run_anvil_status(json, network, name).await
+            }
+            AnvilSubcommand::Logs { network, name, follow } => {
+                run_anvil_logs(network, name, follow).await
+            }
         },
     }
 }
@@ -348,30 +358,27 @@ pub async fn run_anvil_restart(
     let mut store = ForkStateStore::new(&treb_dir);
     store.load().context("failed to load fork state")?;
 
-    let entry = store
-        .list_active_forks()
-        .into_iter()
-        .filter(|e| is_tracked_anvil_instance(e))
-        .filter(|e| network.as_deref().is_none_or(|net| e.network == net))
-        .find(|e| e.resolved_instance_name() == instance_name)
-        .cloned()
-        .ok_or_else(|| {
+    let entry = match resolve_single_tracked_anvil_entry(&store, network.as_deref(), &instance_name)
+    {
+        Ok(entry) => entry.clone(),
+        Err(err) if err.to_string().contains("tracked on multiple networks") => return Err(err),
+        Err(_) => {
             if let Some(ref net) = network {
-                anyhow::anyhow!(
+                bail!(
                     "no existing Anvil instance found for network '{}' (instance '{}'); \
                      start one first with `treb dev anvil start --network {}`",
                     net,
                     instance_name,
                     net
-                )
-            } else {
-                anyhow::anyhow!(
-                    "no existing Anvil instance found for instance '{}'; \
-                     start one first with `treb dev anvil start`",
-                    instance_name
-                )
+                );
             }
-        })?;
+            bail!(
+                "no existing Anvil instance found for instance '{}'; \
+                 start one first with `treb dev anvil start`",
+                instance_name
+            );
+        }
+    };
 
     let entry_network = entry.network.clone();
     let entry_port = entry.port;
@@ -423,16 +430,26 @@ pub async fn run_anvil_restart(
 // ── run_anvil_status ──────────────────────────────────────────────────────────
 
 /// Display a table of active Anvil fork instances with live reachability status.
-pub async fn run_anvil_status(json: bool, name: Option<String>) -> anyhow::Result<()> {
+pub async fn run_anvil_status(
+    json: bool,
+    network: Option<String>,
+    name: Option<String>,
+) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     let treb_dir = cwd.join(TREB_DIR);
 
     let mut store = ForkStateStore::new(&treb_dir);
     store.load().context("failed to load fork state")?;
 
-    let forks = if let Some(ref requested_name) = name {
-        let instance_name = resolve_instance_name(Some(requested_name), None);
-        resolve_named_anvil_entries(&store, None, &instance_name)?
+    let mut forks = if let Some(ref requested_name) = name {
+        let instance_name = resolve_instance_name(Some(requested_name), network.as_deref());
+        resolve_named_anvil_entries(&store, network.as_deref(), &instance_name)?
+    } else if let Some(ref net) = network {
+        store
+            .list_active_forks_for_network(net)
+            .into_iter()
+            .filter(|entry| is_tracked_anvil_instance(entry))
+            .collect()
     } else {
         store
             .list_active_forks()
@@ -440,6 +457,7 @@ pub async fn run_anvil_status(json: bool, name: Option<String>) -> anyhow::Resul
             .filter(|entry| is_tracked_anvil_instance(entry))
             .collect()
     };
+    sort_tracked_anvil_entries(&mut forks);
 
     let now = Utc::now();
 
@@ -449,6 +467,7 @@ pub async fn run_anvil_status(json: bool, name: Option<String>) -> anyhow::Resul
             let running = is_port_reachable(entry.port).await;
             let uptime = format_uptime(now - entry.started_at);
             statuses.push(serde_json::json!({
+                "instanceName":   entry.resolved_instance_name(),
                 "network":         entry.network,
                 "rpcUrl":          entry.rpc_url,
                 "port":            entry.port,
@@ -470,6 +489,7 @@ pub async fn run_anvil_status(json: bool, name: Option<String>) -> anyhow::Resul
 
     let mut table = crate::output::build_table(&[
         "Network",
+        "Instance",
         "RPC URL",
         "Port",
         "Chain ID",
@@ -498,6 +518,7 @@ pub async fn run_anvil_status(json: bool, name: Option<String>) -> anyhow::Resul
 
         table.add_row(vec![
             comfy_table::Cell::new(&entry.network),
+            comfy_table::Cell::new(entry.resolved_instance_name()),
             comfy_table::Cell::new(&entry.rpc_url),
             comfy_table::Cell::new(entry.port),
             comfy_table::Cell::new(entry.chain_id),
@@ -521,16 +542,24 @@ pub async fn run_anvil_status(json: bool, name: Option<String>) -> anyhow::Resul
 /// Resolves the instance name from `--name` (defaulting to "default"), looks up
 /// the log file path from fork state, and prints its contents. With `--follow`,
 /// continuously streams new lines as they are appended.
-pub async fn run_anvil_logs(name: Option<String>, follow: bool) -> anyhow::Result<()> {
+pub async fn run_anvil_logs(
+    network: Option<String>,
+    name: Option<String>,
+    follow: bool,
+) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     let treb_dir = cwd.join(TREB_DIR);
-    let instance_name = resolve_instance_name(name.as_deref(), None);
+    let instance_name = resolve_instance_name(name.as_deref(), network.as_deref());
 
     // Try to find the log file path from fork state first.
-    let log_path = resolve_log_file_path(&treb_dir, &instance_name)?;
+    let log_path = resolve_log_file_path(&treb_dir, network.as_deref(), &instance_name)?;
 
     if !log_path.exists() {
-        bail!("log file '{}' does not exist; instance '{}' may not have been started yet", log_path.display(), instance_name);
+        bail!(
+            "log file '{}' does not exist; instance '{}' may not have been started yet",
+            log_path.display(),
+            instance_name
+        );
     }
 
     if follow {
@@ -545,12 +574,23 @@ pub async fn run_anvil_logs(name: Option<String>, follow: bool) -> anyhow::Resul
 
 /// Resolve the log file path for an instance, checking fork state first then falling
 /// back to the default path.
-fn resolve_log_file_path(treb_dir: &Path, instance_name: &str) -> anyhow::Result<PathBuf> {
+fn resolve_log_file_path(
+    treb_dir: &Path,
+    network: Option<&str>,
+    instance_name: &str,
+) -> anyhow::Result<PathBuf> {
     // Try to find the log file from fork state entries.
     let mut store = ForkStateStore::new(treb_dir);
     if store.load().is_ok() {
-        for entry in store.list_active_forks() {
-            if entry.resolved_instance_name() == instance_name && !entry.log_file.is_empty() {
+        if let Ok(entries) = resolve_named_anvil_entries(&store, network, instance_name) {
+            if network.is_none() && entries.len() > 1 {
+                bail!(
+                    "Anvil instance '{}' is tracked on multiple networks; pass --network to disambiguate",
+                    instance_name
+                );
+            }
+            let entry = entries[0];
+            if !entry.log_file.is_empty() {
                 return Ok(PathBuf::from(&entry.log_file));
             }
         }
@@ -648,18 +688,33 @@ fn is_tracked_anvil_instance(entry: &ForkEntry) -> bool {
     entry.port != 0 || !entry.pid_file.is_empty() || !entry.log_file.is_empty()
 }
 
+fn sort_tracked_anvil_entries(entries: &mut Vec<&ForkEntry>) {
+    entries.sort_by(|left, right| {
+        left.network
+            .cmp(&right.network)
+            .then_with(|| left.resolved_instance_name().cmp(right.resolved_instance_name()))
+    });
+}
+
 fn resolve_named_anvil_entries<'a>(
     store: &'a ForkStateStore,
     network: Option<&str>,
     instance_name: &str,
 ) -> anyhow::Result<Vec<&'a ForkEntry>> {
-    let entries: Vec<&ForkEntry> = store
-        .list_active_forks()
-        .into_iter()
-        .filter(|entry| is_tracked_anvil_instance(entry))
-        .filter(|entry| network.is_none_or(|net| entry.network == net))
-        .filter(|entry| entry.resolved_instance_name() == instance_name)
-        .collect();
+    let mut entries = if let Some(net) = network {
+        store
+            .get_active_fork_instance(net, instance_name)
+            .filter(|entry| is_tracked_anvil_instance(entry))
+            .map(|entry| vec![entry])
+            .unwrap_or_default()
+    } else {
+        store
+            .list_active_forks()
+            .into_iter()
+            .filter(|entry| is_tracked_anvil_instance(entry))
+            .filter(|entry| entry.resolved_instance_name() == instance_name)
+            .collect()
+    };
 
     if entries.is_empty() {
         if let Some(net) = network {
@@ -668,7 +723,23 @@ fn resolve_named_anvil_entries<'a>(
         bail!("Anvil instance '{}' is not tracked", instance_name);
     }
 
+    sort_tracked_anvil_entries(&mut entries);
     Ok(entries)
+}
+
+fn resolve_single_tracked_anvil_entry<'a>(
+    store: &'a ForkStateStore,
+    network: Option<&str>,
+    instance_name: &str,
+) -> anyhow::Result<&'a ForkEntry> {
+    let entries = resolve_named_anvil_entries(store, network, instance_name)?;
+    if network.is_none() && entries.len() > 1 {
+        bail!(
+            "Anvil instance '{}' is tracked on multiple networks; pass --network to disambiguate",
+            instance_name
+        );
+    }
+    Ok(entries[0])
 }
 
 /// Resolve the instance name from explicit `--name`, the network name, or "default".
@@ -932,6 +1003,18 @@ mod tests {
         }
     }
 
+    #[test]
+    fn parse_dev_anvil_status_with_network() {
+        let sub = parse_dev(&["anvil", "status", "--network", "mainnet"]).unwrap();
+        match sub {
+            DevSubcommand::Anvil { subcommand: AnvilSubcommand::Status { network, name, .. } } => {
+                assert_eq!(network.as_deref(), Some("mainnet"));
+                assert!(name.is_none());
+            }
+            _ => panic!("expected Dev::Anvil::Status"),
+        }
+    }
+
     // ── --name clap parsing tests ────────────────────────────────────────
 
     #[test]
@@ -953,6 +1036,21 @@ mod tests {
                 assert_eq!(name.as_deref(), Some("my-node"));
             }
             _ => panic!("expected Dev::Anvil::Stop"),
+        }
+    }
+
+    #[test]
+    fn parse_dev_anvil_logs_with_network() {
+        let sub = parse_dev(&["anvil", "logs", "--network", "mainnet", "--name", "alpha"]).unwrap();
+        match sub {
+            DevSubcommand::Anvil {
+                subcommand: AnvilSubcommand::Logs { network, name, follow },
+            } => {
+                assert_eq!(network.as_deref(), Some("mainnet"));
+                assert_eq!(name.as_deref(), Some("alpha"));
+                assert!(!follow);
+            }
+            _ => panic!("expected Dev::Anvil::Logs"),
         }
     }
 
@@ -1026,12 +1124,8 @@ mod tests {
         // Override cwd: we test the logic directly by calling the search code.
         let instance_name = resolve_instance_name(None, Some("mainnet"));
         store.load().unwrap();
-        let result = store
-            .list_active_forks()
-            .into_iter()
-            .filter(|e| is_tracked_anvil_instance(e))
-            .filter(|e| e.network == "mainnet")
-            .find(|e| e.resolved_instance_name() == instance_name)
+        let result = resolve_single_tracked_anvil_entry(&store, Some("mainnet"), &instance_name)
+            .ok()
             .cloned();
 
         assert!(result.is_none(), "should not find an untracked entry for mainnet");
@@ -1052,12 +1146,8 @@ mod tests {
 
         let instance_name = resolve_instance_name(None, Some("mainnet"));
         store.load().unwrap();
-        let result = store
-            .list_active_forks()
-            .into_iter()
-            .filter(|e| is_tracked_anvil_instance(e))
-            .filter(|e| e.network == "mainnet")
-            .find(|e| e.resolved_instance_name() == instance_name)
+        let result = resolve_single_tracked_anvil_entry(&store, Some("mainnet"), &instance_name)
+            .ok()
             .cloned();
 
         assert!(result.is_some(), "should find tracked entry for mainnet");
@@ -1330,6 +1420,83 @@ mod tests {
         let entries = resolve_named_anvil_entries(&store, None, "alpha").unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].resolved_instance_name(), "alpha");
+    }
+
+    #[test]
+    fn resolve_single_tracked_anvil_entry_requires_network_for_duplicate_names() {
+        let (_root, treb_dir) = make_treb_dir();
+        let mut store = ForkStateStore::new(&treb_dir);
+
+        let mut mainnet = sample_fork_entry(&treb_dir, "mainnet");
+        mainnet.instance_name = Some("alpha".into());
+        mainnet.port = 8546;
+        mainnet.pid_file = pid_file_path(&treb_dir, "alpha").to_string_lossy().into_owned();
+        mainnet.log_file = log_file_path(&treb_dir, "alpha").to_string_lossy().into_owned();
+        store.insert_active_fork(mainnet).unwrap();
+
+        let mut sepolia = sample_fork_entry(&treb_dir, "sepolia");
+        sepolia.instance_name = Some("alpha".into());
+        sepolia.port = 9546;
+        sepolia.pid_file = pid_file_path(&treb_dir, "alpha").to_string_lossy().into_owned();
+        sepolia.log_file = log_file_path(&treb_dir, "alpha").to_string_lossy().into_owned();
+        store.insert_active_fork(sepolia).unwrap();
+
+        let err = resolve_single_tracked_anvil_entry(&store, None, "alpha").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Anvil instance 'alpha' is tracked on multiple networks; pass --network to disambiguate"
+        );
+    }
+
+    #[test]
+    fn resolve_single_tracked_anvil_entry_uses_network_lookup() {
+        let (_root, treb_dir) = make_treb_dir();
+        let mut store = ForkStateStore::new(&treb_dir);
+
+        let mut mainnet = sample_fork_entry(&treb_dir, "mainnet");
+        mainnet.instance_name = Some("alpha".into());
+        mainnet.port = 8546;
+        mainnet.pid_file = pid_file_path(&treb_dir, "alpha").to_string_lossy().into_owned();
+        mainnet.log_file = log_file_path(&treb_dir, "alpha").to_string_lossy().into_owned();
+        store.insert_active_fork(mainnet).unwrap();
+
+        let mut sepolia = sample_fork_entry(&treb_dir, "sepolia");
+        sepolia.instance_name = Some("alpha".into());
+        sepolia.port = 9546;
+        sepolia.pid_file = pid_file_path(&treb_dir, "alpha").to_string_lossy().into_owned();
+        sepolia.log_file = log_file_path(&treb_dir, "alpha").to_string_lossy().into_owned();
+        store.insert_active_fork(sepolia).unwrap();
+
+        let resolved =
+            resolve_single_tracked_anvil_entry(&store, Some("sepolia"), "alpha").unwrap();
+        assert_eq!(resolved.network, "sepolia");
+        assert_eq!(resolved.port, 9546);
+    }
+
+    #[test]
+    fn resolve_log_file_path_requires_network_for_duplicate_names() {
+        let (_root, treb_dir) = make_treb_dir();
+        let mut store = ForkStateStore::new(&treb_dir);
+
+        let mut mainnet = sample_fork_entry(&treb_dir, "mainnet");
+        mainnet.instance_name = Some("alpha".into());
+        mainnet.port = 8546;
+        mainnet.pid_file = pid_file_path(&treb_dir, "alpha-mainnet").to_string_lossy().into_owned();
+        mainnet.log_file = log_file_path(&treb_dir, "alpha-mainnet").to_string_lossy().into_owned();
+        store.insert_active_fork(mainnet).unwrap();
+
+        let mut sepolia = sample_fork_entry(&treb_dir, "sepolia");
+        sepolia.instance_name = Some("alpha".into());
+        sepolia.port = 9546;
+        sepolia.pid_file = pid_file_path(&treb_dir, "alpha-sepolia").to_string_lossy().into_owned();
+        sepolia.log_file = log_file_path(&treb_dir, "alpha-sepolia").to_string_lossy().into_owned();
+        store.insert_active_fork(sepolia).unwrap();
+
+        let err = resolve_log_file_path(&treb_dir, None, "alpha").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Anvil instance 'alpha' is tracked on multiple networks; pass --network to disambiguate"
+        );
     }
 
     // ── PID file write/remove ────────────────────────────────────────────

@@ -401,17 +401,17 @@ fn seed_fork_exit(project_root: &std::path::Path) {
 
 /// Configure `foundry.toml` with a one-shot local JSON-RPC endpoint that
 /// responds to `eth_chainId` for deterministic `fork enter` golden testing.
-fn seed_fork_enter_success(project_root: &std::path::Path) {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
+fn seed_fork_enter_success(project_root: &std::path::Path) -> std::io::Result<()> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let port = listener.local_addr()?.port();
 
     let foundry_toml = project_root.join("foundry.toml");
-    let content = std::fs::read_to_string(&foundry_toml).unwrap();
+    let content = std::fs::read_to_string(&foundry_toml)?;
     let updated = content.replace(
         r#"localhost = "http://localhost:8545""#,
         &format!(r#"localhost = "http://127.0.0.1:{port}""#),
     );
-    std::fs::write(foundry_toml, updated).unwrap();
+    std::fs::write(foundry_toml, updated)?;
 
     std::thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
@@ -430,6 +430,8 @@ fn seed_fork_enter_success(project_root: &std::path::Path) {
         stream.write_all(response.as_bytes()).unwrap();
         stream.flush().unwrap();
     });
+
+    Ok(())
 }
 
 // ── fork enter: not initialized ─────────────────────────────────────────
@@ -496,11 +498,16 @@ fn fork_enter_no_rpc_url() {
 #[test]
 fn fork_enter_success() {
     let ctx = TestContext::new("minimal-project");
+    if let Err(err) = seed_fork_enter_success(ctx.path()) {
+        if err.kind() == std::io::ErrorKind::PermissionDenied {
+            return;
+        }
+        panic!("seed fork enter success: {err}");
+    }
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("fork_enter_success")
         .setup(&["init"])
-        .post_setup_hook(|ctx| seed_fork_enter_success(ctx.path()))
         .test(&["fork", "enter", "--network", "localhost"])
         .extra_normalizer(Box::new(path_normalizer));
 

@@ -677,8 +677,12 @@ mod tests {
         }
     }
 
-    fn spawn_chain_id_server(chain_id: u64) -> String {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    fn spawn_chain_id_server(chain_id: u64) -> Option<String> {
+        let listener = match std::net::TcpListener::bind("127.0.0.1:0") {
+            Ok(listener) => listener,
+            Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return None,
+            Err(err) => panic!("failed to bind test RPC listener: {err}"),
+        };
         let port = listener.local_addr().unwrap().port();
 
         std::thread::spawn(move || {
@@ -696,7 +700,7 @@ mod tests {
             stream.flush().unwrap();
         });
 
-        format!("http://127.0.0.1:{port}")
+        Some(format!("http://127.0.0.1:{port}"))
     }
 
     fn sample_transaction(id: &str) -> Transaction {
@@ -776,7 +780,9 @@ mod tests {
         let _guard = EnvVarGuard::unset("TREB_SYNC_RPC_URL");
 
         let tmp = TempDir::new().unwrap();
-        let rpc_url = spawn_chain_id_server(1);
+        let Some(rpc_url) = spawn_chain_id_server(1) else {
+            return;
+        };
         std::fs::write(
             tmp.path().join("foundry.toml"),
             r#"

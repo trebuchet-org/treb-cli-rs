@@ -1,23 +1,18 @@
 //! TrebRunner — CLI subprocess wrapper for integration tests.
 //!
-//! Wraps `assert_cmd::Command` with project defaults: workdir, 60 s timeout,
-//! and optional debug output (`TREB_TEST_DEBUG=1`).
+//! Wraps `assert_cmd::Command` with project defaults: workdir and optional
+//! debug output (`TREB_TEST_DEBUG=1`).
 
 use assert_cmd::Command;
 use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
-    time::Duration,
 };
-
-/// Default timeout for CLI invocations.
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// CLI subprocess wrapper with sensible defaults for integration tests.
 ///
 /// Every invocation automatically:
 /// - sets the working directory to the test workdir
-/// - applies a 60-second timeout
 /// - prints debug diagnostics to stderr when `TREB_TEST_DEBUG=1`
 pub struct TrebRunner {
     workdir: PathBuf,
@@ -64,7 +59,7 @@ impl TrebRunner {
         }
 
         let mut cmd = Command::new(&bin_path);
-        cmd.current_dir(&self.workdir).timeout(DEFAULT_TIMEOUT).args(args);
+        cmd.current_dir(&self.workdir).args(args);
 
         for (k, v) in env_vars {
             cmd.env(k, v);

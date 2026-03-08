@@ -1,6 +1,7 @@
 //! Persistent store for fork-mode state and registry snapshot/restore.
 
 use std::{
+    collections::BTreeSet,
     fs,
     path::{Path, PathBuf},
 };
@@ -184,9 +185,58 @@ impl ForkStateStore {
         Ok(entry)
     }
 
+    /// Remove every active fork entry associated with a network.
+    pub fn remove_active_forks_for_network(
+        &mut self,
+        network: &str,
+    ) -> Result<Vec<ForkEntry>, TrebError> {
+        let keys: Vec<String> = self
+            .data
+            .forks
+            .iter()
+            .filter(|(_, entry)| entry.network == network)
+            .map(|(key, _)| key.clone())
+            .collect();
+
+        if keys.is_empty() {
+            return Err(TrebError::Fork(format!("network is not actively forked: {network}")));
+        }
+
+        let removed =
+            keys.into_iter().filter_map(|key| self.data.forks.remove(&key)).collect::<Vec<_>>();
+        self.save()?;
+        Ok(removed)
+    }
+
     /// List all active fork entries.
     pub fn list_active_forks(&self) -> Vec<&ForkEntry> {
         self.data.forks.values().collect()
+    }
+
+    /// List all active fork entries for a single network.
+    pub fn list_active_forks_for_network(&self, network: &str) -> Vec<&ForkEntry> {
+        self.data.forks.values().filter(|entry| entry.network == network).collect()
+    }
+
+    /// List the session-level active fork entries (one default entry per network).
+    pub fn list_active_fork_sessions(&self) -> Vec<&ForkEntry> {
+        self.data.forks.values().filter(|entry| entry.instance_name.is_none()).collect()
+    }
+
+    /// Return whether any fork state is tracked for a network.
+    pub fn has_active_fork_network(&self, network: &str) -> bool {
+        self.data.forks.values().any(|entry| entry.network == network)
+    }
+
+    /// List active network names with duplicates removed.
+    pub fn list_active_networks(&self) -> Vec<String> {
+        self.data
+            .forks
+            .values()
+            .map(|entry| entry.network.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
     }
 
     /// Prepend a history entry. Caps history at [`MAX_HISTORY`] entries.
@@ -417,6 +467,22 @@ mod tests {
     }
 
     #[test]
+    fn remove_active_forks_for_network_removes_related_entries() {
+        let dir = TempDir::new().unwrap();
+        let mut store = ForkStateStore::new(dir.path());
+
+        store.insert_active_fork(sample_fork_entry("mainnet")).unwrap();
+
+        let mut named = sample_fork_entry("mainnet");
+        named.instance_name = Some("alpha".into());
+        store.insert_active_fork(named).unwrap();
+
+        let removed = store.remove_active_forks_for_network("mainnet").unwrap();
+        assert_eq!(removed.len(), 2);
+        assert!(!store.has_active_fork_network("mainnet"));
+    }
+
+    #[test]
     fn list_active_forks_returns_all() {
         let dir = TempDir::new().unwrap();
         let mut store = ForkStateStore::new(dir.path());
@@ -430,6 +496,42 @@ mod tests {
 
         let forks = store.list_active_forks();
         assert_eq!(forks.len(), 2);
+    }
+
+    #[test]
+    fn list_active_fork_sessions_ignores_named_entries() {
+        let dir = TempDir::new().unwrap();
+        let mut store = ForkStateStore::new(dir.path());
+
+        store.insert_active_fork(sample_fork_entry("mainnet")).unwrap();
+
+        let mut named = sample_fork_entry("mainnet");
+        named.instance_name = Some("alpha".into());
+        store.insert_active_fork(named).unwrap();
+
+        let sessions = store.list_active_fork_sessions();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].network, "mainnet");
+        assert_eq!(sessions[0].instance_name, None);
+    }
+
+    #[test]
+    fn list_active_networks_deduplicates_named_entries() {
+        let dir = TempDir::new().unwrap();
+        let mut store = ForkStateStore::new(dir.path());
+
+        store.insert_active_fork(sample_fork_entry("mainnet")).unwrap();
+
+        let mut named = sample_fork_entry("mainnet");
+        named.instance_name = Some("alpha".into());
+        store.insert_active_fork(named).unwrap();
+
+        let mut sepolia = sample_fork_entry("sepolia");
+        sepolia.chain_id = 11155111;
+        store.insert_active_fork(sepolia).unwrap();
+
+        let networks = store.list_active_networks();
+        assert_eq!(networks, vec!["mainnet".to_string(), "sepolia".to_string()]);
     }
 
     #[test]
