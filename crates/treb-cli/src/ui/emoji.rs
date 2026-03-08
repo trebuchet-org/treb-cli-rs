@@ -80,8 +80,18 @@ pub const WASTEBASKET: &str = "🗑️";
 /// ✔︎ Verified status in deployment table (deployments)
 pub const VERIFIED_WIDE: &str = "✔︎";
 
-/// ● Namespace marker in tree
-pub const CIRCLE: &str = "●";
+/// ◎ Namespace marker in deployment tree
+pub const CIRCLE: &str = "◎";
 
 /// ⛓ Chain marker in tree
 pub const CHAIN_EMOJI: &str = "⛓";
+
+#[cfg(test)]
+mod tests {
+    use super::CIRCLE;
+
+    #[test]
+    fn namespace_marker_matches_go_renderer() {
+        assert_eq!(CIRCLE, "◎");
+    }
+}
