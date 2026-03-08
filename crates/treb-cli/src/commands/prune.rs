@@ -57,11 +57,7 @@ pub struct PruneArgs {
 
 /// Apply a color style when color is enabled, plain text otherwise.
 fn styled(text: &str, style: Style) -> String {
-    if color::is_color_enabled() {
-        format!("{}", text.style(style))
-    } else {
-        text.to_string()
-    }
+    if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -201,10 +197,7 @@ pub async fn find_onchain_prune_candidates(
     chain_id_filter: Option<u64>,
     rpc_url: &str,
 ) -> Vec<PruneCandidate> {
-    let client = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-    {
+    let client = match reqwest::Client::builder().timeout(Duration::from_secs(30)).build() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Warning: failed to build HTTP client: {e}");
@@ -237,10 +230,7 @@ pub async fn find_onchain_prune_candidates(
         let resp = match client.post(rpc_url).json(&body).send().await {
             Ok(r) => r,
             Err(e) => {
-                eprintln!(
-                    "Warning: eth_getCode failed for {} ({}): {}",
-                    dep.id, address, e
-                );
+                eprintln!("Warning: eth_getCode failed for {} ({}): {}", dep.id, address, e);
                 continue;
             }
         };
@@ -257,27 +247,18 @@ pub async fn find_onchain_prune_candidates(
         };
 
         if let Some(error) = json.get("error") {
-            eprintln!(
-                "Warning: RPC error for eth_getCode on {} ({}): {}",
-                dep.id, address, error
-            );
+            eprintln!("Warning: RPC error for eth_getCode on {} ({}): {}", dep.id, address, error);
             continue;
         }
 
-        let code = json
-            .get("result")
-            .and_then(|v| v.as_str())
-            .unwrap_or("0x");
+        let code = json.get("result").and_then(|v| v.as_str()).unwrap_or("0x");
 
         // Empty bytecode: "0x" or "0x0" means no contract at that address.
         if code == "0x" || code == "0x0" {
             candidates.push(PruneCandidate {
                 id: dep.id.clone(),
                 kind: PruneCandidateKind::DestroyedOnChain,
-                reason: format!(
-                    "deployment '{}' at {} has no on-chain bytecode",
-                    dep.id, address
-                ),
+                reason: format!("deployment '{}' at {} has no on-chain bytecode", dep.id, address),
                 chain_id: Some(dep.chain_id),
             });
         }
@@ -301,17 +282,16 @@ pub fn backup_registry(project_root: &Path) -> anyhow::Result<std::path::PathBuf
 }
 
 fn targets_deployment(kind: &PruneCandidateKind) -> bool {
-    matches!(
-        kind,
-        PruneCandidateKind::BrokenTransactionRef | PruneCandidateKind::DestroyedOnChain
-    )
+    matches!(kind, PruneCandidateKind::BrokenTransactionRef | PruneCandidateKind::DestroyedOnChain)
 }
 
-fn merge_onchain_candidates(candidates: &mut Vec<PruneCandidate>, onchain_candidates: Vec<PruneCandidate>) {
+fn merge_onchain_candidates(
+    candidates: &mut Vec<PruneCandidate>,
+    onchain_candidates: Vec<PruneCandidate>,
+) {
     for onchain in onchain_candidates {
-        if let Some(existing) = candidates
-            .iter_mut()
-            .find(|c| c.id == onchain.id && targets_deployment(&c.kind))
+        if let Some(existing) =
+            candidates.iter_mut().find(|c| c.id == onchain.id && targets_deployment(&c.kind))
         {
             if onchain.kind == PruneCandidateKind::DestroyedOnChain {
                 existing.kind = PruneCandidateKind::DestroyedOnChain;
@@ -424,10 +404,7 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
     }
 
     if !args.yes {
-        let message = format!(
-            "Remove {} entry(s)?",
-            candidates.len()
-        );
+        let message = format!("Remove {} entry(s)?", candidates.len());
         if !crate::ui::prompt::confirm(&message, false) {
             if !args.json {
                 println!("{}", styled("Cancelled.", color::MUTED));
@@ -486,13 +463,7 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
             ]);
         }
         output::print_table(&table);
-        println!(
-            "\n{}",
-            styled(
-                &format!("Removed {} entry(s).", removed.len()),
-                color::SUCCESS,
-            )
-        );
+        println!("\n{}", styled(&format!("Removed {} entry(s).", removed.len()), color::SUCCESS,));
         println!("Backup created at: {}", backup_path.display());
     }
 
@@ -805,16 +776,8 @@ mod tests {
         merge_onchain_candidates(&mut candidates, onchain_candidates);
 
         assert_eq!(candidates.len(), 2);
-        assert!(
-            candidates
-                .iter()
-                .any(|c| c.kind == PruneCandidateKind::BrokenDeploymentRef)
-        );
-        assert!(
-            candidates
-                .iter()
-                .any(|c| c.kind == PruneCandidateKind::DestroyedOnChain)
-        );
+        assert!(candidates.iter().any(|c| c.kind == PruneCandidateKind::BrokenDeploymentRef));
+        assert!(candidates.iter().any(|c| c.kind == PruneCandidateKind::DestroyedOnChain));
     }
 
     #[test]

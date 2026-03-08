@@ -384,11 +384,7 @@ fn compute_totals(results: &[ComponentResultEntry]) -> ComposeTotals {
 
 /// Apply a color style when color is enabled, plain text otherwise.
 fn styled(text: &str, style: Style) -> String {
-    if color::is_color_enabled() {
-        format!("{}", text.style(style))
-    } else {
-        text.to_string()
-    }
+    if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
 }
 
 /// Display compose results in human-readable format.
@@ -427,12 +423,7 @@ fn display_compose_human(group: &str, results: &[ComponentResultEntry], totals: 
             }
             ComponentStatus::NotExecuted => {
                 let icon = styled("\u{2014}", color::MUTED); // —
-                println!(
-                    "  {} {} {}",
-                    icon,
-                    r.component,
-                    styled("(not executed)", color::MUTED)
-                );
+                println!("  {} {} {}", icon, r.component, styled("(not executed)", color::MUTED));
             }
         }
     }
@@ -520,10 +511,8 @@ pub async fn run(
     if verbose && !json && resume && !skip_set.is_empty() {
         let hash_str = &compose_hash;
         let skip_count = skip_set.len().to_string();
-        let kv_pairs: Vec<(&str, &str)> = vec![
-            ("Compose hash", hash_str),
-            ("Skipping", &skip_count),
-        ];
+        let kv_pairs: Vec<(&str, &str)> =
+            vec![("Compose hash", hash_str), ("Skipping", &skip_count)];
         output::eprint_kv(&kv_pairs);
         eprintln!();
     }
@@ -534,7 +523,13 @@ pub async fn run(
         if json {
             output::print_json(&plan)?;
         } else {
-            eprintln!("{}", output::format_warning_banner("\u{1f6a7}", "[DRY RUN] Showing execution plan only — no changes will be made."));
+            eprintln!(
+                "{}",
+                output::format_warning_banner(
+                    "\u{1f6a7}",
+                    "[DRY RUN] Showing execution plan only — no changes will be made."
+                )
+            );
             eprintln!();
             print_dry_run_plan(&compose, &plan);
         }
@@ -583,8 +578,8 @@ pub async fn run(
             let mut script_config =
                 build_script_config_with_senders(&resolved, &component.script, &resolved_senders)
                     .with_context(|| {
-                        format!("failed to build script config for component '{}'", name)
-                    })?;
+                    format!("failed to build script config for component '{}'", name)
+                })?;
 
             let sig = component.sig.as_deref().unwrap_or("run()");
             let args = component.args.clone().unwrap_or_default();
@@ -628,10 +623,8 @@ pub async fn run(
         if is_tty {
             let executing_count = order.iter().filter(|n| !skip_set.contains(*n)).count();
             let count_str = format!("{}", executing_count);
-            let mut kv_pairs: Vec<(&str, &str)> = vec![
-                ("Components", &count_str),
-                ("Compose", &compose.group),
-            ];
+            let mut kv_pairs: Vec<(&str, &str)> =
+                vec![("Components", &count_str), ("Compose", &compose.group)];
             let ns_ref;
             if let Some(ref ns) = namespace {
                 ns_ref = ns.clone();
@@ -684,14 +677,20 @@ pub async fn run(
     let mut failed_component: Option<String> = None;
 
     if !json {
-        output::print_stage("\u{1f680}", &format!("Orchestrating {} ({} components)", compose.group, total));
+        output::print_stage(
+            "\u{1f680}",
+            &format!("Orchestrating {} ({} components)", compose.group, total),
+        );
     }
 
     for (i, name) in order.iter().enumerate() {
         // Skip already-completed components (resume mode).
         if skip_set.contains(name) {
             if !json {
-                output::print_stage("\u{23ed}\u{fe0f}", &format!("[{}/{}] Skipping '{}' (already completed)", i + 1, total, name));
+                output::print_stage(
+                    "\u{23ed}\u{fe0f}",
+                    &format!("[{}/{}] Skipping '{}' (already completed)", i + 1, total, name),
+                );
             }
             component_results.push(ComponentResultEntry {
                 component: name.clone(),
@@ -720,7 +719,10 @@ pub async fn run(
         let component = &compose.components[name];
 
         if !json {
-            output::print_stage("\u{1f528}", &format!("[{}/{}] Executing '{}'...", i + 1, total, name));
+            output::print_stage(
+                "\u{1f528}",
+                &format!("[{}/{}] Executing '{}'...", i + 1, total, name),
+            );
         }
 
         // Re-inject global env vars (reset any previous component overrides).
@@ -782,8 +784,7 @@ pub async fn run(
             let verify_display = effective_verify.to_string();
             let rpc_display = effective_rpc_url.clone().unwrap_or_default();
             let chain_id_str = if !rpc_display.is_empty() {
-                let resolved_url =
-                    super::run::resolve_rpc_url_for_chain_id(&rpc_display, &cwd);
+                let resolved_url = super::run::resolve_rpc_url_for_chain_id(&rpc_display, &cwd);
                 if let Some(url) = resolved_url {
                     let cid = super::run::fetch_chain_id(&url).await.unwrap_or(0);
                     if cid > 0 { cid.to_string() } else { String::new() }
@@ -794,10 +795,8 @@ pub async fn run(
                 String::new()
             };
 
-            let mut kv_pairs: Vec<(&str, &str)> = vec![
-                ("Script", &component.script),
-                ("Namespace", &resolved.namespace),
-            ];
+            let mut kv_pairs: Vec<(&str, &str)> =
+                vec![("Script", &component.script), ("Namespace", &resolved.namespace)];
             if !rpc_display.is_empty() {
                 kv_pairs.push(("RPC", &rpc_display));
             }
@@ -837,7 +836,10 @@ pub async fn run(
             Ok(result) => {
                 completed += 1;
                 if !json {
-                    output::print_stage("\u{2705}", &format!("[{}/{}] '{}' completed", i + 1, total, name));
+                    output::print_stage(
+                        "\u{2705}",
+                        &format!("[{}/{}] '{}' completed", i + 1, total, name),
+                    );
                 }
 
                 // Verbose post-execution summary per component.
@@ -886,10 +888,7 @@ pub async fn run(
                         log.push_str("\n--- Transactions ---\n");
                         for rt in &result.transactions {
                             let tx = &rt.transaction;
-                            log.push_str(&format!(
-                                "  {} {} ({})\n",
-                                tx.id, tx.hash, tx.status
-                            ));
+                            log.push_str(&format!("  {} {} ({})\n", tx.id, tx.hash, tx.status));
                         }
                     }
 

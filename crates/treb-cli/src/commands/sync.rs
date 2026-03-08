@@ -7,8 +7,8 @@ use serde::Serialize;
 use treb_core::types::{enums::TransactionStatus, safe_transaction::Confirmation};
 use treb_registry::Registry;
 use treb_safe::{
-    types::{SafeServiceMultisigResponse, SafeServiceTx},
     SafeServiceClient,
+    types::{SafeServiceMultisigResponse, SafeServiceTx},
 };
 
 use crate::{output, ui::color};

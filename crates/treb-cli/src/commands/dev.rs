@@ -402,8 +402,7 @@ mod tests {
     use std::{fs, time::Duration};
     use tempfile::TempDir;
     use treb_core::types::fork::ForkEntry;
-    use treb_forge::AnvilInstance;
-    use treb_forge::anvil::AnvilConfig;
+    use treb_forge::{AnvilInstance, anvil::AnvilConfig};
     use treb_registry::ForkStateStore;
 
     // ── Minimal test CLI for clap parsing ─────────────────────────────────

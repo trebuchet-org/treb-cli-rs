@@ -8,7 +8,8 @@ use serde::Serialize;
 use treb_registry::Registry;
 
 use crate::{
-    commands::resolve::resolve_deployment, output,
+    commands::resolve::resolve_deployment,
+    output,
     ui::{color, selector::fuzzy_select_deployment_id},
 };
 
@@ -25,11 +26,7 @@ struct TagOutputJson {
 
 /// Apply a color style when color is enabled, plain text otherwise.
 fn styled(text: &str, style: Style) -> String {
-    if color::is_color_enabled() {
-        format!("{}", text.style(style))
-    } else {
-        text.to_string()
-    }
+    if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
 }
 
 pub async fn run(
@@ -134,13 +131,7 @@ fn add_tag(
             tag: Some(tag.to_string()),
         })?;
     } else {
-        println!(
-            "{}",
-            styled(
-                &format!("Added tag '{tag}' to '{deployment_id}'"),
-                color::SUCCESS,
-            )
-        );
+        println!("{}", styled(&format!("Added tag '{tag}' to '{deployment_id}'"), color::SUCCESS,));
         println!();
         println!("{}", styled("Tags:", color::STAGE));
         for t in &tags {
@@ -186,10 +177,7 @@ fn remove_tag(
     } else {
         println!(
             "{}",
-            styled(
-                &format!("Removed tag '{tag}' from '{deployment_id}'"),
-                color::SUCCESS,
-            )
+            styled(&format!("Removed tag '{tag}' from '{deployment_id}'"), color::SUCCESS,)
         );
         println!();
         if final_tags.is_empty() {

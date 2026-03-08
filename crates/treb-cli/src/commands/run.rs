@@ -2,8 +2,7 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
-    env,
-    fs,
+    env, fs,
     io::{self, BufRead, IsTerminal, Write},
     path::PathBuf,
     time::Duration,
@@ -83,7 +82,10 @@ pub fn ensure_initialized(cwd: &std::path::Path) -> anyhow::Result<()> {
 
 /// Resolve a network name to an RPC URL. If the input is already a URL, returns it directly.
 /// Falls back to looking up the name in foundry.toml [rpc_endpoints].
-pub(crate) fn resolve_rpc_url_for_chain_id(network_or_url: &str, cwd: &std::path::Path) -> Option<String> {
+pub(crate) fn resolve_rpc_url_for_chain_id(
+    network_or_url: &str,
+    cwd: &std::path::Path,
+) -> Option<String> {
     if network_or_url.starts_with("http://") || network_or_url.starts_with("https://") {
         return Some(network_or_url.to_string());
     }
@@ -422,10 +424,7 @@ pub async fn run(
             log_content.push_str("\n--- Transactions ---\n");
             for rt in &result.transactions {
                 let tx = &rt.transaction;
-                log_content.push_str(&format!(
-                    "  {} {} ({})\n",
-                    tx.id, tx.hash, tx.status
-                ));
+                log_content.push_str(&format!("  {} {} ({})\n", tx.id, tx.hash, tx.status));
             }
         }
 
@@ -599,9 +598,7 @@ fn group_recorded_deployments<'a>(
         let chain_map = result.entry(d.namespace.clone()).or_default();
         let type_groups = chain_map.entry(d.chain_id).or_default();
 
-        if let Some(group) = type_groups
-            .iter_mut()
-            .find(|g| g.deployment_type == d.deployment_type)
+        if let Some(group) = type_groups.iter_mut().find(|g| g.deployment_type == d.deployment_type)
         {
             group.deployments.push(rd);
         } else {
@@ -651,8 +648,7 @@ fn build_run_deployment_node(d: &treb_core::types::Deployment) -> TreeNode {
     let label = format_run_deployment_entry(d);
     let mut node = TreeNode::new(label);
     if let Some(ref pi) = d.proxy_info {
-        let impl_label =
-            format!("Implementation {}", output::truncate_address(&pi.implementation));
+        let impl_label = format!("Implementation {}", output::truncate_address(&pi.implementation));
         node = node.child(TreeNode::new(impl_label));
     }
     node
@@ -661,7 +657,10 @@ fn build_run_deployment_node(d: &treb_core::types::Deployment) -> TreeNode {
 fn display_result_human(result: &PipelineResult) {
     // Dry-run banner
     if result.dry_run {
-        output::print_warning_banner("\u{1f6a7}", "[DRY RUN] No changes were written to the registry.");
+        output::print_warning_banner(
+            "\u{1f6a7}",
+            "[DRY RUN] No changes were written to the registry.",
+        );
         println!();
     }
 
@@ -684,8 +683,7 @@ fn display_result_human(result: &PipelineResult) {
             first = false;
             let mut ns_node = TreeNode::new(namespace.clone()).with_style(color::NAMESPACE);
             for (chain_id, type_groups) in chains {
-                let mut chain_node =
-                    TreeNode::new(chain_id.to_string()).with_style(color::CHAIN);
+                let mut chain_node = TreeNode::new(chain_id.to_string()).with_style(color::CHAIN);
                 for tg in type_groups {
                     let type_label = tg.deployment_type.to_string();
                     let type_style = color::style_for_deployment_type(tg.deployment_type.clone());
@@ -722,12 +720,7 @@ fn display_result_human(result: &PipelineResult) {
         println!("Governor Proposals:");
         for (i, gp) in result.governor_proposals.iter().enumerate() {
             let action = if result.dry_run { "would be proposed" } else { "proposed" };
-            println!(
-                "  {}. {} ({})",
-                i + 1,
-                output::truncate_address(&gp.proposal_id),
-                action,
-            );
+            println!("  {}. {} ({})", i + 1, output::truncate_address(&gp.proposal_id), action,);
             println!("     {}", format_governor_proposal_details(gp));
         }
         println!();
@@ -773,11 +766,7 @@ fn display_result_human(result: &PipelineResult) {
             ));
         }
         if tx_count > 0 {
-            parts.push(format!(
-                "{} transaction{}",
-                tx_count,
-                if tx_count == 1 { "" } else { "s" }
-            ));
+            parts.push(format!("{} transaction{}", tx_count, if tx_count == 1 { "" } else { "s" }));
         }
         if proposal_count > 0 {
             let proposal_verb = if result.dry_run { "would be proposed" } else { "proposed" };

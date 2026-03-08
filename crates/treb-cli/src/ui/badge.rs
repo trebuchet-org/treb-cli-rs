@@ -11,7 +11,8 @@ use treb_core::types::VerifierStatus;
 use super::color;
 
 /// The three verifiers in display order.
-const VERIFIER_ORDER: [(&str, &str); 3] = [("etherscan", "e"), ("sourcify", "s"), ("blockscout", "b")];
+const VERIFIER_ORDER: [(&str, &str); 3] =
+    [("etherscan", "e"), ("sourcify", "s"), ("blockscout", "b")];
 
 /// Returns a compact verification badge string for the given verifiers map.
 ///
@@ -86,11 +87,7 @@ fn status_style(status: &str) -> Style {
 /// A namespace is considered a fork when it starts with `"fork/"`.
 #[allow(dead_code)]
 pub fn fork_badge(namespace: &str) -> Option<String> {
-    if namespace.starts_with("fork/") {
-        Some("[fork]".to_string())
-    } else {
-        None
-    }
+    if namespace.starts_with("fork/") { Some("[fork]".to_string()) } else { None }
 }
 
 /// Returns a styled `[fork]` badge with yellow bold ANSI codes when the
@@ -109,11 +106,7 @@ mod tests {
     use super::*;
 
     fn make_verifier(status: &str) -> VerifierStatus {
-        VerifierStatus {
-            status: status.to_string(),
-            url: String::new(),
-            reason: String::new(),
-        }
+        VerifierStatus { status: status.to_string(), url: String::new(), reason: String::new() }
     }
 
     #[test]

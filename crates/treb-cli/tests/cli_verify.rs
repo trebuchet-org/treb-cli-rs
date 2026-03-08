@@ -198,10 +198,7 @@ fn verify_etherscan_shorthand_flag_accepted() {
         .unwrap();
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !stderr.contains("unexpected argument"),
-        "--etherscan should be accepted: {stderr}"
-    );
+    assert!(!stderr.contains("unexpected argument"), "--etherscan should be accepted: {stderr}");
 }
 
 #[test]
@@ -216,10 +213,7 @@ fn verify_blockscout_shorthand_flag_accepted() {
         .unwrap();
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !stderr.contains("unexpected argument"),
-        "--blockscout should be accepted: {stderr}"
-    );
+    assert!(!stderr.contains("unexpected argument"), "--blockscout should be accepted: {stderr}");
 }
 
 #[test]
@@ -234,10 +228,7 @@ fn verify_sourcify_shorthand_flag_accepted() {
         .unwrap();
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !stderr.contains("unexpected argument"),
-        "--sourcify should be accepted: {stderr}"
-    );
+    assert!(!stderr.contains("unexpected argument"), "--sourcify should be accepted: {stderr}");
 }
 
 #[test]
@@ -264,13 +255,7 @@ fn verify_all_three_shorthand_flags() {
     init_project_with_deployments(&tmp);
 
     let output = treb()
-        .args([
-            "verify",
-            "NonexistentContract",
-            "--etherscan",
-            "--blockscout",
-            "--sourcify",
-        ])
+        .args(["verify", "NonexistentContract", "--etherscan", "--blockscout", "--sourcify"])
         .current_dir(tmp.path())
         .output()
         .unwrap();
@@ -290,13 +275,7 @@ fn verify_shorthand_overrides_verifier_flag() {
     init_project_with_deployments(&tmp);
 
     let output = treb()
-        .args([
-            "verify",
-            "NonexistentContract",
-            "--verifier",
-            "sourcify",
-            "--etherscan",
-        ])
+        .args(["verify", "NonexistentContract", "--verifier", "sourcify", "--etherscan"])
         .current_dir(tmp.path())
         .output()
         .unwrap();
@@ -421,5 +400,8 @@ fn verify_all_force_proceeds_with_reverification() {
         "--all --force should not print noop message: {stderr}"
     );
     // Should show progress messages indicating it tried to re-verify.
-    assert!(stderr.contains("Re-verifying"), "--all --force should attempt re-verification: {stderr}");
+    assert!(
+        stderr.contains("Re-verifying"),
+        "--all --force should attempt re-verification: {stderr}"
+    );
 }

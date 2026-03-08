@@ -1,16 +1,15 @@
 //! `treb list` command implementation.
 
-use std::collections::BTreeMap;
-use std::env;
+use std::{collections::BTreeMap, env};
 
 use anyhow::{Context, bail};
 use treb_core::types::{Deployment, DeploymentType};
 use treb_registry::Registry;
 
-use crate::output;
-use crate::ui::badge;
-use crate::ui::color;
-use crate::ui::tree::TreeNode;
+use crate::{
+    output,
+    ui::{badge, color, tree::TreeNode},
+};
 
 /// Filter criteria for deployments. All specified filters are combined with AND logic.
 pub struct DeploymentFilters {
@@ -160,9 +159,7 @@ pub fn group_deployments<'a>(deployments: &[&'a Deployment]) -> GroupedDeploymen
         let chain_map = result.entry(d.namespace.clone()).or_default();
         let type_groups = chain_map.entry(d.chain_id).or_default();
 
-        if let Some(group) = type_groups
-            .iter_mut()
-            .find(|g| g.deployment_type == d.deployment_type)
+        if let Some(group) = type_groups.iter_mut().find(|g| g.deployment_type == d.deployment_type)
         {
             group.deployments.push(d);
         } else {
@@ -178,9 +175,7 @@ pub fn group_deployments<'a>(deployments: &[&'a Deployment]) -> GroupedDeploymen
         for type_groups in chain_map.values_mut() {
             type_groups.sort_by_key(|g| type_sort_key(&g.deployment_type));
             for group in type_groups.iter_mut() {
-                group
-                    .deployments
-                    .sort_by(|a, b| a.contract_name.cmp(&b.contract_name));
+                group.deployments.sort_by(|a, b| a.contract_name.cmp(&b.contract_name));
             }
         }
     }
@@ -247,8 +242,7 @@ pub async fn run(
             first = false;
             let mut ns_node = TreeNode::new(namespace.clone()).with_style(color::NAMESPACE);
             for (chain_id, type_groups) in chains {
-                let mut chain_node =
-                    TreeNode::new(chain_id.to_string()).with_style(color::CHAIN);
+                let mut chain_node = TreeNode::new(chain_id.to_string()).with_style(color::CHAIN);
                 for tg in type_groups {
                     let type_label = tg.deployment_type.to_string();
                     let type_style = color::style_for_deployment_type(tg.deployment_type.clone());
@@ -588,10 +582,7 @@ mod tests {
         assert_eq!(type_groups.len(), 2);
         assert_eq!(type_groups[0].deployment_type, DeploymentType::Proxy);
         assert_eq!(type_groups[0].deployments.len(), 1);
-        assert_eq!(
-            type_groups[0].deployments[0].contract_name,
-            "TransparentUpgradeableProxy"
-        );
+        assert_eq!(type_groups[0].deployments[0].contract_name, "TransparentUpgradeableProxy");
         assert_eq!(type_groups[1].deployment_type, DeploymentType::Singleton);
         assert_eq!(type_groups[1].deployments.len(), 2);
         assert_eq!(type_groups[1].deployments[0].contract_name, "FPMM");
@@ -653,11 +644,8 @@ mod tests {
         let refs: Vec<&Deployment> = deployments.iter().collect();
         let grouped = group_deployments(&refs);
 
-        let names: Vec<&str> = grouped["ns"][&1][0]
-            .deployments
-            .iter()
-            .map(|d| d.contract_name.as_str())
-            .collect();
+        let names: Vec<&str> =
+            grouped["ns"][&1][0].deployments.iter().map(|d| d.contract_name.as_str()).collect();
         assert_eq!(names, vec!["Alpha", "Mid", "Zeta"]);
     }
 
@@ -670,10 +658,7 @@ mod tests {
         // 3 namespaces: fork/42220, mainnet, testnet
         assert_eq!(grouped.len(), 3);
         let namespaces: Vec<&String> = grouped.keys().collect();
-        assert_eq!(
-            namespaces,
-            vec!["fork/42220", "mainnet", "testnet"]
-        );
+        assert_eq!(namespaces, vec!["fork/42220", "mainnet", "testnet"]);
 
         // mainnet has 1 chain (42220) with 1 type group (Singleton, 2 entries)
         let mainnet_chains = &grouped["mainnet"];
@@ -727,14 +712,8 @@ mod tests {
             lines[0].contains("TransparentUpgradeableProxy:FPMMFactory"),
             "first line should contain contract name:label"
         );
-        assert!(
-            lines[0].contains("UNVERIFIED"),
-            "first line should contain verification badge"
-        );
-        assert!(
-            lines[1].contains("Implementation"),
-            "child should be an Implementation node"
-        );
+        assert!(lines[0].contains("UNVERIFIED"), "first line should contain verification badge");
+        assert!(lines[1].contains("Implementation"), "child should be an Implementation node");
         assert!(
             lines[1].contains("0x9595...79dF"),
             "child should contain truncated implementation address"
@@ -755,11 +734,7 @@ mod tests {
 
         let node = build_deployment_node(&d);
         let rendered = node.render();
-        assert_eq!(
-            rendered.lines().count(),
-            1,
-            "non-proxy deployment should have no child nodes"
-        );
+        assert_eq!(rendered.lines().count(), 1, "non-proxy deployment should have no child nodes");
     }
 
     #[test]

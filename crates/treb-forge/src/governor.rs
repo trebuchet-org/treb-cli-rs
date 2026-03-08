@@ -4,8 +4,7 @@
 //! via `eth_call` JSON-RPC and maps the uint8 return value to [`ProposalStatus`].
 
 use alloy_primitives::U256;
-use treb_core::TrebError;
-use treb_core::types::ProposalStatus;
+use treb_core::{TrebError, types::ProposalStatus};
 
 /// Function selector for `state(uint256)`: first 4 bytes of keccak256("state(uint256)").
 const STATE_SELECTOR: [u8; 4] = [0x3e, 0x4f, 0x49, 0xe6];
@@ -18,6 +17,68 @@ fn build_state_calldata(proposal_id: &U256) -> Vec<u8> {
     calldata.extend_from_slice(&STATE_SELECTOR);
     calldata.extend_from_slice(&proposal_id.to_be_bytes::<32>());
     calldata
+}
+
+fn body_excerpt(body: &str) -> String {
+    const MAX_LEN: usize = 200;
+
+    let mut excerpt = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    if excerpt.is_empty() {
+        return "empty response body".into();
+    }
+
+    if excerpt.len() > MAX_LEN {
+        excerpt.truncate(MAX_LEN);
+        excerpt.push_str("...");
+    }
+
+    excerpt
+}
+
+fn format_rpc_error(err: &serde_json::Value) -> String {
+    let code = err.get("code").and_then(|v| v.as_i64());
+    let message = err.get("message").and_then(|v| v.as_str());
+    let detail = err.get("data").and_then(rpc_error_detail);
+
+    match (code, message, detail) {
+        (Some(code), Some(message), Some(detail)) if detail != message => {
+            format!("JSON-RPC error {code}: {message} ({detail})")
+        }
+        (Some(code), Some(message), _) => format!("JSON-RPC error {code}: {message}"),
+        (None, Some(message), Some(detail)) if detail != message => {
+            format!("JSON-RPC error: {message} ({detail})")
+        }
+        (None, Some(message), _) => format!("JSON-RPC error: {message}"),
+        _ => format!("JSON-RPC error: {}", body_excerpt(&err.to_string())),
+    }
+}
+
+fn rpc_error_detail(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Object(map) => map
+            .get("message")
+            .and_then(|v| v.as_str())
+            .map(ToOwned::to_owned)
+            .or_else(|| {
+                map.get("originalError")
+                    .and_then(|v| v.get("message"))
+                    .and_then(|v| v.as_str())
+                    .map(ToOwned::to_owned)
+            })
+            .or_else(|| Some(body_excerpt(&value.to_string()))),
+        serde_json::Value::Null => None,
+        _ => Some(body_excerpt(&value.to_string())),
+    }
+}
+
+fn rpc_error_indicates_revert(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::String(s) => s.to_ascii_lowercase().contains("revert"),
+        serde_json::Value::Array(items) => items.iter().any(rpc_error_indicates_revert),
+        serde_json::Value::Object(map) => map.values().any(rpc_error_indicates_revert),
+        _ => false,
+    }
 }
 
 /// Map an on-chain OZ Governor `ProposalState` uint8 value (0–7) to [`ProposalStatus`].
@@ -56,9 +117,8 @@ pub async fn query_proposal_state(
     proposal_id: &str,
 ) -> Result<ProposalStatus, TrebError> {
     // Parse proposal_id as a decimal U256.
-    let id = U256::from_str_radix(proposal_id, 10).map_err(|e| {
-        TrebError::Governor(format!("invalid proposal ID '{proposal_id}': {e}"))
-    })?;
+    let id = U256::from_str_radix(proposal_id, 10)
+        .map_err(|e| TrebError::Governor(format!("invalid proposal ID '{proposal_id}': {e}")))?;
 
     let calldata = build_state_calldata(&id);
     let data_hex = format!("0x{}", hex::encode(&calldata));
@@ -83,15 +143,39 @@ pub async fn query_proposal_state(
         .await
         .map_err(|e| TrebError::Governor(format!("RPC request to {rpc_url} failed: {e}")))?;
 
-    let json: serde_json::Value = resp
-        .json()
+    let status = resp.status();
+    let body_text = resp
+        .text()
         .await
-        .map_err(|e| TrebError::Governor(format!("failed to parse RPC response: {e}")))?;
+        .map_err(|e| TrebError::Governor(format!("failed to read RPC response body: {e}")))?;
+
+    if !status.is_success() {
+        let detail = serde_json::from_str::<serde_json::Value>(&body_text)
+            .ok()
+            .and_then(|json| json.get("error").map(format_rpc_error))
+            .unwrap_or_else(|| body_excerpt(&body_text));
+
+        return Err(TrebError::Governor(format!(
+            "RPC request to {rpc_url} returned HTTP {status}: {detail}"
+        )));
+    }
+
+    let json: serde_json::Value = serde_json::from_str(&body_text).map_err(|e| {
+        TrebError::Governor(format!(
+            "failed to parse RPC response: {e}; body: {}",
+            body_excerpt(&body_text)
+        ))
+    })?;
 
     if let Some(err) = json.get("error") {
-        return Err(TrebError::Governor(format!(
-            "Governor state() call reverted: {err}"
-        )));
+        let summary = format_rpc_error(err);
+        let prefix = if rpc_error_indicates_revert(err) {
+            "Governor state() call reverted"
+        } else {
+            "RPC error calling Governor state()"
+        };
+
+        return Err(TrebError::Governor(format!("{prefix}: {summary}")));
     }
 
     let result_hex = json
@@ -116,10 +200,7 @@ pub async fn query_proposal_state(
 
 /// Check if a [`ProposalStatus`] is terminal (no further state transitions expected).
 pub fn is_terminal(status: &ProposalStatus) -> bool {
-    matches!(
-        status,
-        ProposalStatus::Executed | ProposalStatus::Canceled | ProposalStatus::Defeated
-    )
+    matches!(status, ProposalStatus::Executed | ProposalStatus::Canceled | ProposalStatus::Defeated)
 }
 
 // Use the hex crate from alloy for encoding/decoding.
@@ -128,6 +209,7 @@ use alloy_primitives::hex;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
 
     #[test]
     fn build_state_calldata_encodes_correctly() {
@@ -200,5 +282,123 @@ mod tests {
         assert!(!is_terminal(&ProposalStatus::Active));
         assert!(!is_terminal(&ProposalStatus::Succeeded));
         assert!(!is_terminal(&ProposalStatus::Queued));
+    }
+
+    fn spawn_http_server(status_line: &str, body: &str) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let status_line = status_line.to_string();
+        let body = body.to_string();
+
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0_u8; 4096];
+            let _ = stream.read(&mut buf);
+
+            let response = format!(
+                "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.flush().unwrap();
+        });
+
+        format!("http://127.0.0.1:{port}")
+    }
+
+    fn encoded_state_result(state: u8) -> String {
+        let mut encoded = [0_u8; 32];
+        encoded[31] = state;
+        format!("0x{}", hex::encode(encoded))
+    }
+
+    #[tokio::test]
+    async fn query_proposal_state_returns_result_payload() {
+        let rpc_url = spawn_http_server(
+            "200 OK",
+            &format!(r#"{{"jsonrpc":"2.0","id":1,"result":"{}"}}"#, encoded_state_result(5)),
+        );
+        let client = reqwest::Client::new();
+
+        let status = query_proposal_state(
+            &client,
+            &rpc_url,
+            "0x0000000000000000000000000000000000000001",
+            "42",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(status, ProposalStatus::Queued);
+    }
+
+    #[tokio::test]
+    async fn query_proposal_state_preserves_non_revert_rpc_errors() {
+        let rpc_url = spawn_http_server(
+            "200 OK",
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32005,"message":"rate limit exceeded"}}"#,
+        );
+        let client = reqwest::Client::new();
+
+        let err = query_proposal_state(
+            &client,
+            &rpc_url,
+            "0x0000000000000000000000000000000000000001",
+            "42",
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("RPC error calling Governor state()"), "got: {err}");
+        assert!(err.contains("-32005"), "got: {err}");
+        assert!(err.contains("rate limit exceeded"), "got: {err}");
+        assert!(!err.contains("call reverted"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn query_proposal_state_marks_revert_payloads_as_reverts() {
+        let rpc_url = spawn_http_server(
+            "200 OK",
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":3,"message":"execution reverted: unknown proposal id"}}"#,
+        );
+        let client = reqwest::Client::new();
+
+        let err = query_proposal_state(
+            &client,
+            &rpc_url,
+            "0x0000000000000000000000000000000000000001",
+            "42",
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("Governor state() call reverted"), "got: {err}");
+        assert!(err.contains("execution reverted"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn query_proposal_state_includes_http_status_for_non_success_responses() {
+        let rpc_url = spawn_http_server(
+            "429 Too Many Requests",
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32005,"message":"rate limit exceeded"}}"#,
+        );
+        let client = reqwest::Client::new();
+
+        let err = query_proposal_state(
+            &client,
+            &rpc_url,
+            "0x0000000000000000000000000000000000000001",
+            "42",
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("HTTP 429 Too Many Requests"), "got: {err}");
+        assert!(err.contains("-32005"), "got: {err}");
+        assert!(err.contains("rate limit exceeded"), "got: {err}");
     }
 }

@@ -35,12 +35,7 @@ fn roundtrip_contract_deployed() {
         createStrategy: "create2".to_string(),
     };
 
-    let event = ContractDeployed {
-        deployer,
-        location,
-        transactionId: tx_id,
-        deployment: details,
-    };
+    let event = ContractDeployed { deployer, location, transactionId: tx_id, deployment: details };
 
     let log = make_log(Address::ZERO, event.encode_log_data());
     let parsed = decode_events(&[log]);
@@ -55,9 +50,18 @@ fn roundtrip_contract_deployed() {
                 assert_eq!(d.deployment.artifact, "Counter");
                 assert_eq!(d.deployment.label, "counter-v1");
                 assert_eq!(d.deployment.entropy, "abc123");
-                assert_eq!(d.deployment.salt, b256!("0000000000000000000000000000000000000000000000000000000000000001"));
-                assert_eq!(d.deployment.bytecodeHash, b256!("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"));
-                assert_eq!(d.deployment.initCodeHash, b256!("abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd"));
+                assert_eq!(
+                    d.deployment.salt,
+                    b256!("0000000000000000000000000000000000000000000000000000000000000001")
+                );
+                assert_eq!(
+                    d.deployment.bytecodeHash,
+                    b256!("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
+                );
+                assert_eq!(
+                    d.deployment.initCodeHash,
+                    b256!("abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd")
+                );
                 assert_eq!(d.deployment.constructorArgs, Bytes::from(vec![0x01, 0x02, 0x03]));
                 assert_eq!(d.deployment.createStrategy, "create2");
             }
@@ -166,8 +170,14 @@ fn roundtrip_deployment_collision() {
                 assert_eq!(d.deployment.label, "token-v2");
                 assert_eq!(d.deployment.entropy, "collision-entropy");
                 assert_eq!(d.deployment.salt, salt);
-                assert_eq!(d.deployment.bytecodeHash, b256!("9999999999999999999999999999999999999999999999999999999999999999"));
-                assert_eq!(d.deployment.initCodeHash, b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab"));
+                assert_eq!(
+                    d.deployment.bytecodeHash,
+                    b256!("9999999999999999999999999999999999999999999999999999999999999999")
+                );
+                assert_eq!(
+                    d.deployment.initCodeHash,
+                    b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab")
+                );
                 assert_eq!(d.deployment.constructorArgs, Bytes::from(vec![0xff]));
                 assert_eq!(d.deployment.createStrategy, "create2");
             }
@@ -285,9 +295,15 @@ fn roundtrip_all_events_in_single_batch() {
     let parsed = decode_events(&[log1, log2, log3, log4, log5]);
     assert_eq!(parsed.len(), 5);
 
-    assert!(matches!(&parsed[0], ParsedEvent::Treb(b) if matches!(b.as_ref(), TrebEvent::ContractDeployed(_))));
-    assert!(matches!(&parsed[1], ParsedEvent::Treb(b) if matches!(b.as_ref(), TrebEvent::TransactionSimulated(_))));
-    assert!(matches!(&parsed[2], ParsedEvent::Treb(b) if matches!(b.as_ref(), TrebEvent::DeploymentCollision(_))));
+    assert!(
+        matches!(&parsed[0], ParsedEvent::Treb(b) if matches!(b.as_ref(), TrebEvent::ContractDeployed(_)))
+    );
+    assert!(
+        matches!(&parsed[1], ParsedEvent::Treb(b) if matches!(b.as_ref(), TrebEvent::TransactionSimulated(_)))
+    );
+    assert!(
+        matches!(&parsed[2], ParsedEvent::Treb(b) if matches!(b.as_ref(), TrebEvent::DeploymentCollision(_)))
+    );
     assert!(matches!(&parsed[3], ParsedEvent::CreateX(CreateXEvent::ContractCreationWithSalt(_))));
     assert!(matches!(&parsed[4], ParsedEvent::Proxy(ProxyEvent::Upgraded { .. })));
 }
