@@ -113,6 +113,7 @@ fn build_pipeline_result(
         gas_used: 0,
         event_count: 0,
         console_logs: Vec::new(),
+        governor_proposals: Vec::new(),
     }
 }
 

@@ -21,6 +21,10 @@ pub enum TrebError {
     #[error("safe error: {0}")]
     Safe(String),
 
+    /// Governor/governance proposal errors.
+    #[error("governor error: {0}")]
+    Governor(String),
+
     /// Fork-mode errors.
     #[error("fork error: {0}")]
     Fork(String),
@@ -45,5 +49,11 @@ mod tests {
     fn fork_error_displays_correctly() {
         let err = TrebError::Fork("network already forked".into());
         assert_eq!(err.to_string(), "fork error: network already forked");
+    }
+
+    #[test]
+    fn governor_error_displays_correctly() {
+        let err = TrebError::Governor("proposal not found".into());
+        assert_eq!(err.to_string(), "governor error: proposal not found");
     }
 }
