@@ -40,7 +40,14 @@ The binary is `target/release/treb-cli` (renamed to `treb` in release packaging)
 treb init
 ```
 
-This creates the `.treb/` directory with local configuration. The deployment registry (`deployments.json`) is created lazily on first deployment.
+Example output:
+
+```text
+Initialized treb project at <PROJECT_ROOT>/.treb
+Run `treb config show` to view your configuration.
+```
+
+This creates the `.treb/` directory for local state such as `config.local.json` and `registry.json`.
 
 **2. Write a deploy script** (e.g., `script/Deploy.s.sol`):
 
@@ -66,10 +73,32 @@ contract Deploy is Script {
 treb run script/Deploy.s.sol --network sepolia --dry-run
 ```
 
+Example output:
+
+```text
+No files changed, compilation skipped
+🚧 [DRY RUN] No changes were written to the registry.
+...
+🔨 Compiling and executing script/Deploy.s.sol...
+🧪 Simulating...
+✅ Execution complete.
+```
+
 **4. Broadcast** (submit transactions and record deployments):
 
 ```sh
 treb run script/Deploy.s.sol --network sepolia --broadcast
+```
+
+Example output:
+
+```text
+No files changed, compilation skipped
+...
+1 deployment recorded, 1 transaction, 160,053 gas used
+🔨 Compiling and executing script/Deploy.s.sol...
+📡 Broadcasting...
+✅ Execution complete.
 ```
 
 ## Command Reference
@@ -111,7 +140,7 @@ treb run script/Deploy.s.sol --network sepolia --broadcast
 
 | Subcommand | Description |
 |---|---|
-| `fork enter` | Snapshot registry and enter fork mode (`--network`, `--json`) |
+| `fork enter` | Snapshot registry and enter fork mode (`--network`) |
 | `fork exit` | Restore registry and exit fork mode (`--network`, `--json`) |
 | `fork revert` | Restore fork to last snapshot (`--network`, `--all`, `--json`) |
 | `fork restart` | Reset Anvil node to fresh fork (`--network`, `--json`) |
@@ -124,14 +153,14 @@ treb run script/Deploy.s.sol --network sepolia --broadcast
 | Subcommand | Description |
 |---|---|
 | `dev anvil start` | Start a local Anvil node (`--network`, `--port`) |
-| `dev anvil stop` | Stop an Anvil instance (`--network`, `--name`) |
+| `dev anvil stop` | Remove stale tracked Anvil entries whose port is unreachable (`--network`, `--name`) |
 | `dev anvil restart` | Restart an Anvil instance (`--network`, `--port`) |
 | `dev anvil status` | Show Anvil node status (`--json`) |
 | `dev anvil logs` | Display Anvil log output (`--follow`) |
 
 ## Configuration
 
-treb uses `.treb/treb.toml` (v2 format) for project configuration:
+treb uses root-level `treb.toml` (v2 format) for project configuration. The `.treb/` directory stores local state such as `config.local.json`, `registry.json`, fork snapshots, and Anvil metadata.
 
 ```toml
 [accounts.deployer]
