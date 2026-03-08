@@ -6,27 +6,77 @@
 
 mod e2e;
 
+use std::{
+    net::TcpListener,
+    path::Path,
+    process::{Child, Stdio},
+    time::Duration,
+};
+
 use e2e::{
     assert_deployment_count, get_deployment_id, read_registry_file, run_deployment, run_json,
     setup_project, spawn_anvil_or_skip, treb,
 };
+
+struct BackgroundProcess {
+    child: Child,
+}
+
+impl Drop for BackgroundProcess {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+async fn spawn_tracked_anvil(project_root: &Path, network: &str) -> (BackgroundProcess, String) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("failed to reserve an Anvil port");
+    let port = listener.local_addr().expect("reserved listener must have a local addr").port();
+    drop(listener);
+
+    #[allow(deprecated)]
+    let treb_bin = assert_cmd::cargo::cargo_bin("treb-cli");
+
+    let child = std::process::Command::new(&treb_bin)
+        .args(["dev", "anvil", "start", "--network", network, "--port", &port.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .current_dir(project_root)
+        .spawn()
+        .expect("failed to spawn `treb dev anvil start`");
+    let process = BackgroundProcess { child };
+
+    let addr = format!("127.0.0.1:{port}");
+    let ready_deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        if tokio::net::TcpStream::connect(&addr).await.is_ok() {
+            break;
+        }
+        if tokio::time::Instant::now() >= ready_deadline {
+            panic!("tracked Anvil did not become reachable on {addr} within 60 seconds");
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    (process, format!("http://127.0.0.1:{port}"))
+}
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 /// Full fork lifecycle: enter → deploy → diff → revert → exit.
 ///
 /// 11 verification steps covering registry state checks at each transition:
-///  1. init + deploy → 1 deployment baseline
-///  2. fork enter → snapshot registry (1 deployment, no tags)
+///  1. init → empty deployment baseline
+///  2. fork enter → snapshot registry (0 deployments)
 ///  3. verify fork.json has active fork entry with correct chain ID
-///  4. tag the deployment → modify registry during fork mode
-///  5. verify deployment has tag via show --json
-///  6. fork diff --json → shows "modified" deployment entry
-///  7. fork revert → restores from snapshot (tag removed)
-///  8. verify deployment tag is gone (restored)
+///  4. deploy during fork mode → create fork-only deployment
+///  5. verify list --json shows the new deployment
+///  6. fork diff --json → shows "added" deployment entry
+///  7. fork revert → restores from snapshot (deployment removed)
+///  8. verify deployment count returns to 0
 ///  9. verify fork.json still active + history has "enter" and "revert"
 /// 10. fork exit → restores registry, removes fork entry, cleans snapshot
-/// 11. verify no active forks, history has "exit", snapshot dir gone
+/// 11. verify no active forks, history has "exit", snapshot dir gone, count stays 0
 #[tokio::test(flavor = "multi_thread")]
 async fn e2e_fork_enter_deploy_diff_revert_exit() {
     let Some(anvil) = spawn_anvil_or_skip().await else {
@@ -34,12 +84,11 @@ async fn e2e_fork_enter_deploy_diff_revert_exit() {
     };
     let rpc_url = anvil.rpc_url().to_string();
 
-    // Step 1: init + deploy → 1 deployment baseline
+    // Step 1: init → empty deployment baseline
     let tmp = setup_project().await;
-    run_deployment(tmp.path().to_path_buf(), rpc_url.clone()).await;
-    let dep_id = get_deployment_id(tmp.path().to_path_buf()).await;
+    assert_deployment_count(tmp.path().to_path_buf(), 0).await;
 
-    // Step 2: fork enter (snapshots registry with 1 deployment)
+    // Step 2: fork enter (snapshots registry with 0 deployments)
     let tmp_path = tmp.path().to_path_buf();
     let rpc = rpc_url.clone();
     tokio::task::spawn_blocking(move || {
@@ -60,40 +109,32 @@ async fn e2e_fork_enter_deploy_diff_revert_exit() {
     assert_eq!(fork_entry["network"].as_str(), Some("anvil-31337"));
     assert_eq!(fork_entry["chainId"].as_u64(), Some(31337));
 
-    // Step 4: tag the deployment during fork mode (modifies deployments.json)
-    let tmp_path = tmp.path().to_path_buf();
-    let id = dep_id.clone();
-    tokio::task::spawn_blocking(move || {
-        treb()
-            .args(["tag", &id, "--add", "fork-tag"])
-            .current_dir(&tmp_path)
-            .assert()
-            .success();
-    })
-    .await
-    .unwrap();
+    // Step 4: deploy during fork mode (adds a fork-only deployment)
+    run_deployment(tmp.path().to_path_buf(), rpc_url.clone()).await;
 
-    // Step 5: verify deployment has tag
-    let show_json = run_json(tmp.path().to_path_buf(), vec!["show".into(), dep_id.clone()]).await;
-    let tags = show_json["tags"].as_array().expect("tags must be array after tagging");
-    assert!(tags.iter().any(|t| t.as_str() == Some("fork-tag")), "deployment must have fork-tag");
+    // Step 5: verify list --json shows the new deployment
+    let deployments = assert_deployment_count(tmp.path().to_path_buf(), 1).await;
+    let dep_id = deployments[0]["id"].as_str().expect("deployment must have an id").to_string();
 
-    // Step 6: fork diff → shows modified deployment
+    // Step 6: fork diff → shows added deployment
     let diff = run_json(
         tmp.path().to_path_buf(),
         vec!["fork".into(), "diff".into(), "--network".into(), "anvil-31337".into()],
     )
     .await;
     assert_eq!(diff["network"].as_str(), Some("anvil-31337"));
-    assert_eq!(diff["clean"].as_bool(), Some(false), "diff must not be clean after modification");
+    assert_eq!(diff["clean"].as_bool(), Some(false), "diff must not be clean after deployment");
     let changes = diff["changes"].as_array().expect("changes must be an array");
     assert!(
-        changes.iter().any(|c| c["change"].as_str() == Some("modified")
-            && c["file"].as_str() == Some("deployments")),
-        "diff must show modified deployment"
+        changes.iter().any(|c| {
+            c["change"].as_str() == Some("added")
+                && c["file"].as_str() == Some("deployments")
+                && c["key"].as_str() == Some(dep_id.as_str())
+        }),
+        "diff must show the fork-only deployment as added"
     );
 
-    // Step 7: fork revert → restores from snapshot (tag removed)
+    // Step 7: fork revert → restores from snapshot (deployment removed)
     let tmp_path = tmp.path().to_path_buf();
     tokio::task::spawn_blocking(move || {
         treb()
@@ -105,13 +146,8 @@ async fn e2e_fork_enter_deploy_diff_revert_exit() {
     .await
     .unwrap();
 
-    // Step 8: verify tag is gone (restored from snapshot)
-    let show_json = run_json(tmp.path().to_path_buf(), vec!["show".into(), dep_id.clone()]).await;
-    let tags = &show_json["tags"];
-    assert!(
-        tags.is_null() || tags.as_array().map_or(true, |a| a.is_empty()),
-        "tags must be absent or empty after revert, got: {tags}"
-    );
+    // Step 8: verify deployment count returns to the pre-fork baseline
+    assert_deployment_count(tmp.path().to_path_buf(), 0).await;
 
     // Step 9: verify fork.json still has active fork (revert ≠ exit)
     let fork_state = read_registry_file(tmp.path(), "fork.json");
@@ -150,7 +186,7 @@ async fn e2e_fork_enter_deploy_diff_revert_exit() {
     );
     let snapshot_dir = tmp.path().join(".treb").join("snapshots").join("anvil-31337");
     assert!(!snapshot_dir.exists(), "snapshot directory must be removed after exit");
-    assert_deployment_count(tmp.path().to_path_buf(), 1).await;
+    assert_deployment_count(tmp.path().to_path_buf(), 0).await;
 
     drop(anvil);
 }
@@ -234,7 +270,7 @@ async fn e2e_fork_enter_deploy_exit_restores_state() {
     drop(anvil);
 }
 
-/// Fork status --json reports correct network and chain ID fields.
+/// Fork status --json reports the concrete network, chain ID, and rpcUrl values.
 #[tokio::test(flavor = "multi_thread")]
 async fn e2e_fork_status_shows_active_fork() {
     let Some(anvil) = spawn_anvil_or_skip().await else {
@@ -257,20 +293,36 @@ async fn e2e_fork_status_shows_active_fork() {
     .await
     .unwrap();
 
+    let (tracked_anvil, expected_rpc_url) = spawn_tracked_anvil(tmp.path(), "anvil-31337").await;
+
     // Fork status --json
-    let status = run_json(tmp.path().to_path_buf(), vec!["fork".into(), "status".into()]).await;
+    let ready_deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        let status = run_json(tmp.path().to_path_buf(), vec!["fork".into(), "status".into()]).await;
+        let statuses = status.as_array().expect("fork status --json must be array");
+        if statuses.len() == 1 && statuses[0]["rpcUrl"].as_str() == Some(expected_rpc_url.as_str())
+        {
+            break status;
+        }
+        if tokio::time::Instant::now() >= ready_deadline {
+            panic!("fork status never reported rpcUrl {expected_rpc_url}");
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    };
     let statuses = status.as_array().expect("fork status --json must be array");
     assert_eq!(statuses.len(), 1, "exactly 1 active fork");
 
     let s = &statuses[0];
     assert_eq!(s["network"].as_str(), Some("anvil-31337"), "network must match");
     assert_eq!(s["chainId"].as_u64(), Some(31337), "chainId must be 31337");
-    assert!(s.get("rpcUrl").is_some(), "rpcUrl field must be present");
+    assert_eq!(s["rpcUrl"].as_str(), Some(expected_rpc_url.as_str()), "rpcUrl must match");
     assert_eq!(
         s["status"].as_str(),
-        Some("stopped"),
-        "status is stopped (no tracked Anvil running)"
+        Some("running"),
+        "status is running once the tracked Anvil is started"
     );
+
+    drop(tracked_anvil);
 
     // Clean up: exit fork mode
     let tmp_path = tmp.path().to_path_buf();

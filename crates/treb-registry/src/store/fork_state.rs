@@ -63,13 +63,13 @@ pub fn restore_registry(snapshot_dir: &Path, registry_dir: &Path) -> Result<(), 
             snapshot_dir.display()
         )));
     }
-    for entry in fs::read_dir(snapshot_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("json") {
-            if let Some(name) = path.file_name() {
-                fs::copy(&path, registry_dir.join(name))?;
-            }
+    for &file in SNAPSHOT_FILES {
+        let snapshot_file = snapshot_dir.join(file);
+        let registry_file = registry_dir.join(file);
+        if snapshot_file.exists() {
+            fs::copy(&snapshot_file, &registry_file)?;
+        } else if registry_file.exists() {
+            fs::remove_file(&registry_file)?;
         }
     }
     Ok(())
@@ -345,6 +345,26 @@ mod tests {
 
         let content = fs::read_to_string(reg_dir.path().join(DEPLOYMENTS_FILE)).unwrap();
         assert_eq!(content, r#"{"old": true}"#);
+    }
+
+    #[test]
+    fn restore_removes_files_missing_from_snapshot() {
+        let reg_dir = TempDir::new().unwrap();
+        let snap_dir = TempDir::new().unwrap();
+
+        fs::write(reg_dir.path().join(DEPLOYMENTS_FILE), r#"{"fork_only": true}"#).unwrap();
+        fs::write(snap_dir.path().join(TRANSACTIONS_FILE), "{}").unwrap();
+
+        restore_registry(snap_dir.path(), reg_dir.path()).unwrap();
+
+        assert!(
+            !reg_dir.path().join(DEPLOYMENTS_FILE).exists(),
+            "restore should remove registry files that were absent from the snapshot"
+        );
+        assert!(
+            reg_dir.path().join(TRANSACTIONS_FILE).exists(),
+            "restore should still copy files that do exist in the snapshot"
+        );
     }
 
     #[test]
