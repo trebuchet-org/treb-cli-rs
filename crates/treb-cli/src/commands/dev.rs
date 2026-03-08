@@ -52,7 +52,7 @@ pub enum AnvilSubcommand {
         #[arg(long)]
         name: Option<String>,
     },
-    /// Restart an Anvil node (not yet implemented)
+    /// Restart an Anvil node — stops the existing instance and starts a fresh one
     Restart {
         /// Network name to restart
         #[arg(long)]
@@ -60,6 +60,12 @@ pub enum AnvilSubcommand {
         /// Instance name to restart
         #[arg(long)]
         name: Option<String>,
+        /// Port to listen on (overrides existing config)
+        #[arg(long)]
+        port: Option<u16>,
+        /// Block number to fork from (overrides existing config)
+        #[arg(long)]
+        fork_block_number: Option<u64>,
     },
     /// Show Anvil node status
     Status {
@@ -90,9 +96,8 @@ pub async fn run(subcommand: DevSubcommand) -> anyhow::Result<()> {
                 run_anvil_start(network, port, fork_block_number, name).await
             }
             AnvilSubcommand::Stop { network, name } => run_anvil_stop(network, name).await,
-            AnvilSubcommand::Restart { .. } => {
-                println!("dev anvil restart: not yet implemented");
-                Ok(())
+            AnvilSubcommand::Restart { network, name, port, fork_block_number } => {
+                run_anvil_restart(network, name, port, fork_block_number).await
             }
             AnvilSubcommand::Status { json, name } => run_anvil_status(json, name).await,
             AnvilSubcommand::Logs { .. } => {
@@ -325,6 +330,93 @@ pub async fn run_anvil_stop(network: Option<String>, name: Option<String>) -> an
     Ok(())
 }
 
+// ── run_anvil_restart ─────────────────────────────────────────────────────
+
+/// Restart an Anvil node.
+///
+/// Reads the existing fork entry config for the given network/instance,
+/// stops the old instance if it is still reachable (via PID file), then
+/// starts a fresh Anvil instance with the same configuration. The `--port`
+/// and `--fork-block-number` flags can override the existing values.
+pub async fn run_anvil_restart(
+    network: Option<String>,
+    name: Option<String>,
+    port_override: Option<u16>,
+    fork_block_number_override: Option<u64>,
+) -> anyhow::Result<()> {
+    let cwd = env::current_dir().context("failed to determine current directory")?;
+    let treb_dir = cwd.join(TREB_DIR);
+    let instance_name = resolve_instance_name(name.as_deref(), network.as_deref());
+
+    // Load fork state and find the existing entry.
+    let mut store = ForkStateStore::new(&treb_dir);
+    store.load().context("failed to load fork state")?;
+
+    let entry = store
+        .list_active_forks()
+        .into_iter()
+        .filter(|e| is_tracked_anvil_instance(e))
+        .filter(|e| network.as_deref().is_none_or(|net| e.network == net))
+        .find(|e| e.resolved_instance_name() == instance_name)
+        .cloned()
+        .ok_or_else(|| {
+            if let Some(ref net) = network {
+                anyhow::anyhow!(
+                    "no existing Anvil instance found for network '{}' (instance '{}'); \
+                     start one first with `treb dev anvil start --network {}`",
+                    net,
+                    instance_name,
+                    net
+                )
+            } else {
+                anyhow::anyhow!(
+                    "no existing Anvil instance found for instance '{}'; \
+                     start one first with `treb dev anvil start`",
+                    instance_name
+                )
+            }
+        })?;
+
+    let entry_network = entry.network.clone();
+    let entry_port = entry.port;
+    let entry_pid_file = entry.pid_file.clone();
+
+    // Use existing port unless overridden.
+    let restart_port = port_override.or(if entry_port != 0 { Some(entry_port) } else { None });
+
+    // Try to stop the old instance if it's still running.
+    if entry_port != 0 && is_port_reachable(entry_port).await {
+        println!("Stopping existing instance on port {}...", entry_port);
+        try_kill_pid_file(&entry_pid_file);
+
+        // Wait for port to become available.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        while is_port_reachable(entry_port).await {
+            if tokio::time::Instant::now() >= deadline {
+                bail!(
+                    "old instance on port {} did not stop within 5 seconds; stop it manually first",
+                    entry_port
+                );
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        println!("Old instance stopped.");
+    }
+
+    // Record restart history.
+    store
+        .add_history(ForkHistoryEntry {
+            action: "anvil-restart".into(),
+            network: entry_network.clone(),
+            timestamp: Utc::now(),
+            details: Some(format!("Restarting Anvil instance '{}'", instance_name)),
+        })
+        .ok();
+
+    // Start the new instance (blocks until SIGINT/SIGTERM).
+    run_anvil_start(Some(entry_network), restart_port, fork_block_number_override, name).await
+}
+
 // ── run_anvil_status ──────────────────────────────────────────────────────────
 
 /// Display a table of active Anvil fork instances with live reachability status.
@@ -475,6 +567,21 @@ pub(crate) fn pid_file_path(treb_dir: &Path, instance_name: &str) -> PathBuf {
 /// Return the log file path for the given instance name.
 pub(crate) fn log_file_path(treb_dir: &Path, instance_name: &str) -> PathBuf {
     treb_dir.join(format!("anvil-{instance_name}.log"))
+}
+
+/// Attempt to stop a process by reading its PID from a file and sending SIGTERM.
+fn try_kill_pid_file(pid_file: &str) {
+    if pid_file.is_empty() {
+        return;
+    }
+    if let Ok(content) = fs::read_to_string(pid_file) {
+        if let Ok(pid) = content.trim().parse::<u32>() {
+            #[cfg(unix)]
+            {
+                let _ = std::process::Command::new("kill").arg(pid.to_string()).output();
+            }
+        }
+    }
 }
 
 /// Check whether a port on 127.0.0.1 is currently accepting TCP connections.
@@ -701,6 +808,138 @@ mod tests {
             }
             _ => panic!("expected Dev::Anvil::Stop"),
         }
+    }
+
+    // ── restart clap parsing tests ──────────────────────────────────────
+
+    #[test]
+    fn parse_dev_anvil_restart_network_only() {
+        let sub = parse_dev(&["anvil", "restart", "--network", "mainnet"]).unwrap();
+        match sub {
+            DevSubcommand::Anvil {
+                subcommand:
+                    AnvilSubcommand::Restart { network, name, port, fork_block_number },
+            } => {
+                assert_eq!(network.as_deref(), Some("mainnet"));
+                assert!(name.is_none());
+                assert!(port.is_none());
+                assert!(fork_block_number.is_none());
+            }
+            _ => panic!("expected Dev::Anvil::Restart"),
+        }
+    }
+
+    #[test]
+    fn parse_dev_anvil_restart_with_overrides() {
+        let sub = parse_dev(&[
+            "anvil",
+            "restart",
+            "--network",
+            "mainnet",
+            "--port",
+            "9001",
+            "--fork-block-number",
+            "20000000",
+        ])
+        .unwrap();
+        match sub {
+            DevSubcommand::Anvil {
+                subcommand:
+                    AnvilSubcommand::Restart { network, port, fork_block_number, .. },
+            } => {
+                assert_eq!(network.as_deref(), Some("mainnet"));
+                assert_eq!(port, Some(9001));
+                assert_eq!(fork_block_number, Some(20_000_000));
+            }
+            _ => panic!("expected Dev::Anvil::Restart"),
+        }
+    }
+
+    #[test]
+    fn parse_dev_anvil_restart_with_name() {
+        let sub = parse_dev(&["anvil", "restart", "--network", "mainnet", "--name", "alpha"]).unwrap();
+        match sub {
+            DevSubcommand::Anvil {
+                subcommand: AnvilSubcommand::Restart { network, name, .. },
+            } => {
+                assert_eq!(network.as_deref(), Some("mainnet"));
+                assert_eq!(name.as_deref(), Some("alpha"));
+            }
+            _ => panic!("expected Dev::Anvil::Restart"),
+        }
+    }
+
+    // ── restart error when no entry found ─────────────────────────────────
+
+    #[tokio::test]
+    async fn restart_errors_when_no_entry_found() {
+        let (_root, treb_dir) = make_treb_dir();
+
+        // Create an empty fork state file.
+        let mut store = ForkStateStore::new(&treb_dir);
+        store.insert_active_fork(sample_fork_entry(&treb_dir, "sepolia")).unwrap();
+        // Entry for "sepolia" exists but is not tracked (port=0, empty pid/log).
+
+        // Override cwd: we test the logic directly by calling the search code.
+        let instance_name = resolve_instance_name(None, Some("mainnet"));
+        store.load().unwrap();
+        let result = store
+            .list_active_forks()
+            .into_iter()
+            .filter(|e| is_tracked_anvil_instance(e))
+            .filter(|e| e.network == "mainnet")
+            .find(|e| e.resolved_instance_name() == instance_name)
+            .cloned();
+
+        assert!(result.is_none(), "should not find an untracked entry for mainnet");
+    }
+
+    #[tokio::test]
+    async fn restart_finds_tracked_entry() {
+        let (_root, treb_dir) = make_treb_dir();
+
+        let mut entry = sample_fork_entry(&treb_dir, "mainnet");
+        entry.rpc_url = "http://127.0.0.1:8545".into();
+        entry.port = 8545;
+        entry.pid_file = pid_file_path(&treb_dir, "mainnet").to_string_lossy().into_owned();
+        entry.log_file = log_file_path(&treb_dir, "mainnet").to_string_lossy().into_owned();
+
+        let mut store = ForkStateStore::new(&treb_dir);
+        store.insert_active_fork(entry).unwrap();
+
+        let instance_name = resolve_instance_name(None, Some("mainnet"));
+        store.load().unwrap();
+        let result = store
+            .list_active_forks()
+            .into_iter()
+            .filter(|e| is_tracked_anvil_instance(e))
+            .filter(|e| e.network == "mainnet")
+            .find(|e| e.resolved_instance_name() == instance_name)
+            .cloned();
+
+        assert!(result.is_some(), "should find tracked entry for mainnet");
+        let found = result.unwrap();
+        assert_eq!(found.port, 8545);
+    }
+
+    #[test]
+    fn restart_port_override_logic() {
+        // No override, entry has port → reuse entry port
+        let port_override: Option<u16> = None;
+        let entry_port: u16 = 9000;
+        let restart_port = port_override.or(if entry_port != 0 { Some(entry_port) } else { None });
+        assert_eq!(restart_port, Some(9000));
+
+        // Override provided → use override
+        let port_override: Option<u16> = Some(9001);
+        let restart_port = port_override.or(if entry_port != 0 { Some(entry_port) } else { None });
+        assert_eq!(restart_port, Some(9001));
+
+        // No override, entry has port 0 → None (use default)
+        let port_override: Option<u16> = None;
+        let entry_port: u16 = 0;
+        let restart_port = port_override.or(if entry_port != 0 { Some(entry_port) } else { None });
+        assert_eq!(restart_port, None);
     }
 
     // ── resolve_instance_name tests ──────────────────────────────────────
