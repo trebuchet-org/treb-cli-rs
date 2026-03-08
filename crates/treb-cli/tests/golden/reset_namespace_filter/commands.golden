@@ -1,7 +1,7 @@
 === cmd 0: [reset --yes --namespace staging] ===
-⚠️ Warning: About to remove 1 deployment(s), 2 transaction(s), 2 safe transaction(s), 2 governor proposal(s). A backup will be created first.
+⚠️ Warning: About to remove 1 deployment(s), 1 transaction(s), 1 safe transaction(s), 1 governor proposal(s). A backup will be created first.
 Reset complete.
-Removed 1 deployment(s), 2 transaction(s), 2 safe transaction(s), 2 governor proposal(s).
+Removed 1 deployment(s), 1 transaction(s), 1 safe transaction(s), 1 governor proposal(s).
 Backup created at: <PROJECT_ROOT>/.treb/backups/reset-<UNIX_TIME>
 🔍 Scanning registry...
 💾 Creating backup...

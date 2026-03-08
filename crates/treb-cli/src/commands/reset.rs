@@ -4,6 +4,7 @@
 //! creating a timestamped backup before any mutation.
 
 use std::{
+    collections::HashSet,
     env,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -82,25 +83,74 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
         })
         .map(|d| d.id.clone())
         .collect();
+    let deployments_to_remove_set: HashSet<&str> =
+        deployments_to_remove.iter().map(String::as_str).collect();
 
     let transactions_to_remove: Vec<String> = registry
         .list_transactions()
         .iter()
-        .filter(|t| chain_id_filter.is_none_or(|id| t.chain_id == id))
+        .filter(|t| {
+            let chain_ok = chain_id_filter.is_none_or(|id| t.chain_id == id);
+            if !chain_ok {
+                return false;
+            }
+
+            match args.namespace.as_deref() {
+                Some(_) => {
+                    !t.deployments.is_empty()
+                        && t.deployments
+                            .iter()
+                            .all(|dep_id| deployments_to_remove_set.contains(dep_id.as_str()))
+                }
+                None => true,
+            }
+        })
         .map(|t| t.id.clone())
         .collect();
+    let transactions_to_remove_set: HashSet<&str> =
+        transactions_to_remove.iter().map(String::as_str).collect();
 
     let safe_txs_to_remove: Vec<String> = registry
         .list_safe_transactions()
         .iter()
-        .filter(|t| chain_id_filter.is_none_or(|id| t.chain_id == id))
+        .filter(|t| {
+            let chain_ok = chain_id_filter.is_none_or(|id| t.chain_id == id);
+            if !chain_ok {
+                return false;
+            }
+
+            match args.namespace.as_deref() {
+                Some(_) => {
+                    !t.transaction_ids.is_empty()
+                        && t.transaction_ids
+                            .iter()
+                            .all(|tx_id| transactions_to_remove_set.contains(tx_id.as_str()))
+                }
+                None => true,
+            }
+        })
         .map(|t| t.safe_tx_hash.clone())
         .collect();
 
     let governor_proposals_to_remove: Vec<String> = registry
         .list_governor_proposals()
         .iter()
-        .filter(|p| chain_id_filter.is_none_or(|id| p.chain_id == id))
+        .filter(|p| {
+            let chain_ok = chain_id_filter.is_none_or(|id| p.chain_id == id);
+            if !chain_ok {
+                return false;
+            }
+
+            match args.namespace.as_deref() {
+                Some(_) => {
+                    !p.transaction_ids.is_empty()
+                        && p.transaction_ids
+                            .iter()
+                            .all(|tx_id| transactions_to_remove_set.contains(tx_id.as_str()))
+                }
+                None => true,
+            }
+        })
         .map(|p| p.proposal_id.clone())
         .collect();
 

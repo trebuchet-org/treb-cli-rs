@@ -46,10 +46,7 @@ async fn deploy_contract_on_anvil(rpc_url: &str) -> (String, String) {
     let tx_hash = resp["result"]
         .as_str()
         .unwrap_or_else(|| {
-            panic!(
-                "eth_sendTransaction failed: {}",
-                serde_json::to_string_pretty(&resp).unwrap()
-            )
+            panic!("eth_sendTransaction failed: {}", serde_json::to_string_pretty(&resp).unwrap())
         })
         .to_string();
 
@@ -104,8 +101,14 @@ async fn anvil_set_code(rpc_url: &str, address: &str, code: &str) {
     assert!(resp.get("error").is_none(), "anvil_setCode failed: {resp}");
 }
 
-/// Register a deployment from a transaction hash.
-async fn register_deployment(tmp_path: std::path::PathBuf, tx_hash: String, rpc_url: String) {
+/// Register a deployment from a transaction hash in the requested namespace.
+async fn register_deployment(
+    tmp_path: std::path::PathBuf,
+    tx_hash: String,
+    rpc_url: String,
+    namespace: &str,
+) {
+    let namespace = namespace.to_string();
     tokio::task::spawn_blocking(move || {
         treb()
             .args([
@@ -114,6 +117,8 @@ async fn register_deployment(tmp_path: std::path::PathBuf, tx_hash: String, rpc_
                 &tx_hash,
                 "--rpc-url",
                 &rpc_url,
+                "--namespace",
+                &namespace,
                 "--skip-verify",
             ])
             .current_dir(&tmp_path)
@@ -139,7 +144,7 @@ async fn e2e_prune_onchain_clean_registry() {
     // Step 1: Deploy directly on Anvil and register so the contract is both
     //         in the registry AND on-chain with valid bytecode.
     let (tx_hash, _) = deploy_contract_on_anvil(&rpc_url).await;
-    register_deployment(tmp.path().to_path_buf(), tx_hash, rpc_url.clone()).await;
+    register_deployment(tmp.path().to_path_buf(), tx_hash, rpc_url.clone(), "default").await;
     assert_deployment_count(tmp.path().to_path_buf(), 1).await;
 
     // Step 2: Prune with --check-onchain --dry-run → no candidates.
@@ -158,9 +163,8 @@ async fn e2e_prune_onchain_clean_registry() {
     .await;
 
     // When no candidates are found, prune outputs {"candidates": []}.
-    let candidates = result["candidates"]
-        .as_array()
-        .expect("prune --json must have 'candidates' array");
+    let candidates =
+        result["candidates"].as_array().expect("prune --json must have 'candidates' array");
     assert!(
         candidates.is_empty(),
         "expected no prune candidates for clean registry, got: {candidates:?}"
@@ -184,11 +188,9 @@ async fn e2e_prune_detects_selfdestructed() {
 
     // Step 1: Deploy directly on Anvil and register.
     let (tx_hash, contract_address) = deploy_contract_on_anvil(&rpc_url).await;
-    register_deployment(tmp.path().to_path_buf(), tx_hash, rpc_url.clone()).await;
+    register_deployment(tmp.path().to_path_buf(), tx_hash, rpc_url.clone(), "default").await;
     let deployments = assert_deployment_count(tmp.path().to_path_buf(), 1).await;
-    let dep_id = deployments[0]["id"]
-        .as_str()
-        .expect("deployment must have id");
+    let dep_id = deployments[0]["id"].as_str().expect("deployment must have id");
 
     // Step 2: Zero the bytecode at the contract address (simulate selfdestruct).
     anvil_set_code(&rpc_url, &contract_address, "0x").await;
@@ -209,16 +211,12 @@ async fn e2e_prune_detects_selfdestructed() {
     .await;
 
     // Destructive prune outputs {removed: [...], backupPath: "..."}.
-    let removed = result["removed"]
-        .as_array()
-        .expect("prune --yes --json must have 'removed' array");
+    let removed =
+        result["removed"].as_array().expect("prune --yes --json must have 'removed' array");
     assert_eq!(removed.len(), 1, "expected 1 pruned deployment");
     assert_eq!(removed[0]["id"].as_str(), Some(dep_id));
     assert_eq!(removed[0]["kind"].as_str(), Some("DestroyedOnChain"));
-    assert!(
-        result["backupPath"].as_str().is_some(),
-        "must include backupPath"
-    );
+    assert!(result["backupPath"].as_str().is_some(), "must include backupPath");
 
     // Step 4: Verify deployment removed from registry.
     assert_deployment_count(tmp.path().to_path_buf(), 0).await;
@@ -226,8 +224,8 @@ async fn e2e_prune_detects_selfdestructed() {
     drop(anvil);
 }
 
-/// Reset with --namespace filters only deployments in that namespace.
-/// A non-matching namespace should leave deployments intact.
+/// Reset with --namespace removes only matching deployments and linked
+/// transactions, leaving other namespaces intact.
 #[tokio::test(flavor = "multi_thread")]
 async fn e2e_reset_scoped_by_namespace() {
     let Some(anvil) = spawn_anvil_or_skip().await else {
@@ -236,41 +234,44 @@ async fn e2e_reset_scoped_by_namespace() {
     let rpc_url = anvil.rpc_url().to_string();
     let tmp = setup_project().await;
 
-    // Step 1: Deploy in "default" namespace.
-    run_deployment(tmp.path().to_path_buf(), rpc_url.clone()).await;
-    assert_deployment_count(tmp.path().to_path_buf(), 1).await;
+    // Step 1: Seed two deployments in different namespaces.
+    let (default_tx_hash, _) = deploy_contract_on_anvil(&rpc_url).await;
+    register_deployment(tmp.path().to_path_buf(), default_tx_hash, rpc_url.clone(), "default")
+        .await;
+    let (staging_tx_hash, _) = deploy_contract_on_anvil(&rpc_url).await;
+    register_deployment(tmp.path().to_path_buf(), staging_tx_hash, rpc_url.clone(), "staging")
+        .await;
+    assert_deployment_count(tmp.path().to_path_buf(), 2).await;
 
-    // Step 2: Reset with non-matching namespace → deployment survives.
-    // Note: --namespace only scopes deployments; transactions are scoped by
-    // --network only. Without --network, all transactions are removed.
-    let result = run_json(
-        tmp.path().to_path_buf(),
-        vec![
-            "reset".into(),
-            "--namespace".into(),
-            "nonexistent".into(),
-            "--yes".into(),
-        ],
-    )
-    .await;
+    let deployments_before = read_deployments(tmp.path());
+    let transactions_before = read_transactions(tmp.path());
+
+    // Step 2: Reset with a non-matching namespace → no files change.
+    let tmp_path = tmp.path().to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        treb()
+            .args(["reset", "--namespace", "nonexistent", "--yes"])
+            .current_dir(&tmp_path)
+            .assert()
+            .success();
+    })
+    .await
+    .unwrap();
     assert_eq!(
-        result["removedDeployments"].as_u64(),
-        Some(0),
-        "non-matching namespace should remove 0 deployments"
+        read_deployments(tmp.path()),
+        deployments_before,
+        "deployments.json should be unchanged for a non-matching namespace reset"
+    );
+    assert_eq!(
+        read_transactions(tmp.path()),
+        transactions_before,
+        "transactions.json should be unchanged for a non-matching namespace reset"
     );
 
-    // Step 3: Verify deployment is still present.
-    assert_deployment_count(tmp.path().to_path_buf(), 1).await;
-
-    // Step 4: Reset with matching namespace → deployment removed.
+    // Step 3: Reset the default namespace only.
     let result = run_json(
         tmp.path().to_path_buf(),
-        vec![
-            "reset".into(),
-            "--namespace".into(),
-            "default".into(),
-            "--yes".into(),
-        ],
+        vec!["reset".into(), "--namespace".into(), "default".into(), "--yes".into()],
     )
     .await;
     assert_eq!(
@@ -278,13 +279,34 @@ async fn e2e_reset_scoped_by_namespace() {
         Some(1),
         "matching namespace should remove 1 deployment"
     );
-    assert!(
-        result["backupPath"].as_str().is_some(),
-        "must include backupPath"
+    assert_eq!(
+        result["removedTransactions"].as_u64(),
+        Some(1),
+        "matching namespace should remove only the linked transaction"
     );
+    assert!(result["backupPath"].as_str().is_some(), "must include backupPath");
 
-    // Step 5: Verify deployment gone.
-    assert_deployment_count(tmp.path().to_path_buf(), 0).await;
+    // Step 4: Verify the staging deployment and its transaction linkage survive.
+    let deps_after = read_deployments(tmp.path());
+    let txs_after = read_transactions(tmp.path());
+    let deps_after_obj =
+        deps_after.as_object().expect("deployments.json must be an object after namespace reset");
+    let txs_after_obj =
+        txs_after.as_object().expect("transactions.json must be an object after namespace reset");
+    assert_eq!(deps_after_obj.len(), 1, "exactly one deployment should remain");
+    assert_eq!(txs_after_obj.len(), 1, "exactly one transaction should remain");
+
+    let remaining_dep = deps_after_obj.values().next().expect("remaining deployment must exist");
+    assert_eq!(remaining_dep["namespace"].as_str(), Some("staging"));
+    let remaining_dep_id = remaining_dep["id"].as_str().expect("remaining deployment must have id");
+    let remaining_tx_id = remaining_dep["transactionId"]
+        .as_str()
+        .expect("remaining deployment must reference a transaction");
+    let remaining_tx = txs_after_obj
+        .get(remaining_tx_id)
+        .expect("remaining deployment should keep a live transaction reference");
+    assert_eq!(remaining_tx["deployments"].as_array().map(Vec::len), Some(1));
+    assert_eq!(remaining_tx["deployments"][0].as_str(), Some(remaining_dep_id));
 
     drop(anvil);
 }
@@ -307,11 +329,7 @@ async fn e2e_deploy_reset_redeploy() {
     assert_eq!(read_transactions(tmp.path()).as_object().unwrap().len(), 1);
 
     // Step 2: Reset everything.
-    let result = run_json(
-        tmp.path().to_path_buf(),
-        vec!["reset".into(), "--yes".into()],
-    )
-    .await;
+    let result = run_json(tmp.path().to_path_buf(), vec!["reset".into(), "--yes".into()]).await;
     assert_eq!(result["removedDeployments"].as_u64(), Some(1));
     assert_eq!(result["removedTransactions"].as_u64(), Some(1));
     assert!(result["backupPath"].as_str().is_some(), "must include backupPath");
