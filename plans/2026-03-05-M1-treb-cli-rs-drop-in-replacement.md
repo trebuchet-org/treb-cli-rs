@@ -255,6 +255,10 @@ Complete the compose orchestration system for multi-step deployment pipelines de
 - Pre-existing compose golden file failures (JSON key ordering) must be fixed before adding new compose golden tests — use `sort_json_keys()` via `print_json` for all JSON output
 - `type_sort_key()` is duplicated between list.rs and run.rs — compose should extract to shared module if it also needs deployment type sorting
 
+**Notes from Phase 13:**
+- `PipelineResult` now has `governor_proposals: Vec<GovernorProposal>` — compose must aggregate governor proposals across components (same pattern as gas_used/event_count aggregation)
+- Compose summary should include governor proposal count when any component uses a governor sender
+
 ---
 
 ## Phase 8 -- fork Mode Output Parity
@@ -306,6 +310,12 @@ Complete `register` for importing existing deployments via transaction tracing a
 
 **User stories:** 7
 **Dependencies:** Phase 3, Phase 12 (sync depends on Safe API client, but register can proceed independently)
+
+**Notes from Phase 13:**
+- Governor sync is already implemented in sync.rs — Safe sync should follow the same patterns: RPC URL resolution via `resolve_rpc_urls()`, non-fatal warning accumulation, `--clean` flag for stale entry removal
+- `SyncOutputJson` already has governor-specific fields (governorSynced, governorUpdated, etc.) — add Safe-specific fields following the same camelCase pattern
+- `list_governor_proposals()` borrow-then-clone pattern established for iterating registry entries while mutating — follow for Safe transaction iteration
+- `fetch_chain_id` is `pub(crate)` in run.rs and reusable from sync.rs for RPC chain ID resolution
 
 ---
 
@@ -379,6 +389,15 @@ Complete the Safe multisig integration from proposal through execution tracking.
 - `--verbose --json` guards already established (`if verbose && !json`) — follow same pattern for Safe-specific verbose output
 - Debug log pattern (`.treb/debug-<timestamp>.log`) can capture Safe API request/response details
 
+**Notes from Phase 13:**
+- Governor established the pattern for non-EOA sender types: capture `is_governor`/`is_safe` flags BEFORE `deployer_sender` is moved into `PipelineContext`, then use flags for stage message and output routing
+- Governor run output added "Creating governance proposal..." stage message — Safe should follow same pattern with "Proposing to Safe..." or similar
+- `GovernorProposalJson` struct in run.rs with camelCase serde is the pattern for Safe proposal JSON output
+- Run summary includes proposal count with "proposed" / "would be proposed" dry-run language — follow same pattern for Safe proposals
+- Governor sync polling in sync.rs is the template for Safe sync: resolve RPC URLs, iterate non-terminal proposals, poll status, update registry, cascade status to linked transactions
+- `reqwest` is now available in treb-forge via workspace dep — reuse for Safe Transaction Service API client
+- Golden test patterns: `pre_setup_hook` for custom treb.toml sender config, `post_setup_hook` with `Registry::open()` for seeding proposals — reuse for Safe test setup
+
 ---
 
 ## Phase 13 -- Governor and Timelock Sender Support
@@ -403,6 +422,21 @@ Add OpenZeppelin Governor account type support. When the configured sender is an
 - Run command dispatch pattern: sender type determines execution flow — governor routing hooks in same location as Safe routing (after sender resolution in run handler)
 - `PipelineResult` may need governor-specific fields (proposalId, state) — follow same pattern as gas_used/event_count additions to types.rs + orchestrator.rs population
 - Debug log captures full execution context — extend for governor proposal details
+
+**Learnings from implementation:**
+- `TrebError::Governor(String)` variant added to `treb-core/src/error.rs` for governor-specific errors
+- `governor_proposals: Vec<GovernorProposal>` added to `PipelineResult` — orchestrator populates in both live and dry-run paths; live path uses `for proposal in &governor_proposals` (borrow) with `.clone()` to keep ownership for the result
+- When adding PipelineResult fields: update orchestrator (both paths), `build_pipeline_result()` test helper in pipeline_integration.rs, and all downstream consumers (run.rs, compose)
+- `deployer_sender` is moved into `PipelineContext` — capture sender type flags (`is_governor`, `is_safe`) BEFORE the move into PipelineContext
+- Governor on-chain polling lives in `crates/treb-forge/src/governor.rs` — `query_proposal_state()`, `map_onchain_state()`, `is_terminal()` re-exported from `treb_forge`
+- Governor state selector `0x3e4f49e6` + ABI-encoded uint256 proposal_id for `eth_call`; OZ Governor uint8 states (0-7) mapped to ProposalStatus variants; Expired maps to Defeated
+- `list_governor_proposals()` returns `Vec<&GovernorProposal>` (borrowed) — must `.cloned().collect()` before mutating registry in a loop
+- Sync governor RPC URL resolution: probe foundry.toml `[rpc_endpoints]` via `eth_chainId` to build chain_id → URL map; `super::run::fetch_chain_id` is `pub(crate)` and reusable from sync.rs
+- `err_str.contains("call reverted")` detects contracts that revert on `state()` query (for `--clean` removal of stale proposals)
+- Golden test patterns: `pre_setup_hook` to overwrite treb.toml with custom sender config; `post_setup_hook` with `Registry::open()` + `insert_governor_proposal()` to seed proposals before sync
+- Governor sender golden tests need BOTH "anvil" (for script senderId) and "deployer" (for governor detection) in treb.toml senders
+- Review fix commits can introduce golden file regressions (e.g., `comfy_table` column width changes) — always run full `cargo test -p treb-cli` after any golden file updates
+- `reqwest` was already a workspace dep but not declared in treb-forge — just add `reqwest = { workspace = true }` to the crate's Cargo.toml
 
 ---
 
@@ -452,6 +486,29 @@ Systematic audit of all commands to ensure `--json` output schema matches Go exa
 - `--verbose --json` guards use `if verbose && !json` — audit should verify no verbose output leaks into JSON mode for all commands
 - `--dump-command` returns early before pipeline execution — no JSON output produced; verify this matches Go behavior
 
+**Notes from Phase 13:**
+- `RunOutputJson` now includes `governorProposals` array (camelCase) — audit must verify this matches Go schema; `output::print_json` sorts keys alphabetically so `governorProposals` appears between `gas_used` and `skipped`
+- `SyncOutputJson` now includes governor-specific fields (governorSynced, governorUpdated, governorWarnings, governorCleaned) — audit against Go schema
+- Governor golden files added for both run and sync JSON output — use as reference during JSON audit
+
+**Learnings from implementation:**
+- `ui::interactive::is_non_interactive(cli_flag)` is the centralized non-interactive check — checks `--non-interactive` CLI flag, `TREB_NON_INTERACTIVE=true`, `CI=true`, `!stdin.is_terminal()` in that priority order
+- `output::print_json_error(msg)` emits `{"error":"msg"}` to stderr — use for all JSON-mode error output
+- `Commands::json_flag()` method extracts `--json` from ANY subcommand (including nested ForkSubcommand, DevSubcommand, AnvilSubcommand, MigrateSubcommand) — must be updated when adding new subcommands
+- `main()` delegates to `run(cli)` with error handler checking `Commands::json_flag()` to switch between JSON (`print_json_error`) and text (`{err:?}` Debug) error formats
+- Non-JSON errors use `{err:?}` (anyhow Debug) to preserve "Caused by:" chains; JSON errors use `{err:#}` (anyhow alternate Display) for compact single-line chains
+- All JSON output structs MUST have `#[serde(rename_all = "camelCase")]` — but structs with Deserialize for file I/O (ComposeFile, ComposeState) should NOT get it if it would break existing file formats
+- When adding `--json` to a fork subcommand, update 5 places: (1) enum variant, (2) dispatch match arm, (3) run_* function signature, (4) `ForkSubcommand::json_flag()` in main.rs, (5) clap parsing unit tests
+- Guard ALL `print_stage()`, `print_warning_banner()`, `print_kv()`, `eprint_kv()`, `println!()` calls with `if !json` — even stderr output (`print_stage`, `eprint_kv`) should be suppressed in JSON mode for clean output
+- `print_warning_banner()` goes to stdout — must ALWAYS be guarded in JSON mode; `print_stage()` goes to stderr — should still be guarded for clean stderr
+- `--json --broadcast` without `--non-interactive` should be rejected early with `bail!()` — prevents interactive prompts from blocking JSON-mode consumers (see run.rs and compose.rs patterns)
+- `TestWorkdir::new()` always creates `.treb/` dir — use `pre_setup_hook` to remove it for "uninitialized project" error tests
+- In subprocess tests, stdin is always piped (non-TTY), so `is_non_interactive()` returns true regardless of env vars — env var tests validate the codepath but the behavior is the same
+- `IntegrationTest` builder doesn't support env vars — use `ctx.run_with_env()` directly for env var tests
+- Pre-existing golden file mismatches (e.g., table column width differences between environments) should be regenerated as part of any test coverage story to keep CI green
+- `output::print_json()` uses `sort_json_keys()` for alphabetical key ordering — golden files must match this sorted order, not struct field declaration order
+- selector.rs and prompt.rs use dialoguer for interactive UI; run.rs and compose.rs use manual stdin `read_line` — both must respect `is_non_interactive()` but via different mechanisms
+
 ---
 
 ## Phase 16 -- End-to-End Workflow Tests
@@ -465,11 +522,43 @@ Create comprehensive workflow tests that exercise multi-command sequences matchi
 - Workflow: compose -> verify -> list (orchestrated multi-step deployment)
 - Workflow: register -> tag -> show (import and annotate existing deployment)
 - Workflow: run -> prune -> list (deployment lifecycle with cleanup)
+- Workflow: run (Governor sender) -> sync -> show (Governor proposal lifecycle)
 - Cross-command registry consistency assertions
 - All workflows run against in-process anvil nodes
 
 **User stories:** 6
 **Dependencies:** Phases 4-14
+
+**Notes from Phase 13:**
+- Governor golden tests demonstrate the test setup patterns: `pre_setup_hook` for treb.toml sender config, `post_setup_hook` for seeding registry data — reuse for E2E workflow test scaffolding
+- Governor sync tests produce meaningful output without live RPC ("no RPC endpoint found" warnings) — E2E governor workflow may need a live anvil with a deployed governor contract for full lifecycle testing
+- `#[tokio::test(flavor = "multi_thread")]` required for tests using anvil; dry-run tests can use `#[test]`
+
+**Notes from Phase 15:**
+- All 23 commands with `--json` now have golden file tests — E2E workflows can rely on JSON output for cross-command assertions (parse with `serde_json::from_str`)
+- `is_non_interactive()` returns true in subprocess tests (stdin piped) — E2E workflows won't hang on interactive prompts, but use `TREB_NON_INTERACTIVE=true` or `--non-interactive` explicitly for clarity
+- `ctx.run_with_env()` supports setting env vars (e.g., `TREB_NON_INTERACTIVE`, `CI`) in subprocess test contexts
+- `--json --broadcast` without `--non-interactive` is rejected early — E2E broadcast workflows must include `--non-interactive` flag when using `--json`
+- `TestWorkdir::new()` always creates `.treb/` — use `pre_setup_hook` to customize or remove for specific workflow starting conditions
+- JSON error format is `{"error":"msg"}` on stderr with exit code 1 — E2E tests can assert structured error output across command sequences
+
+**Learnings from implementation:**
+- E2E test infrastructure: shared helpers in `tests/e2e/mod.rs` imported via `mod e2e;` — includes `setup_project`, `run_deployment`, `spawn_anvil_or_skip`, `treb()`, `run_json`, `assert_deployment_count`, `read_deployments`, `read_transactions`, `assert_registry_consistent`
+- Anvil spawning: `AnvilConfig::new().port(0).spawn().await` with `spawn_anvil_or_skip()` wrapper that skips tests when anvil is unavailable
+- `treb run --json` stdout contains non-JSON prefix (forge compilation output) — `run_json` helper extracts JSON by finding the first `{` character
+- After `treb init`, deployments.json may not exist until first real deployment — check file existence before reading
+- Fork snapshot/restore only copies existing files — deploy BEFORE `fork enter` to ensure registry files exist in snapshot; `restore_registry` overwrites from snapshot but does NOT delete files not in snapshot
+- Cannot deploy same script twice on same Anvil — causes "transaction already exists" due to deterministic event txId; use tag/reset operations to modify registry during fork instead
+- Direct Anvil deploys via `eth_sendTransaction`: poll `eth_getTransactionReceipt` until result is non-null (may be null briefly after send)
+- `treb register` args: `--tx-hash`, `--rpc-url`, `--skip-verify` (no `--non-interactive` flag needed — no interactive prompts)
+- Contract addresses: compare with `.to_lowercase()` — checksumming may differ between register and receipt
+- Creation bytecode `0x6001600c60003960016000f300` correctly deploys 1-byte STOP runtime; `0x6001600a...` has wrong CODECOPY offset → empty runtime bytecode
+- Deployment IDs are deterministic: `namespace/chainId/contractName:label` — not unique across redeploys of same contract
+- Prune JSON output varies: empty → `{"candidates": []}`, dry-run with candidates → bare array `[...]`, destructive → `{removed: [...], backupPath: "..."}`
+- Reset `--namespace` only scopes deployments; transactions/safe-txs/gov-proposals scoped by `--network` only
+- `assert_registry_consistent(project_root)` validates bidirectional lookup.json ↔ deployments.json cross-references (byName uses lowercase contract name, byAddress uses lowercase address, byTag uses exact tag string)
+- Reset with 0 matching items and `--json` returns Ok(()) with no stdout — `run_json` helper would fail on empty output; ensure queries have > 0 matches when expecting JSON
+- New test helpers show `dead_code` warnings until consumed by later stories — expected and harmless
 
 ---
 
@@ -497,6 +586,30 @@ Set up GitHub Actions for automated multi-platform binary builds and releases. M
 - Foundry version is extracted from workspace Cargo.toml `tag = "vX.Y.Z"` on the `foundry-config` dependency line
 - The alloy/foundry version pinning strategy is documented in a comment block in workspace Cargo.toml — CI should validate `cargo check` passes to catch pin breakage
 
+**Notes from Phase 16:**
+- E2E tests use `#[tokio::test(flavor = "multi_thread")]` + `tokio::task::spawn_blocking` for async tests with CLI subprocess calls — CI runners must support tokio multi-threaded runtime
+- E2E tests spawn live Anvil nodes on OS-assigned ports (`port(0)`) — CI must have foundry/anvil available or tests will be skipped via `spawn_anvil_or_skip()`
+- Tests in `tests/e2e_*.rs` files import shared helpers via `mod e2e;` from `tests/e2e/mod.rs` — all E2E test files must be in the `tests/` root directory
+
+**Learnings from implementation:**
+- CI workflows live in `.github/workflows/` — ci.yml (4 jobs: check, test, clippy, fmt), release-build.yml (matrix build), release.yml (tag-triggered release), foundry-track.yml
+- All checkout steps across ALL workflows need `submodules: recursive` — treb-sol has nested submodules required for build
+- `foundry-rs/foundry-toolchain@v1` must come before `rust-cache` in CI for optimal caching
+- `cargo test --workspace --all-targets` includes integration tests that `--workspace` alone skips
+- Shell completions output path: `target/{target}/release/build/treb-cli-*/out/completions/` — use `find` glob since the hash in the path varies per build
+- clap_complete output files: `treb.bash`, `_treb` (zsh), `treb.fish`, `treb.elv` — standard install locations: bash `~/.local/share/bash-completion/completions/`, zsh `~/.local/share/zsh/site-functions/`, fish `~/.config/fish/completions/`
+- Release archives use Go-compatible naming: `treb-{tag}-{os_arch}.tar.gz` (linux-amd64, linux-arm64, darwin-amd64, darwin-arm64) — archive contents are flat (treb binary + completions/ dir)
+- Binary name is `treb-cli` (Cargo package name), renamed to `treb` only in release packaging stage
+- `gh release create` supports both `--notes` and `--generate-notes` together — custom notes appear first, auto-generated changelog appended
+- `workflow_run` events need explicit `ref:` in checkout to get the correct tag/branch code
+- Build metadata (foundry version, treb-sol commit, Rust version) must be gathered in the release job since it runs in a separate workflow from the build matrix
+- GitHub org is `trebuchet-org` — repo is `trebuchet-org/treb-cli-rs`
+- `trebSolCommit` in build.rs requires `submodules: recursive` checkout since it runs `git -C ../../lib/treb-sol rev-parse`
+- `foundryVersion` is extracted from workspace Cargo.toml `foundry-config` tag field at build time (not runtime forge detection)
+- Cross.toml target sections can be empty — cross uses sensible defaults for common musl targets
+- CI smoke test validates `treb version --json` metadata: asserts version, commit, foundryVersion, trebSolCommit are non-empty and not "unknown"
+- Installation script (`trebup`) supports `--help`, auto-detects shell from `$SHELL` for completions installation, and checks PATH presence with hint to add install dir
+
 ---
 
 ## Phase 18 -- Documentation and Migration Guide
@@ -512,6 +625,26 @@ Write user-facing documentation for the Rust CLI including a migration guide for
 
 **User stories:** 4
 **Dependencies:** Phases 1-17
+
+**Notes from Phase 15:**
+- Non-interactive mode supports 3 detection methods: `--non-interactive` CLI flag, `TREB_NON_INTERACTIVE=true` env var, `CI=true` env var, plus TTY detection — document all methods in CLI reference
+- JSON error format is standardized: `{"error":"msg"}` on stderr, exit code 1 — document for scripting/CI integration guides
+- `--json --broadcast` requires `--non-interactive` — document this constraint for CI/CD pipeline examples
+- All `--json` output uses alphabetically sorted keys (via `sort_json_keys()`) — document for users parsing JSON output programmatically
+
+**Notes from Phase 16:**
+- E2E test patterns established: shared helpers in `tests/e2e/mod.rs`, reusable `assert_registry_consistent()` for bidirectional lookup validation — document in CLAUDE.md testing patterns section
+- Deployment ID format is `namespace/chainId/contractName:label` (deterministic, not unique across redeploys) — document for users managing registry state
+- Registry behavior nuances worth documenting: `treb init` does not create deployments.json (created on first deploy); fork snapshot only copies existing files; reset `--namespace` scopes deployments only (not transactions)
+- `treb run --json` stdout may contain forge compilation output before JSON — document for users parsing JSON output programmatically (search for first `{`)
+
+**Notes from Phase 17:**
+- Installation script (`trebup`) supports `--help`, shell completions auto-installation (bash, zsh, fish from `$SHELL` detection), and PATH presence check — document installation in README quick start
+- Shell completion install locations: bash `~/.local/share/bash-completion/completions/`, zsh `~/.local/share/zsh/site-functions/`, fish `~/.config/fish/completions/` — document for users who want manual completion setup
+- `treb version --json` emits build metadata (version, commit, date, foundryVersion, trebSolCommit, rustVersion) — document for CI integration and version pinning
+- GitHub org is `trebuchet-org` — use correct org in all documentation URLs and installation instructions
+- Binary name is `treb-cli` (Cargo package), renamed to `treb` in release packaging — document the distinction for users building from source vs installing from release
+- CI smoke test validates version JSON metadata fields are non-empty and not "unknown" — reference as testing pattern in CLAUDE.md
 
 ---
 
