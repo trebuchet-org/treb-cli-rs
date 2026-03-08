@@ -4,6 +4,9 @@
 //! the `TERM=dumb` convention. Use [`should_use_color`] to check whether color
 //! output is appropriate, and [`color_enabled`] to query or apply the decision
 //! to the owo-colors subsystem.
+//!
+//! The palette matches the Go CLI `fatih/color` definitions from
+//! `render/deployments.go:19-34` and `render/script.go:17-23`.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -38,8 +41,24 @@ pub const ERROR: Style = Style::new().red().bold();
 pub const MUTED: Style = Style::new().dimmed();
 
 // ---------------------------------------------------------------------------
-// Palette constants – deployment-specific
+// Palette constants – deployment-specific (Go: render/deployments.go:19-34)
 // ---------------------------------------------------------------------------
+
+#[allow(dead_code)]
+/// Namespace header: black text on yellow background (Go: `nsHeader`).
+pub const NS_HEADER: Style = Style::new().black().on_yellow();
+
+#[allow(dead_code)]
+/// Namespace header bold: black bold on yellow background (Go: `nsHeaderBold`).
+pub const NS_HEADER_BOLD: Style = Style::new().black().bold().on_yellow();
+
+#[allow(dead_code)]
+/// Chain header: black text on cyan background (Go: `chainHeader`).
+pub const CHAIN_HEADER: Style = Style::new().black().on_cyan();
+
+#[allow(dead_code)]
+/// Chain header bold: black bold on cyan background (Go: `chainHeaderBold`).
+pub const CHAIN_HEADER_BOLD: Style = Style::new().black().bold().on_cyan();
 
 #[allow(dead_code)]
 /// Color/style for namespace labels.
@@ -50,44 +69,100 @@ pub const NAMESPACE: Style = Style::new().cyan().bold();
 pub const CHAIN: Style = Style::new().magenta().bold();
 
 #[allow(dead_code)]
-/// Color/style for proxy deployment type.
-pub const TYPE_PROXY: Style = Style::new().blue().bold();
+/// Color/style for proxy deployment type (Go: `FgMagenta, Bold`).
+pub const TYPE_PROXY: Style = Style::new().magenta().bold();
 
 #[allow(dead_code)]
-/// Color/style for library deployment type.
-pub const TYPE_LIBRARY: Style = Style::new().yellow();
+/// Color/style for library deployment type (Go: `FgBlue, Bold`).
+pub const TYPE_LIBRARY: Style = Style::new().blue().bold();
 
 #[allow(dead_code)]
-/// Color/style for singleton deployment type.
-pub const TYPE_SINGLETON: Style = Style::new().green();
+/// Color/style for singleton deployment type (Go: `FgGreen, Bold`).
+pub const TYPE_SINGLETON: Style = Style::new().green().bold();
 
 #[allow(dead_code)]
 /// Color/style for unknown deployment type.
 pub const TYPE_UNKNOWN: Style = Style::new().dimmed();
 
 #[allow(dead_code)]
-/// Color/style for address display.
-pub const ADDRESS: Style = Style::new().white().dimmed();
+/// Color/style for address display (Go: `FgWhite`).
+pub const ADDRESS: Style = Style::new().white();
 
 #[allow(dead_code)]
 /// Color/style for deployment labels/names.
 pub const LABEL: Style = Style::new().bold();
 
 #[allow(dead_code)]
-/// Color/style for fork badge indicators.
-pub const FORK_BADGE: Style = Style::new().yellow().bold();
+/// Color/style for timestamp display (Go: `Faint`).
+pub const TIMESTAMP: Style = Style::new().dimmed();
 
 #[allow(dead_code)]
-/// Color/style for verified status.
-pub const VERIFIED: Style = Style::new().green().bold();
+/// Color/style for pending status (Go: `FgYellow`).
+pub const PENDING: Style = Style::new().yellow();
 
 #[allow(dead_code)]
-/// Color/style for failed verification status.
-pub const FAILED: Style = Style::new().red().bold();
+/// Color/style for tags display (Go: `FgCyan`).
+pub const TAGS: Style = Style::new().cyan();
 
 #[allow(dead_code)]
-/// Color/style for unverified status.
+/// Color/style for section headers (Go: `Bold, FgHiWhite`).
+pub const SECTION_HEADER: Style = Style::new().bold().bright_white();
+
+#[allow(dead_code)]
+/// Color/style for implementation prefix (Go: `Faint`).
+pub const IMPL_PREFIX: Style = Style::new().dimmed();
+
+#[allow(dead_code)]
+/// Color/style for fork indicator (Go: `FgYellow`).
+pub const FORK_INDICATOR: Style = Style::new().yellow();
+
+#[allow(dead_code)]
+/// Color/style for fork badge indicators (alias for `FORK_INDICATOR`).
+pub const FORK_BADGE: Style = Style::new().yellow();
+
+#[allow(dead_code)]
+/// Color/style for verified status (Go: `FgGreen`).
+pub const VERIFIED: Style = Style::new().green();
+
+#[allow(dead_code)]
+/// Color/style for not-verified / failed verification status (Go: `FgRed`).
+pub const NOT_VERIFIED: Style = Style::new().red();
+
+#[allow(dead_code)]
+/// Color/style for failed verification status (alias for `NOT_VERIFIED`).
+pub const FAILED: Style = Style::new().red();
+
+#[allow(dead_code)]
+/// Color/style for unverified/missing status.
 pub const UNVERIFIED: Style = Style::new().dimmed();
+
+// ---------------------------------------------------------------------------
+// Palette constants – script renderer (Go: render/script.go:17-23)
+// ---------------------------------------------------------------------------
+
+#[allow(dead_code)]
+/// Bold style for script renderer.
+pub const BOLD: Style = Style::new().bold();
+
+#[allow(dead_code)]
+/// Gray (bright black / FgHiBlack) for script renderer.
+pub const GRAY: Style = Style::new().bright_black();
+
+#[allow(dead_code)]
+/// Cyan foreground for script renderer.
+pub const CYAN: Style = Style::new().cyan();
+
+#[allow(dead_code)]
+/// Yellow foreground for script renderer.
+pub const YELLOW: Style = Style::new().yellow();
+
+#[allow(dead_code)]
+/// Green foreground for script renderer.
+pub const GREEN: Style = Style::new().green();
+
+#[allow(dead_code)]
+/// Red foreground for script renderer.
+pub const RED: Style = Style::new().red();
 
 // ---------------------------------------------------------------------------
 // Deployment type → style mapping
@@ -214,5 +289,45 @@ mod tests {
             format!("{:?}", style_for_deployment_type(DeploymentType::Unknown)),
             format!("{:?}", TYPE_UNKNOWN),
         );
+    }
+
+    #[test]
+    fn proxy_is_magenta_bold() {
+        // Go: color.New(color.FgMagenta, color.Bold)
+        let style = style_for_deployment_type(DeploymentType::Proxy);
+        let expected = Style::new().magenta().bold();
+        assert_eq!(format!("{:?}", style), format!("{:?}", expected));
+    }
+
+    #[test]
+    fn library_is_blue_bold() {
+        // Go: color.New(color.FgBlue, color.Bold)
+        let style = style_for_deployment_type(DeploymentType::Library);
+        let expected = Style::new().blue().bold();
+        assert_eq!(format!("{:?}", style), format!("{:?}", expected));
+    }
+
+    #[test]
+    fn verified_is_green_not_bold() {
+        // Go: verifiedStyle = color.New(color.FgGreen)
+        assert_eq!(format!("{:?}", VERIFIED), format!("{:?}", Style::new().green()));
+    }
+
+    #[test]
+    fn not_verified_is_red_not_bold() {
+        // Go: notVerifiedStyle = color.New(color.FgRed)
+        assert_eq!(format!("{:?}", NOT_VERIFIED), format!("{:?}", Style::new().red()));
+    }
+
+    #[test]
+    fn fork_indicator_is_yellow_not_bold() {
+        // Go: forkIndicatorStyle = color.New(color.FgYellow)
+        assert_eq!(format!("{:?}", FORK_INDICATOR), format!("{:?}", Style::new().yellow()));
+    }
+
+    #[test]
+    fn address_is_white_not_dimmed() {
+        // Go: addressStyle = color.New(color.FgWhite)
+        assert_eq!(format!("{:?}", ADDRESS), format!("{:?}", Style::new().white()));
     }
 }
