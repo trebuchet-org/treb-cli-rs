@@ -86,6 +86,23 @@ fn config_show_uninitialized() {
     run_integration_test(&test, &ctx);
 }
 
+/// JSON error output: config show --json without init produces structured JSON error on stderr.
+#[test]
+fn config_show_json_error() {
+    let ctx = TestContext::new("project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("config_show_json_error")
+        .pre_setup_hook(|ctx| {
+            std::fs::remove_dir_all(ctx.treb_dir()).ok();
+        })
+        .test(&["config", "show", "--json"])
+        .expect_err(true)
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
 /// Config set with an invalid key fails with error listing valid keys.
 #[test]
 fn config_set_invalid_key() {

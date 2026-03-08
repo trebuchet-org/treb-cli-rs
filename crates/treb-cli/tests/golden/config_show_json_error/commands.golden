@@ -1,0 +1,2 @@
+=== cmd 0: [config show --json] ===
+{"error":"project not initialized — .treb/ directory not found in <PROJECT_ROOT>\n\nRun `treb init` first."}

@@ -132,6 +132,16 @@ pub fn print_warning_banner(emoji: &str, message: &str) {
     println!("{}", format_warning_banner(emoji, message));
 }
 
+/// Print a JSON error object to stderr: `{"error":"<message>"}`.
+///
+/// Used by the top-level error handler when `--json` is set so that
+/// automation consumers receive a machine-parseable error on stderr.
+pub fn print_json_error(message: &str) {
+    let obj = serde_json::json!({ "error": message });
+    // Unwrap is safe — the value is always a valid JSON object.
+    eprintln!("{}", serde_json::to_string(&obj).unwrap());
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Mutex, MutexGuard, OnceLock};
