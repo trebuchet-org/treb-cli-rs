@@ -248,6 +248,8 @@ pub struct PlanEntry {
     pub deps: Vec<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub skipped: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub env: Option<HashMap<String, String>>,
 }
 
 /// Build the execution plan for display.
@@ -267,6 +269,7 @@ fn build_plan(
                 script: component.script.clone(),
                 deps: component.deps.as_ref().cloned().unwrap_or_default(),
                 skipped: skip_set.contains(name),
+                env: component.env.clone(),
             }
         })
         .collect()
@@ -321,6 +324,11 @@ fn print_execution_plan(compose: &ComposeFile, plan: &[PlanEntry]) {
             }
         }
         eprintln!();
+        if let Some(env) = &entry.env {
+            if !env.is_empty() {
+                eprintln!("   {}", styled(&format!("Env: {:?}", env), color::WARNING));
+            }
+        }
     }
     eprintln!();
 }
