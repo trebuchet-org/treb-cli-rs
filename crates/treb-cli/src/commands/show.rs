@@ -58,7 +58,14 @@ pub async fn run(deployment_query: Option<String>, json: bool) -> anyhow::Result
     let deployment = resolve_deployment(&query, &registry, &lookup)?;
 
     if json {
-        output::print_json(deployment)?;
+        let is_fork = deployment.namespace.starts_with("fork/");
+        let mut wrapper = serde_json::json!({
+            "deployment": deployment,
+        });
+        if is_fork {
+            wrapper["fork"] = serde_json::json!(true);
+        }
+        output::print_json(&wrapper)?;
     } else {
         print_deployment_details(deployment, &impl_lookup);
     }
