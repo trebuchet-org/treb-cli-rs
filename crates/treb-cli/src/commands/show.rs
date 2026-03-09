@@ -4,7 +4,7 @@ use std::{collections::HashMap, env};
 
 use anyhow::{Context, bail};
 use owo_colors::{OwoColorize, Style};
-use treb_core::types::{Deployment, contract_display_name};
+use treb_core::types::{Deployment, VerificationStatus, contract_display_name};
 use treb_registry::Registry;
 
 use crate::{
@@ -12,10 +12,6 @@ use crate::{
     output,
     ui::{badge, color, selector::fuzzy_select_deployment_id},
 };
-
-/// Verifier display order with human-readable labels (matches badge::VERIFIER_ORDER).
-const VERIFIER_DISPLAY_ORDER: [(&str, &str); 3] =
-    [("etherscan", "Etherscan"), ("sourcify", "Sourcify"), ("blockscout", "Blockscout")];
 
 /// Lookup table for resolving proxy implementation addresses to display names.
 type ImplNameLookup = HashMap<(String, u64, String), String>;
@@ -89,16 +85,6 @@ fn print_section(title: &str) {
 /// Print a 2-space-indented key-value field: `  Key: Value`.
 fn print_field(key: &str, value: &str) {
     println!("  {}: {}", key, value);
-}
-
-/// Style a verification status value according to its meaning.
-fn styled_verification_status(status: &str) -> String {
-    let style = match status.to_uppercase().as_str() {
-        "VERIFIED" => color::VERIFIED,
-        "FAILED" => color::FAILED,
-        _ => color::UNVERIFIED,
-    };
-    styled(status, style)
 }
 
 fn build_impl_name_lookup(deployments: &[&Deployment]) -> ImplNameLookup {
@@ -208,26 +194,20 @@ fn print_deployment_details(d: &Deployment, impl_lookup: &ImplNameLookup) {
 
     // Verification Status (Go: Verification)
     print_section("Verification Status");
-    if d.verification.verifiers.is_empty() {
-        let status = styled_verification_status("UNVERIFIED");
-        print_field("Status", &status);
-    } else {
-        for (key, label) in VERIFIER_DISPLAY_ORDER {
-            if let Some(vs) = d.verification.verifiers.get(key) {
-                let status_styled = styled_verification_status(&vs.status);
-                let mut detail = status_styled;
-                if !vs.url.is_empty() {
-                    detail.push_str(&format!(" {}", vs.url));
-                }
-                if !vs.reason.is_empty() {
-                    detail.push_str(&format!(" — {}", vs.reason));
-                }
-                print_field(label, &detail);
-            }
-        }
+    let status_str = d.verification.status.to_string();
+    let status_style = match d.verification.status {
+        VerificationStatus::Verified => color::VERIFIED,
+        _ => color::NOT_VERIFIED,
+    };
+    print_field("Status", &styled(&status_str, status_style));
+    if !d.verification.etherscan_url.is_empty() {
+        print_field("Etherscan", &d.verification.etherscan_url);
     }
     if let Some(ref verified_at) = d.verification.verified_at {
-        print_field("Verified At", &verified_at.to_rfc3339());
+        print_field(
+            "Verified At",
+            &verified_at.format("%Y-%m-%d %H:%M:%S").to_string(),
+        );
     }
 
     // Tags (only when present)
@@ -242,6 +222,12 @@ fn print_deployment_details(d: &Deployment, impl_lookup: &ImplNameLookup) {
 
     // Timestamps
     print_section("Timestamps");
-    print_field("Created", &d.created_at.to_rfc3339());
-    print_field("Updated", &d.updated_at.to_rfc3339());
+    print_field(
+        "Created",
+        &d.created_at.format("%Y-%m-%d %H:%M:%S").to_string(),
+    );
+    print_field(
+        "Updated",
+        &d.updated_at.format("%Y-%m-%d %H:%M:%S").to_string(),
+    );
 }
