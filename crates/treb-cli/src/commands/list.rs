@@ -1790,8 +1790,15 @@ mod tests {
 
     #[test]
     fn json_output_fork_true_for_fork_deployment() {
-        let d =
-            make_deployment("fork/42220/A", "fork/42220", 42220, "A", "", DeploymentType::Singleton, None);
+        let d = make_deployment(
+            "fork/42220/A",
+            "fork/42220",
+            42220,
+            "A",
+            "",
+            DeploymentType::Singleton,
+            None,
+        );
         let mut fork_ids = HashSet::new();
         fork_ids.insert("fork/42220/A".to_string());
 

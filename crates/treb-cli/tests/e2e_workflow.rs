@@ -38,7 +38,7 @@ async fn e2e_init_run_list() {
 
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("treb list --json must emit valid JSON");
-    let arr = json.as_array().expect("JSON output must be an array");
+    let arr = json["deployments"].as_array().expect("JSON output must contain a deployments array");
     assert_eq!(arr.len(), 1, "exactly one deployment should be recorded");
 
     let address = arr[0]["address"].as_str().expect("deployment must have 'address'");
@@ -72,7 +72,7 @@ async fn e2e_run_show() {
     .unwrap();
 
     let list_json: serde_json::Value = serde_json::from_slice(&list_output.stdout).unwrap();
-    let arr = list_json.as_array().unwrap();
+    let arr = list_json["deployments"].as_array().unwrap();
     assert_eq!(arr.len(), 1, "expected one deployment before show");
     let deployment_id = arr[0]["id"].as_str().expect("deployment must have 'id'").to_string();
 
@@ -118,7 +118,7 @@ async fn e2e_run_tag_list_with_filter() {
     .unwrap();
 
     let list_json: serde_json::Value = serde_json::from_slice(&list_output.stdout).unwrap();
-    let arr = list_json.as_array().unwrap();
+    let arr = list_json["deployments"].as_array().unwrap();
     let deployment_id = arr[0]["id"].as_str().unwrap().to_string();
 
     // Tag the deployment with "v1.0.0".
@@ -142,7 +142,7 @@ async fn e2e_run_tag_list_with_filter() {
 
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("treb list --json must emit valid JSON");
-    let arr = json.as_array().expect("JSON output must be an array");
+    let arr = json["deployments"].as_array().expect("JSON output must contain a deployments array");
     assert_eq!(arr.len(), 1, "exactly one deployment should match tag v1.0.0");
     assert_eq!(
         arr[0]["id"].as_str().unwrap(),
@@ -215,7 +215,7 @@ async fn e2e_run_reset_list() {
 
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("treb list --json must emit valid JSON");
-    let arr = json.as_array().expect("JSON output must be an array");
+    let arr = json["deployments"].as_array().expect("JSON output must contain a deployments array");
     assert!(arr.is_empty(), "registry should be empty after reset, but got {} entries", arr.len());
 
     drop(anvil);
