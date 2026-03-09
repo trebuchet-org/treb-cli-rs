@@ -20,7 +20,9 @@ fn init_creates_treb_directory_with_correct_files() {
         .current_dir(tmp.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains(".treb"))
+        .stdout(predicate::str::contains("Initialized registry in .treb/"))
+        .stdout(predicate::str::contains("treb initialized successfully!"))
+        .stdout(predicate::str::contains("Next steps:"))
         .stdout(predicate::str::contains("treb config show"));
 
     // Verify registry.json exists with the current version.
