@@ -18,7 +18,7 @@ mod ui_integration_tests {
     use super::{
         badge::{fork_badge, fork_badge_styled, verification_badge, verification_badge_styled},
         color,
-        terminal::display_width,
+        terminal::{display_width, strip_ansi_codes},
         tree::TreeNode,
     };
 
@@ -155,7 +155,7 @@ mod ui_integration_tests {
         let styled_label = format!("MyContract 0xdead {badge_styled} {fork_styled_val}");
 
         let plain_w = display_width(&plain_label);
-        let styled_w = display_width(&styled_label);
+        let styled_w = display_width(&strip_ansi_codes(&styled_label));
 
         assert_eq!(
             plain_w, styled_w,

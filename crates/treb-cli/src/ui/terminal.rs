@@ -22,13 +22,14 @@ pub fn strip_ansi_codes(s: &str) -> Cow<'_, str> {
     console::strip_ansi_codes(s)
 }
 
-/// Returns the display width of a string, stripping ANSI escape codes before measuring.
+/// Returns the display width of a string using Unicode-aware column measurement.
 ///
-/// Uses unicode-width for accurate measurement of wide characters.
+/// Uses the `unicode-width` crate for accurate measurement of wide characters
+/// (e.g., CJK ideographs, certain emoji). Callers must strip ANSI escape codes
+/// before calling this function — it does **not** strip them itself.
 #[allow(dead_code)]
 pub fn display_width(s: &str) -> usize {
-    let stripped = strip_ansi_codes(s);
-    UnicodeWidthStr::width(stripped.as_ref())
+    UnicodeWidthStr::width(s)
 }
 
 #[cfg(test)]
@@ -106,18 +107,37 @@ mod tests {
     }
 
     #[test]
-    fn display_width_strips_ansi() {
-        assert_eq!(display_width("\x1b[31mhello\x1b[0m"), 5);
+    fn display_width_check_mark_with_variation_selector() {
+        // ✔︎ = U+2714 (HEAVY CHECK MARK) + U+FE0E (text variation selector)
+        // go-runewidth returns 1 for this combination
+        assert_eq!(display_width("✔\u{FE0E}"), 1);
     }
 
     #[test]
-    fn display_width_complex_ansi() {
-        // Bold + color + underline
-        assert_eq!(display_width("\x1b[1;31;4mtest\x1b[0m"), 4);
+    fn display_width_hourglass_emoji() {
+        // ⏳ = U+23F3 (HOURGLASS WITH FLOWING SAND) — East Asian Width "W"
+        // go-runewidth returns 2
+        assert_eq!(display_width("⏳"), 2);
     }
 
     #[test]
-    fn display_width_mixed_ansi_and_plain() {
-        assert_eq!(display_width("pre\x1b[32m-mid-\x1b[0mpost"), 12);
+    fn display_width_cjk_wide_char() {
+        // CJK ideograph — always 2 columns wide
+        assert_eq!(display_width("漢"), 2);
+        assert_eq!(display_width("漢字"), 4);
+    }
+
+    #[test]
+    fn display_width_mixed_ascii_and_unicode() {
+        // "Name ✔︎" = 5 (Name ) + 1 (✔︎) = 6
+        assert_eq!(display_width("Name \u{2714}\u{FE0E}"), 6);
+    }
+
+    #[test]
+    fn display_width_box_drawing_chars() {
+        // Box-drawing characters used in tree rendering — each 1 column wide
+        assert_eq!(display_width("├─ "), 3);
+        assert_eq!(display_width("└─ "), 3);
+        assert_eq!(display_width("│"), 1);
     }
 }
