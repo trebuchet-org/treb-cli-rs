@@ -5,8 +5,7 @@
 
 use std::{
     collections::{BTreeSet, HashSet},
-    env,
-    io::{self, BufRead, Write},
+    env, io,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -48,24 +47,6 @@ fn describe_reset_scope(
             ),
         },
     }
-}
-
-fn prompt_for_reset_confirmation<W: Write, R: BufRead>(
-    output: &mut W,
-    input: &mut R,
-    confirmation_target: &str,
-) -> io::Result<bool> {
-    write!(
-        output,
-        "Are you sure you want to reset {confirmation_target}? This cannot be undone. [y/N]: "
-    )?;
-    output.flush()?;
-
-    let mut answer = String::new();
-    input.read_line(&mut answer)?;
-    let answer = answer.trim().to_ascii_lowercase();
-
-    Ok(matches!(answer.as_str(), "y" | "yes"))
 }
 
 // ── Args ─────────────────────────────────────────────────────────────────────
@@ -262,19 +243,23 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
             println!("Running in non-interactive mode. Proceeding with reset...");
         }
     } else {
+        let prompt = format!(
+            "Are you sure you want to reset {}? This cannot be undone. [y/N]: ",
+            scope.confirmation_target
+        );
         let confirmed = if args.json {
             let stdin = io::stdin();
             let mut stdin = stdin.lock();
             let stderr = io::stderr();
             let mut stderr = stderr.lock();
-            prompt_for_reset_confirmation(&mut stderr, &mut stdin, &scope.confirmation_target)
+            crate::ui::prompt::confirm_raw(&mut stderr, &mut stdin, &prompt)
                 .context("failed to read reset confirmation")?
         } else {
             let stdin = io::stdin();
             let mut stdin = stdin.lock();
             let stdout = io::stdout();
             let mut stdout = stdout.lock();
-            prompt_for_reset_confirmation(&mut stdout, &mut stdin, &scope.confirmation_target)
+            crate::ui::prompt::confirm_raw(&mut stdout, &mut stdin, &prompt)
                 .context("failed to read reset confirmation")?
         };
 
@@ -335,7 +320,8 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{describe_reset_scope, prompt_for_reset_confirmation};
+    use super::describe_reset_scope;
+    use crate::ui::prompt::confirm_raw;
     use std::{
         collections::{BTreeSet, HashMap},
         io::Cursor,
@@ -496,10 +482,10 @@ mod tests {
         let mut output = Vec::new();
         let mut input = Cursor::new(b"y\n");
 
-        let confirmed = prompt_for_reset_confirmation(
+        let confirmed = confirm_raw(
             &mut output,
             &mut input,
-            "the registry for namespace 'default' on network '1'",
+            "Are you sure you want to reset the registry for namespace 'default' on network '1'? This cannot be undone. [y/N]: ",
         )
         .unwrap();
 

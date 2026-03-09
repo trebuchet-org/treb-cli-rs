@@ -9,6 +9,7 @@ Deployments (2):
 
 Transactions (1):
   - tx-orphan [Executed] (reason: transaction 'tx-orphan' references missing deployment 'dep-gone')
+Running in non-interactive mode. Proceeding with prune...
 
 🔧 Pruning registry entries...
 ✅ Successfully pruned 3 items.

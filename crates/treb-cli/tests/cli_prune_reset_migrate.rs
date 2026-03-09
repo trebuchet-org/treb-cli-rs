@@ -152,6 +152,10 @@ fn prune_yes_removes_broken_entry_and_creates_backup() {
 
     // Output reports prune success without exposing the backup path.
     assert!(
+        stdout.contains("Running in non-interactive mode. Proceeding with prune..."),
+        "stdout should include the non-interactive proceed line: {stdout}"
+    );
+    assert!(
         stdout.contains("✅ Successfully pruned 1 items."),
         "stdout should report prune success: {stdout}"
     );
@@ -175,6 +179,39 @@ fn prune_yes_removes_broken_entry_and_creates_backup() {
     assert!(
         registry_after.get_deployment("dep-broken").is_none(),
         "dep-broken should be removed after prune --yes"
+    );
+}
+
+#[test]
+fn prune_non_interactive_proceeds_without_yes_and_creates_backup() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut registry = init_project(&tmp);
+
+    registry.insert_deployment(make_deployment("dep-broken", "tx-missing", 1, "default")).unwrap();
+
+    let output = treb()
+        .args(["prune"])
+        .env("TREB_NON_INTERACTIVE", "true")
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "prune should succeed in non-interactive mode");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    assert!(
+        stdout.contains("Running in non-interactive mode. Proceeding with prune..."),
+        "stdout should include the non-interactive proceed line: {stdout}"
+    );
+    assert!(
+        stdout.contains("✅ Successfully pruned 1 items."),
+        "stdout should report prune success: {stdout}"
+    );
+
+    let registry_after = treb_registry::Registry::open(tmp.path()).unwrap();
+    assert!(
+        registry_after.get_deployment("dep-broken").is_none(),
+        "dep-broken should be removed after non-interactive prune"
     );
 }
 

@@ -4,7 +4,7 @@
 //! candidates, and (in destructive mode) removes them with a timestamped backup.
 
 use std::{
-    env,
+    env, io,
     path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -322,6 +322,13 @@ fn validate_onchain_args(args: &PruneArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn prune_confirmation_prompt() -> String {
+    format!(
+        "{}  Are you sure you want to prune these items? This cannot be undone. [y/N]: ",
+        emoji::WARNING
+    )
+}
+
 /// Print section listings for prune candidates grouped by type (deployment vs transaction).
 fn print_candidate_sections(candidates: &[PruneCandidate]) {
     let dep_candidates: Vec<&PruneCandidate> =
@@ -418,15 +425,34 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
         print_candidate_sections(&candidates);
     }
 
-    if !args.yes {
+    let skip_confirmation = args.yes || crate::ui::interactive::is_non_interactive(false);
+    if skip_confirmation {
+        if !args.json {
+            println!("Running in non-interactive mode. Proceeding with prune...");
+        }
+    } else {
         if !args.json {
             println!();
         }
-        let message = format!(
-            "{}  Are you sure you want to prune these items? This cannot be undone.",
-            emoji::WARNING
-        );
-        if !crate::ui::prompt::confirm(&message, false) {
+
+        let prompt = prune_confirmation_prompt();
+        let confirmed = if args.json {
+            let stdin = io::stdin();
+            let mut stdin = stdin.lock();
+            let stderr = io::stderr();
+            let mut stderr = stderr.lock();
+            crate::ui::prompt::confirm_raw(&mut stderr, &mut stdin, &prompt)
+                .context("failed to read prune confirmation")?
+        } else {
+            let stdin = io::stdin();
+            let mut stdin = stdin.lock();
+            let stdout = io::stdout();
+            let mut stdout = stdout.lock();
+            crate::ui::prompt::confirm_raw(&mut stdout, &mut stdin, &prompt)
+                .context("failed to read prune confirmation")?
+        };
+
+        if !confirmed {
             if !args.json {
                 println!("{} Prune cancelled.", emoji::CROSS);
             }
@@ -666,6 +692,14 @@ mod tests {
         let candidates_with_pending = find_prune_candidates(&registry, None, true);
         assert_eq!(candidates_with_pending.len(), 1);
         assert_eq!(candidates_with_pending[0].kind, PruneCandidateKind::OrphanedPendingEntry);
+    }
+
+    #[test]
+    fn prune_confirmation_prompt_matches_phase_11_contract() {
+        assert_eq!(
+            prune_confirmation_prompt(),
+            "⚠️  Are you sure you want to prune these items? This cannot be undone. [y/N]: "
+        );
     }
 
     #[test]
