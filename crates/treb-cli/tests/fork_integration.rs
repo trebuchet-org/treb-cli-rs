@@ -209,7 +209,7 @@ fn fork_diff_with_no_changes() {
         .current_dir(root.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("No changes detected"));
+        .stdout(predicate::str::contains("No changes since fork entered."));
 }
 
 // ── fork exit restores registry ───────────────────────────────────────────────

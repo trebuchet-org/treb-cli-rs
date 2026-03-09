@@ -14,7 +14,6 @@ use foundry_common::{
     Shell as FoundryShell,
     shell::{ColorChoice, OutputFormat, OutputMode, Verbosity},
 };
-use owo_colors::{OwoColorize, Style};
 use serde::Serialize;
 use tokio::net::TcpStream;
 use treb_config::{ResolveOpts, load_local_config, resolve_config};
@@ -28,7 +27,7 @@ use treb_registry::{
     snapshot_registry,
 };
 
-use crate::{output, ui::color};
+use crate::output;
 
 const TREB_DIR: &str = ".treb";
 const SNAPSHOT_BASE: &str = "snapshots";
@@ -1016,6 +1015,16 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
     let diff_files = [DEPLOYMENTS_FILE, TRANSACTIONS_FILE];
     let mut changes: Vec<serde_json::Value> = Vec::new();
 
+    // Structured data for human output (deployment details + transaction count).
+    struct DiffEntry {
+        name: String,
+        address: String,
+        deployment_type: String,
+    }
+    let mut new_deployments: Vec<DiffEntry> = Vec::new();
+    let mut modified_deployments: Vec<DiffEntry> = Vec::new();
+    let mut new_transactions: usize = 0;
+
     for &file_name in &diff_files {
         let current_path = treb_dir.join(file_name);
         let snapshot_path = snapshot_dir.join(file_name);
@@ -1031,6 +1040,7 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
             .collect();
 
         let file_label = file_name.trim_end_matches(".json");
+        let is_deployments = file_label == "deployments";
 
         for key in &all_keys {
             let in_current = current_map.as_ref().and_then(|m| m.get(key));
@@ -1048,6 +1058,33 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
                 "file":   file_label,
                 "key":    key,
             }));
+
+            // Collect structured data for human output sections.
+            if is_deployments && (change_type == "added" || change_type == "modified") {
+                let data = in_current.unwrap(); // present for added/modified
+                let address = data
+                    .get("address")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let dtype = data
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let diff_entry = DiffEntry {
+                    name: key.clone(),
+                    address,
+                    deployment_type: dtype,
+                };
+                if change_type == "added" {
+                    new_deployments.push(diff_entry);
+                } else {
+                    modified_deployments.push(diff_entry);
+                }
+            } else if !is_deployments && change_type == "added" {
+                new_transactions += 1;
+            }
         }
     }
 
@@ -1060,31 +1097,52 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
         return Ok(());
     }
 
+    // Human output — Go-matching format.
+    println!("Fork Diff: {network}");
+    println!();
+
     if changes.is_empty() {
-        println!("No changes detected for network '{network}'.");
+        println!("No changes since fork entered.");
         return Ok(());
     }
 
-    let mut table = crate::output::build_table(&["Change", "File", "Key"]);
-    for change in &changes {
-        let change_text = change["change"].as_str().unwrap_or("");
-        let change_style = match change_text {
-            "added" => Style::new().green(),
-            "removed" => Style::new().red(),
-            "modified" => Style::new().yellow(),
-            _ => Style::new(),
-        };
-        table.add_row(vec![
-            styled(change_text, change_style),
-            change["file"].as_str().unwrap_or("").to_string(),
-            styled(change["key"].as_str().unwrap_or(""), color::LABEL),
-        ]);
+    if !new_deployments.is_empty() {
+        println!("New Deployments ({}):", new_deployments.len());
+        for d in &new_deployments {
+            println!("  + {:<20} {}", d.name, format_diff_suffix(&d.address, &d.deployment_type));
+        }
+        println!();
     }
-    crate::output::print_table(&table);
+
+    if !modified_deployments.is_empty() {
+        println!("Modified Deployments ({}):", modified_deployments.len());
+        for d in &modified_deployments {
+            println!("  ~ {:<20} {}", d.name, format_diff_suffix(&d.address, &d.deployment_type));
+        }
+        println!();
+    }
+
+    if new_transactions > 0 {
+        println!("New Transactions: {new_transactions}");
+        println!();
+    }
+
     Ok(())
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+/// Format the address + type suffix for a diff entry line.
+/// Produces `"0xAddr  TYPE"` when both present, `"0xAddr"` when type is empty,
+/// or empty string when address is also empty.
+fn format_diff_suffix(address: &str, deployment_type: &str) -> String {
+    match (address.is_empty(), deployment_type.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => address.to_string(),
+        (true, false) => deployment_type.to_string(),
+        (false, false) => format!("{address}  {deployment_type}"),
+    }
+}
 
 fn is_tracked_anvil_instance(entry: &ForkEntry) -> bool {
     entry.port != 0 || !entry.pid_file.is_empty() || !entry.log_file.is_empty()
@@ -1232,10 +1290,6 @@ fn revert_success_message(networks: &[String], all: bool) -> String {
     } else {
         format!("Reverted fork for network '{}'.", networks[0])
     }
-}
-
-fn styled(text: &str, style: Style) -> String {
-    if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
 }
 
 /// Format a duration as a human-readable uptime string.
