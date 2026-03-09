@@ -2,7 +2,7 @@
 Fork History: mainnet
 
     [0] initial  (<TIMESTAMP>)
-  → [1] restart Anvil reset; snapshot: 0x2  (<TIMESTAMP>)
+  → [1] restart  (<TIMESTAMP>)
 
 Fork History: sepolia
 

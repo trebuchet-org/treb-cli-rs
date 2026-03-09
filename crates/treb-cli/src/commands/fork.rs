@@ -969,41 +969,23 @@ pub async fn run_history(network: Option<String>, json: bool) -> anyhow::Result<
         return Ok(());
     }
 
-    if history.is_empty() {
+    let networks = human_history_networks(&store, network.as_deref());
+    if networks.is_empty() {
         let filter_msg =
             network.as_deref().map_or_else(String::new, |n| format!(" for network '{n}'"));
         println!("No fork history{filter_msg}.");
         return Ok(());
     }
 
-    // Collect unique networks in order of first appearance (most-recent-first).
-    let mut networks: Vec<String> = Vec::new();
-    for entry in &history {
-        if !networks.contains(&entry.network) {
-            networks.push(entry.network.clone());
-        }
-    }
-
     for net in &networks {
-        // Filter entries for this network and reverse to chronological order.
-        let net_entries: Vec<_> = history.iter().filter(|e| e.network == *net).rev().collect();
-        let last_idx = net_entries.len() - 1;
+        let entry = human_history_entry(&store, net)
+            .ok_or_else(|| anyhow::anyhow!("network '{}' is not in fork mode", net))?;
 
         println!("Fork History: {net}");
         println!();
 
-        for (i, entry) in net_entries.iter().enumerate() {
-            let marker = if i == last_idx { "\u{2192} " } else { "  " };
-            let label = if i == 0 {
-                "initial".to_string()
-            } else {
-                match &entry.details {
-                    Some(d) => format!("{} {d}", entry.action),
-                    None => entry.action.clone(),
-                }
-            };
-            let ts = entry.timestamp.format("%Y-%m-%d %H:%M:%S");
-            println!("  {marker}[{i}] {label}  ({ts})");
+        for line in render_history_lines(entry) {
+            println!("{line}");
         }
 
         println!();
@@ -1120,6 +1102,55 @@ fn resolve_fork_session_entry<'a>(
                 .then_with(|| left.resolved_instance_name().cmp(right.resolved_instance_name()))
         })
     })
+}
+
+fn human_history_networks(store: &ForkStateStore, network: Option<&str>) -> Vec<String> {
+    match network {
+        Some(network) => human_history_entry(store, network)
+            .map(|_| vec![network.to_string()])
+            .unwrap_or_default(),
+        None => store
+            .list_active_networks()
+            .into_iter()
+            .filter(|network| human_history_entry(store, network).is_some())
+            .collect(),
+    }
+}
+
+fn human_history_entry<'a>(store: &'a ForkStateStore, network: &str) -> Option<&'a ForkEntry> {
+    let session = resolve_fork_session_entry(store, network)?;
+    if !session.snapshots.is_empty() {
+        return Some(session);
+    }
+
+    primary_tracked_anvil_entry(store, network)
+        .filter(|entry| !entry.snapshots.is_empty())
+        .or(Some(session))
+}
+
+fn render_history_lines(entry: &ForkEntry) -> Vec<String> {
+    if entry.snapshots.is_empty() {
+        return vec![format!(
+            "  \u{2192} [0] initial  ({})",
+            entry.entered_at.format("%Y-%m-%d %H:%M:%S")
+        )];
+    }
+
+    let last_idx = entry.snapshots.len() - 1;
+    entry
+        .snapshots
+        .iter()
+        .enumerate()
+        .map(|(offset, snapshot)| {
+            let marker = if offset == last_idx { "\u{2192} " } else { "  " };
+            let label = if offset == 0 { "initial" } else { snapshot.command.as_str() };
+            format!(
+                "  {marker}[{}] {label}  ({})",
+                snapshot.index,
+                snapshot.timestamp.format("%Y-%m-%d %H:%M:%S")
+            )
+        })
+        .collect()
 }
 
 fn exit_ordered_networks(store: &ForkStateStore) -> Vec<String> {
@@ -1398,7 +1429,7 @@ fn load_json_map(path: &Path) -> Option<serde_json::Map<String, serde_json::Valu
 #[cfg(test)]
 mod tests {
     use super::ForkSubcommand;
-    use chrono::Utc;
+    use chrono::{TimeZone, Utc};
     use clap::{Parser, Subcommand};
     use std::{fs, path::PathBuf};
     use tempfile::TempDir;
@@ -1877,6 +1908,80 @@ mod tests {
 
         let history: Vec<_> = store.data().history.iter().collect();
         assert!(history.is_empty(), "expected empty history");
+    }
+
+    #[test]
+    fn human_history_entry_prefers_runtime_snapshots_when_session_is_placeholder() {
+        let (_root, treb_dir) = make_treb_dir();
+        let mut store = ForkStateStore::new(&treb_dir);
+
+        let session = sample_entry(&treb_dir, "mainnet");
+        let mut runtime = sample_named_entry(&treb_dir, "mainnet", "alpha");
+        runtime.port = 18545;
+        runtime.rpc_url = "http://127.0.0.1:18545".into();
+        runtime.snapshots.push(treb_core::types::fork::SnapshotEntry {
+            index: 0,
+            snapshot_id: "0x1".into(),
+            command: "enter".into(),
+            timestamp: Utc::now(),
+        });
+
+        store.insert_active_fork(session).unwrap();
+        store.insert_active_fork(runtime).unwrap();
+
+        let entry = super::human_history_entry(&store, "mainnet").unwrap();
+        assert_eq!(entry.resolved_instance_name(), "alpha");
+        assert_eq!(entry.snapshots.len(), 1);
+    }
+
+    #[test]
+    fn render_history_lines_use_active_snapshot_stack_for_current_session() {
+        let (_root, treb_dir) = make_treb_dir();
+        let mut store = ForkStateStore::new(&treb_dir);
+
+        let entered_at = Utc.with_ymd_and_hms(2026, 1, 12, 9, 0, 0).unwrap();
+        let older_entered_at = Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap();
+
+        let mut active = sample_entry(&treb_dir, "mainnet");
+        active.entered_at = entered_at;
+        active.started_at = entered_at;
+        active.snapshots.push(treb_core::types::fork::SnapshotEntry {
+            index: 0,
+            snapshot_id: "0x2".into(),
+            command: "enter".into(),
+            timestamp: entered_at,
+        });
+
+        store.insert_active_fork(active).unwrap();
+        store
+            .add_history(ForkHistoryEntry {
+                action: "enter".into(),
+                network: "mainnet".into(),
+                timestamp: older_entered_at,
+                details: None,
+            })
+            .unwrap();
+        store
+            .add_history(ForkHistoryEntry {
+                action: "exit".into(),
+                network: "mainnet".into(),
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 11, 9, 0, 0).unwrap(),
+                details: None,
+            })
+            .unwrap();
+        store
+            .add_history(ForkHistoryEntry {
+                action: "enter".into(),
+                network: "mainnet".into(),
+                timestamp: entered_at,
+                details: None,
+            })
+            .unwrap();
+
+        let entry = super::human_history_entry(&store, "mainnet").unwrap();
+        let lines = super::render_history_lines(entry);
+
+        assert_eq!(lines, vec!["  → [0] initial  (2026-01-12 09:00:00)".to_string()]);
     }
 
     // ── diff detects changes ──────────────────────────────────────────────

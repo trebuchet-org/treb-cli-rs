@@ -7,7 +7,7 @@ mod framework;
 
 use chrono::{TimeZone, Utc};
 use std::io::{Read, Write};
-use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
+use treb_core::types::fork::{ForkEntry, ForkHistoryEntry, SnapshotEntry};
 use treb_registry::{DEPLOYMENTS_FILE, ForkStateStore, TRANSACTIONS_FILE};
 
 use framework::{
@@ -137,16 +137,59 @@ fn fork_status_not_initialized() {
 
 // ── History helpers ─────────────────────────────────────────────────────
 
-/// Pre-populate fork state with history entries for golden file tests.
+/// Pre-populate fork state with active fork entries plus audit history for
+/// golden file tests.
 ///
-/// Creates 3 entries in chronological order; the store prepends each, so the
-/// final order in `history` is most-recent-first:
+/// Human output reads the active fork snapshot stack, while `--json` still
+/// returns the raw audit log. This seeds both data sources consistently:
+/// - active snapshots for mainnet: initial -> restart
+/// - active snapshots for sepolia: initial
+/// - audit history entries in most-recent-first order:
 ///   1. restart mainnet (with details)
 ///   2. enter  sepolia  (no details)
 ///   3. enter  mainnet  (no details)
 fn seed_fork_history(project_root: &std::path::Path) {
     let treb_dir = project_root.join(".treb");
     let mut store = ForkStateStore::new(&treb_dir);
+
+    let mut mainnet = sample_fork_entry_for_network(
+        &treb_dir,
+        "mainnet",
+        Utc.with_ymd_and_hms(2026, 1, 10, 8, 0, 0).unwrap(),
+    );
+    mainnet.snapshots = vec![
+        SnapshotEntry {
+            index: 0,
+            snapshot_id: "0x1".to_string(),
+            command: "enter".to_string(),
+            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 8, 0, 0).unwrap(),
+        },
+        SnapshotEntry {
+            index: 1,
+            snapshot_id: "0x2".to_string(),
+            command: "restart".to_string(),
+            timestamp: Utc.with_ymd_and_hms(2026, 1, 15, 10, 30, 0).unwrap(),
+        },
+    ];
+    store.insert_active_fork(mainnet).unwrap();
+
+    let mut sepolia = sample_fork_entry_for_network(
+        &treb_dir,
+        "sepolia",
+        Utc.with_ymd_and_hms(2026, 1, 12, 14, 0, 0).unwrap(),
+    );
+    sepolia.chain_id = 11155111;
+    sepolia.rpc_url = "http://localhost:28545".to_string();
+    sepolia.fork_url = "https://sepolia.example.com".to_string();
+    sepolia.original_rpc = "https://sepolia.example.com".to_string();
+    sepolia.env_var_name = "ETH_RPC_URL_SEPOLIA".to_string();
+    sepolia.snapshots = vec![SnapshotEntry {
+        index: 0,
+        snapshot_id: "0x3".to_string(),
+        command: "enter".to_string(),
+        timestamp: Utc.with_ymd_and_hms(2026, 1, 12, 14, 0, 0).unwrap(),
+    }];
+    store.insert_active_fork(sepolia).unwrap();
 
     // Oldest first — add_history prepends, so last add ends up at index 0.
     let entries = vec![
@@ -193,9 +236,8 @@ fn fork_history_empty() {
 
 // ── fork history: with entries ──────────────────────────────────────────
 
-/// `treb fork history` with entries should display a table with 4 columns
-/// (Timestamp, Action, Network, Details) in most-recent-first order.
-/// Entries with details = None should show "-".
+/// `treb fork history` with active fork snapshots should display stack-style
+/// history grouped by network.
 #[test]
 fn fork_history_with_entries() {
     let ctx = TestContext::new("minimal-project");
@@ -212,7 +254,8 @@ fn fork_history_with_entries() {
 
 // ── fork history: network filter ────────────────────────────────────────
 
-/// `treb fork history --network mainnet` should only display mainnet entries.
+/// `treb fork history --network mainnet` should only display the active
+/// mainnet session stack.
 #[test]
 fn fork_history_network_filter() {
     let ctx = TestContext::new("minimal-project");
