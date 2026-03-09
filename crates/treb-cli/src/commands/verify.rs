@@ -1,12 +1,12 @@
 //! `treb verify` command implementation.
 
-use std::{collections::HashMap, env, time::Duration};
+use std::{collections::HashMap, env, fmt, time::Duration};
 
 use anyhow::{Context, bail};
 use chrono::Utc;
 use owo_colors::{OwoColorize, Style};
 use serde::Serialize;
-use treb_core::types::{VerificationStatus, VerifierStatus};
+use treb_core::types::{VerificationStatus, VerifierStatus, contract_display_name};
 use treb_registry::Registry;
 use treb_verify::VerifyOpts;
 
@@ -14,7 +14,7 @@ use crate::{
     commands::resolve::resolve_deployment,
     output,
     ui::{
-        badge, color,
+        color, emoji,
         interactive::is_non_interactive,
         selector::{fuzzy_select_deployment_id, multiselect_deployments},
     },
@@ -43,6 +43,21 @@ struct VerifyOutputJson {
     reason: String,
     verified_at: Option<String>,
     verifiers: HashMap<String, VerifierResultJson>,
+}
+
+#[derive(Debug)]
+struct RenderedVerifyFailure;
+
+impl fmt::Display for RenderedVerifyFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("verification failed")
+    }
+}
+
+impl std::error::Error for RenderedVerifyFailure {}
+
+pub(crate) fn is_rendered_verify_failure(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<RenderedVerifyFailure>().is_some()
 }
 
 /// Resolve the API key for a verifier.
@@ -107,6 +122,132 @@ fn verifier_results_json(
 /// Returns the styled string when color is enabled, plain text otherwise.
 fn styled(text: &str, style: Style) -> String {
     if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
+}
+
+/// Title-case a verifier name (e.g., "etherscan" → "Etherscan").
+fn title_case(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+    }
+}
+
+/// Map a `VerificationStatus` to its Go-matching emoji icon for batch output.
+fn get_status_icon(status: &VerificationStatus) -> &'static str {
+    match status {
+        VerificationStatus::Verified => emoji::REFRESH,
+        VerificationStatus::Failed => emoji::WARNING,
+        VerificationStatus::Partial => emoji::REPEAT,
+        VerificationStatus::Unverified => emoji::HOURGLASS,
+    }
+}
+
+fn ordered_verifier_names(
+    requested_verifiers: Option<&[String]>,
+    verifiers: &HashMap<String, VerifierStatus>,
+) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+
+    if let Some(requested) = requested_verifiers {
+        for name in requested {
+            let normalized = name.to_lowercase();
+            if verifiers.contains_key(&normalized) && !names.contains(&normalized) {
+                names.push(normalized);
+            }
+        }
+    }
+
+    let mut remaining: Vec<_> =
+        verifiers.keys().filter(|name| !names.contains(*name)).cloned().collect();
+    remaining.sort();
+    names.extend(remaining);
+
+    names
+}
+
+fn print_verifier_status_lines(
+    verifiers: &HashMap<String, VerifierStatus>,
+    requested_verifiers: Option<&[String]>,
+    indent: &str,
+) {
+    for name in ordered_verifier_names(requested_verifiers, verifiers) {
+        let v = &verifiers[&name];
+        let title = title_case(&name);
+        if v.status == "VERIFIED" {
+            eprintln!(
+                "{indent}{} {} {}",
+                styled(emoji::CHECK_MARK, color::VERIFIED),
+                title,
+                styled("Verified", color::VERIFIED),
+            );
+            if !v.url.is_empty() {
+                eprintln!("{indent}  {}", styled(&v.url, color::MUTED));
+            }
+        } else {
+            eprintln!(
+                "{indent}{} {} {}",
+                styled(emoji::CROSS_MARK, color::FAILED),
+                title,
+                styled("Failed", color::FAILED),
+            );
+            if !v.reason.is_empty() {
+                eprintln!("{indent}  {}", styled(&v.reason, color::MUTED));
+            }
+        }
+    }
+}
+
+fn print_batch_result_details(
+    status: &VerificationStatus,
+    verifiers: &HashMap<String, VerifierStatus>,
+    requested_verifiers: &[String],
+) {
+    if matches!(status, VerificationStatus::Verified | VerificationStatus::Partial) {
+        eprintln!(
+            "    {} {}",
+            styled(emoji::CHECK_MARK, color::SUCCESS),
+            styled("Verification completed", color::SUCCESS),
+        );
+    }
+
+    let mut printed_failure = false;
+    for name in ordered_verifier_names(Some(requested_verifiers), verifiers) {
+        let verifier = &verifiers[&name];
+        if verifier.status != "FAILED" {
+            continue;
+        }
+
+        printed_failure = true;
+        let message = if verifier.reason.is_empty() {
+            "Verification failed"
+        } else {
+            verifier.reason.as_str()
+        };
+        eprintln!(
+            "    {} {}",
+            styled(emoji::CROSS_MARK, color::FAILED),
+            styled(message, color::FAILED),
+        );
+    }
+
+    if !printed_failure && *status == VerificationStatus::Failed {
+        eprintln!(
+            "    {} {}",
+            styled(emoji::CROSS_MARK, color::FAILED),
+            styled("Verification failed", color::FAILED),
+        );
+    }
+}
+
+/// Print the `Verification Status:` section with per-verifier results.
+fn print_verification_status(verifiers: &HashMap<String, VerifierStatus>) {
+    if verifiers.is_empty() {
+        return;
+    }
+    eprintln!();
+    eprintln!("  Verification Status:");
+    print_verifier_status_lines(verifiers, None, "    ");
 }
 
 /// Run the verify command.
@@ -188,12 +329,14 @@ pub async fn run(
     // Capture fields we need after the borrow on registry is released.
     let deployment_id = resolved.id.clone();
     let contract_name = resolved.contract_name.clone();
+    let label = resolved.label.clone();
     let address = resolved.address.clone();
     let chain_id = resolved.chain_id;
     let already_verified = resolved.verification.status == VerificationStatus::Verified;
     let existing_url = resolved.verification.etherscan_url.clone();
     let existing_verified_at = resolved.verification.verified_at;
     let existing_verifiers = resolved.verification.verifiers.clone();
+    let display_name = contract_display_name(&contract_name, &label);
 
     // Skip if already verified and not forced.
     if already_verified && !force {
@@ -214,9 +357,14 @@ pub async fn run(
             output::print_json(&out)?;
         } else {
             eprintln!(
-                "  {} {} is already verified — use --force to re-verify",
-                styled("\u{2713}", color::SUCCESS),
-                contract_name,
+                "{}",
+                styled(
+                    &format!(
+                        "Contract {} is already verified. Use --force to re-verify.",
+                        display_name
+                    ),
+                    color::WARNING,
+                ),
             );
         }
         return Ok(());
@@ -226,13 +374,6 @@ pub async fn run(
     let _ = resolved;
 
     // --- Multi-verifier loop ---
-    if !json {
-        output::print_stage(
-            "\u{1f50d}",
-            &format!("Verifying {} ({})", contract_name, output::truncate_address(&address)),
-        );
-    }
-
     let mut dep = registry.get_deployment(&deployment_id).unwrap().clone();
     let verifier_count = verifiers.len();
     let mut attempted_verifiers: HashMap<String, VerifierStatus> = HashMap::new();
@@ -265,10 +406,6 @@ pub async fn run(
                 };
                 dep.verification.verifiers.insert(verifier.to_lowercase(), status.clone());
                 attempted_verifiers.insert(verifier.to_lowercase(), status);
-                if !json {
-                    eprintln!("  {}: {}", verifier, styled("FAILED", color::FAILED),);
-                    eprintln!("    {}", styled(&reason, color::MUTED));
-                }
                 continue;
             }
         };
@@ -294,12 +431,6 @@ pub async fn run(
                 };
                 dep.verification.verifiers.insert(verifier.to_lowercase(), status.clone());
                 attempted_verifiers.insert(verifier.to_lowercase(), status);
-                if !json {
-                    eprintln!("  {}: {}", verifier, styled("VERIFIED", color::VERIFIED),);
-                    if let Some(ref url) = explorer_url {
-                        eprintln!("    {}", styled(url, color::MUTED));
-                    }
-                }
             }
             Err(e) => {
                 let reason = format!("{e:#}");
@@ -310,10 +441,6 @@ pub async fn run(
                 };
                 dep.verification.verifiers.insert(verifier.to_lowercase(), status.clone());
                 attempted_verifiers.insert(verifier.to_lowercase(), status);
-                if !json {
-                    eprintln!("  {}: {}", verifier, styled("FAILED", color::FAILED),);
-                    eprintln!("    {}", styled(&reason, color::MUTED));
-                }
             }
         }
 
@@ -335,16 +462,6 @@ pub async fn run(
         .unwrap_or_default();
 
     registry.update_deployment(dep.clone())?;
-
-    // Show verification badge summary on stdout.
-    if !json {
-        let ver_badge = if color::is_color_enabled() {
-            badge::verification_badge_styled(&attempted_verifiers)
-        } else {
-            badge::verification_badge(&attempted_verifiers)
-        };
-        println!("  {}", ver_badge);
-    }
 
     // Output.
     if json {
@@ -368,8 +485,37 @@ pub async fn run(
             verifiers: verifier_results_json(&attempted_verifiers),
         };
         output::print_json(&out)?;
-    } else if dep.verification.status == VerificationStatus::Failed {
-        bail!("verification failed for {}", contract_name);
+    } else {
+        // Print success/failure message and verification status section.
+        match dep.verification.status {
+            VerificationStatus::Verified => {
+                eprintln!(
+                    "{} {}",
+                    styled(emoji::CHECK_MARK, color::SUCCESS),
+                    styled("Verification completed successfully!", color::SUCCESS),
+                );
+            }
+            VerificationStatus::Failed => {
+                // Print per-error failure messages.
+                for v in attempted_verifiers.values() {
+                    if v.status == "FAILED" {
+                        eprintln!(
+                            "{} {}",
+                            styled(emoji::CROSS_MARK, color::FAILED),
+                            styled(&format!("Verification failed: {}", v.reason), color::FAILED,),
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        // Show verification status section.
+        print_verification_status(&attempted_verifiers);
+
+        if dep.verification.status == VerificationStatus::Failed {
+            return Err(RenderedVerifyFailure.into());
+        }
     }
 
     Ok(())
@@ -390,19 +536,29 @@ async fn run_batch(
 ) -> anyhow::Result<()> {
     let mut registry = Registry::open(cwd).context("failed to open registry")?;
 
-    // Collect candidate deployments as owned values to avoid borrow conflicts.
-    let candidate_deployments: Vec<_> = registry
-        .list_deployments()
-        .into_iter()
-        .filter(|d| force || d.verification.status != VerificationStatus::Verified)
-        .cloned()
-        .collect();
+    let all_deployments: Vec<_> = registry.list_deployments().into_iter().cloned().collect();
+    let candidate_deployments: Vec<_> = if force {
+        all_deployments
+    } else {
+        all_deployments
+            .into_iter()
+            .filter(|d| d.verification.status != VerificationStatus::Verified)
+            .collect()
+    };
 
     if candidate_deployments.is_empty() {
         if json {
             output::print_json(&Vec::<VerifyOutputJson>::new())?;
+        } else if force {
+            eprintln!("{}", styled("No deployed contracts found to verify.", color::WARNING),);
         } else {
-            eprintln!("No unverified deployments found.");
+            eprintln!(
+                "{}",
+                styled(
+                    "No unverified deployed contracts found. Use --force to re-verify all contracts.",
+                    color::WARNING,
+                ),
+            );
         }
         return Ok(());
     }
@@ -423,40 +579,54 @@ async fn run_batch(
     if candidate_ids.is_empty() {
         if json {
             output::print_json(&Vec::<VerifyOutputJson>::new())?;
+        } else if force {
+            eprintln!("{}", styled("No deployed contracts found to verify.", color::WARNING),);
         } else {
-            eprintln!("No deployments selected.");
+            eprintln!(
+                "{}",
+                styled(
+                    "No unverified deployed contracts found. Use --force to re-verify all contracts.",
+                    color::WARNING,
+                ),
+            );
         }
         return Ok(());
     }
 
     let total = candidate_ids.len();
     let mut results: Vec<VerifyOutputJson> = Vec::new();
-    let mut ver_badges: Vec<String> = Vec::new();
+    let mut success_count: usize = 0;
+
+    if !json {
+        if force {
+            eprintln!(
+                "{}",
+                styled(
+                    &format!(
+                        "Found {} deployed contracts to verify (including verified ones with --force):",
+                        total,
+                    ),
+                    color::STAGE,
+                ),
+            );
+        } else {
+            eprintln!(
+                "{}",
+                styled(
+                    &format!("Found {} unverified deployed contracts to verify:", total),
+                    color::STAGE,
+                ),
+            );
+        }
+    }
 
     for (i, dep_id) in candidate_ids.iter().enumerate() {
         let dep_snapshot = registry.get_deployment(dep_id).unwrap().clone();
         let contract_name = dep_snapshot.contract_name.clone();
+        let display_name = contract_display_name(&dep_snapshot.contract_name, &dep_snapshot.label);
         let address = dep_snapshot.address.clone();
         let chain_id = dep_snapshot.chain_id;
-
-        if !json {
-            let action = if dep_snapshot.verification.status == VerificationStatus::Verified {
-                "Re-verifying"
-            } else {
-                "Verifying"
-            };
-            output::print_stage(
-                "\u{1f50d}",
-                &format!(
-                    "[{}/{}] {} {} ({})",
-                    i + 1,
-                    total,
-                    action,
-                    contract_name,
-                    output::truncate_address(&address),
-                ),
-            );
-        }
+        let namespace = dep_snapshot.namespace.clone();
 
         let mut dep_owned = dep_snapshot;
         let verifier_count = verifiers.len();
@@ -492,10 +662,6 @@ async fn run_batch(
                         .verifiers
                         .insert(verifier.to_lowercase(), status.clone());
                     attempted_verifiers.insert(verifier.to_lowercase(), status);
-                    if !json {
-                        eprintln!("  {}: {}", verifier, styled("FAILED", color::FAILED),);
-                        eprintln!("    {}", styled(&reason, color::MUTED));
-                    }
                     continue;
                 }
             };
@@ -524,12 +690,6 @@ async fn run_batch(
                         .verifiers
                         .insert(verifier.to_lowercase(), status.clone());
                     attempted_verifiers.insert(verifier.to_lowercase(), status);
-                    if !json {
-                        eprintln!("  {}: {}", verifier, styled("VERIFIED", color::VERIFIED),);
-                        if let Some(ref url) = explorer_url {
-                            eprintln!("    {}", styled(url, color::MUTED));
-                        }
-                    }
                 }
                 Err(e) => {
                     let reason = format!("{e:#}");
@@ -543,10 +703,6 @@ async fn run_batch(
                         .verifiers
                         .insert(verifier.to_lowercase(), status.clone());
                     attempted_verifiers.insert(verifier.to_lowercase(), status);
-                    if !json {
-                        eprintln!("  {}: {}", verifier, styled("FAILED", color::FAILED),);
-                        eprintln!("    {}", styled(&reason, color::MUTED));
-                    }
                 }
             }
 
@@ -568,13 +724,22 @@ async fn run_batch(
 
         registry.update_deployment(dep_owned.clone())?;
 
-        // Compute verification badge for summary table.
-        let ver_badge = if color::is_color_enabled() {
-            badge::verification_badge_styled(&attempted_verifiers)
-        } else {
-            badge::verification_badge(&attempted_verifiers)
-        };
-        ver_badges.push(ver_badge);
+        // Print per-result output in Go-matching format.
+        if !json {
+            let location = format!("chain:{}/{}/{}", chain_id, namespace, display_name);
+            let icon = get_status_icon(&agg_status);
+            eprintln!("  {} {}", icon, location);
+            print_batch_result_details(&agg_status, &attempted_verifiers, verifiers);
+
+            // Blank line between results, not after last.
+            if i + 1 < total {
+                eprintln!();
+            }
+        }
+
+        if agg_status == VerificationStatus::Verified {
+            success_count += 1;
+        }
 
         let agg_status_str = match dep_owned.verification.status {
             VerificationStatus::Verified => "VERIFIED",
@@ -606,23 +771,7 @@ async fn run_batch(
     if json {
         output::print_json(&results)?;
     } else {
-        // Print summary table.
-        let mut table = output::build_table(&["Contract", "Address", "Status", "Verifiers"]);
-        for (r, ver_badge) in results.iter().zip(ver_badges.iter()) {
-            let status_styled = match r.status.as_str() {
-                "VERIFIED" => styled("VERIFIED", color::VERIFIED),
-                "FAILED" => styled("FAILED", color::FAILED),
-                "PARTIAL" => styled("PARTIAL", color::WARNING),
-                _ => r.status.clone(),
-            };
-            table.add_row(vec![
-                r.contract_name.clone(),
-                output::truncate_address(&r.address),
-                status_styled,
-                ver_badge.clone(),
-            ]);
-        }
-        output::print_table(&table);
+        eprintln!("\nVerification complete: {}/{} successful", success_count, total);
     }
 
     Ok(())
@@ -637,7 +786,9 @@ mod tests {
 
     use treb_core::types::{VerificationStatus, VerifierStatus};
 
-    use super::{aggregate_status, resolve_api_key};
+    use crate::ui::emoji;
+
+    use super::{aggregate_status, get_status_icon, resolve_api_key};
 
     fn env_lock() -> MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -863,5 +1014,27 @@ mod tests {
     fn resolve_api_key_unknown_verifier_returns_none() {
         let result = resolve_api_key("unknown", &None);
         assert_eq!(result, None);
+    }
+
+    // --- get_status_icon tests ---
+
+    #[test]
+    fn status_icon_verified_is_refresh() {
+        assert_eq!(get_status_icon(&VerificationStatus::Verified), emoji::REFRESH);
+    }
+
+    #[test]
+    fn status_icon_failed_is_warning() {
+        assert_eq!(get_status_icon(&VerificationStatus::Failed), emoji::WARNING);
+    }
+
+    #[test]
+    fn status_icon_partial_is_repeat() {
+        assert_eq!(get_status_icon(&VerificationStatus::Partial), emoji::REPEAT);
+    }
+
+    #[test]
+    fn status_icon_unverified_is_hourglass() {
+        assert_eq!(get_status_icon(&VerificationStatus::Unverified), emoji::HOURGLASS);
     }
 }

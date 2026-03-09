@@ -56,6 +56,54 @@ fn init_project_with_verified_deployments(tmp: &tempfile::TempDir) {
     registry.rebuild_lookup_index().expect("lookup index rebuild should succeed");
 }
 
+/// Helper: create a project with one unverified deployment whose address is invalid,
+/// so verification fails before any network call.
+fn init_project_with_invalid_address_deployment(tmp: &tempfile::TempDir) {
+    init_project_with_deployments(tmp);
+
+    let path = tmp.path().join(".treb/deployments.json");
+    let json_str = fs::read_to_string(&path).unwrap();
+    let mut map: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+    let deployment =
+        map.get_mut("mainnet/42220/FPMM:v3.0.0").expect("fixture deployment should exist");
+
+    deployment["address"] = serde_json::json!("not-an-address");
+    deployment["verification"]["status"] = serde_json::json!("UNVERIFIED");
+    deployment["verification"]["etherscanUrl"] = serde_json::json!("");
+    deployment["verification"]["verifiedAt"] = serde_json::Value::Null;
+    deployment["verification"]["reason"] = serde_json::json!("");
+    deployment["verification"]["verifiers"] = serde_json::json!({});
+
+    fs::write(&path, serde_json::to_string_pretty(&map).unwrap()).unwrap();
+
+    let registry = treb_registry::Registry::open(tmp.path()).expect("registry should open");
+    registry.rebuild_lookup_index().expect("lookup index rebuild should succeed");
+}
+
+/// Helper: create a project where only a single labeled deployment remains
+/// unverified and fails locally before any network call.
+fn init_project_with_single_labeled_batch_deployment(tmp: &tempfile::TempDir) {
+    init_project_with_verified_deployments(tmp);
+
+    let path = tmp.path().join(".treb/deployments.json");
+    let json_str = fs::read_to_string(&path).unwrap();
+    let mut map: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+    let deployment =
+        map.get_mut("mainnet/42220/FPMM:v3.0.0").expect("fixture deployment should exist");
+
+    deployment["address"] = serde_json::json!("not-an-address");
+    deployment["verification"]["status"] = serde_json::json!("UNVERIFIED");
+    deployment["verification"]["etherscanUrl"] = serde_json::json!("");
+    deployment["verification"]["verifiedAt"] = serde_json::Value::Null;
+    deployment["verification"]["reason"] = serde_json::json!("");
+    deployment["verification"]["verifiers"] = serde_json::json!({});
+
+    fs::write(&path, serde_json::to_string_pretty(&map).unwrap()).unwrap();
+
+    let registry = treb_registry::Registry::open(tmp.path()).expect("registry should open");
+    registry.rebuild_lookup_index().expect("lookup index rebuild should succeed");
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // --help output
 // ═══════════════════════════════════════════════════════════════════════════
@@ -373,6 +421,43 @@ fn verify_already_verified_skips_with_message() {
 }
 
 #[test]
+fn verify_single_failure_uses_go_style_output_without_generic_error_line() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_invalid_address_deployment(&tmp);
+
+    let output = treb()
+        .args(["--no-color", "verify", "FPMM"])
+        .env("NO_COLOR", "1")
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success(), "verification failure should exit non-zero");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("✗ Verification failed: invalid address 'not-an-address'"),
+        "single verify failure should print the handled summary: {stderr}"
+    );
+    assert!(
+        stderr.contains("Verification Status:"),
+        "single verify failure should include the status section: {stderr}"
+    );
+    assert!(
+        stderr.contains("✗ Etherscan Failed"),
+        "single verify failure should print title-cased verifier status: {stderr}"
+    );
+    assert!(
+        !stderr.contains("  etherscan: FAILED"),
+        "legacy lowercase verifier line should be suppressed: {stderr}"
+    );
+    assert!(
+        !stderr.contains("Error:"),
+        "generic main error line should be suppressed for handled verification failures: {stderr}"
+    );
+}
+
+#[test]
 fn verify_all_with_all_verified_prints_noop() {
     let tmp = tempfile::tempdir().unwrap();
     init_project_with_verified_deployments(&tmp);
@@ -382,7 +467,7 @@ fn verify_all_with_all_verified_prints_noop() {
         .current_dir(tmp.path())
         .assert()
         .success()
-        .stderr(predicate::str::contains("No unverified deployments found"));
+        .stderr(predicate::str::contains("No unverified deployed contracts found"));
 }
 
 #[test]
@@ -396,12 +481,83 @@ fn verify_all_force_proceeds_with_reverification() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     // With --force, the batch should attempt verification (not print noop).
     assert!(
-        !stderr.contains("No unverified deployments found"),
+        !stderr.contains("No unverified deployed contracts found"),
         "--all --force should not print noop message: {stderr}"
     );
-    // Should show progress messages indicating it tried to re-verify.
+    // Should show to-verify header indicating it found contracts to verify.
     assert!(
-        stderr.contains("Re-verifying"),
-        "--all --force should attempt re-verification: {stderr}"
+        stderr.contains("Found") && stderr.contains("to verify"),
+        "--all --force should show to-verify header: {stderr}"
+    );
+}
+
+#[test]
+fn verify_all_uses_labeled_display_name_without_synthetic_skip_section() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_single_labeled_batch_deployment(&tmp);
+
+    let output = treb()
+        .args(["--no-color", "verify", "--all"])
+        .env("NO_COLOR", "1")
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "batch verify should complete with handled failures");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        !stderr.contains("Skipping "),
+        "batch verify should not synthesize a skipped section for already verified deployments: {stderr}"
+    );
+    assert!(
+        !stderr.contains("(already verified)"),
+        "batch verify should not render already verified deployments as skipped batch results: {stderr}"
+    );
+    // Per-result line should contain the labeled display name in chain:CHAINID/NS/NAME format.
+    assert!(
+        stderr.contains("chain:42220/mainnet/FPMM:v3.0.0"),
+        "batch per-result should show the labeled display name: {stderr}"
+    );
+    assert!(
+        !stderr.contains("chain:42220/mainnet/FPMM\n"),
+        "batch per-result should not fall back to the raw contract name: {stderr}"
+    );
+    // Summary line should appear.
+    assert!(stderr.contains("Verification complete:"), "batch should show summary line: {stderr}");
+}
+
+#[test]
+fn verify_all_batch_output_uses_aggregate_failure_details() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_single_labeled_batch_deployment(&tmp);
+
+    let output = treb()
+        .args(["--no-color", "verify", "--all", "--etherscan", "--sourcify"])
+        .env("NO_COLOR", "1")
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "batch verify should complete with handled failures");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        stderr.contains("✗ invalid address 'not-an-address'"),
+        "batch verify should print aggregate failure details instead of verifier status lines: {stderr}"
+    );
+    assert!(
+        !stderr.contains("✗ Etherscan Failed"),
+        "batch verify should not reuse single-verify verifier breakdown lines: {stderr}"
+    );
+    assert!(
+        !stderr.contains("✗ Sourcify Failed"),
+        "batch verify should not reuse single-verify verifier breakdown lines: {stderr}"
+    );
+    assert!(
+        !stderr.contains("Verification Status:"),
+        "batch verify should not print the single-verify status section: {stderr}"
     );
 }

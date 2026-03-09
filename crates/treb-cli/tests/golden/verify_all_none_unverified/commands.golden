@@ -1,2 +1,2 @@
 === cmd 0: [verify --all] ===
-No unverified deployments found.
+No unverified deployed contracts found. Use --force to re-verify all contracts.
