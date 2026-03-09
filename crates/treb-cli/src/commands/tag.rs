@@ -138,14 +138,12 @@ fn add_tag(
     } else {
         println!(
             "{}",
-            styled(
-                &format!("\u{2705} Added tag {tag} to {deployment_id}"),
-                color::GREEN,
-            )
+            styled(&format!("\u{2705} Added tag '{tag}' to {deployment_id}"), color::GREEN,)
         );
         tags.sort();
         let tags_display =
             tags.iter().map(|t| styled(t, color::CYAN)).collect::<Vec<_>>().join(", ");
+        println!();
         println!("Current tags: {tags_display}");
     }
 
