@@ -129,19 +129,12 @@ pub async fn remove(key: &str) -> anyhow::Result<()> {
         "namespace" => {
             config.namespace = defaults.namespace.clone();
             save_local_config(&cwd, &config).context("failed to save local config")?;
-            println!(
-                "{} Reset namespace to: {}",
-                emoji::CHECK,
-                defaults.namespace
-            );
+            println!("{} Reset namespace to: {}", emoji::CHECK, defaults.namespace);
         }
         "network" => {
             config.network = defaults.network;
             save_local_config(&cwd, &config).context("failed to save local config")?;
-            println!(
-                "{} Removed network from config (will be required as flag)",
-                emoji::CHECK
-            );
+            println!("{} Removed network from config (will be required as flag)", emoji::CHECK);
         }
         _ => bail!("unknown config key '{}'; valid keys: namespace, network", key),
     }

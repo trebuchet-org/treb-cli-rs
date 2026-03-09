@@ -3,13 +3,13 @@
   {
     "chainId": null,
     "name": "mainnet",
-    "rpcUrl": "${MAINNET_RPC_URL}",
+    "rpcUrl": "$MAINNET_RPC_URL",
     "status": "unresolved env var"
   },
   {
     "chainId": null,
     "name": "sepolia",
-    "rpcUrl": "${SEPOLIA_RPC_URL}",
+    "rpcUrl": "$SEPOLIA_RPC_URL",
     "status": "unresolved env var"
   }
 ]

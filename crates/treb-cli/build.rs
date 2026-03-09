@@ -585,9 +585,9 @@ fn main() {
         .unwrap_or_else(|| "unknown".to_string());
     println!("cargo:rustc-env=TREB_GIT_COMMIT={git_commit}");
 
-    // Build date (UTC, date only).
+    // Build date (UTC, RFC3339) for formatting at render time.
     let build_date = Command::new("date")
-        .args(["-u", "+%Y-%m-%d"])
+        .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
         .output()
         .ok()
         .filter(|o| o.status.success())

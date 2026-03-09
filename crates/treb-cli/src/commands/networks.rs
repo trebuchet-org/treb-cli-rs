@@ -53,7 +53,22 @@ async fn resolve_chain_id(client: &reqwest::Client, url: &str) -> (Option<u64>, 
 /// Returns true if the URL string contains unresolved environment variable
 /// references like `${VAR}` or `$VAR`.
 fn has_unresolved_env_vars(url: &str) -> bool {
-    url.contains("${") || url.contains("${{")
+    let bytes = url.as_bytes();
+    let mut idx = 0;
+
+    while idx < bytes.len() {
+        if bytes[idx] == b'$' {
+            match bytes.get(idx + 1).copied() {
+                Some(b'{') => return true,
+                Some(next) if next == b'_' || next.is_ascii_alphabetic() => return true,
+                _ => {}
+            }
+        }
+
+        idx += 1;
+    }
+
+    false
 }
 
 pub async fn run(json: bool) -> anyhow::Result<()> {
