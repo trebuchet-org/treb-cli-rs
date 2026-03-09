@@ -172,6 +172,14 @@ pub const GREEN: Style = Style::new().green();
 /// Red foreground for script renderer.
 pub const RED: Style = Style::new().red();
 
+#[allow(dead_code)]
+/// Blue foreground for script renderer (network names).
+pub const BLUE: Style = Style::new().blue();
+
+#[allow(dead_code)]
+/// Magenta foreground for script renderer (namespace, fork mode).
+pub const MAGENTA: Style = Style::new().magenta();
+
 // ---------------------------------------------------------------------------
 // Deployment type → style mapping
 // ---------------------------------------------------------------------------

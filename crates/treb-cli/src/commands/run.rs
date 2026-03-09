@@ -314,35 +314,113 @@ pub async fn run(
         0
     };
 
-    // ── Verbose pre-execution context ──────────────────────────────────
+    // ── Verbose pre-execution banner (Go: PrintDeploymentBanner) ──────
     if verbose && !json {
-        let broadcast_mode = if dry_run {
-            "dry-run"
-        } else if broadcast {
-            "broadcast"
+        let separator: String = "─".repeat(50);
+        let use_color = color::is_color_enabled();
+
+        // Header
+        println!();
+        if use_color {
+            println!("{} {}", emoji::ROCKET, "Running Deployment Script".style(color::BOLD));
+            println!("{}", separator.style(color::GRAY));
         } else {
-            "simulate"
+            println!("{} Running Deployment Script", emoji::ROCKET);
+            println!("{separator}");
+        }
+
+        // Script
+        if use_color {
+            println!("  {:10} {}", "Script:", script.style(color::CYAN));
+        } else {
+            println!("  {:10} {}", "Script:", script);
+        }
+
+        // Network
+        let network_name = resolved.network.as_deref().unwrap_or("(none)");
+        if use_color {
+            if chain_id > 0 {
+                println!(
+                    "  {:10} {} {}",
+                    "Network:",
+                    network_name.style(color::BLUE),
+                    format!("({})", chain_id).style(color::GRAY)
+                );
+            } else {
+                println!("  {:10} {}", "Network:", network_name.style(color::BLUE));
+            }
+        } else if chain_id > 0 {
+            println!("  {:10} {} ({})", "Network:", network_name, chain_id);
+        } else {
+            println!("  {:10} {}", "Network:", network_name);
+        }
+
+        // Namespace
+        if use_color {
+            println!(
+                "  {:10} {}",
+                "Namespace:",
+                resolved.namespace.style(color::MAGENTA)
+            );
+        } else {
+            println!("  {:10} {}", "Namespace:", resolved.namespace);
+        }
+
+        // Mode
+        let (mode_label, mode_style) = if dry_run {
+            ("DRY_RUN", color::YELLOW)
+        } else if broadcast {
+            ("LIVE", color::GREEN)
+        } else {
+            ("SIMULATE", color::MAGENTA)
         };
-        let rpc_display = effective_rpc_url.as_deref().unwrap_or("(none)");
-        let chain_id_str = chain_id.to_string();
-        let mut kv_pairs: Vec<(&str, &str)> = vec![
-            ("Config source", &resolved.config_source),
-            ("Namespace", &resolved.namespace),
-            ("Chain ID", &chain_id_str),
-            ("RPC", rpc_display),
-        ];
-        // Collect sender lines
+        if use_color {
+            println!("  {:10} {}", "Mode:", mode_label.style(mode_style));
+        } else {
+            println!("  {:10} {}", "Mode:", mode_label);
+        }
+
+        // Env Vars (only when present)
+        if !env_vars.is_empty() {
+            for (i, var) in env_vars.iter().enumerate() {
+                let (key, value) = parse_env_var(var).unwrap_or((var.as_str(), ""));
+                let formatted = if use_color {
+                    format!("{}={}", key.style(color::YELLOW), value.style(color::GREEN))
+                } else {
+                    format!("{key}={value}")
+                };
+                if i == 0 {
+                    println!("  {:10} {}", "Env Vars:", formatted);
+                } else {
+                    println!("  {:10} {}", "", formatted);
+                }
+            }
+        }
+
+        // Senders
         let mut sender_lines: Vec<String> =
             resolved_senders.iter().map(|(role, s)| format_verbose_sender(role, s)).collect();
         sender_lines.sort();
-        for line in &sender_lines {
-            kv_pairs.push(("Sender", line));
+        for (i, line) in sender_lines.iter().enumerate() {
+            if use_color {
+                if i == 0 {
+                    println!("  {:10} {}", "Senders:", line.style(color::GRAY));
+                } else {
+                    println!("  {:10} {}", "", line.style(color::GRAY));
+                }
+            } else if i == 0 {
+                println!("  {:10} {}", "Senders:", line);
+            } else {
+                println!("  {:10} {}", "", line);
+            }
         }
-        kv_pairs.push(("Script path", script));
-        kv_pairs.push(("Function sig", sig));
-        kv_pairs.push(("Broadcast mode", broadcast_mode));
-        output::eprint_kv(&kv_pairs);
-        eprintln!();
+
+        // Bottom separator
+        if use_color {
+            println!("{}", separator.style(color::GRAY));
+        } else {
+            println!("{separator}");
+        }
     }
 
     // ── Build PipelineConfig and PipelineContext ─────────────────────────
