@@ -25,8 +25,8 @@ Artifact Information:
   GitCommit: f7c896cf0da6eca082cf90066d7e9510978e4659
 
 Verification Status:
-  Etherscan: VERIFIED https://celoscan.io/address/0x42eddd7dC046da254A93659CA9b02f294606833D#code
-  Sourcify: FAILED — Contract not found on Sourcify
+  Status: PARTIAL
+  Etherscan: https://celoscan.io/address/0x42eddd7dC046da254A93659CA9b02f294606833D#code
 
 Timestamps:
   Created: <TIMESTAMP>

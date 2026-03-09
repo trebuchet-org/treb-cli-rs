@@ -4,7 +4,7 @@ use std::{collections::HashMap, env};
 
 use anyhow::{Context, bail};
 use owo_colors::{OwoColorize, Style};
-use treb_core::types::{Deployment, VerificationStatus, contract_display_name};
+use treb_core::types::{Deployment, VerificationStatus, VerifierStatus, contract_display_name};
 use treb_registry::Registry;
 
 use crate::{
@@ -15,6 +15,12 @@ use crate::{
 
 /// Lookup table for resolving proxy implementation addresses to display names.
 type ImplNameLookup = HashMap<(String, u64, String), String>;
+
+struct VerificationDisplay<'a> {
+    status: VerificationStatus,
+    etherscan_url: &'a str,
+    verified_at: Option<&'a chrono::DateTime<chrono::Utc>>,
+}
 
 pub async fn run(deployment_query: Option<String>, json: bool) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
@@ -114,6 +120,46 @@ fn resolve_proxy_implementation_display(
     }
 }
 
+fn aggregate_verification_status(
+    verifiers: &HashMap<String, VerifierStatus>,
+) -> VerificationStatus {
+    if verifiers.is_empty() {
+        return VerificationStatus::Unverified;
+    }
+
+    let all_verified =
+        verifiers.values().all(|verifier| verifier.status.eq_ignore_ascii_case("VERIFIED"));
+    let all_failed =
+        verifiers.values().all(|verifier| verifier.status.eq_ignore_ascii_case("FAILED"));
+
+    if all_verified {
+        VerificationStatus::Verified
+    } else if all_failed {
+        VerificationStatus::Failed
+    } else {
+        VerificationStatus::Partial
+    }
+}
+
+fn verification_display(d: &Deployment) -> VerificationDisplay<'_> {
+    let status = if d.verification.verifiers.is_empty() {
+        d.verification.status.clone()
+    } else {
+        aggregate_verification_status(&d.verification.verifiers)
+    };
+
+    let etherscan_url = d
+        .verification
+        .verifiers
+        .iter()
+        .find(|(name, verifier)| name.eq_ignore_ascii_case("etherscan") && !verifier.url.is_empty())
+        .map(|(_, verifier)| verifier.url.as_str())
+        .filter(|_| d.verification.etherscan_url.is_empty())
+        .unwrap_or(&d.verification.etherscan_url);
+
+    VerificationDisplay { status, etherscan_url, verified_at: d.verification.verified_at.as_ref() }
+}
+
 fn print_deployment_details(d: &Deployment, impl_lookup: &ImplNameLookup) {
     // Header: Deployment: {id} [fork]
     let fork = badge::fork_badge(&d.namespace);
@@ -194,20 +240,18 @@ fn print_deployment_details(d: &Deployment, impl_lookup: &ImplNameLookup) {
 
     // Verification Status (Go: Verification)
     print_section("Verification Status");
-    let status_str = d.verification.status.to_string();
-    let status_style = match d.verification.status {
+    let verification = verification_display(d);
+    let status_str = verification.status.to_string();
+    let status_style = match verification.status {
         VerificationStatus::Verified => color::VERIFIED,
         _ => color::NOT_VERIFIED,
     };
     print_field("Status", &styled(&status_str, status_style));
-    if !d.verification.etherscan_url.is_empty() {
-        print_field("Etherscan", &d.verification.etherscan_url);
+    if !verification.etherscan_url.is_empty() {
+        print_field("Etherscan", verification.etherscan_url);
     }
-    if let Some(ref verified_at) = d.verification.verified_at {
-        print_field(
-            "Verified At",
-            &verified_at.format("%Y-%m-%d %H:%M:%S").to_string(),
-        );
+    if let Some(verified_at) = verification.verified_at {
+        print_field("Verified At", &verified_at.format("%Y-%m-%d %H:%M:%S").to_string());
     }
 
     // Tags (only when present)
@@ -222,12 +266,97 @@ fn print_deployment_details(d: &Deployment, impl_lookup: &ImplNameLookup) {
 
     // Timestamps
     print_section("Timestamps");
-    print_field(
-        "Created",
-        &d.created_at.format("%Y-%m-%d %H:%M:%S").to_string(),
-    );
-    print_field(
-        "Updated",
-        &d.updated_at.format("%Y-%m-%d %H:%M:%S").to_string(),
-    );
+    print_field("Created", &d.created_at.format("%Y-%m-%d %H:%M:%S").to_string());
+    print_field("Updated", &d.updated_at.format("%Y-%m-%d %H:%M:%S").to_string());
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::TimeZone;
+
+    use super::*;
+    use treb_core::types::{
+        ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, VerificationInfo,
+    };
+
+    fn sample_deployment() -> Deployment {
+        Deployment {
+            id: "mainnet/1/Counter:v1".into(),
+            namespace: "mainnet".into(),
+            chain_id: 1,
+            contract_name: "Counter".into(),
+            label: "v1".into(),
+            address: "0x1234567890abcdef1234567890abcdef12345678".into(),
+            deployment_type: DeploymentType::Singleton,
+            transaction_id: String::new(),
+            deployment_strategy: DeploymentStrategy {
+                method: DeploymentMethod::Create,
+                salt: String::new(),
+                init_code_hash: String::new(),
+                factory: String::new(),
+                constructor_args: String::new(),
+                entropy: String::new(),
+            },
+            proxy_info: None,
+            artifact: ArtifactInfo {
+                path: "out/Counter.sol/Counter.json".into(),
+                compiler_version: "0.8.24".into(),
+                bytecode_hash: String::new(),
+                script_path: String::new(),
+                git_commit: String::new(),
+            },
+            verification: VerificationInfo {
+                status: VerificationStatus::Unverified,
+                etherscan_url: String::new(),
+                verified_at: None,
+                reason: String::new(),
+                verifiers: HashMap::new(),
+            },
+            tags: None,
+            created_at: chrono::Utc.with_ymd_and_hms(2026, 3, 1, 12, 0, 0).unwrap(),
+            updated_at: chrono::Utc.with_ymd_and_hms(2026, 3, 2, 12, 0, 0).unwrap(),
+        }
+    }
+
+    #[test]
+    fn verification_display_derives_stale_aggregate_fields_from_verifiers() {
+        let mut deployment = sample_deployment();
+        deployment.verification.verifiers.insert(
+            "etherscan".into(),
+            VerifierStatus {
+                status: "VERIFIED".into(),
+                url: "https://etherscan.io/address/0x123".into(),
+                reason: String::new(),
+            },
+        );
+        deployment.verification.verifiers.insert(
+            "sourcify".into(),
+            VerifierStatus {
+                status: "FAILED".into(),
+                url: String::new(),
+                reason: "not found".into(),
+            },
+        );
+
+        let display = verification_display(&deployment);
+
+        assert_eq!(display.status, VerificationStatus::Partial);
+        assert_eq!(display.etherscan_url, "https://etherscan.io/address/0x123");
+        assert!(display.verified_at.is_none());
+    }
+
+    #[test]
+    fn verification_display_keeps_top_level_fields_without_verifiers() {
+        let mut deployment = sample_deployment();
+        let verified_at = chrono::Utc.with_ymd_and_hms(2026, 3, 3, 12, 0, 0).unwrap();
+        deployment.verification.status = VerificationStatus::Verified;
+        deployment.verification.etherscan_url = "https://etherscan.io/address/0xabc".into();
+        deployment.verification.verified_at = Some(verified_at);
+
+        let display = verification_display(&deployment);
+
+        assert_eq!(display.status, VerificationStatus::Verified);
+        assert_eq!(display.etherscan_url, "https://etherscan.io/address/0xabc");
+        assert_eq!(display.verified_at, Some(&verified_at));
+    }
 }
