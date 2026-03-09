@@ -6,5 +6,7 @@ Tags:
 📝 Updating tags...
 
 === cmd 1: [tag mainnet/42220/FPMM:v<VERSION>] ===
-Tags for 'mainnet/42220/FPMM:v<VERSION>':
-  - v3-release
+
+Deployment: mainnet/42220/FPMM:v<VERSION>
+Address: 0x42eddd7dC046da254A93659CA9b02f294606833D
+Tags:    v3-release

@@ -90,11 +90,7 @@ fn show_tags(registry: &Registry, deployment_id: &str, json: bool) -> anyhow::Re
         })?;
     } else {
         println!();
-        println!(
-            "{} {}",
-            styled("Deployment:", color::STAGE),
-            styled(deployment_id, color::STAGE),
-        );
+        println!("{} {}", styled("Deployment:", color::STAGE), styled(deployment_id, color::STAGE),);
         println!(
             "{} {}",
             styled("Address:", color::SECTION_HEADER),
@@ -104,10 +100,7 @@ fn show_tags(registry: &Registry, deployment_id: &str, json: bool) -> anyhow::Re
         let tags_value = if tags.is_empty() {
             styled("No tags", color::GRAY)
         } else {
-            tags.iter()
-                .map(|t| styled(t, color::CYAN))
-                .collect::<Vec<_>>()
-                .join(", ")
+            tags.iter().map(|t| styled(t, color::CYAN)).collect::<Vec<_>>().join(", ")
         };
         println!("{} {tags_value}", styled("Tags:   ", color::SECTION_HEADER));
         println!();
