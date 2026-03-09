@@ -467,7 +467,7 @@ fn verify_all_with_all_verified_prints_noop() {
         .current_dir(tmp.path())
         .assert()
         .success()
-        .stderr(predicate::str::contains("No unverified deployments found"));
+        .stderr(predicate::str::contains("No unverified deployed contracts found"));
 }
 
 #[test]
@@ -481,13 +481,13 @@ fn verify_all_force_proceeds_with_reverification() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     // With --force, the batch should attempt verification (not print noop).
     assert!(
-        !stderr.contains("No unverified deployments found"),
+        !stderr.contains("No unverified deployed contracts found"),
         "--all --force should not print noop message: {stderr}"
     );
-    // Should show progress messages indicating it tried to re-verify.
+    // Should show to-verify header indicating it found contracts to verify.
     assert!(
-        stderr.contains("Re-verifying"),
-        "--all --force should attempt re-verification: {stderr}"
+        stderr.contains("Found") && stderr.contains("to verify"),
+        "--all --force should show to-verify header: {stderr}"
     );
 }
 
@@ -505,19 +505,20 @@ fn verify_all_uses_labeled_display_name_in_progress_and_summary() {
 
     assert!(output.status.success(), "batch verify should complete with handled failures");
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
+    // Per-result line should contain the labeled display name in chain:CHAINID/NS/NAME format.
     assert!(
-        stderr.contains("[1/1] Verifying FPMM:v3.0.0 ("),
-        "batch progress should show the labeled display name: {stderr}"
+        stderr.contains("FPMM:v3.0.0"),
+        "batch per-result should show the labeled display name: {stderr}"
     );
     assert!(
-        !stderr.contains("[1/1] Verifying FPMM ("),
-        "batch progress should not fall back to the raw contract name: {stderr}"
+        !stderr.contains("chain:42220/mainnet/FPMM\n"),
+        "batch per-result should not fall back to the raw contract name: {stderr}"
     );
+    // Summary line should appear.
     assert!(
-        stdout.contains("FPMM:v3.0.0"),
-        "batch summary should show the labeled display name: {stdout}"
+        stderr.contains("Verification complete:"),
+        "batch should show summary line: {stderr}"
     );
 }
