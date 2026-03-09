@@ -1,7 +1,7 @@
 //! `treb fork` subcommands — enter/exit fork mode, status, history, diff, revert, restart.
 
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, HashSet},
     env,
     path::{Path, PathBuf},
     time::Duration,
@@ -17,7 +17,7 @@ use foundry_common::{
 use serde::Serialize;
 use tokio::net::TcpStream;
 use treb_config::{ResolveOpts, load_local_config, resolve_config};
-use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
+use treb_core::types::fork::{ForkEntry, ForkHistoryEntry, SnapshotEntry};
 use treb_forge::{
     createx::createx_deployed_bytecode, execute_script, script::build_script_config_with_senders,
     sender::resolve_all_senders,
@@ -529,13 +529,8 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
                 })?;
 
             let mut updated = entry.clone();
-            let next_index = updated.snapshots.len() as u32;
-            updated.snapshots.push(treb_core::types::fork::SnapshotEntry {
-                index: next_index,
-                snapshot_id: new_snapshot_id.clone(),
-                command: "revert".into(),
-                timestamp: Utc::now(),
-            });
+            updated.snapshots =
+                revert_snapshot_stack(&updated.snapshots, new_snapshot_id.clone(), Utc::now());
             store.update_active_fork(updated).context("failed to update fork entry")?;
 
             history_snapshots.push((instance_name, new_snapshot_id.clone()));
@@ -695,13 +690,7 @@ pub async fn run_restart(
         if let Some(b) = blk {
             updated.fork_block_number = Some(b);
         }
-        let next_index = updated.snapshots.len() as u32;
-        updated.snapshots.push(treb_core::types::fork::SnapshotEntry {
-            index: next_index,
-            snapshot_id: snapshot_id.clone(),
-            command: "restart".into(),
-            timestamp: Utc::now(),
-        });
+        updated.snapshots = restart_snapshot_stack(snapshot_id.clone(), Utc::now());
         store.update_active_fork(updated).context("failed to update fork entry")?;
 
         history_snapshots.push((instance_name.clone(), snapshot_id.clone()));
@@ -977,13 +966,11 @@ pub async fn run_history(network: Option<String>, json: bool) -> anyhow::Result<
     }
 
     for net in &networks {
-        let entry = human_history_entry(&store, net)
-            .ok_or_else(|| anyhow::anyhow!("network '{}' is not in fork mode", net))?;
-
+        let entries = human_history_entries(&store, net);
         println!("Fork History: {net}");
         println!();
 
-        for line in render_history_lines(entry) {
+        for line in render_history_lines(&entries) {
             println!("{line}");
         }
 
@@ -1159,51 +1146,92 @@ fn resolve_fork_session_entry<'a>(
 
 fn human_history_networks(store: &ForkStateStore, network: Option<&str>) -> Vec<String> {
     match network {
-        Some(network) => human_history_entry(store, network)
-            .map(|_| vec![network.to_string()])
-            .unwrap_or_default(),
-        None => store
-            .list_active_networks()
-            .into_iter()
-            .filter(|network| human_history_entry(store, network).is_some())
-            .collect(),
+        Some(network) => {
+            if store.data().history.iter().any(|entry| entry.network == network) {
+                vec![network.to_string()]
+            } else {
+                Vec::new()
+            }
+        }
+        None => {
+            let mut seen = HashSet::new();
+            store
+                .data()
+                .history
+                .iter()
+                .filter_map(|entry| {
+                    seen.insert(entry.network.clone()).then_some(entry.network.clone())
+                })
+                .collect()
+        }
     }
 }
 
-fn human_history_entry<'a>(store: &'a ForkStateStore, network: &str) -> Option<&'a ForkEntry> {
-    let session = resolve_fork_session_entry(store, network)?;
-    if !session.snapshots.is_empty() {
-        return Some(session);
-    }
-
-    primary_tracked_anvil_entry(store, network)
-        .filter(|entry| !entry.snapshots.is_empty())
-        .or(Some(session))
+fn human_history_entries<'a>(
+    store: &'a ForkStateStore,
+    network: &str,
+) -> Vec<&'a ForkHistoryEntry> {
+    let mut entries: Vec<_> =
+        store.data().history.iter().filter(|entry| entry.network == network).collect();
+    entries.reverse();
+    entries
 }
 
-fn render_history_lines(entry: &ForkEntry) -> Vec<String> {
-    if entry.snapshots.is_empty() {
-        return vec![format!(
-            "  \u{2192} [0] initial  ({})",
-            entry.entered_at.format("%Y-%m-%d %H:%M:%S")
-        )];
-    }
+fn render_history_lines(entries: &[&ForkHistoryEntry]) -> Vec<String> {
+    let Some(last_idx) = entries.len().checked_sub(1) else {
+        return Vec::new();
+    };
 
-    let last_idx = entry.snapshots.len() - 1;
-    entry
-        .snapshots
+    entries
         .iter()
         .enumerate()
-        .map(|(offset, snapshot)| {
-            let marker = if offset == last_idx { "\u{2192} " } else { "  " };
-            let label = if offset == 0 { "initial" } else { snapshot.command.as_str() };
+        .map(|(index, entry)| {
+            let marker = if index == last_idx { "\u{2192} " } else { "  " };
+            let label = history_label(index, entry);
             format!(
-                "  {marker}[{}] {label}  ({})",
-                snapshot.index,
-                snapshot.timestamp.format("%Y-%m-%d %H:%M:%S")
+                "  {marker}[{index}] {label}  ({})",
+                entry.timestamp.format("%Y-%m-%d %H:%M:%S")
             )
         })
         .collect()
+}
+
+fn history_label(index: usize, entry: &ForkHistoryEntry) -> String {
+    if index == 0 && entry.action == "enter" {
+        return "initial".to_string();
+    }
+
+    match entry.details.as_deref() {
+        Some(details) if !details.is_empty() => format!("{}: {details}", entry.action),
+        _ => entry.action.clone(),
+    }
+}
+
+fn restart_snapshot_stack(
+    snapshot_id: String,
+    timestamp: chrono::DateTime<Utc>,
+) -> Vec<SnapshotEntry> {
+    vec![snapshot_entry(0, snapshot_id, "restart", timestamp)]
+}
+
+fn revert_snapshot_stack(
+    existing: &[SnapshotEntry],
+    snapshot_id: String,
+    timestamp: chrono::DateTime<Utc>,
+) -> Vec<SnapshotEntry> {
+    let mut snapshots = existing.to_vec();
+    snapshots.pop();
+    snapshots.push(snapshot_entry(snapshots.len() as u32, snapshot_id, "revert", timestamp));
+    snapshots
+}
+
+fn snapshot_entry(
+    index: u32,
+    snapshot_id: String,
+    command: &str,
+    timestamp: chrono::DateTime<Utc>,
+) -> SnapshotEntry {
+    SnapshotEntry { index, snapshot_id, command: command.into(), timestamp }
 }
 
 fn exit_ordered_networks(store: &ForkStateStore) -> Vec<String> {
@@ -1482,7 +1510,7 @@ mod tests {
     use clap::{Parser, Subcommand};
     use std::{fs, path::PathBuf};
     use tempfile::TempDir;
-    use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
+    use treb_core::types::fork::{ForkEntry, ForkHistoryEntry, SnapshotEntry};
     use treb_registry::{DEPLOYMENTS_FILE, ForkStateStore, restore_registry, snapshot_registry};
 
     // ── Minimal test CLI for clap parsing ─────────────────────────────────
@@ -1960,77 +1988,138 @@ mod tests {
     }
 
     #[test]
-    fn human_history_entry_prefers_runtime_snapshots_when_session_is_placeholder() {
+    fn human_history_networks_use_persisted_audit_log() {
         let (_root, treb_dir) = make_treb_dir();
         let mut store = ForkStateStore::new(&treb_dir);
 
-        let session = sample_entry(&treb_dir, "mainnet");
-        let mut runtime = sample_named_entry(&treb_dir, "mainnet", "alpha");
-        runtime.port = 18545;
-        runtime.rpc_url = "http://127.0.0.1:18545".into();
-        runtime.snapshots.push(treb_core::types::fork::SnapshotEntry {
-            index: 0,
-            snapshot_id: "0x1".into(),
-            command: "enter".into(),
-            timestamp: Utc::now(),
-        });
-
-        store.insert_active_fork(session).unwrap();
-        store.insert_active_fork(runtime).unwrap();
-
-        let entry = super::human_history_entry(&store, "mainnet").unwrap();
-        assert_eq!(entry.resolved_instance_name(), "alpha");
-        assert_eq!(entry.snapshots.len(), 1);
-    }
-
-    #[test]
-    fn render_history_lines_use_active_snapshot_stack_for_current_session() {
-        let (_root, treb_dir) = make_treb_dir();
-        let mut store = ForkStateStore::new(&treb_dir);
-
-        let entered_at = Utc.with_ymd_and_hms(2026, 1, 12, 9, 0, 0).unwrap();
-        let older_entered_at = Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap();
-
-        let mut active = sample_entry(&treb_dir, "mainnet");
-        active.entered_at = entered_at;
-        active.started_at = entered_at;
-        active.snapshots.push(treb_core::types::fork::SnapshotEntry {
-            index: 0,
-            snapshot_id: "0x2".into(),
-            command: "enter".into(),
-            timestamp: entered_at,
-        });
-
-        store.insert_active_fork(active).unwrap();
-        store
-            .add_history(ForkHistoryEntry {
-                action: "enter".into(),
-                network: "mainnet".into(),
-                timestamp: older_entered_at,
-                details: None,
-            })
-            .unwrap();
         store
             .add_history(ForkHistoryEntry {
                 action: "exit".into(),
                 network: "mainnet".into(),
-                timestamp: Utc.with_ymd_and_hms(2026, 1, 11, 9, 0, 0).unwrap(),
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 12, 9, 0, 0).unwrap(),
                 details: None,
             })
             .unwrap();
         store
             .add_history(ForkHistoryEntry {
                 action: "enter".into(),
-                network: "mainnet".into(),
-                timestamp: entered_at,
+                network: "sepolia".into(),
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 11, 9, 0, 0).unwrap(),
                 details: None,
             })
             .unwrap();
 
-        let entry = super::human_history_entry(&store, "mainnet").unwrap();
-        let lines = super::render_history_lines(entry);
+        assert_eq!(
+            super::human_history_networks(&store, None),
+            vec!["sepolia".to_string(), "mainnet".to_string()]
+        );
+        assert_eq!(
+            super::human_history_networks(&store, Some("mainnet")),
+            vec!["mainnet".to_string()]
+        );
+    }
 
-        assert_eq!(lines, vec!["  → [0] initial  (2026-01-12 09:00:00)".to_string()]);
+    #[test]
+    fn render_history_lines_use_persisted_audit_entries() {
+        let (_root, treb_dir) = make_treb_dir();
+        let mut store = ForkStateStore::new(&treb_dir);
+
+        store
+            .add_history(ForkHistoryEntry {
+                action: "enter".into(),
+                network: "mainnet".into(),
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap(),
+                details: None,
+            })
+            .unwrap();
+        store
+            .add_history(ForkHistoryEntry {
+                action: "restart".into(),
+                network: "mainnet".into(),
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 12, 9, 0, 0).unwrap(),
+                details: Some("Anvil reset; snapshot: 0x2".into()),
+            })
+            .unwrap();
+        store
+            .add_history(ForkHistoryEntry {
+                action: "revert".into(),
+                network: "mainnet".into(),
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 13, 9, 0, 0).unwrap(),
+                details: Some("new EVM snapshot: 0x3".into()),
+            })
+            .unwrap();
+
+        let entries = super::human_history_entries(&store, "mainnet");
+        let lines = super::render_history_lines(&entries);
+
+        assert_eq!(
+            lines,
+            vec![
+                "    [0] initial  (2026-01-10 09:00:00)".to_string(),
+                "    [1] restart: Anvil reset; snapshot: 0x2  (2026-01-12 09:00:00)".to_string(),
+                "  → [2] revert: new EVM snapshot: 0x3  (2026-01-13 09:00:00)".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn restart_snapshot_stack_clears_previous_snapshots() {
+        let restarted = super::restart_snapshot_stack(
+            "0xrestart".into(),
+            Utc.with_ymd_and_hms(2026, 1, 12, 9, 0, 0).unwrap(),
+        );
+
+        assert_eq!(
+            restarted,
+            vec![SnapshotEntry {
+                index: 0,
+                snapshot_id: "0xrestart".into(),
+                command: "restart".into(),
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 12, 9, 0, 0).unwrap(),
+            }]
+        );
+    }
+
+    #[test]
+    fn revert_snapshot_stack_replaces_consumed_snapshot() {
+        let snapshots = vec![
+            SnapshotEntry {
+                index: 0,
+                snapshot_id: "0xenter".into(),
+                command: "enter".into(),
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap(),
+            },
+            SnapshotEntry {
+                index: 1,
+                snapshot_id: "0xrestart".into(),
+                command: "restart".into(),
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 11, 9, 0, 0).unwrap(),
+            },
+        ];
+
+        let reverted = super::revert_snapshot_stack(
+            &snapshots,
+            "0xrevert".into(),
+            Utc.with_ymd_and_hms(2026, 1, 12, 9, 0, 0).unwrap(),
+        );
+
+        assert_eq!(
+            reverted,
+            vec![
+                SnapshotEntry {
+                    index: 0,
+                    snapshot_id: "0xenter".into(),
+                    command: "enter".into(),
+                    timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap(),
+                },
+                SnapshotEntry {
+                    index: 1,
+                    snapshot_id: "0xrevert".into(),
+                    command: "revert".into(),
+                    timestamp: Utc.with_ymd_and_hms(2026, 1, 12, 9, 0, 0).unwrap(),
+                },
+            ]
+        );
     }
 
     // ── diff detects changes ──────────────────────────────────────────────

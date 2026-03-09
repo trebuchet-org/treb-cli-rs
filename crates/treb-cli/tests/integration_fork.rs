@@ -140,8 +140,8 @@ fn fork_status_not_initialized() {
 /// Pre-populate fork state with active fork entries plus audit history for
 /// golden file tests.
 ///
-/// Human output reads the active fork snapshot stack, while `--json` still
-/// returns the raw audit log. This seeds both data sources consistently:
+/// Human and JSON history both read from the persisted audit log. Active fork
+/// entries are still seeded so the same fixture can exercise `fork status`.
 /// - active snapshots for mainnet: initial -> restart
 /// - active snapshots for sepolia: initial
 /// - audit history entries in most-recent-first order:
@@ -306,6 +306,38 @@ fn fork_history_not_initialized() {
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
+}
+
+#[test]
+fn fork_history_after_exit_uses_persisted_audit_log() {
+    let ctx = TestContext::new("minimal-project");
+    ctx.run(["init"]).success();
+
+    let mut store = ForkStateStore::new(&ctx.treb_dir());
+    store
+        .add_history(ForkHistoryEntry {
+            action: "enter".into(),
+            network: "mainnet".into(),
+            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 8, 0, 0).unwrap(),
+            details: None,
+        })
+        .unwrap();
+    store
+        .add_history(ForkHistoryEntry {
+            action: "exit".into(),
+            network: "mainnet".into(),
+            timestamp: Utc.with_ymd_and_hms(2026, 1, 11, 8, 0, 0).unwrap(),
+            details: None,
+        })
+        .unwrap();
+
+    let output =
+        ctx.run(["fork", "history", "--network", "mainnet"]).success().get_output().stdout.clone();
+    let stdout = String::from_utf8(output).expect("utf8 fork history output");
+
+    assert!(stdout.contains("Fork History: mainnet"));
+    assert!(stdout.contains("[0] initial"));
+    assert!(stdout.contains("→ [1] exit"));
 }
 
 // ── Diff helpers ────────────────────────────────────────────────────────
@@ -1147,4 +1179,93 @@ fn fork_restart_json_not_forked() {
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
+}
+
+#[test]
+fn fork_restart_revert_keeps_status_and_history_in_sync() {
+    let mut snapshot_count = 0usize;
+    let port =
+        match spawn_json_rpc_server(move |request| match request["method"].as_str().unwrap() {
+            "anvil_reset" | "anvil_setCode" => serde_json::Value::Null,
+            "evm_revert" => serde_json::json!(true),
+            "evm_snapshot" => {
+                snapshot_count += 1;
+                match snapshot_count {
+                    1 => serde_json::json!("0xrestart-1"),
+                    2 => serde_json::json!("0xrevert-1"),
+                    3 => serde_json::json!("0xrestart-2"),
+                    other => panic!("unexpected evm_snapshot call #{other}"),
+                }
+            }
+            other => panic!("unexpected JSON-RPC method for lifecycle fixture: {other}"),
+        }) {
+            Ok(port) => port,
+            Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return,
+            Err(err) => panic!("spawn lifecycle fixture: {err}"),
+        };
+
+    let ctx = TestContext::new("minimal-project");
+    ctx.run(["init"]).success();
+
+    let treb_dir = ctx.treb_dir();
+    let mut entry = sample_fork_entry(&treb_dir);
+    entry.rpc_url = format!("http://127.0.0.1:{port}");
+    entry.port = port;
+    entry.snapshots = vec![SnapshotEntry {
+        index: 0,
+        snapshot_id: "0xenter".into(),
+        command: "enter".into(),
+        timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 8, 0, 0).unwrap(),
+    }];
+
+    let snapshot_dir = std::path::PathBuf::from(&entry.snapshot_dir);
+    std::fs::create_dir_all(&snapshot_dir).unwrap();
+    std::fs::write(treb_dir.join(DEPLOYMENTS_FILE), r#"{"Counter_1":{"address":"0xaaa"}}"#)
+        .unwrap();
+    std::fs::write(snapshot_dir.join(DEPLOYMENTS_FILE), r#"{"Counter_1":{"address":"0xaaa"}}"#)
+        .unwrap();
+
+    let mut store = ForkStateStore::new(&treb_dir);
+    store.insert_active_fork(entry).unwrap();
+    store
+        .add_history(ForkHistoryEntry {
+            action: "enter".into(),
+            network: "mainnet".into(),
+            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 8, 0, 0).unwrap(),
+            details: None,
+        })
+        .unwrap();
+
+    ctx.run(["fork", "restart", "--network", "mainnet"]).success();
+    ctx.run(["fork", "revert", "--network", "mainnet"]).success();
+    ctx.run(["fork", "restart", "--network", "mainnet"]).success();
+
+    let mut store = ForkStateStore::new(&treb_dir);
+    store.load().expect("load fork state after lifecycle commands");
+    let entry = store.get_active_fork("mainnet").expect("active mainnet fork");
+    assert_eq!(entry.snapshots.len(), 1, "restart should clear prior snapshot stack");
+    assert_eq!(entry.snapshots[0].index, 0);
+    assert_eq!(entry.snapshots[0].snapshot_id, "0xrestart-2");
+    assert_eq!(entry.snapshots[0].command, "restart");
+
+    let status = ctx.run(["fork", "status"]).success().get_output().stdout.clone();
+    let status = String::from_utf8(status).expect("utf8 fork status output");
+    assert!(status.contains("Snapshots:    1"), "status output: {status}");
+
+    let history =
+        ctx.run(["fork", "history", "--network", "mainnet"]).success().get_output().stdout.clone();
+    let history = String::from_utf8(history).expect("utf8 fork history output");
+    assert!(history.contains("[0] initial"), "history output: {history}");
+    assert!(
+        history.contains("[1] restart: Anvil reset; snapshot: 0xrestart-1"),
+        "history output: {history}"
+    );
+    assert!(
+        history.contains("[2] revert: new EVM snapshot: 0xrevert-1"),
+        "history output: {history}"
+    );
+    assert!(
+        history.contains("→ [3] restart: Anvil reset; snapshot: 0xrestart-2"),
+        "history output: {history}"
+    );
 }
