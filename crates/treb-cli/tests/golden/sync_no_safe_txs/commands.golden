@@ -1,2 +1,5 @@
 === cmd 0: [sync] ===
-No safe transactions or governor proposals in the registry.
+Syncing registry...
+No pending Safe transactions found
+
+✓ Registry synced successfully

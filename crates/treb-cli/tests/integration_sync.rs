@@ -16,7 +16,7 @@ use treb_forge::anvil::AnvilConfig;
 
 // ── Tests ────────────────────────────────────────────────────────────────
 
-/// Empty registry with no safe transactions prints informational message.
+/// Empty registry with no pending entries uses the Go-style summary output.
 #[test]
 fn sync_no_safe_txs() {
     let ctx = TestContext::new("minimal-project");
@@ -30,7 +30,7 @@ fn sync_no_safe_txs() {
     run_integration_test(&test, &ctx);
 }
 
-/// Empty registry with --network filter prints network-specific message.
+/// Empty registry with --network filter still uses the shared summary output.
 #[test]
 fn sync_no_safe_txs_network_filter() {
     let ctx = TestContext::new("minimal-project");
@@ -170,6 +170,23 @@ async fn sync_governor_human() {
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("sync_governor_human")
+        .test(&["sync"])
+        .output_artifact(".treb/governor-txs.json")
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// Sync with governor proposals but no matching RPC endpoint emits one warning section.
+#[test]
+fn sync_governor_missing_rpc_human() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    ctx.run(["init"]).success();
+    seed_governor_proposal(&ctx);
+
+    let test = IntegrationTest::new("sync_governor_missing_rpc_human")
         .test(&["sync"])
         .output_artifact(".treb/governor-txs.json")
         .extra_normalizer(Box::new(path_normalizer));

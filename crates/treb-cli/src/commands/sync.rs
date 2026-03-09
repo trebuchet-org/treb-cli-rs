@@ -16,7 +16,10 @@ use treb_safe::{
     types::{SafeServiceMultisigResponse, SafeServiceTx},
 };
 
-use crate::{output, ui::{color, emoji}};
+use crate::{
+    output,
+    ui::{color, emoji},
+};
 
 // ── JSON output types ───────────────────────────────────────────────────
 
@@ -227,27 +230,18 @@ pub async fn run(
         .cloned()
         .collect();
 
-    if safe_filtered.is_empty() && gov_filtered.is_empty() {
-        if json {
-            output::print_json(&SyncOutputJson {
-                synced: 0,
-                updated: 0,
-                newly_executed: 0,
-                removed: 0,
-                governor_synced: 0,
-                governor_updated: 0,
-                governor_newly_executed: 0,
-                governor_removed: 0,
-                errors: vec![],
-            })?;
-        } else {
-            match &network {
-                Some(name) => {
-                    println!("No safe transactions or governor proposals found for network {name}.")
-                }
-                None => println!("No safe transactions or governor proposals in the registry."),
-            }
-        }
+    if safe_filtered.is_empty() && gov_filtered.is_empty() && json {
+        output::print_json(&SyncOutputJson {
+            synced: 0,
+            updated: 0,
+            newly_executed: 0,
+            removed: 0,
+            governor_synced: 0,
+            governor_updated: 0,
+            governor_newly_executed: 0,
+            governor_removed: 0,
+            errors: vec![],
+        })?;
         return Ok(());
     }
 
@@ -297,12 +291,6 @@ pub async fn run(
                             "unsupported chain {chain_id} for Safe Transaction Service (safe {safe_address})"
                         );
                         errors.push(msg.clone());
-                        if !json {
-                            eprintln!(
-                                "{}",
-                                output::format_warning_banner("\u{26a0}\u{fe0f}", &msg)
-                            );
-                        }
                         continue;
                     }
                 },
@@ -317,28 +305,23 @@ pub async fn run(
             }
 
             // Fetch multisig transactions from the Safe Transaction Service
-            let service_resp: SafeServiceMultisigResponse = match client
-                .get_multisig_transactions(safe_address)
-                .await
-            {
-                Ok(resp) => {
-                    if debug {
-                        eprintln!("[debug] received {} results", resp.results.len());
+            let service_resp: SafeServiceMultisigResponse =
+                match client.get_multisig_transactions(safe_address).await {
+                    Ok(resp) => {
+                        if debug {
+                            eprintln!("[debug] received {} results", resp.results.len());
+                        }
+                        resp
                     }
-                    resp
-                }
-                Err(e) => {
-                    let msg = format!(
-                        "Safe service error for {} (chain {chain_id}): {e}",
-                        output::truncate_address(safe_address)
-                    );
-                    errors.push(msg.clone());
-                    if !json {
-                        eprintln!("{}", output::format_warning_banner("\u{26a0}\u{fe0f}", &msg));
+                    Err(e) => {
+                        let msg = format!(
+                            "Safe service error for {} (chain {chain_id}): {e}",
+                            output::truncate_address(safe_address)
+                        );
+                        errors.push(msg.clone());
+                        continue;
                     }
-                    continue;
-                }
-            };
+                };
 
             // Index service results by safeTxHash for fast lookup
             let service_map: HashMap<&str, &SafeServiceTx> =
@@ -443,9 +426,6 @@ pub async fn run(
 
         for warning in resolved_rpc_urls.warnings {
             errors.push(warning.clone());
-            if !json {
-                eprintln!("{}", output::format_warning_banner("\u{26a0}\u{fe0f}", &warning));
-            }
         }
 
         let http_client = reqwest::Client::builder()
@@ -463,9 +443,6 @@ pub async fn run(
                         output::truncate_address(&proposal.governor_address)
                     );
                     errors.push(msg.clone());
-                    if !json {
-                        eprintln!("{}", output::format_warning_banner("\u{26a0}\u{fe0f}", &msg));
-                    }
                     continue;
                 }
             };
@@ -517,12 +494,6 @@ pub async fn run(
                             err_str
                         );
                         errors.push(msg.clone());
-                        if !json {
-                            eprintln!(
-                                "{}",
-                                output::format_warning_banner("\u{26a0}\u{fe0f}", &msg)
-                            );
-                        }
                     }
                 }
             }
@@ -550,10 +521,7 @@ pub async fn run(
             println!("  \u{2022} Checked: {synced_count}");
             if newly_executed_count > 0 {
                 if color::is_color_enabled() {
-                    println!(
-                        "  \u{2022} Executed: {}",
-                        newly_executed_count.style(color::GREEN)
-                    );
+                    println!("  \u{2022} Executed: {}", newly_executed_count.style(color::GREEN));
                 } else {
                     println!("  \u{2022} Executed: {newly_executed_count}");
                 }
@@ -613,10 +581,7 @@ pub async fn run(
             "Registry sync completed with warnings"
         };
         if color::is_color_enabled() {
-            println!(
-                "\n{}",
-                format!("{} {footer_msg}", emoji::CHECK_MARK).style(color::GREEN)
-            );
+            println!("\n{}", format!("{} {footer_msg}", emoji::CHECK_MARK).style(color::GREEN));
         } else {
             println!("\n{} {footer_msg}", emoji::CHECK_MARK);
         }
