@@ -146,12 +146,18 @@ pub struct BuildDateNormalizer;
 
 impl Normalizer for BuildDateNormalizer {
     fn normalize(&self, input: &str) -> String {
-        // Version JSON build date: "date": "2026-03-09"
-        let json_date = Regex::new(r#"("date":\s*")\d{4}-\d{2}-\d{2}(")"#).unwrap();
+        // Version JSON build date: "date": "2026-03-09T12:34:56Z"
+        let json_date = Regex::new(
+            r#"("date":\s*")(?:<TIMESTAMP>|\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2}))?)(")"#,
+        )
+        .unwrap();
         let result = json_date.replace_all(input, "${1}<DATE>${2}");
 
-        // Human version output build date: "Date:  2026-03-09"
-        let human_date = Regex::new(r"(Date:\s+)\d{4}-\d{2}-\d{2}").unwrap();
+        // Human version output build date: "Date:  2026-03-09" or
+        // "built:  2026-03-09 12:34:56 UTC"
+        let human_date =
+            Regex::new(r"((?:Date:|built:)\s+)(?:<TIMESTAMP>(?: UTC)?|\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2}:\d{2} UTC)?)")
+                .unwrap();
         human_date.replace_all(&result, "${1}<DATE>").into_owned()
     }
 }
@@ -568,13 +574,31 @@ mod tests {
     #[test]
     fn build_date_normalizer_json_build_date() {
         let n = BuildDateNormalizer;
-        assert_eq!(n.normalize(r#""date": "2026-03-09""#), r#""date": "<DATE>""#);
+        assert_eq!(n.normalize(r#""date": "2026-03-09T14:25:36Z""#), r#""date": "<DATE>""#);
     }
 
     #[test]
     fn build_date_normalizer_human_build_date() {
         let n = BuildDateNormalizer;
         assert_eq!(n.normalize("Date:  2026-03-09"), "Date:  <DATE>");
+    }
+
+    #[test]
+    fn build_date_normalizer_human_built_date() {
+        let n = BuildDateNormalizer;
+        assert_eq!(n.normalize("built:  2026-03-09 14:25:36 UTC"), "built:  <DATE>");
+    }
+
+    #[test]
+    fn build_date_normalizer_json_timestamp_placeholder() {
+        let n = BuildDateNormalizer;
+        assert_eq!(n.normalize(r#""date": "<TIMESTAMP>""#), r#""date": "<DATE>""#);
+    }
+
+    #[test]
+    fn build_date_normalizer_human_timestamp_placeholder() {
+        let n = BuildDateNormalizer;
+        assert_eq!(n.normalize("built:  <TIMESTAMP> UTC"), "built:  <DATE>");
     }
 
     #[test]

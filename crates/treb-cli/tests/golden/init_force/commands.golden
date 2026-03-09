@@ -1,3 +1,2 @@
 === cmd 0: [init --force] ===
-Reset local config at <PROJECT_ROOT>/.treb
-Run `treb config show` to view your configuration.
+✅ Reset local config

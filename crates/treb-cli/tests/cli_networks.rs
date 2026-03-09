@@ -19,6 +19,15 @@ mainnet = "${MAINNET_RPC_URL}"
 sepolia = "${SEPOLIA_RPC_URL}"
 "#;
 
+const FIXTURE_FOUNDRY_TOML_BARE_ENV: &str = r#"
+[profile.default]
+src = "src"
+
+[rpc_endpoints]
+mainnet = "$MAINNET_RPC_URL"
+sepolia = "$SEPOLIA_RPC_URL"
+"#;
+
 #[test]
 fn networks_errors_without_foundry_toml() {
     let tmp = tempfile::tempdir().unwrap();
@@ -32,7 +41,7 @@ fn networks_errors_without_foundry_toml() {
 }
 
 #[test]
-fn networks_table_shows_endpoint_names() {
+fn networks_shows_emoji_per_line_format() {
     let tmp = tempfile::tempdir().unwrap();
     fs::write(tmp.path().join("foundry.toml"), FIXTURE_FOUNDRY_TOML).unwrap();
 
@@ -41,6 +50,7 @@ fn networks_table_shows_endpoint_names() {
         .current_dir(tmp.path())
         .assert()
         .success()
+        .stdout(predicate::str::contains("🌐 Available Networks:"))
         .stdout(predicate::str::contains("mainnet"))
         .stdout(predicate::str::contains("sepolia"));
 }
@@ -77,4 +87,19 @@ fn networks_json_parses_with_expected_fields() {
         assert!(obj.contains_key("chainId"), "missing field: chainId");
         assert!(obj.contains_key("status"), "missing field: status");
     }
+}
+
+#[test]
+fn networks_bare_env_vars_report_unresolved_without_http_errors() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(tmp.path().join("foundry.toml"), FIXTURE_FOUNDRY_TOML_BARE_ENV).unwrap();
+
+    treb()
+        .arg("networks")
+        .current_dir(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("mainnet - Error: unresolved env var"))
+        .stdout(predicate::str::contains("sepolia - Error: unresolved env var"))
+        .stdout(predicate::str::contains("unreachable").not());
 }

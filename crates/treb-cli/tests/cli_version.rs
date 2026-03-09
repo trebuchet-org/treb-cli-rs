@@ -13,13 +13,10 @@ fn version_displays_expected_fields() {
         .arg("version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Version"))
-        .stdout(predicate::str::contains("Commit"))
-        .stdout(predicate::str::contains("Date"))
-        .stdout(predicate::str::contains("Rust Version"))
-        .stdout(predicate::str::contains("Forge Version"))
-        .stdout(predicate::str::contains("Foundry Version"))
-        .stdout(predicate::str::contains("treb-sol Commit"));
+        .stdout(predicate::str::starts_with("treb "))
+        .stdout(predicate::str::contains("commit: "))
+        .stdout(predicate::str::contains("built:  "))
+        .stdout(predicate::str::contains(" UTC"));
 }
 
 #[test]
@@ -47,6 +44,10 @@ fn version_json_parses_with_expected_fields() {
         let s = val.as_str().unwrap_or_else(|| panic!("field {field} is not a string"));
         assert!(!s.is_empty(), "field {field} is empty");
     }
+
+    let build_date = obj["date"].as_str().expect("field date is not a string");
+    assert!(build_date.contains('T'), "build date should include a timestamp: {build_date}");
+    assert!(build_date.ends_with('Z'), "build date should be UTC RFC3339: {build_date}");
 
     let foundry_version =
         obj["foundryVersion"].as_str().expect("field foundryVersion is not a string");

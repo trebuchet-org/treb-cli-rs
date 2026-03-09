@@ -34,15 +34,23 @@ pub async fn run(json: bool) -> anyhow::Result<()> {
     if json {
         output::print_json(&info)?;
     } else {
-        output::print_kv(&[
-            ("Version", &info.version),
-            ("Commit", &info.commit),
-            ("Date", &info.date),
-            ("Rust Version", &info.rust_version),
-            ("Forge Version", &info.forge_version),
-            ("Foundry Version", &info.foundry_version),
-            ("treb-sol Commit", &info.treb_sol_commit),
-        ]);
+        println!("treb {}", info.version);
+
+        let has_commit = info.commit != "unknown";
+        let has_date = info.date != "unknown";
+
+        if has_commit || has_date {
+            println!();
+            if has_commit {
+                let short_commit =
+                    if info.commit.len() > 7 { &info.commit[..7] } else { &info.commit };
+                println!("commit: {short_commit}");
+            }
+            if has_date {
+                let formatted_date = output::format_build_date(&info.date);
+                println!("built:  {formatted_date}");
+            }
+        }
     }
 
     Ok(())

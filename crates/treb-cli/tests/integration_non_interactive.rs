@@ -11,7 +11,7 @@ mod framework;
 use framework::{
     context::TestContext,
     integration_test::{IntegrationTest, run_integration_test},
-    normalizer::{PathNormalizer, ShortHexNormalizer},
+    normalizer::{BuildDateNormalizer, PathNormalizer, ShortHexNormalizer},
 };
 
 // ── Exit code tests ─────────────────────────────────────────────────────
@@ -26,6 +26,7 @@ fn exit_code_zero_on_json_success() {
 
     let test = IntegrationTest::new("exit_code_zero_on_json_success")
         .test(&["version", "--json"])
+        .extra_normalizer(Box::new(BuildDateNormalizer))
         .extra_normalizer(Box::new(ShortHexNormalizer));
 
     run_integration_test(&test, &ctx);

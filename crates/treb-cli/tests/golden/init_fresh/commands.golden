@@ -1,3 +1,17 @@
 === cmd 0: [init] ===
-Initialized treb project at <PROJECT_ROOT>/.treb
-Run `treb config show` to view your configuration.
+✅ Initialized registry in .treb/
+✅ Created config.local.json
+
+🎉 treb initialized successfully!
+
+📋 Next steps:
+1. View and configure your project:
+   treb config show
+   treb config set namespace <name>
+   treb config set network <network>
+
+2. Run a deployment script:
+   treb run script/Deploy.s.sol --network sepolia
+
+3. View and manage deployments:
+   treb list

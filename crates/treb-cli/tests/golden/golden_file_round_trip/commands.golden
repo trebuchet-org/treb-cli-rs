@@ -1,7 +1,4 @@
-Version:  0.1.0
-         Commit:  <SHORT_HASH>
-           Date:  <DATE>
-   Rust Version:  rustc 1.96.0-nightly (<SHORT_HASH> 2026-03-01)
-  Forge Version:  forge v<VERSION> (<SHORT_HASH>)
-Foundry Version:  v<VERSION>
-treb-sol Commit:  <SHORT_HASH>
+treb 0.1.0
+
+commit: <COMMIT>
+built:  <DATE>

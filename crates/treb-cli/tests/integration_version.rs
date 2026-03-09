@@ -5,7 +5,7 @@ mod framework;
 use framework::{
     context::TestContext,
     integration_test::{IntegrationTest, run_integration_test},
-    normalizer::ShortHexNormalizer,
+    normalizer::{BuildDateNormalizer, ShortHexNormalizer},
 };
 
 /// Human-readable version output matches golden file.
@@ -15,6 +15,7 @@ fn version_human() {
 
     let test = IntegrationTest::new("version_human")
         .test(&["version"])
+        .extra_normalizer(Box::new(BuildDateNormalizer))
         .extra_normalizer(Box::new(ShortHexNormalizer));
 
     run_integration_test(&test, &ctx);
@@ -27,6 +28,7 @@ fn version_json() {
 
     let test = IntegrationTest::new("version_json")
         .test(&["version", "--json"])
+        .extra_normalizer(Box::new(BuildDateNormalizer))
         .extra_normalizer(Box::new(ShortHexNormalizer));
 
     run_integration_test(&test, &ctx);

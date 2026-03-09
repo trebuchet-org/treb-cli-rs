@@ -7,13 +7,13 @@ use framework::{
     integration_test::{IntegrationTest, run_integration_test},
 };
 
-/// foundry.toml with unresolved env var endpoints (no real HTTP calls needed).
+/// foundry.toml with unresolved bare env var endpoints (no real HTTP calls needed).
 const FOUNDRY_TOML_UNRESOLVED: &str = r#"[profile.default]
 src = "src"
 
 [rpc_endpoints]
-mainnet = "${MAINNET_RPC_URL}"
-sepolia = "${SEPOLIA_RPC_URL}"
+mainnet = "$MAINNET_RPC_URL"
+sepolia = "$SEPOLIA_RPC_URL"
 "#;
 
 /// foundry.toml with no [rpc_endpoints] section.

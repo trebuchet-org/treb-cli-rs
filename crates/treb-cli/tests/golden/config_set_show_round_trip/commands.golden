@@ -1,9 +1,10 @@
 === cmd 0: [config show] ===
-    Namespace:  default
-      Network:  mainnet
-      Profile:  default
-Config Source:  treb.toml (v2)
- Project Root:  <PROJECT_ROOT>
+📋 Current config:
+Namespace: default
+Network:   mainnet
+
+📦 Config source: treb.toml
+📁 config file: .treb/config.local.json
 
 ┌───────┬─────────────┬─────────┐
 │ Role  ┆ Type        ┆ Address │

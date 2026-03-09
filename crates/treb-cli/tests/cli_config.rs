@@ -28,10 +28,11 @@ fn config_show_displays_namespace_and_network() {
         .current_dir(tmp.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("Namespace"))
-        .stdout(predicate::str::contains("default"))
-        .stdout(predicate::str::contains("Network"))
-        .stdout(predicate::str::contains("not set"));
+        .stdout(predicate::str::contains("📋 Current config:"))
+        .stdout(predicate::str::contains("Namespace: default"))
+        .stdout(predicate::str::contains("Network:   (not set)"))
+        .stdout(predicate::str::contains("📦 Config source:"))
+        .stdout(predicate::str::contains("📁 config file:"));
 }
 
 #[test]
@@ -86,7 +87,8 @@ fn config_set_updates_local_config() {
         .current_dir(tmp.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("Set namespace = production"));
+        .stdout(predicate::str::contains("✅ Set namespace to: production"))
+        .stdout(predicate::str::contains("📁 config saved to:"));
 
     let config_json = fs::read_to_string(tmp.path().join(".treb/config.local.json")).unwrap();
     let config: serde_json::Value = serde_json::from_str(&config_json).unwrap();
@@ -139,7 +141,8 @@ fn config_remove_resets_to_default() {
         .current_dir(tmp.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("Removed namespace"));
+        .stdout(predicate::str::contains("✅ Reset namespace to: default"))
+        .stdout(predicate::str::contains("📁 config saved to:"));
 
     let config_json = fs::read_to_string(tmp.path().join(".treb/config.local.json")).unwrap();
     let config: serde_json::Value = serde_json::from_str(&config_json).unwrap();
@@ -147,7 +150,15 @@ fn config_remove_resets_to_default() {
     assert_eq!(config["network"], "mainnet"); // network unchanged
 
     // Remove network — should reset to "".
-    treb().args(["config", "remove", "network"]).current_dir(tmp.path()).assert().success();
+    treb()
+        .args(["config", "remove", "network"])
+        .current_dir(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "✅ Removed network from config (will be required as flag)",
+        ))
+        .stdout(predicate::str::contains("📁 config saved to:"));
 
     let config_json = fs::read_to_string(tmp.path().join(".treb/config.local.json")).unwrap();
     let config: serde_json::Value = serde_json::from_str(&config_json).unwrap();

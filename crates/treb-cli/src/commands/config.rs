@@ -8,7 +8,7 @@ use treb_config::{
     LocalConfig, ResolveOpts, SenderConfig, load_local_config, resolve_config, save_local_config,
 };
 
-use crate::output;
+use crate::{output, ui::emoji};
 
 const FOUNDRY_TOML: &str = "foundry.toml";
 const TREB_DIR: &str = ".treb";
@@ -31,7 +31,7 @@ pub async fn show(json: bool) -> anyhow::Result<()> {
     ensure_initialized(&cwd)?;
 
     let resolved = resolve_config(ResolveOpts {
-        project_root: cwd,
+        project_root: cwd.clone(),
         namespace: None,
         network: None,
         profile: None,
@@ -51,15 +51,25 @@ pub async fn show(json: bool) -> anyhow::Result<()> {
     if json {
         output::print_json(&output_data)?;
     } else {
-        let network_display = resolved.network.as_deref().unwrap_or("not set");
+        let network_display = resolved.network.as_deref().unwrap_or("(not set)");
 
-        output::print_kv(&[
-            ("Namespace", &resolved.namespace),
-            ("Network", network_display),
-            ("Profile", &resolved.profile),
-            ("Config Source", &resolved.config_source),
-            ("Project Root", &resolved.project_root.display().to_string()),
-        ]);
+        println!("{} Current config:", emoji::CLIPBOARD);
+        println!("Namespace: {}", resolved.namespace);
+        println!("Network:   {}", network_display);
+
+        println!();
+        println!(
+            "{} Config source: {}",
+            emoji::PACKAGE,
+            human_config_source(&resolved.config_source)
+        );
+
+        let config_path = resolved.project_root.join(".treb/config.local.json");
+        let relative_path = config_path
+            .strip_prefix(&cwd)
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| config_path.display().to_string());
+        println!("{} config file: {}", emoji::FOLDER, relative_path);
 
         if !resolved.senders.is_empty() {
             println!();
@@ -94,7 +104,14 @@ pub async fn set(key: &str, value: &str) -> anyhow::Result<()> {
     }
 
     save_local_config(&cwd, &config).context("failed to save local config")?;
-    println!("Set {} = {}", key, value);
+
+    println!("{} Set {} to: {}", emoji::CHECK, key, value);
+    let config_path = cwd.join(".treb/config.local.json");
+    let relative_path = config_path
+        .strip_prefix(&cwd)
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| config_path.display().to_string());
+    println!("{} config saved to: {}", emoji::FOLDER, relative_path);
 
     Ok(())
 }
@@ -109,13 +126,25 @@ pub async fn remove(key: &str) -> anyhow::Result<()> {
     let defaults = LocalConfig::default();
 
     match key {
-        "namespace" => config.namespace = defaults.namespace,
-        "network" => config.network = defaults.network,
+        "namespace" => {
+            config.namespace = defaults.namespace.clone();
+            save_local_config(&cwd, &config).context("failed to save local config")?;
+            println!("{} Reset namespace to: {}", emoji::CHECK, defaults.namespace);
+        }
+        "network" => {
+            config.network = defaults.network;
+            save_local_config(&cwd, &config).context("failed to save local config")?;
+            println!("{} Removed network from config (will be required as flag)", emoji::CHECK);
+        }
         _ => bail!("unknown config key '{}'; valid keys: namespace, network", key),
     }
 
-    save_local_config(&cwd, &config).context("failed to save local config")?;
-    println!("Removed {} (reset to default)", key);
+    let config_path = cwd.join(".treb/config.local.json");
+    let relative_path = config_path
+        .strip_prefix(&cwd)
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| config_path.display().to_string());
+    println!("{} config saved to: {}", emoji::FOLDER, relative_path);
 
     Ok(())
 }
@@ -143,4 +172,17 @@ fn ensure_treb_dir(cwd: &std::path::Path) -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+fn human_config_source(config_source: &str) -> &str {
+    if let Some((source_name, version)) = config_source.rsplit_once(" (v") {
+        if version
+            .strip_suffix(')')
+            .is_some_and(|v| !v.is_empty() && v.chars().all(|c| c.is_ascii_digit()))
+        {
+            return source_name;
+        }
+    }
+
+    config_source
 }
