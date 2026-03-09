@@ -106,17 +106,10 @@ fn print_deployment_details(d: &Deployment) {
     let display_name = contract_display_name(&d.contract_name, &d.label);
     let contract_styled = styled(&display_name, color::YELLOW);
     print_field("Contract", &contract_styled);
-    let addr_styled = styled(&d.address, color::ADDRESS);
-    print_field("Address", &addr_styled);
+    print_field("Address", &d.address);
     let type_str = d.deployment_type.to_string();
-    let type_styled =
-        styled(&type_str, color::style_for_deployment_type(d.deployment_type.clone()));
-    print_field("Type", &type_styled);
-    let ns_display = match badge::fork_badge(&d.namespace) {
-        Some(fb) => format!("{} {}", d.namespace, styled(&fb, color::FORK_BADGE)),
-        None => d.namespace.clone(),
-    };
-    print_field("Namespace", &ns_display);
+    print_field("Type", &type_str);
+    print_field("Namespace", &d.namespace);
     print_field("Network", &d.chain_id.to_string());
     if !d.label.is_empty() {
         let label_styled = styled(&d.label, Style::new().magenta());

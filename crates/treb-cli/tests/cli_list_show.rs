@@ -332,17 +332,41 @@ fn show_by_full_id() {
         .current_dir(tmp.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("Identity"))
+        .stdout(predicate::str::contains("Basic Information"))
         .stdout(predicate::str::contains("FPMM"))
         .stdout(predicate::str::contains("v3.0.0"))
         .stdout(predicate::str::contains("mainnet"))
-        .stdout(predicate::str::contains("On-Chain"))
+        .stdout(predicate::str::contains("Network: 42220"))
         .stdout(predicate::str::contains("42220"))
         .stdout(predicate::str::contains("0x42eddd7dC046da254A93659CA9b02f294606833D"))
-        .stdout(predicate::str::contains("Transaction"))
-        .stdout(predicate::str::contains("Artifact"))
-        .stdout(predicate::str::contains("Verification"))
+        .stdout(predicate::str::contains("Deployment Strategy"))
+        .stdout(predicate::str::contains("Artifact Information"))
+        .stdout(predicate::str::contains("Verification Status"))
         .stdout(predicate::str::contains("Timestamps"));
+}
+
+#[test]
+fn show_fork_badge_stays_in_header_only() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_deployments(&tmp);
+
+    let output =
+        treb().args(["show", "fork/42220/MockToken"]).current_dir(tmp.path()).output().unwrap();
+
+    assert!(output.status.success(), "treb show should exit 0");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains("Deployment: fork/42220/MockToken [fork]"),
+        "expected fork badge in header, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Namespace: fork/42220"),
+        "expected raw namespace in Basic Information, got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("Namespace: fork/42220 [fork]"),
+        "fork badge must not be repeated in Namespace, got:\n{stdout}"
+    );
 }
 
 #[test]
@@ -439,7 +463,7 @@ fn show_proxy_deployment_shows_proxy_info() {
         .current_dir(tmp.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("Proxy Info"))
+        .stdout(predicate::str::contains("Proxy Information"))
         .stdout(predicate::str::contains("UUPS"))
         .stdout(predicate::str::contains("Implementation"));
 }
@@ -453,7 +477,7 @@ fn show_non_proxy_deployment_hides_proxy_info() {
 
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(
-        !stdout.contains("Proxy Info"),
-        "non-proxy deployment should not show Proxy Info section"
+        !stdout.contains("Proxy Information"),
+        "non-proxy deployment should not show Proxy Information section"
     );
 }

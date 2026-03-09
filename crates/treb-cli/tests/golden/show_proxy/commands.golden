@@ -1,35 +1,36 @@
 === cmd 0: [show mainnet/42220/TransparentUpgradeableProxy:FPMMFactory] ===
-── Identity ──
-       ID:  mainnet/42220/TransparentUpgradeableProxy:FPMMFactory
- Contract:  TransparentUpgradeableProxy
-    Label:  FPMMFactory
-Namespace:  mainnet
-     Type:  PROXY
+Deployment: mainnet/42220/TransparentUpgradeableProxy:FPMMFactory
+================================================================================
 
-── On-Chain ──
-Chain ID:  42220
- Address:  0x22A81Fc75b0d5F7cac19cABa9F0c3719b3897F03
+Basic Information:
+  Contract: TransparentUpgradeableProxy:FPMMFactory
+  Address: 0x22A81Fc75b0d5F7cac19cABa9F0c3719b3897F03
+  Type: PROXY
+  Namespace: mainnet
+  Network: 42220
+  Label: FPMMFactory
 
-── Transaction ──
-Transaction ID:  
-        Method:  CREATE3
-Salt:  0x32cb58b145d3f7e28c45ce4b2cc31fa94248b23f00eef2eee23afd47b3f7fcaf
-Factory:  0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed
+Deployment Strategy:
+  Method: CREATE3
+  Factory: 0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed
+  Salt: 0x32cb58b145d3f7e28c45ce4b2cc31fa94248b23f00eef2eee23afd47b3f7fcaf
+  Entropy: mainnet/lib/openzeppelin-contracts/contracts/proxy/transparent/TransparentUpgradeableProxy.sol:TransparentUpgradeableProxy:FPMMFactory
+  InitCodeHash: 0x<HASH>
 
-── Artifact ──
-         Path:  lib/openzeppelin-contracts/contracts/proxy/transparent/TransparentUpgradeableProxy.sol
-     Compiler:  0.8.33+commit.64118f21
-Bytecode Hash:  0xd18370017b91fe6cf7851e9a692f60f42cfb17d544cdf742d9efdf176f19fba2
-       Script:  script/deploy/v3/DeployV3PreStage.s.sol
-   Git Commit:  f7c896cf0da6eca082cf90066d7e9510978e4659
+Proxy Information:
+  Type: UUPS
+  Implementation: 0x959597fD009876e6f53EbdB2F1c1Bc3f994579dF
 
-── Verification ──
-Status:  UNVERIFIED
+Artifact Information:
+  Path: lib/openzeppelin-contracts/contracts/proxy/transparent/TransparentUpgradeableProxy.sol
+  Compiler: 0.8.33+commit.64118f21
+  BytecodeHash: 0x<HASH>
+  Script: script/deploy/v3/DeployV3PreStage.s.sol
+  GitCommit: f7c896cf0da6eca082cf90066d7e9510978e4659
 
-── Proxy Info ──
-    Proxy Type:  UUPS
-Implementation:  0x959597fD009876e6f53EbdB2F1c1Bc3f994579dF
+Verification Status:
+  Status: UNVERIFIED
 
-── Timestamps ──
-Created At:  <TIMESTAMP>
-Updated At:  <TIMESTAMP>
+Timestamps:
+  Created: <TIMESTAMP>
+  Updated: <TIMESTAMP>

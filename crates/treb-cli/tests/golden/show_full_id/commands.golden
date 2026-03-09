@@ -1,32 +1,33 @@
 === cmd 0: [show mainnet/42220/FPMM:v<VERSION>] ===
-── Identity ──
-       ID:  mainnet/42220/FPMM:v<VERSION>
- Contract:  FPMM
-    Label:  v<VERSION>
-Namespace:  mainnet
-     Type:  SINGLETON
+Deployment: mainnet/42220/FPMM:v<VERSION>
+================================================================================
 
-── On-Chain ──
-Chain ID:  42220
- Address:  0x42eddd7dC046da254A93659CA9b02f294606833D
+Basic Information:
+  Contract: FPMM:v<VERSION>
+  Address: 0x42eddd7dC046da254A93659CA9b02f294606833D
+  Type: SINGLETON
+  Namespace: mainnet
+  Network: 42220
+  Label: v<VERSION>
 
-── Transaction ──
-Transaction ID:  
-        Method:  CREATE3
-Salt:  0x32cb58b145d3f7e28c45ce4b2cc31fa94248b23f00a2e3014050467acb6c25eb
-Factory:  0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed
+Deployment Strategy:
+  Method: CREATE3
+  Factory: 0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed
+  Salt: 0x32cb58b145d3f7e28c45ce4b2cc31fa94248b23f00a2e3014050467acb6c25eb
+  Entropy: mainnet/FPMM:v<VERSION>
+  InitCodeHash: 0x<HASH>
 
-── Artifact ──
-         Path:  lib/mento-core/contracts/swap/FPMM.sol
-     Compiler:  0.8.24+commit.e11b9ed9
-Bytecode Hash:  0x6b7fb93a42cf317aec80a67fcdc73ba8d75edb0be9e0bb01185e70f2028a5d6a
-       Script:  script/deploy/v3/DeployV3PreStage.s.sol
-   Git Commit:  f7c896cf0da6eca082cf90066d7e9510978e4659
+Artifact Information:
+  Path: lib/mento-core/contracts/swap/FPMM.sol
+  Compiler: 0.8.24+commit.e11b9ed9
+  BytecodeHash: 0x<HASH>
+  Script: script/deploy/v3/DeployV3PreStage.s.sol
+  GitCommit: f7c896cf0da6eca082cf90066d7e9510978e4659
 
-── Verification ──
-Etherscan:  VERIFIED https://celoscan.io/address/0x42eddd7dC046da254A93659CA9b02f294606833D#code
- Sourcify:  FAILED — Contract not found on Sourcify
+Verification Status:
+  Etherscan: VERIFIED https://celoscan.io/address/0x42eddd7dC046da254A93659CA9b02f294606833D#code
+  Sourcify: FAILED — Contract not found on Sourcify
 
-── Timestamps ──
-Created At:  <TIMESTAMP>
-Updated At:  <TIMESTAMP>
+Timestamps:
+  Created: <TIMESTAMP>
+  Updated: <TIMESTAMP>
