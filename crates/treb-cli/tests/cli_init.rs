@@ -3,6 +3,8 @@
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 fn treb() -> assert_cmd::Command {
     cargo_bin_cmd!("treb-cli")
@@ -98,4 +100,86 @@ fn init_force_resets_local_config() {
 
     // Registry data should still exist.
     assert!(tmp.path().join(".treb/registry.json").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn init_prints_step_failure_when_registry_init_fails() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
+
+    let original_mode = fs::metadata(tmp.path()).unwrap().permissions().mode();
+    let mut readonly = fs::metadata(tmp.path()).unwrap().permissions();
+    readonly.set_mode(0o500);
+    fs::set_permissions(tmp.path(), readonly).unwrap();
+
+    let output = treb().env("NO_COLOR", "1").arg("init").current_dir(tmp.path()).output().unwrap();
+
+    let mut restored = fs::metadata(tmp.path()).unwrap().permissions();
+    restored.set_mode(original_mode);
+    fs::set_permissions(tmp.path(), restored).unwrap();
+
+    assert!(!output.status.success(), "init should fail when project root is not writable");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        stdout.contains("❌ Failed to initialize registry in .treb/"),
+        "stdout should include the init step failure line: {stdout}"
+    );
+    assert!(
+        stdout.contains("Permission denied"),
+        "stdout should include the underlying OS error: {stdout}"
+    );
+    assert!(
+        stderr.contains("Error: failed to initialize registry"),
+        "stderr should still include the bubbled error: {stderr}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn init_force_prints_step_failure_when_config_write_fails() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
+    treb().arg("init").current_dir(tmp.path()).assert().success();
+
+    let config_path = tmp.path().join(".treb/config.local.json");
+    let original_mode = fs::metadata(&config_path).unwrap().permissions().mode();
+    let mut readonly = fs::metadata(&config_path).unwrap().permissions();
+    readonly.set_mode(0o400);
+    fs::set_permissions(&config_path, readonly).unwrap();
+
+    let output = treb()
+        .env("NO_COLOR", "1")
+        .args(["init", "--force"])
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    let mut restored = fs::metadata(&config_path).unwrap().permissions();
+    restored.set_mode(original_mode);
+    fs::set_permissions(&config_path, restored).unwrap();
+
+    assert!(
+        !output.status.success(),
+        "init --force should fail when config.local.json is not writable"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        stdout.contains("❌ Failed to reset local config"),
+        "stdout should include the reset failure line: {stdout}"
+    );
+    assert!(
+        stdout.contains("Permission denied"),
+        "stdout should include the underlying OS error: {stdout}"
+    );
+    assert!(
+        stderr.contains("Error: failed to write config.local.json"),
+        "stderr should still include the bubbled error: {stderr}"
+    );
 }

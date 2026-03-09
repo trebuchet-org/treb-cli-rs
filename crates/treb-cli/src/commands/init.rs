@@ -7,8 +7,10 @@ use owo_colors::OwoColorize;
 use treb_config::{LocalConfig, save_local_config};
 use treb_registry::Registry;
 
-use crate::output;
-use crate::ui::{color, emoji};
+use crate::{
+    output,
+    ui::{color, emoji},
+};
 
 const FOUNDRY_TOML: &str = "foundry.toml";
 const TREB_DIR: &str = ".treb";
@@ -30,11 +32,7 @@ pub async fn run(force: bool) -> anyhow::Result<()> {
 
     if treb_dir.exists() && !force {
         if color::is_color_enabled() {
-            println!(
-                "{}  {}",
-                emoji::WARNING,
-                "Project already initialized".style(color::WARNING)
-            );
+            println!("{}  {}", emoji::WARNING, "Project already initialized".style(color::WARNING));
         } else {
             println!("{}  Project already initialized", emoji::WARNING);
         }
@@ -43,26 +41,26 @@ pub async fn run(force: bool) -> anyhow::Result<()> {
 
     if force && treb_dir.exists() {
         // --force: overwrite config.local.json but preserve registry data files.
-        write_default_config(&cwd)?;
+        write_default_config(&cwd)
+            .inspect_err(|err| render_init_failure("Failed to reset local config", err))?;
         println!("{}", output::format_success("Reset local config"));
         return Ok(());
     }
 
     // Fresh init: create .treb/ with registry + local config.
-    Registry::init(&cwd).context("failed to initialize registry")?;
+    Registry::init(&cwd)
+        .context("failed to initialize registry")
+        .inspect_err(|err| render_init_failure("Failed to initialize registry in .treb/", err))?;
     println!("{}", output::format_success("Initialized registry in .treb/"));
 
-    write_default_config(&cwd)?;
+    write_default_config(&cwd)
+        .inspect_err(|err| render_init_failure("Failed to create config.local.json", err))?;
     println!("{}", output::format_success("Created config.local.json"));
 
     // Success banner.
     println!();
     if color::is_color_enabled() {
-        println!(
-            "{} {}",
-            emoji::PARTY,
-            "treb initialized successfully!".style(color::SUCCESS)
-        );
+        println!("{} {}", emoji::PARTY, "treb initialized successfully!".style(color::SUCCESS));
     } else {
         println!("{} treb initialized successfully!", emoji::PARTY);
     }
@@ -100,6 +98,17 @@ fn print_command(cmd: &str) {
         println!("   {}", cmd.style(color::GRAY));
     } else {
         println!("   {cmd}");
+    }
+}
+
+fn render_init_failure(step: &str, err: &anyhow::Error) {
+    println!("{}", output::format_error(step));
+
+    let detail = err.chain().last().map(ToString::to_string).unwrap_or_else(|| err.to_string());
+    if color::is_color_enabled() {
+        println!("   {}", detail.style(color::RED));
+    } else {
+        println!("   {detail}");
     }
 }
 

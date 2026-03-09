@@ -7,8 +7,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use crate::output;
-use crate::ui::emoji;
+use crate::{output, ui::emoji};
 
 /// Network information for a single RPC endpoint.
 #[derive(Serialize)]
