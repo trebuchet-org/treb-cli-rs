@@ -1,16 +1,22 @@
 === cmd 0: [run script/Deploy.s.sol --network anvil-31337 --dry-run --non-interactive] ===
 No files changed, compilation skipped
-🚧 [DRY RUN] No changes were written to the registry.
 
+🔄 Transactions:
+──────────────────────────────────────────────────
+  1.  (SIMULATED)
+
+
+📦 Deployment Summary:
+──────────────────────────────────────────────────
 default
 └─ 31337
    └─ SINGLETON
       └─ Counter:Counter 0x5b73...0519 UNVERIFIED
 
-Transactions:
-  1.  (SIMULATED)
 
-1 deployment would be recorded, 1 transaction, 160,053 gas would be used
+✓ Registry Update:
+──────────────────────────────────────────────────
+
 🔨 Compiling and executing script/Deploy.s.sol...
 🧪 Simulating...
 ✅ Execution complete.

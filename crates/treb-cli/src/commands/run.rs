@@ -752,6 +752,18 @@ fn build_run_deployment_node(d: &treb_core::types::Deployment) -> TreeNode {
     node
 }
 
+fn registry_update_section_message(result: &PipelineResult) -> Option<&'static str> {
+    if result.dry_run { None } else { Some("Registry update details pending.") }
+}
+
+fn print_registry_update_section(result: &PipelineResult) {
+    output::print_section_header(emoji::CHECK_MARK, "Registry Update", 50);
+    if let Some(message) = registry_update_section_message(result) {
+        println!("  {message}");
+    }
+    println!();
+}
+
 fn display_result_human(result: &PipelineResult) {
     // ── Transactions ────────────────────────────────────────────────────
     if !result.transactions.is_empty() {
@@ -812,6 +824,9 @@ fn display_result_human(result: &PipelineResult) {
         }
         println!();
     }
+
+    // ── Registry Update ────────────────────────────────────────────────
+    print_registry_update_section(result);
 
     // ── Governor Proposals ──────────────────────────────────────────────
     if !result.governor_proposals.is_empty() {
@@ -941,6 +956,21 @@ mod tests {
             tags: None,
             created_at: Utc.with_ymd_and_hms(2025, 1, 15, 10, 30, 0).unwrap(),
             updated_at: Utc.with_ymd_and_hms(2025, 1, 15, 10, 30, 0).unwrap(),
+        }
+    }
+
+    fn sample_pipeline_result() -> PipelineResult {
+        PipelineResult {
+            deployments: Vec::new(),
+            transactions: Vec::new(),
+            collisions: Vec::new(),
+            skipped: Vec::new(),
+            dry_run: false,
+            success: true,
+            gas_used: 0,
+            event_count: 0,
+            console_logs: Vec::new(),
+            governor_proposals: Vec::new(),
         }
     }
 
@@ -1105,5 +1135,23 @@ mod tests {
         assert!(entry.contains('\x1b'), "styled entry should contain ANSI codes: {entry:?}");
         assert!(entry.contains("e[✔︎]"), "styled entry should contain Go-format verifier text");
         assert!(entry.contains("[fork]"), "styled entry should include the fork badge text");
+    }
+
+    #[test]
+    fn registry_update_section_message_uses_placeholder_for_non_dry_run() {
+        let result = sample_pipeline_result();
+
+        assert_eq!(
+            registry_update_section_message(&result),
+            Some("Registry update details pending.")
+        );
+    }
+
+    #[test]
+    fn registry_update_section_message_omits_placeholder_for_dry_run() {
+        let mut result = sample_pipeline_result();
+        result.dry_run = true;
+
+        assert_eq!(registry_update_section_message(&result), None);
     }
 }

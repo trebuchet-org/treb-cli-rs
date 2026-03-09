@@ -1,14 +1,23 @@
 === cmd 0: [run script/Deploy.s.sol --network anvil-31337 --broadcast --non-interactive --debug] ===
 No files changed, compilation skipped
+
+🔄 Transactions:
+──────────────────────────────────────────────────
+  1.  (SIMULATED)
+
+
+📦 Deployment Summary:
+──────────────────────────────────────────────────
 default
 └─ 31337
    └─ SINGLETON
       └─ Counter:Counter 0x5b73...0519 UNVERIFIED
 
-Transactions:
-  1.  (SIMULATED)
 
-1 deployment recorded, 1 transaction, 160,053 gas used
+✓ Registry Update:
+──────────────────────────────────────────────────
+  Registry update details pending.
+
 🔨 Compiling and executing script/Deploy.s.sol...
 📡 Broadcasting...
 ✅ Execution complete.

@@ -1,15 +1,18 @@
 === cmd 0: [run script/GovernorProposal.s.sol --dry-run --non-interactive] ===
 No files changed, compilation skipped
-🚧 [DRY RUN] No changes were written to the registry.
 
-Transactions:
+🔄 Transactions:
+──────────────────────────────────────────────────
   1.  (SIMULATED)
+
+
+✓ Registry Update:
+──────────────────────────────────────────────────
 
 Governor Proposals:
   1. 42 (would be proposed)
      Governor: 0xaAaA...aaAa | Timelock: 0xbBbB...BBbB | Status: pending | 1 linked transaction
 
-1 transaction, 1 governor proposal would be proposed, 35,948 gas would be used
 🔨 Compiling and executing script/GovernorProposal.s.sol...
 🧪 Simulating...
 ✅ Execution complete.

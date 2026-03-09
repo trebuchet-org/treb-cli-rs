@@ -1,13 +1,19 @@
 === cmd 0: [run script/GovernorProposal.s.sol --network anvil-31337 --broadcast --non-interactive --verbose] ===
 No files changed, compilation skipped
-Transactions:
+
+🔄 Transactions:
+──────────────────────────────────────────────────
   1.  (SIMULATED)
+
+
+✓ Registry Update:
+──────────────────────────────────────────────────
+  Registry update details pending.
 
 Governor Proposals:
   1. 42 (proposed)
      Governor: 0xaAaA...aaAa | Timelock: 0xbBbB...BBbB | Status: pending | 1 linked transaction
 
-1 transaction, 1 governor proposal proposed, 35,948 gas used
  Config source:  treb.toml (v2)
      Namespace:  default
       Chain ID:  31337
