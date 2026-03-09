@@ -181,10 +181,7 @@ fn remove_tag(
     } else {
         println!(
             "{}",
-            styled(
-                &format!("\u{2705} Removed tag '{tag}' from {deployment_id}"),
-                color::GREEN,
-            )
+            styled(&format!("\u{2705} Removed tag {tag} from {deployment_id}"), color::GREEN,)
         );
         final_tags.sort();
         let tags_value = if final_tags.is_empty() {
