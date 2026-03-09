@@ -65,6 +65,9 @@ pub enum ForkSubcommand {
         /// Network name or chain ID
         #[arg(long)]
         network: String,
+        /// Exit all active forks
+        #[arg(long)]
+        all: bool,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -205,7 +208,7 @@ pub async fn run(subcommand: ForkSubcommand) -> anyhow::Result<()> {
         ForkSubcommand::Enter { network, rpc_url, fork_block_number, json } => {
             run_enter(network, rpc_url, fork_block_number, json).await
         }
-        ForkSubcommand::Exit { network, json } => run_exit(network, json).await,
+        ForkSubcommand::Exit { network, all, json } => run_exit(network, all, json).await,
         ForkSubcommand::Revert { network, all, json } => run_revert(network, all, json).await,
         ForkSubcommand::Restart { network, fork_block_number, json } => {
             run_restart(network, fork_block_number, json).await
@@ -315,53 +318,78 @@ pub async fn run_enter(
 ///
 /// Restores the registry from its snapshot, removes the snapshot directory,
 /// and removes the [`ForkEntry`] from `fork.json`.
-pub async fn run_exit(network: String, json: bool) -> anyhow::Result<()> {
+pub async fn run_exit(network: String, all: bool, json: bool) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     let treb_dir = cwd.join(TREB_DIR);
 
     let mut store = ForkStateStore::new(&treb_dir);
     store.load().context("failed to load fork state")?;
 
-    let entry = resolve_fork_session_entry(&store, &network)
-        .cloned()
-        .ok_or_else(|| anyhow::anyhow!("network '{}' is not in fork mode", network))?;
+    let networks: Vec<String> = if all { store.list_active_networks() } else { vec![network] };
 
-    // Count restored entries before removing fork state
-    let restored_entries = store.list_active_forks_for_network(&network).len();
-
-    store.remove_active_forks_for_network(&network).context("failed to remove fork entry")?;
-
-    // Restore registry from snapshot
-    if !json {
-        output::print_stage("\u{1f504}", &format!("Restoring registry for '{network}'..."));
+    if networks.is_empty() {
+        if json {
+            output::print_json(&Vec::<ForkExitJson>::new())?;
+        } else {
+            println!("No active forks to exit.");
+        }
+        return Ok(());
     }
-    let snapshot_dir = PathBuf::from(&entry.snapshot_dir);
-    restore_registry(&snapshot_dir, &treb_dir)
-        .context("failed to restore registry from snapshot")?;
 
-    // Remove snapshot dir
-    if !json {
-        output::print_stage("\u{1f9f9}", &format!("Cleaning up snapshot for '{network}'..."));
+    let mut json_results: Vec<ForkExitJson> = Vec::new();
+    let mut exited_networks: Vec<String> = Vec::new();
+
+    for net in &networks {
+        let entry = resolve_fork_session_entry(&store, net)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("network '{}' is not in fork mode", net))?;
+
+        // Count restored entries before removing fork state
+        let restored_entries = store.list_active_forks_for_network(net).len();
+
+        store.remove_active_forks_for_network(net).context("failed to remove fork entry")?;
+
+        // Restore registry from snapshot
+        let snapshot_dir = PathBuf::from(&entry.snapshot_dir);
+        restore_registry(&snapshot_dir, &treb_dir)
+            .context("failed to restore registry from snapshot")?;
+
+        // Remove snapshot dir
+        remove_snapshot(&snapshot_dir).context("failed to remove snapshot directory")?;
+
+        // Add history entry
+        store
+            .add_history(ForkHistoryEntry {
+                action: "exit".into(),
+                network: net.clone(),
+                timestamp: Utc::now(),
+                details: None,
+            })
+            .context("failed to record exit history")?;
+
+        if json {
+            json_results.push(ForkExitJson {
+                network: net.clone(),
+                restored_entries,
+                cleaned_up: true,
+            });
+        } else {
+            exited_networks.push(net.clone());
+        }
     }
-    remove_snapshot(&snapshot_dir).context("failed to remove snapshot directory")?;
-
-    // Add history entry
-    store
-        .add_history(ForkHistoryEntry {
-            action: "exit".into(),
-            network: network.clone(),
-            timestamp: Utc::now(),
-            details: None,
-        })
-        .context("failed to record exit history")?;
 
     if json {
-        output::print_json(&ForkExitJson { network, restored_entries, cleaned_up: true })?;
+        if json_results.len() == 1 {
+            output::print_json(&json_results.into_iter().next().unwrap())?;
+        } else {
+            output::print_json(&json_results)?;
+        }
     } else {
-        output::print_stage("\u{2705}", &format!("Fork mode exited for '{network}'."));
-
-        println!("Exited fork mode for network '{network}'.");
-        println!("Registry restored from snapshot.");
+        println!("Exited fork mode.");
+        println!();
+        for net in &exited_networks {
+            println!("  - {net}: registry restored, fork cleaned up");
+        }
     }
 
     Ok(())
@@ -1366,8 +1394,9 @@ mod tests {
     fn parse_exit() {
         let sub = parse_fork(&["exit", "--network", "sepolia"]).unwrap();
         match sub {
-            ForkSubcommand::Exit { network, json } => {
+            ForkSubcommand::Exit { network, all, json } => {
                 assert_eq!(network, "sepolia");
+                assert!(!all);
                 assert!(!json);
             }
             _ => panic!("expected Exit"),
