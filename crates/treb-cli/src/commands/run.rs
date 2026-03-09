@@ -1,7 +1,7 @@
 //! `treb run` command implementation.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     env, fs,
     io::{self, BufRead, Write},
     path::PathBuf,
@@ -16,11 +16,10 @@ use foundry_common::{
 use owo_colors::OwoColorize;
 use serde::Serialize;
 use treb_config::{ResolveOpts, resolve_config};
-use treb_core::types::{DeploymentType, Operation, TransactionStatus};
+use treb_core::types::{Operation, TransactionStatus};
 use treb_forge::{
     pipeline::{
-        PipelineConfig, PipelineContext, PipelineResult, RecordedDeployment, RunPipeline,
-        resolve_git_commit,
+        PipelineConfig, PipelineContext, PipelineResult, RunPipeline, resolve_git_commit,
     },
     script::build_script_config_with_senders,
     sender::{ResolvedSender, resolve_all_senders},
@@ -29,10 +28,7 @@ use treb_registry::Registry;
 
 use crate::{
     output,
-    ui::{
-        badge, color, emoji, interactive::is_non_interactive, selector::fuzzy_select_network,
-        tree::TreeNode,
-    },
+    ui::{color, emoji, interactive::is_non_interactive, selector::fuzzy_select_network},
 };
 
 const FOUNDRY_TOML: &str = "foundry.toml";
@@ -657,102 +653,6 @@ fn format_governor_proposal_details(gp: &treb_core::types::GovernorProposal) -> 
     )
 }
 
-// ---------------------------------------------------------------------------
-// Deployment grouping for tree display: namespace > chain_id > type
-// ---------------------------------------------------------------------------
-
-/// Returns the sort key for the fixed display order of deployment types.
-fn type_sort_key(dt: &DeploymentType) -> u8 {
-    match dt {
-        DeploymentType::Proxy => 0,
-        DeploymentType::Singleton => 1,
-        DeploymentType::Library => 2,
-        DeploymentType::Unknown => 3,
-    }
-}
-
-/// A group of recorded deployments sharing the same deployment type.
-struct RunTypeGroup<'a> {
-    deployment_type: DeploymentType,
-    deployments: Vec<&'a RecordedDeployment>,
-}
-
-/// Group recorded deployments by namespace > chain_id > deployment type.
-fn group_recorded_deployments<'a>(
-    deployments: &'a [RecordedDeployment],
-) -> BTreeMap<String, BTreeMap<u64, Vec<RunTypeGroup<'a>>>> {
-    let mut result: BTreeMap<String, BTreeMap<u64, Vec<RunTypeGroup<'a>>>> = BTreeMap::new();
-
-    for rd in deployments {
-        let d = &rd.deployment;
-        let chain_map = result.entry(d.namespace.clone()).or_default();
-        let type_groups = chain_map.entry(d.chain_id).or_default();
-
-        if let Some(group) = type_groups.iter_mut().find(|g| g.deployment_type == d.deployment_type)
-        {
-            group.deployments.push(rd);
-        } else {
-            type_groups.push(RunTypeGroup {
-                deployment_type: d.deployment_type.clone(),
-                deployments: vec![rd],
-            });
-        }
-    }
-
-    // Sort type groups by fixed order and deployments by contract name
-    for chain_map in result.values_mut() {
-        for type_groups in chain_map.values_mut() {
-            type_groups.sort_by_key(|g| type_sort_key(&g.deployment_type));
-            for group in type_groups.iter_mut() {
-                group
-                    .deployments
-                    .sort_by(|a, b| a.deployment.contract_name.cmp(&b.deployment.contract_name));
-            }
-        }
-    }
-
-    result
-}
-
-/// Format a deployment entry label for tree display.
-///
-/// Format: `ContractName[:label] address badge [fork]`
-fn format_run_deployment_entry(d: &treb_core::types::Deployment) -> String {
-    let addr = output::truncate_address(&d.address);
-    let name_part = if d.label.is_empty() {
-        d.contract_name.clone()
-    } else {
-        format!("{}:{}", d.contract_name, d.label)
-    };
-    let ver_badge = if color::is_color_enabled() {
-        badge::verification_badge_styled(&d.verification.verifiers)
-    } else {
-        badge::verification_badge(&d.verification.verifiers)
-    };
-    let mut parts = vec![name_part, addr, ver_badge];
-    let fork_badge = if color::is_color_enabled() {
-        badge::fork_badge_styled(&d.namespace)
-    } else {
-        badge::fork_badge(&d.namespace)
-    };
-    if let Some(fb) = fork_badge {
-        parts.push(fb);
-    }
-    parts.join(" ")
-}
-
-/// Build a TreeNode for a recorded deployment, including an implementation
-/// child node when proxy_info is present.
-fn build_run_deployment_node(d: &treb_core::types::Deployment) -> TreeNode {
-    let label = format_run_deployment_entry(d);
-    let mut node = TreeNode::new(label);
-    if let Some(ref pi) = d.proxy_info {
-        let impl_label = format!("Implementation {}", output::truncate_address(&pi.implementation));
-        node = node.child(TreeNode::new(impl_label));
-    }
-    node
-}
-
 fn registry_update_section_message(result: &PipelineResult) -> Option<&'static str> {
     if result.dry_run { None } else { Some("Registry update details pending.") }
 }
@@ -859,39 +759,62 @@ fn display_result_human(result: &PipelineResult) {
     // ── Collisions ──────────────────────────────────────────────────────
     if !result.collisions.is_empty() {
         output::print_section_header(emoji::WARNING, "Deployment Collisions Detected", 50);
-        println!("Collisions detected: {}", result.collisions.len());
+        for collision in &result.collisions {
+            let name = if color::is_color_enabled() {
+                format!("{}", collision.contract_name.style(color::CYAN))
+            } else {
+                collision.contract_name.clone()
+            };
+            let addr = format!("{}", collision.existing_address);
+            let addr_display = if color::is_color_enabled() {
+                format!("{}", addr.style(color::YELLOW))
+            } else {
+                addr
+            };
+            println!("  {} already deployed at {}", name, addr_display);
+            if !collision.label.is_empty() {
+                println!("    Label: {}", collision.label);
+            }
+        }
+        let note = "Existing deployments were not overwritten";
+        if color::is_color_enabled() {
+            println!("\n  {}", note.style(color::GRAY));
+        } else {
+            println!("\n  {}", note);
+        }
         println!();
     }
 
     // ── Deployment Summary ──────────────────────────────────────────────
     if !result.deployments.is_empty() {
         output::print_section_header(emoji::PACKAGE, "Deployment Summary", 50);
-        let grouped = group_recorded_deployments(&result.deployments);
-        let mut first = true;
-        for (namespace, chains) in &grouped {
-            if !first {
-                println!();
+        for rd in &result.deployments {
+            let d = &rd.deployment;
+            // Build name: contract_name + optional :label + optional [impl]
+            let mut name = d.contract_name.clone();
+            if !d.label.is_empty() {
+                name = format!("{name}:{}", d.label);
             }
-            first = false;
-            let mut ns_node = TreeNode::new(namespace.clone()).with_style(color::NAMESPACE);
-            for (chain_id, type_groups) in chains {
-                let mut chain_node = TreeNode::new(chain_id.to_string()).with_style(color::CHAIN);
-                for tg in type_groups {
-                    let type_label = tg.deployment_type.to_string();
-                    let type_style = color::style_for_deployment_type(tg.deployment_type.clone());
-                    let mut type_node = TreeNode::new(type_label).with_style(type_style);
-                    for rd in &tg.deployments {
-                        type_node = type_node.child(build_run_deployment_node(&rd.deployment));
-                    }
-                    chain_node = chain_node.child(type_node);
-                }
-                ns_node = ns_node.child(chain_node);
+            if let Some(ref pi) = d.proxy_info {
+                let impl_name = result
+                    .deployments
+                    .iter()
+                    .find(|other| other.deployment.address == pi.implementation)
+                    .map(|other| other.deployment.contract_name.as_str())
+                    .unwrap_or("UnknownImplementation");
+                name = format!("{name}[{impl_name}]");
             }
-            if color::is_color_enabled() {
-                println!("{}", ns_node.render_styled());
+            let name_display = if color::is_color_enabled() {
+                format!("{}", name.style(color::CYAN))
             } else {
-                println!("{}", ns_node.render());
-            }
+                name
+            };
+            let addr_display = if color::is_color_enabled() {
+                format!("{}", d.address.style(color::GREEN))
+            } else {
+                d.address.clone()
+            };
+            println!("  {name_display} at {addr_display}");
         }
         println!();
     }
@@ -938,51 +861,8 @@ fn display_result_human(result: &PipelineResult) {
 mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
-    use std::sync::{Mutex, MutexGuard, OnceLock};
-    use treb_core::types::{
-        ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, GovernorProposal,
-        ProposalStatus, VerificationInfo, VerificationStatus, VerifierStatus,
-    };
+    use treb_core::types::{GovernorProposal, ProposalStatus};
     use treb_forge::in_memory_signer;
-
-    fn env_lock() -> MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(())).lock().expect("env test lock poisoned")
-    }
-
-    struct EnvVarGuard {
-        key: &'static str,
-        old: Option<String>,
-    }
-
-    impl EnvVarGuard {
-        fn set(key: &'static str, value: &str) -> Self {
-            let old = std::env::var(key).ok();
-            unsafe {
-                std::env::set_var(key, value);
-            }
-            Self { key, old }
-        }
-
-        fn unset(key: &'static str) -> Self {
-            let old = std::env::var(key).ok();
-            unsafe {
-                std::env::remove_var(key);
-            }
-            Self { key, old }
-        }
-    }
-
-    impl Drop for EnvVarGuard {
-        fn drop(&mut self) {
-            unsafe {
-                match &self.old {
-                    Some(value) => std::env::set_var(self.key, value),
-                    None => std::env::remove_var(self.key),
-                }
-            }
-        }
-    }
 
     fn sample_governor_proposal() -> GovernorProposal {
         GovernorProposal {
@@ -997,45 +877,6 @@ mod tests {
             description: String::new(),
             executed_at: None,
             execution_tx_hash: String::new(),
-        }
-    }
-
-    fn sample_deployment(namespace: &str) -> treb_core::types::Deployment {
-        treb_core::types::Deployment {
-            id: format!("{namespace}/1/FPMM:dev"),
-            namespace: namespace.into(),
-            chain_id: 1,
-            contract_name: "FPMM".into(),
-            label: "dev".into(),
-            address: "0x1111111111111111111111111111111111111111".into(),
-            deployment_type: DeploymentType::Proxy,
-            transaction_id: "tx-001".into(),
-            deployment_strategy: DeploymentStrategy {
-                method: DeploymentMethod::Create,
-                salt: String::new(),
-                init_code_hash: String::new(),
-                factory: String::new(),
-                constructor_args: String::new(),
-                entropy: String::new(),
-            },
-            proxy_info: None,
-            artifact: ArtifactInfo {
-                path: "out/FPMM.json".into(),
-                compiler_version: "0.8.24".into(),
-                bytecode_hash: "0xabc".into(),
-                script_path: "script/Deploy.s.sol".into(),
-                git_commit: "abc1234".into(),
-            },
-            verification: VerificationInfo {
-                status: VerificationStatus::Unverified,
-                etherscan_url: String::new(),
-                verified_at: None,
-                reason: String::new(),
-                verifiers: Default::default(),
-            },
-            tags: None,
-            created_at: Utc.with_ymd_and_hms(2025, 1, 15, 10, 30, 0).unwrap(),
-            updated_at: Utc.with_ymd_and_hms(2025, 1, 15, 10, 30, 0).unwrap(),
         }
     }
 
@@ -1194,27 +1035,6 @@ mod tests {
             line.contains("proposer=0x70997970C51812dc3A010C7d01b50e0d17dc79C8"),
             "got: {line}"
         );
-    }
-
-    #[test]
-    fn format_run_entry_uses_styled_badges_when_color_enabled() {
-        let _lock = env_lock();
-        let _no_color = EnvVarGuard::unset("NO_COLOR");
-        let _term = EnvVarGuard::set("TERM", "xterm-256color");
-        owo_colors::set_override(true);
-        color::color_enabled(false);
-
-        let mut deployment = sample_deployment("fork/1");
-        deployment.verification.verifiers.insert(
-            "etherscan".into(),
-            VerifierStatus { status: "VERIFIED".into(), url: String::new(), reason: String::new() },
-        );
-
-        let entry = format_run_deployment_entry(&deployment);
-
-        assert!(entry.contains('\x1b'), "styled entry should contain ANSI codes: {entry:?}");
-        assert!(entry.contains("e[✔︎]"), "styled entry should contain Go-format verifier text");
-        assert!(entry.contains("[fork]"), "styled entry should include the fork badge text");
     }
 
     #[test]
