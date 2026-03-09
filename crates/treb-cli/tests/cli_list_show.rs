@@ -350,8 +350,12 @@ fn show_fork_badge_stays_in_header_only() {
     let tmp = tempfile::tempdir().unwrap();
     init_project_with_deployments(&tmp);
 
-    let output =
-        treb().args(["show", "fork/42220/MockToken"]).current_dir(tmp.path()).output().unwrap();
+    let output = treb()
+        .args(["show", "fork/42220/MockToken"])
+        .env("NO_COLOR", "1")
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
 
     assert!(output.status.success(), "treb show should exit 0");
     let stdout = String::from_utf8(output.stdout).unwrap();
