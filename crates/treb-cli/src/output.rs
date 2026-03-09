@@ -146,11 +146,7 @@ pub fn print_warning_banner(emoji: &str, message: &str) {
 pub fn print_section_header(emoji: &str, title: &str, separator_width: usize) {
     let separator: String = "─".repeat(separator_width);
     if color::is_color_enabled() {
-        println!(
-            "\n{} {}",
-            emoji,
-            format!("{title}:").style(color::BOLD)
-        );
+        println!("\n{} {}", emoji, format!("{title}:").style(color::BOLD));
         println!("{}", separator.style(color::GRAY));
     } else {
         println!("\n{} {title}:", emoji);

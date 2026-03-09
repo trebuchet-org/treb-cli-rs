@@ -64,6 +64,18 @@ Align the tree rendering and table formatting to match Go exactly. The Go CLI us
 **User stories:** 5
 **Dependencies:** Phase 1
 
+**Learnings from implementation:**
+- Unicode box-drawing chars (├, └, │) are 1 display column each but 3 bytes in UTF-8 — connector width reduced from 4 to 3 columns per level, matching Go
+- `display_width()` in `ui/terminal.rs` no longer strips ANSI — callers must call `strip_ansi_codes()` first (two-step pattern)
+- `unicode-width 0.2` and go-runewidth agree on widths for common symbols: ✔︎=1, ⏳=2, CJK=2; U+FE0E (text variation selector) has width 0
+- `calculate_column_widths` uses `display_width` for col 2 only; all other columns use byte length after ANSI stripping (matching Go behavior)
+- First column width adjustment formula: `widths[0] + 2 + continuation_prefix.len()` where `.len()` is byte count (matching Go `len()`)
+- New Go-matching table renderer (`TableData`, `calculate_column_widths`, `render_table_with_widths`) added to `output.rs` — coexists with `build_table()` (comfy_table) until all commands are ported
+- comfy_table `ContentArrangement::Dynamic` does NOT strip ANSI codes before measuring column widths — styled cells cause inflated column widths in golden files
+- `is_color_enabled()` returns `true` in subprocess golden tests (checks `NO_COLOR`/`TERM=dumb` only, not TTY) — so `styled()` always adds ANSI codes in golden output
+- `UPDATE_GOLDEN=1` regenerates ALL golden files in the test binary, not just failing ones — use `--test <binary>` to target specific test binaries and always verify the diff
+- `clippy::cloned_ref_to_slice_refs` lint: use `std::slice::from_ref(&table)` instead of `&[table.clone()]`
+
 ---
 
 ## Phase 3 -- version, networks, init, and config Output
@@ -93,6 +105,18 @@ Port the exact output format for four simple commands. These use direct `fmt.Pri
 
 **User stories:** 6
 **Dependencies:** Phase 1
+
+**Learnings from implementation:**
+- Emoji constants live in `crate::ui::emoji` (e.g., `emoji::GLOBE`, `emoji::CHECK`, `emoji::CROSS`) — import from there for all future phases
+- Color style constants: `color::SUCCESS` (green bold) for banners, `color::STAGE` (cyan bold) for headers, `color::WARNING` (yellow), `color::GRAY` (bright_black) for dim/faint text like command examples
+- Reusable format helpers in `output.rs`: `format_success(msg)` → `✅ {msg}` green, `format_warning(msg)` → `⚠️  {msg}` yellow, `format_error(msg)` → `❌ {msg}` red — use these in all future phases
+- For relative path display: `path.strip_prefix(&cwd).unwrap_or_else(|_| path.as_path())` — `strip_prefix()` returns `Result`, needs fallback
+- `cwd` ownership gotcha: `cwd` is moved into `ResolveOpts { project_root: cwd }` — clone it first if you need it later for relative path computation
+- JSON output is unchanged when porting human output — `--json` golden files don't need updates unless the JSON schema itself changes
+- When replacing `print_kv()`/`print_table()` with direct emoji-formatted output, the backing data structs (e.g., `VersionInfo`) stay unchanged since JSON still uses all fields
+- Pre-existing fork golden file failures (table column width drift) were fixed via `UPDATE_GOLDEN=1` — fork golden files now have a clean baseline for Phase 9
+- `UPDATE_GOLDEN=1 cargo test -p treb-cli --test <test_binary> -- <test_names>` regenerates specific golden files without touching unrelated ones
+- When table formatting changes globally (e.g., comfy_table version bump), all table-based golden files may need `UPDATE_GOLDEN=1` refresh
 
 ---
 
@@ -124,8 +148,29 @@ Port the most complex rendering in the CLI: the deployment list tree. The Go `re
 - JSON output schema: `{"deployments": [...], "otherNamespaces": {...}}`
 - Golden file updates for all list variants
 
+**Notes from Phase 2:**
+- Use the new `render_table_with_widths()` and `calculate_column_widths()` from `output.rs` (not `build_table()` / comfy_table) for deployment table rows — these match Go go-pretty output exactly
+- Tree connectors now use Unicode box-drawing (├─, └─, │) with 3-column indent per level
+- Styled cells always include ANSI in golden tests — `calculate_column_widths` handles ANSI stripping internally
+- Target golden tests with `--test cli_list_show` to avoid updating unrelated golden files
+
 **User stories:** 8
 **Dependencies:** Phase 2
+
+**Learnings from implementation:**
+- `DisplayCategory` enum (Proxy, Implementation, Singleton, Library) separates display grouping from domain `DeploymentType` — display-specific enums prevent coupling display logic to domain types
+- `ListResult` struct centralizes all display context (deployments, other_namespaces, network_names, fork_deployment_ids) — complex commands benefit from a single result struct holding all render context
+- Two-pass table rendering pattern: first pass collects `TableData` per type group, `calculate_column_widths()` computes global widths, second pass renders with `render_table_with_widths()` — this is the canonical pattern for Go-matching table output
+- `ImplNameLookup` maps `(namespace_lower, chain_id, address_lower)` → contract name for proxy→implementation resolution; address matching is case-insensitive (lowercase comparison)
+- When `--type` filter excludes implementations from the deployment list, `ImplNameLookup` won't find them — impl row falls back to truncated address; this matches Go behavior
+- JSON schema changes ripple across many test files: when wrapping output (e.g., `{"deployments": [...]}` instead of raw array), search for `as_array()` and command-specific `--json` patterns across ALL test files including `e2e/mod.rs` helpers
+- `serde`'s `skip_serializing_if` needs a custom `is_false` function for `bool` fields — no built-in `"is_false"` predicate
+- `print_json()` sorts keys recursively, so Go field order is handled automatically by alphabetical sorting — no need to control struct field ordering
+- Namespace discovery hint uses `{:<20}` (Go's `%-20s`) for namespace alignment; `build_other_namespaces` uses case-insensitive exclusion matching with `eq_ignore_ascii_case`
+- ANSI codes appear between tree prefixes and labels — test assertions should not span ANSI boundaries; use partial patterns like `"\n│ \n└─"` instead of full styled label strings
+- Fork deployment detection uses `namespace.starts_with("fork/")` — consistent across the codebase
+- When golden files are updated incrementally across multiple stories, the final "update all golden files" story may be a no-op verification — still valuable for consistency confirmation
+- `network_names` field currently empty (no centralized chain_id→name mapping) — future phases needing network names must populate from config or foundry.toml RPC endpoint keys
 
 ---
 
@@ -160,6 +205,27 @@ Port the detailed deployment view from Go `render/deployment.go`. The Go version
 **User stories:** 6
 **Dependencies:** Phase 1
 
+**Notes from Phase 3:**
+- Use `output::format_success()`, `format_warning()`, `format_error()` for status lines — these match Go format strings exactly
+- Color styles: `color::SUCCESS` for banners, `color::STAGE` for section headers (cyan bold), `color::GRAY` for dim text
+- Emoji imports from `crate::ui::emoji` — all Go emoji constants are available there
+
+**Learnings from implementation:**
+- Show command uses local helpers: `print_field(key, value)` for `  Key: Value` 2-space indent, `print_section(title)` for `\nTitle:` headers, `print_deployment_header(id, fork_badge)` for cyan bold header + 80-char `=` divider — reuse this pattern for other section-based commands (e.g., tag show, register)
+- `styled(text, style)` helper in show.rs conditionally applies owo-colors Style based on `color::is_color_enabled()` — useful pattern for inline conditional coloring
+- `output::print_kv()` is no longer used by show.rs after porting; marked `#[allow(dead_code)]` but kept as public utility — future phases may also stop using it
+- `contract_display_name(name, label)` already exported from `treb_core::types` — returns `Name:label` format, no need to reimplement
+- No magenta-only color constant in `color.rs` — use `Style::new().magenta()` inline for label coloring
+- DeploymentStrategy has `entropy` and `init_code_hash` fields with `skip_serializing_if = "String::is_empty"` — conditionally display only when non-empty
+- Zero-hash check for Salt field: skip when empty OR equals `0x000...000` (66 chars total)
+- All human-readable timestamps must use `.format("%Y-%m-%d %H:%M:%S")` for Go parity — never use `to_rfc3339()` in human output
+- `VerificationInfo.status` is a `VerificationStatus` enum (Verified/Unverified/Failed/Partial) — use enum matching, not string comparison
+- `VerificationInfo.etherscan_url` is a top-level field on the verification struct, separate from per-verifier data
+- Go shows proxy Implementation plain (no color) when unresolved — only uses colored styling when resolved via linked runtime field
+- `serde_json::json!` macro + `serde_json::Value` implements `Serialize`, works directly with `output::print_json(&wrapper)` for JSON wrapper objects
+- Tests using `stdout.contains()` with styled output must set `NO_COLOR=1` env var — nested `styled()` calls insert ANSI escape codes that break plain-text matching
+- `helpers::seed_registry(ctx.path())` seeds from `treb-core/tests/fixtures/deployments_map.json` — useful for show/list tests
+
 ---
 
 ## Phase 6 -- run Command Output
@@ -192,8 +258,16 @@ Port the run command execution output from Go. The Go version uses a `ScriptRend
 - Debug output file format matching Go
 - Golden file updates for run variants
 
+**Notes from Phase 2:**
+- Use `render_table_with_widths()` and `calculate_column_widths()` from `output.rs` for any tabular deployment/transaction output — these match Go go-pretty exactly
+- Remember `display_width()` does not strip ANSI; the table renderer handles this internally via `strip_ansi_codes()`
+
 **User stories:** 7
 **Dependencies:** Phase 2
+
+**Notes from Phase 4:**
+- Two-pass table rendering is the canonical pattern: collect all `TableData`, call `calculate_column_widths()` for global widths, then `render_table_with_widths()` — proven in Phase 4 list command
+- Continuation prefix after headers ("│ " or "  ") works correctly with `render_table_with_widths` despite different byte lengths (│ is 3 bytes but 1 display char)
 
 ---
 
@@ -226,6 +300,11 @@ Port verification output from Go `render/verify.go`. The Go version shows skippe
 
 **User stories:** 5
 **Dependencies:** Phase 1
+
+**Notes from Phase 5:**
+- `VerificationInfo.status` is a `VerificationStatus` enum (Verified/Unverified/Failed/Partial) — use enum matching, not string comparison
+- Go uses overall `verification.status` + `etherscan_url`, not per-verifier breakdown — simpler display than Rust's current per-verifier approach
+- Color constants: `color::VERIFIED` (green), `color::NOT_VERIFIED` (red), `color::FAILED` (red), `color::UNVERIFIED` (dimmed)
 
 ---
 
@@ -286,6 +365,21 @@ Port all seven fork subcommand outputs from Go `render/fork.go`. Each subcommand
 - `fork diff`: `Fork Diff: NETWORK` + `+` new / `~` modified deployments + transaction count
 - Golden file updates for all fork variants
 
+**Notes from Phase 2:**
+- Fork golden files (`fork_diff_with_changes`, `fork_history_network_filter`, `fork_history_with_entries`, `fork_status_with_active_fork`) currently use comfy_table with ANSI-inflated column widths — these were pre-existing failures also present on main
+- When porting fork table output, replace `build_table()` (comfy_table) with `render_table_with_widths()` to eliminate ANSI width inflation and match Go output
+- Use `--test integration_fork` to target only fork golden tests
+
+**Notes from Phase 3:**
+- Pre-existing fork golden file failures (table column width drift) were fixed in Phase 3 via `UPDATE_GOLDEN=1` — fork golden files now start from a clean baseline
+- Use `output::format_success()` for checkmark lines, `color::STAGE` (cyan bold) for section headers, `color::GRAY` for dim text
+- Emoji imports from `crate::ui::emoji` — all Go emoji constants are available there
+- For relative path display: `path.strip_prefix(&cwd).unwrap_or_else(|_| path.as_path())`
+
+**Notes from Phase 5:**
+- All human-readable timestamps must use `.format("%Y-%m-%d %H:%M:%S")` for Go parity — never use `to_rfc3339()` in human output
+- Tests checking styled output with `contains()` must set `NO_COLOR=1` or strip ANSI codes — nested `styled()` calls break plain-text matching
+
 **User stories:** 7
 **Dependencies:** Phase 1
 
@@ -315,6 +409,18 @@ Port sync and tag rendering from Go. Sync uses a multi-section format with metri
 **User stories:** 6
 **Dependencies:** Phase 1
 
+**Notes from Phase 3:**
+- Use `output::format_success()`, `format_warning()` for status lines — these match Go format strings exactly
+- Color styles: `color::SUCCESS` (green bold) for banners, `color::STAGE` (cyan bold) for section headers, `color::WARNING` (yellow), `color::GRAY` for dim text
+- Emoji imports from `crate::ui::emoji`
+
+**Notes from Phase 4:**
+- In the list command, only the first tag is shown as `(tag1)` in cyan after contract name — verify tag display in `tag show` uses a different format (comma-separated, all tags)
+
+**Notes from Phase 5:**
+- Show command's `print_field(key, value)` / `print_section(title)` helpers are a useful pattern for section-based output — consider reusing or extracting to shared output module if tag show needs similar formatting
+- `contract_display_name(name, label)` from `treb_core::types` can be reused for tag show's deployment display
+
 ---
 
 ## Phase 11 -- register, prune, and reset Command Output
@@ -340,6 +446,10 @@ Port rendering for three registry management commands. Register uses interactive
 **User stories:** 6
 **Dependencies:** Phase 1
 
+**Notes from Phase 3:**
+- Use `output::format_success()`, `format_warning()`, `format_error()` for status lines
+- Emoji imports from `crate::ui::emoji`; color styles: `color::SUCCESS`, `color::STAGE`, `color::WARNING`, `color::GRAY`
+
 ---
 
 ## Phase 12 -- gen-deploy and migrate Command Output
@@ -362,6 +472,11 @@ Port gen-deploy and migrate output from Go. Gen-deploy has minimal output (succe
 
 **User stories:** 5
 **Dependencies:** Phase 1
+
+**Notes from Phase 3:**
+- Use `output::format_success()`, `format_warning()` for status lines
+- Emoji imports from `crate::ui::emoji`; color styles: `color::SUCCESS`, `color::STAGE`, `color::WARNING`, `color::GRAY`
+- For relative path display: `path.strip_prefix(&cwd).unwrap_or_else(|_| path.as_path())`
 
 ---
 
@@ -391,6 +506,11 @@ Port dev anvil subcommand output from Go `render/anvil.go`. Each subcommand (sta
 **User stories:** 5
 **Dependencies:** Phase 1
 
+**Notes from Phase 3:**
+- Use `output::format_success()` for checkmark lines, `color::STAGE` (cyan bold) for section headers
+- Emoji imports from `crate::ui::emoji`; color styles: `color::SUCCESS`, `color::STAGE`, `color::GRAY`
+- For relative path display: `path.strip_prefix(&cwd).unwrap_or_else(|_| path.as_path())`
+
 ---
 
 ## Phase 14 -- JSON Output Schema Parity and Command Grouping
@@ -418,6 +538,21 @@ Audit every command's `--json` output to ensure schema-identical output with Go.
 
 **User stories:** 6
 **Dependencies:** Phases 3-13
+
+**Notes from Phase 3:**
+- Confirmed that porting human output does NOT change JSON output — `--json` golden files are unaffected unless the JSON schema itself changes
+- Data structs (e.g., `VersionInfo`) stay unchanged even when human display format changes completely
+
+**Notes from Phase 4:**
+- `list --json` already ported to Go schema: `{"deployments": [...], "otherNamespaces": {...}}` wrapper with `ListJsonEntry` (8 Go fields) and `ListJsonOutput` — no audit needed for list
+- `print_json()` sorts keys recursively so field ordering is automatically alphabetical — verify other commands also use `print_json()` for consistency
+- When auditing JSON schema changes, search for `as_array()` and command-specific `--json` patterns across all test files including `e2e/mod.rs` helpers — JSON schema changes break shared helpers silently
+- `serde` `skip_serializing_if` with custom `is_false` function is the pattern for omitting false booleans (Go `omitempty` equivalent for bool)
+
+**Notes from Phase 5:**
+- `show --json` already ported to Go schema: `{"deployment": {...}}` wrapper with conditional `"fork": true` field (absent for non-fork) — no audit needed for show
+- `serde_json::json!` macro works with `output::print_json()` for constructing wrapper objects with conditional fields — proven pattern for JSON wrappers
+- Fork detection in JSON uses `namespace.starts_with("fork/")` — `"fork"` field is absent (not `false`) for non-fork deployments, matching Go `omitempty` behavior
 
 ---
 
