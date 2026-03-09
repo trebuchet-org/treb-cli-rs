@@ -66,9 +66,24 @@ fn styled(text: &str, style: Style) -> String {
     if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
 }
 
-/// Print a section header with optional STAGE styling.
-fn print_header(title: &str) {
-    println!("{}", styled(&format!("── {title} ──"), color::STAGE));
+/// Print the deployment header: `Deployment: {id}` in cyan bold + 80-char `=` divider.
+fn print_deployment_header(id: &str, fork_badge: Option<&str>) {
+    let header = match fork_badge {
+        Some(badge) => format!("Deployment: {} {}", id, styled(badge, color::FORK_BADGE)),
+        None => format!("Deployment: {}", id),
+    };
+    println!("{}", styled(&header, color::STAGE));
+    println!("{}", "=".repeat(80));
+}
+
+/// Print a plain-text section header: `\nSection Name:\n`.
+fn print_section(title: &str) {
+    println!("\n{}:", title);
+}
+
+/// Print a 2-space-indented key-value field: `  Key: Value`.
+fn print_field(key: &str, value: &str) {
+    println!("  {}: {}", key, value);
 }
 
 /// Style a verification status value according to its meaning.
@@ -82,62 +97,82 @@ fn styled_verification_status(status: &str) -> String {
 }
 
 fn print_deployment_details(d: &Deployment) {
-    // Identity
-    print_header("Identity");
+    // Header: Deployment: {id} [fork]
+    let fork = badge::fork_badge(&d.namespace);
+    print_deployment_header(&d.id, fork.as_deref());
+
+    // Basic Information (Go: Identity + On-Chain merged)
+    print_section("Basic Information");
+    print_field("Contract", &d.contract_name);
+    let addr_styled = styled(&d.address, color::ADDRESS);
+    print_field("Address", &addr_styled);
+    let type_str = d.deployment_type.to_string();
+    let type_styled =
+        styled(&type_str, color::style_for_deployment_type(d.deployment_type.clone()));
+    print_field("Type", &type_styled);
     let ns_display = match badge::fork_badge(&d.namespace) {
         Some(fb) => format!("{} {}", d.namespace, styled(&fb, color::FORK_BADGE)),
         None => d.namespace.clone(),
     };
-    let type_str = d.deployment_type.to_string();
-    let type_styled =
-        styled(&type_str, color::style_for_deployment_type(d.deployment_type.clone()));
-    output::print_kv(&[
-        ("ID", &d.id),
-        ("Contract", &d.contract_name),
-        ("Label", &d.label),
-        ("Namespace", &ns_display),
-        ("Type", &type_styled),
-    ]);
-
-    // On-Chain
-    println!();
-    print_header("On-Chain");
-    let addr_styled = styled(&d.address, color::ADDRESS);
-    output::print_kv(&[("Chain ID", &d.chain_id.to_string()), ("Address", &addr_styled)]);
-
-    // Transaction
-    println!();
-    print_header("Transaction");
-    output::print_kv(&[
-        ("Transaction ID", &d.transaction_id),
-        ("Method", &d.deployment_strategy.method.to_string()),
-    ]);
-    if !d.deployment_strategy.salt.is_empty() {
-        output::print_kv(&[("Salt", &d.deployment_strategy.salt)]);
+    print_field("Namespace", &ns_display);
+    print_field("Network", &d.chain_id.to_string());
+    if !d.label.is_empty() {
+        print_field("Label", &d.label);
     }
+
+    // Deployment Strategy (Go: Transaction)
+    print_section("Deployment Strategy");
+    print_field("Method", &d.deployment_strategy.method.to_string());
     if !d.deployment_strategy.factory.is_empty() {
-        output::print_kv(&[("Factory", &d.deployment_strategy.factory)]);
+        print_field("Factory", &d.deployment_strategy.factory);
+    }
+    if !d.deployment_strategy.salt.is_empty() {
+        print_field("Salt", &d.deployment_strategy.salt);
     }
 
-    // Artifact
-    println!();
-    print_header("Artifact");
-    output::print_kv(&[
-        ("Path", &d.artifact.path),
-        ("Compiler", &d.artifact.compiler_version),
-        ("Bytecode Hash", &d.artifact.bytecode_hash),
-        ("Script", &d.artifact.script_path),
-        ("Git Commit", &d.artifact.git_commit),
-    ]);
+    // Proxy Information (only for proxy deployments)
+    if let Some(ref proxy) = d.proxy_info {
+        print_section("Proxy Information");
+        print_field("Type", &proxy.proxy_type);
+        let impl_styled = styled(&proxy.implementation, color::ADDRESS);
+        print_field("Implementation", &impl_styled);
+        if !proxy.admin.is_empty() {
+            let admin_styled = styled(&proxy.admin, color::ADDRESS);
+            print_field("Admin", &admin_styled);
+        }
+        if !proxy.history.is_empty() {
+            println!("  Upgrade History:");
+            for (i, upgrade) in proxy.history.iter().enumerate() {
+                println!(
+                    "    {}. {} (upgraded at {})",
+                    i + 1,
+                    upgrade.implementation_id,
+                    upgrade.upgraded_at.to_rfc3339(),
+                );
+            }
+        }
+    }
 
-    // Verification
-    println!();
-    print_header("Verification");
+    // Artifact Information (Go: Artifact)
+    print_section("Artifact Information");
+    print_field("Path", &d.artifact.path);
+    print_field("Compiler", &d.artifact.compiler_version);
+    if !d.artifact.bytecode_hash.is_empty() {
+        print_field("BytecodeHash", &d.artifact.bytecode_hash);
+    }
+    if !d.artifact.script_path.is_empty() {
+        print_field("Script", &d.artifact.script_path);
+    }
+    if !d.artifact.git_commit.is_empty() {
+        print_field("GitCommit", &d.artifact.git_commit);
+    }
+
+    // Verification Status (Go: Verification)
+    print_section("Verification Status");
     if d.verification.verifiers.is_empty() {
         let status = styled_verification_status("UNVERIFIED");
-        output::print_kv(&[("Status", &status)]);
+        print_field("Status", &status);
     } else {
-        let mut pairs: Vec<(String, String)> = Vec::new();
         for (key, label) in VERIFIER_DISPLAY_ORDER {
             if let Some(vs) = d.verification.verifiers.get(key) {
                 let status_styled = styled_verification_status(&vs.status);
@@ -148,54 +183,26 @@ fn print_deployment_details(d: &Deployment) {
                 if !vs.reason.is_empty() {
                     detail.push_str(&format!(" — {}", vs.reason));
                 }
-                pairs.push((label.to_string(), detail));
+                print_field(label, &detail);
             }
         }
-        let kv_refs: Vec<(&str, &str)> =
-            pairs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-        output::print_kv(&kv_refs);
     }
     if let Some(ref verified_at) = d.verification.verified_at {
-        output::print_kv(&[("Verified At", &verified_at.to_rfc3339())]);
-    }
-
-    // Proxy Info (only for proxy deployments)
-    if let Some(ref proxy) = d.proxy_info {
-        println!();
-        print_header("Proxy Info");
-        let impl_styled = styled(&proxy.implementation, color::ADDRESS);
-        output::print_kv(&[("Proxy Type", &proxy.proxy_type), ("Implementation", &impl_styled)]);
-        if !proxy.admin.is_empty() {
-            let admin_styled = styled(&proxy.admin, color::ADDRESS);
-            output::print_kv(&[("Admin", &admin_styled)]);
-        }
-        if !proxy.history.is_empty() {
-            println!("  Upgrade History:");
-            for upgrade in &proxy.history {
-                println!(
-                    "    - {} at {} (tx: {})",
-                    upgrade.implementation_id,
-                    upgrade.upgraded_at.to_rfc3339(),
-                    upgrade.upgrade_tx_id
-                );
-            }
-        }
+        print_field("Verified At", &verified_at.to_rfc3339());
     }
 
     // Tags (only when present)
     if let Some(ref tags) = d.tags {
         if !tags.is_empty() {
-            println!();
-            print_header("Tags");
-            println!("  {}", tags.join(", "));
+            print_section("Tags");
+            for tag in tags {
+                println!("  - {}", tag);
+            }
         }
     }
 
     // Timestamps
-    println!();
-    print_header("Timestamps");
-    output::print_kv(&[
-        ("Created At", &d.created_at.to_rfc3339()),
-        ("Updated At", &d.updated_at.to_rfc3339()),
-    ]);
+    print_section("Timestamps");
+    print_field("Created", &d.created_at.to_rfc3339());
+    print_field("Updated", &d.updated_at.to_rfc3339());
 }

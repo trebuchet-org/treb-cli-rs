@@ -64,6 +64,7 @@ pub fn print_table(table: &Table) {
 }
 
 /// Print key-value pairs with right-padded keys for alignment.
+#[allow(dead_code)]
 pub fn print_kv(pairs: &[(&str, &str)]) {
     let max_key_len = pairs.iter().map(|(k, _)| k.len()).max().unwrap_or(0);
     for (key, value) in pairs {
