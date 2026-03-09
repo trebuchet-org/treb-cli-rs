@@ -492,7 +492,7 @@ fn verify_all_force_proceeds_with_reverification() {
 }
 
 #[test]
-fn verify_all_uses_labeled_display_name_in_progress_and_summary() {
+fn verify_all_uses_labeled_display_name_without_synthetic_skip_section() {
     let tmp = tempfile::tempdir().unwrap();
     init_project_with_single_labeled_batch_deployment(&tmp);
 
@@ -508,16 +508,16 @@ fn verify_all_uses_labeled_display_name_in_progress_and_summary() {
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert!(
-        stderr.contains("Skipping 3 already verified deployed contracts:"),
-        "batch verify should print a skipped section for verified deployments: {stderr}"
+        !stderr.contains("Skipping "),
+        "batch verify should not synthesize a skipped section for already verified deployments: {stderr}"
     );
     assert!(
-        stderr.contains("⏭️ chain:42220/mainnet/FPMMFactory:v3.0.0 (already verified)"),
-        "batch verify should show skipped verified deployments: {stderr}"
+        !stderr.contains("(already verified)"),
+        "batch verify should not render already verified deployments as skipped batch results: {stderr}"
     );
     // Per-result line should contain the labeled display name in chain:CHAINID/NS/NAME format.
     assert!(
-        stderr.contains("FPMM:v3.0.0"),
+        stderr.contains("chain:42220/mainnet/FPMM:v3.0.0"),
         "batch per-result should show the labeled display name: {stderr}"
     );
     assert!(
@@ -529,7 +529,7 @@ fn verify_all_uses_labeled_display_name_in_progress_and_summary() {
 }
 
 #[test]
-fn verify_all_batch_output_keeps_per_verifier_failures() {
+fn verify_all_batch_output_uses_aggregate_failure_details() {
     let tmp = tempfile::tempdir().unwrap();
     init_project_with_single_labeled_batch_deployment(&tmp);
 
@@ -545,11 +545,19 @@ fn verify_all_batch_output_keeps_per_verifier_failures() {
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert!(
-        stderr.contains("✗ Etherscan Failed"),
-        "batch verify should name the failing etherscan attempt: {stderr}"
+        stderr.contains("✗ invalid address 'not-an-address'"),
+        "batch verify should print aggregate failure details instead of verifier status lines: {stderr}"
     );
     assert!(
-        stderr.contains("✗ Sourcify Failed"),
-        "batch verify should name the failing sourcify attempt: {stderr}"
+        !stderr.contains("✗ Etherscan Failed"),
+        "batch verify should not reuse single-verify verifier breakdown lines: {stderr}"
+    );
+    assert!(
+        !stderr.contains("✗ Sourcify Failed"),
+        "batch verify should not reuse single-verify verifier breakdown lines: {stderr}"
+    );
+    assert!(
+        !stderr.contains("Verification Status:"),
+        "batch verify should not print the single-verify status section: {stderr}"
     );
 }

@@ -198,6 +198,48 @@ fn print_verifier_status_lines(
     }
 }
 
+fn print_batch_result_details(
+    status: &VerificationStatus,
+    verifiers: &HashMap<String, VerifierStatus>,
+    requested_verifiers: &[String],
+) {
+    if matches!(status, VerificationStatus::Verified | VerificationStatus::Partial) {
+        eprintln!(
+            "    {} {}",
+            styled(emoji::CHECK_MARK, color::SUCCESS),
+            styled("Verification completed", color::SUCCESS),
+        );
+    }
+
+    let mut printed_failure = false;
+    for name in ordered_verifier_names(Some(requested_verifiers), verifiers) {
+        let verifier = &verifiers[&name];
+        if verifier.status != "FAILED" {
+            continue;
+        }
+
+        printed_failure = true;
+        let message = if verifier.reason.is_empty() {
+            "Verification failed"
+        } else {
+            verifier.reason.as_str()
+        };
+        eprintln!(
+            "    {} {}",
+            styled(emoji::CROSS_MARK, color::FAILED),
+            styled(message, color::FAILED),
+        );
+    }
+
+    if !printed_failure && *status == VerificationStatus::Failed {
+        eprintln!(
+            "    {} {}",
+            styled(emoji::CROSS_MARK, color::FAILED),
+            styled("Verification failed", color::FAILED),
+        );
+    }
+}
+
 /// Print the `Verification Status:` section with per-verifier results.
 fn print_verification_status(verifiers: &HashMap<String, VerifierStatus>) {
     if verifiers.is_empty() {
@@ -495,12 +537,13 @@ async fn run_batch(
     let mut registry = Registry::open(cwd).context("failed to open registry")?;
 
     let all_deployments: Vec<_> = registry.list_deployments().into_iter().cloned().collect();
-    let (skipped_deployments, candidate_deployments): (Vec<_>, Vec<_>) = if force {
-        (Vec::new(), all_deployments)
+    let candidate_deployments: Vec<_> = if force {
+        all_deployments
     } else {
         all_deployments
             .into_iter()
-            .partition(|d| d.verification.status == VerificationStatus::Verified)
+            .filter(|d| d.verification.status != VerificationStatus::Verified)
+            .collect()
     };
 
     if candidate_deployments.is_empty() {
@@ -555,32 +598,6 @@ async fn run_batch(
     let mut success_count: usize = 0;
 
     if !json {
-        if !skipped_deployments.is_empty() {
-            eprintln!(
-                "{}",
-                styled(
-                    &format!(
-                        "Skipping {} already verified deployed contract{}:",
-                        skipped_deployments.len(),
-                        if skipped_deployments.len() == 1 { "" } else { "s" },
-                    ),
-                    color::WARNING,
-                ),
-            );
-            for dep in &skipped_deployments {
-                let display_name = contract_display_name(&dep.contract_name, &dep.label);
-                eprintln!(
-                    "  {} chain:{}/{}/{} {}",
-                    styled(emoji::FAST_FORWARD, color::WARNING),
-                    dep.chain_id,
-                    dep.namespace,
-                    display_name,
-                    styled("(already verified)", color::MUTED),
-                );
-            }
-            eprintln!();
-        }
-
         if force {
             eprintln!(
                 "{}",
@@ -610,7 +627,6 @@ async fn run_batch(
         let address = dep_snapshot.address.clone();
         let chain_id = dep_snapshot.chain_id;
         let namespace = dep_snapshot.namespace.clone();
-        let pre_status = dep_snapshot.verification.status.clone();
 
         let mut dep_owned = dep_snapshot;
         let verifier_count = verifiers.len();
@@ -711,9 +727,9 @@ async fn run_batch(
         // Print per-result output in Go-matching format.
         if !json {
             let location = format!("chain:{}/{}/{}", chain_id, namespace, display_name);
-            let icon = get_status_icon(&pre_status);
+            let icon = get_status_icon(&agg_status);
             eprintln!("  {} {}", icon, location);
-            print_verifier_status_lines(&attempted_verifiers, Some(verifiers), "    ");
+            print_batch_result_details(&agg_status, &attempted_verifiers, verifiers);
 
             // Blank line between results, not after last.
             if i + 1 < total {
