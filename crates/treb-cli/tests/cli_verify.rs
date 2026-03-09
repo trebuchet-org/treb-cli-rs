@@ -80,6 +80,30 @@ fn init_project_with_invalid_address_deployment(tmp: &tempfile::TempDir) {
     registry.rebuild_lookup_index().expect("lookup index rebuild should succeed");
 }
 
+/// Helper: create a project where only a single labeled deployment remains
+/// unverified and fails locally before any network call.
+fn init_project_with_single_labeled_batch_deployment(tmp: &tempfile::TempDir) {
+    init_project_with_verified_deployments(tmp);
+
+    let path = tmp.path().join(".treb/deployments.json");
+    let json_str = fs::read_to_string(&path).unwrap();
+    let mut map: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+    let deployment =
+        map.get_mut("mainnet/42220/FPMM:v3.0.0").expect("fixture deployment should exist");
+
+    deployment["address"] = serde_json::json!("not-an-address");
+    deployment["verification"]["status"] = serde_json::json!("UNVERIFIED");
+    deployment["verification"]["etherscanUrl"] = serde_json::json!("");
+    deployment["verification"]["verifiedAt"] = serde_json::Value::Null;
+    deployment["verification"]["reason"] = serde_json::json!("");
+    deployment["verification"]["verifiers"] = serde_json::json!({});
+
+    fs::write(&path, serde_json::to_string_pretty(&map).unwrap()).unwrap();
+
+    let registry = treb_registry::Registry::open(tmp.path()).expect("registry should open");
+    registry.rebuild_lookup_index().expect("lookup index rebuild should succeed");
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // --help output
 // ═══════════════════════════════════════════════════════════════════════════
@@ -464,5 +488,36 @@ fn verify_all_force_proceeds_with_reverification() {
     assert!(
         stderr.contains("Re-verifying"),
         "--all --force should attempt re-verification: {stderr}"
+    );
+}
+
+#[test]
+fn verify_all_uses_labeled_display_name_in_progress_and_summary() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_single_labeled_batch_deployment(&tmp);
+
+    let output = treb()
+        .args(["--no-color", "verify", "--all"])
+        .env("NO_COLOR", "1")
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "batch verify should complete with handled failures");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        stderr.contains("[1/1] Verifying FPMM:v3.0.0 ("),
+        "batch progress should show the labeled display name: {stderr}"
+    );
+    assert!(
+        !stderr.contains("[1/1] Verifying FPMM ("),
+        "batch progress should not fall back to the raw contract name: {stderr}"
+    );
+    assert!(
+        stdout.contains("FPMM:v3.0.0"),
+        "batch summary should show the labeled display name: {stdout}"
     );
 }

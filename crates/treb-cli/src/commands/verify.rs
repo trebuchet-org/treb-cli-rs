@@ -515,10 +515,12 @@ async fn run_batch(
     let total = candidate_ids.len();
     let mut results: Vec<VerifyOutputJson> = Vec::new();
     let mut ver_badges: Vec<String> = Vec::new();
+    let mut display_names: Vec<String> = Vec::new();
 
     for (i, dep_id) in candidate_ids.iter().enumerate() {
         let dep_snapshot = registry.get_deployment(dep_id).unwrap().clone();
         let contract_name = dep_snapshot.contract_name.clone();
+        let display_name = contract_display_name(&dep_snapshot.contract_name, &dep_snapshot.label);
         let address = dep_snapshot.address.clone();
         let chain_id = dep_snapshot.chain_id;
 
@@ -535,7 +537,7 @@ async fn run_batch(
                     i + 1,
                     total,
                     action,
-                    contract_name,
+                    display_name,
                     output::truncate_address(&address),
                 ),
             );
@@ -658,6 +660,7 @@ async fn run_batch(
             badge::verification_badge(&attempted_verifiers)
         };
         ver_badges.push(ver_badge);
+        display_names.push(display_name);
 
         let agg_status_str = match dep_owned.verification.status {
             VerificationStatus::Verified => "VERIFIED",
@@ -691,7 +694,9 @@ async fn run_batch(
     } else {
         // Print summary table.
         let mut table = output::build_table(&["Contract", "Address", "Status", "Verifiers"]);
-        for (r, ver_badge) in results.iter().zip(ver_badges.iter()) {
+        for ((r, ver_badge), display_name) in
+            results.iter().zip(ver_badges.iter()).zip(display_names.iter())
+        {
             let status_styled = match r.status.as_str() {
                 "VERIFIED" => styled("VERIFIED", color::VERIFIED),
                 "FAILED" => styled("FAILED", color::FAILED),
@@ -699,7 +704,7 @@ async fn run_batch(
                 _ => r.status.clone(),
             };
             table.add_row(vec![
-                r.contract_name.clone(),
+                display_name.clone(),
                 output::truncate_address(&r.address),
                 status_styled,
                 ver_badge.clone(),
