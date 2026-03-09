@@ -16,7 +16,10 @@ use treb_safe::{
     types::{SafeServiceMultisigResponse, SafeServiceTx},
 };
 
-use crate::{output, ui::color};
+use crate::{
+    output,
+    ui::{color, emoji},
+};
 
 // ── JSON output types ───────────────────────────────────────────────────
 
@@ -32,15 +35,6 @@ struct SyncOutputJson {
     governor_newly_executed: usize,
     governor_removed: usize,
     errors: Vec<String>,
-}
-
-// ── Detail table row ────────────────────────────────────────────────────
-
-struct SyncDetailRow {
-    safe_tx_hash: String,
-    safe_address: String,
-    status: String,
-    confirmations: usize,
 }
 
 // ── Chain ID resolution ─────────────────────────────────────────────────
@@ -236,42 +230,36 @@ pub async fn run(
         .cloned()
         .collect();
 
-    if safe_filtered.is_empty() && gov_filtered.is_empty() {
-        if json {
-            output::print_json(&SyncOutputJson {
-                synced: 0,
-                updated: 0,
-                newly_executed: 0,
-                removed: 0,
-                governor_synced: 0,
-                governor_updated: 0,
-                governor_newly_executed: 0,
-                governor_removed: 0,
-                errors: vec![],
-            })?;
-        } else {
-            match &network {
-                Some(name) => {
-                    println!("No safe transactions or governor proposals found for network {name}.")
-                }
-                None => println!("No safe transactions or governor proposals in the registry."),
-            }
-        }
+    if safe_filtered.is_empty() && gov_filtered.is_empty() && json {
+        output::print_json(&SyncOutputJson {
+            synced: 0,
+            updated: 0,
+            newly_executed: 0,
+            removed: 0,
+            governor_synced: 0,
+            governor_updated: 0,
+            governor_newly_executed: 0,
+            governor_removed: 0,
+            errors: vec![],
+        })?;
         return Ok(());
+    }
+
+    if !json {
+        println!("Syncing registry...");
     }
 
     let mut updated_count = 0usize;
     let mut newly_executed_count = 0usize;
     let mut removed_count = 0usize;
     let mut errors: Vec<String> = Vec::new();
-    let mut detail_rows: Vec<SyncDetailRow> = Vec::new();
     let synced_count = safe_filtered.len();
 
     // ── Safe transaction sync ───────────────────────────────────────────
 
     if !safe_filtered.is_empty() {
         if !json {
-            output::print_stage("\u{1f50d}", "Syncing safe transactions...");
+            println!("{}", output::format_stage("\u{1f50d}", "Syncing safe transactions..."));
         }
 
         // Group safe transactions by (safe_address, chain_id) for batched API calls.
@@ -287,7 +275,10 @@ pub async fn run(
         let mut clients: HashMap<u64, SafeServiceClient> = HashMap::new();
 
         if !json {
-            output::print_stage("\u{2699}\u{fe0f}", "Processing safe transactions...");
+            println!(
+                "{}",
+                output::format_stage("\u{2699}\u{fe0f}", "Processing safe transactions...")
+            );
         }
 
         for ((safe_address, chain_id), local_hashes) in &groups {
@@ -303,12 +294,6 @@ pub async fn run(
                             "unsupported chain {chain_id} for Safe Transaction Service (safe {safe_address})"
                         );
                         errors.push(msg.clone());
-                        if !json {
-                            eprintln!(
-                                "{}",
-                                output::format_warning_banner("\u{26a0}\u{fe0f}", &msg)
-                            );
-                        }
                         continue;
                     }
                 },
@@ -323,28 +308,23 @@ pub async fn run(
             }
 
             // Fetch multisig transactions from the Safe Transaction Service
-            let service_resp: SafeServiceMultisigResponse = match client
-                .get_multisig_transactions(safe_address)
-                .await
-            {
-                Ok(resp) => {
-                    if debug {
-                        eprintln!("[debug] received {} results", resp.results.len());
+            let service_resp: SafeServiceMultisigResponse =
+                match client.get_multisig_transactions(safe_address).await {
+                    Ok(resp) => {
+                        if debug {
+                            eprintln!("[debug] received {} results", resp.results.len());
+                        }
+                        resp
                     }
-                    resp
-                }
-                Err(e) => {
-                    let msg = format!(
-                        "Safe service error for {} (chain {chain_id}): {e}",
-                        output::truncate_address(safe_address)
-                    );
-                    errors.push(msg.clone());
-                    if !json {
-                        eprintln!("{}", output::format_warning_banner("\u{26a0}\u{fe0f}", &msg));
+                    Err(e) => {
+                        let msg = format!(
+                            "Safe service error for {} (chain {chain_id}): {e}",
+                            output::truncate_address(safe_address)
+                        );
+                        errors.push(msg.clone());
+                        continue;
                     }
-                    continue;
-                }
-            };
+                };
 
             // Index service results by safeTxHash for fast lookup
             let service_map: HashMap<&str, &SafeServiceTx> =
@@ -359,7 +339,6 @@ pub async fn run(
                     };
 
                     let was_executed = local_stx.status == TransactionStatus::Executed;
-                    let old_status_str = local_stx.status.to_string();
                     let mut updated_stx = local_stx.clone();
 
                     // Update confirmations from the service
@@ -403,17 +382,6 @@ pub async fn run(
                             || format!("failed to update safe transaction {local_hash}"),
                         )?;
                         updated_count += 1;
-
-                        detail_rows.push(SyncDetailRow {
-                            safe_tx_hash: local_hash.clone(),
-                            safe_address: safe_address.clone(),
-                            status: if became_executed {
-                                format!("{old_status_str} -> Executed")
-                            } else {
-                                "Updated".to_string()
-                            },
-                            confirmations: updated_stx.confirmations.len(),
-                        });
                     }
 
                     // Update linked Transaction records when safe tx becomes Executed
@@ -437,12 +405,6 @@ pub async fn run(
                         format!("failed to remove stale safe transaction {local_hash}")
                     })?;
                     removed_count += 1;
-                    detail_rows.push(SyncDetailRow {
-                        safe_tx_hash: local_hash.clone(),
-                        safe_address: safe_address.clone(),
-                        status: "Removed".to_string(),
-                        confirmations: 0,
-                    });
                 }
             }
         }
@@ -457,7 +419,10 @@ pub async fn run(
 
     if !gov_filtered.is_empty() {
         if !json {
-            output::print_stage("\u{1f3db}\u{fe0f}", "Syncing governor proposals...");
+            println!(
+                "{}",
+                output::format_stage("\u{1f3db}\u{fe0f}", "Syncing governor proposals...")
+            );
         }
 
         // Resolve RPC URLs for needed chain_ids from foundry.toml endpoints
@@ -467,9 +432,6 @@ pub async fn run(
 
         for warning in resolved_rpc_urls.warnings {
             errors.push(warning.clone());
-            if !json {
-                eprintln!("{}", output::format_warning_banner("\u{26a0}\u{fe0f}", &warning));
-            }
         }
 
         let http_client = reqwest::Client::builder()
@@ -487,9 +449,6 @@ pub async fn run(
                         output::truncate_address(&proposal.governor_address)
                     );
                     errors.push(msg.clone());
-                    if !json {
-                        eprintln!("{}", output::format_warning_banner("\u{26a0}\u{fe0f}", &msg));
-                    }
                     continue;
                 }
             };
@@ -541,12 +500,6 @@ pub async fn run(
                             err_str
                         );
                         errors.push(msg.clone());
-                        if !json {
-                            eprintln!(
-                                "{}",
-                                output::format_warning_banner("\u{26a0}\u{fe0f}", &msg)
-                            );
-                        }
                     }
                 }
             }
@@ -568,64 +521,118 @@ pub async fn run(
             errors,
         })?;
     } else {
-        // Print per-transaction detail table when there are changes
-        if !detail_rows.is_empty() {
-            let mut table = output::build_table(&["SafeTxHash", "Safe", "Status", "Confirmations"]);
-            for row in &detail_rows {
-                table.add_row(vec![
-                    output::truncate_address(&row.safe_tx_hash),
-                    output::truncate_address(&row.safe_address),
-                    row.status.clone(),
-                    row.confirmations.to_string(),
-                ]);
-            }
-            output::print_table(&table);
-            println!();
-        }
+        print!(
+            "{}",
+            format_sync_human_output(
+                synced_count,
+                newly_executed_count,
+                updated_count,
+                removed_count,
+                gov_synced_count,
+                gov_newly_executed_count,
+                gov_updated_count,
+                gov_removed_count,
+                &errors,
+            )
+        );
+    }
 
-        println!("{}", output::format_stage("\u{2705}", "Sync complete."));
-        if synced_count > 0 {
-            println!("  Safe transactions synced: {synced_count}");
+    Ok(())
+}
+
+/// Format sync human-readable output (sections, bullets, footer).
+#[allow(clippy::too_many_arguments)]
+fn format_sync_human_output(
+    synced_count: usize,
+    newly_executed_count: usize,
+    updated_count: usize,
+    removed_count: usize,
+    gov_synced_count: usize,
+    gov_newly_executed_count: usize,
+    gov_updated_count: usize,
+    gov_removed_count: usize,
+    errors: &[String],
+) -> String {
+    let mut out = String::new();
+
+    // Safe Transactions section
+    if synced_count > 0 {
+        out.push_str("\nSafe Transactions:\n");
+        out.push_str(&format!("  \u{2022} Checked: {synced_count}\n"));
+        if newly_executed_count > 0 {
             if color::is_color_enabled() {
-                println!("  Updated:                  {}", updated_count.style(color::WARNING));
-                println!(
-                    "  Newly executed:           {}",
-                    newly_executed_count.style(color::SUCCESS)
-                );
+                out.push_str(&format!(
+                    "  \u{2022} Executed: {}\n",
+                    newly_executed_count.style(color::GREEN)
+                ));
             } else {
-                println!("  Updated:                  {updated_count}");
-                println!("  Newly executed:           {newly_executed_count}");
-            }
-            if clean {
-                println!("  Removed (stale):          {removed_count}");
+                out.push_str(&format!("  \u{2022} Executed: {newly_executed_count}\n"));
             }
         }
-        if gov_synced_count > 0 {
-            println!("  Governor proposals synced: {gov_synced_count}");
+        if updated_count > 0 {
+            out.push_str(&format!("  \u{2022} Transactions updated: {updated_count}\n"));
+        }
+    } else {
+        out.push_str("No pending Safe transactions found\n");
+    }
+
+    // Governor Proposals section
+    if gov_synced_count > 0 {
+        out.push_str("\nGovernor Proposals:\n");
+        out.push_str(&format!("  \u{2022} Checked: {gov_synced_count}\n"));
+        if gov_newly_executed_count > 0 {
             if color::is_color_enabled() {
-                println!("  Governor updated:         {}", gov_updated_count.style(color::WARNING));
-                println!(
-                    "  Governor newly executed:  {}",
-                    gov_newly_executed_count.style(color::SUCCESS)
-                );
+                out.push_str(&format!(
+                    "  \u{2022} Executed: {}\n",
+                    gov_newly_executed_count.style(color::GREEN)
+                ));
             } else {
-                println!("  Governor updated:         {gov_updated_count}");
-                println!("  Governor newly executed:  {gov_newly_executed_count}");
-            }
-            if clean {
-                println!("  Governor removed:         {gov_removed_count}");
+                out.push_str(&format!("  \u{2022} Executed: {gov_newly_executed_count}\n"));
             }
         }
-        if !errors.is_empty() {
-            if color::is_color_enabled() {
-                println!("  Errors:                   {}", errors.len().style(color::ERROR));
-            } else {
-                println!("  Errors:                   {}", errors.len());
+        if gov_updated_count > 0 {
+            out.push_str(&format!("  \u{2022} Proposals updated: {gov_updated_count}\n"));
+        }
+    }
+
+    // Cleanup section
+    let total_removed = removed_count + gov_removed_count;
+    if total_removed > 0 {
+        out.push_str("\nCleanup:\n");
+        out.push_str(&format!("  \u{2022} Entries removed: {total_removed}\n"));
+    }
+
+    // Warnings section
+    if !errors.is_empty() {
+        if color::is_color_enabled() {
+            out.push_str(&format!("\n{}\n", "Warnings:".style(color::WARNING)));
+            for err in errors {
+                out.push_str(&format!("  \u{2022} {}\n", err.style(color::WARNING)));
+            }
+        } else {
+            out.push_str("\nWarnings:\n");
+            for err in errors {
+                out.push_str(&format!("  \u{2022} {err}\n"));
             }
         }
     }
 
-    Ok(())
+    // Footer
+    let footer_msg = if errors.is_empty() {
+        "Registry synced successfully"
+    } else {
+        "Registry sync completed with warnings"
+    };
+    if color::is_color_enabled() {
+        out.push_str(&format!(
+            "\n{}\n",
+            format!("{} {footer_msg}", emoji::CHECK_MARK).style(color::GREEN)
+        ));
+    } else {
+        out.push_str(&format!("\n{} {footer_msg}\n", emoji::CHECK_MARK));
+    }
+
+    out
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────
@@ -1001,5 +1008,85 @@ mainnet = "${TREB_SYNC_RPC_URL}"
             ProposalStatus::Pending
         );
         assert_eq!(reopened.get_transaction(tx_id).unwrap().status, TransactionStatus::Queued);
+    }
+
+    // ── Sync human output format tests (Go-matching) ────────────────────
+
+    #[test]
+    fn sync_human_output_no_safe_txs() {
+        color::color_enabled(true);
+        let result = format_sync_human_output(0, 0, 0, 0, 0, 0, 0, 0, &[]);
+        assert!(result.contains("No pending Safe transactions found"), "got: {result}");
+        assert!(result.contains("\u{2713} Registry synced successfully"), "got: {result}");
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn sync_human_output_safe_section_bullets() {
+        color::color_enabled(true);
+        let result = format_sync_human_output(5, 2, 3, 0, 0, 0, 0, 0, &[]);
+        assert!(result.contains("Safe Transactions:"), "got: {result}");
+        assert!(result.contains("  \u{2022} Checked: 5"), "got: {result}");
+        assert!(result.contains("  \u{2022} Executed: 2"), "got: {result}");
+        assert!(result.contains("  \u{2022} Transactions updated: 3"), "got: {result}");
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn sync_human_output_safe_hides_zero_executed() {
+        color::color_enabled(true);
+        let result = format_sync_human_output(3, 0, 1, 0, 0, 0, 0, 0, &[]);
+        assert!(result.contains("  \u{2022} Checked: 3"), "got: {result}");
+        assert!(!result.contains("Executed:"), "got: {result}");
+        assert!(result.contains("  \u{2022} Transactions updated: 1"), "got: {result}");
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn sync_human_output_governor_section_bullets() {
+        color::color_enabled(true);
+        let result = format_sync_human_output(0, 0, 0, 0, 4, 1, 2, 0, &[]);
+        assert!(result.contains("Governor Proposals:"), "got: {result}");
+        assert!(result.contains("  \u{2022} Checked: 4"), "got: {result}");
+        assert!(result.contains("  \u{2022} Executed: 1"), "got: {result}");
+        assert!(result.contains("  \u{2022} Proposals updated: 2"), "got: {result}");
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn sync_human_output_cleanup_section() {
+        color::color_enabled(true);
+        let result = format_sync_human_output(0, 0, 0, 2, 0, 0, 0, 3, &[]);
+        assert!(result.contains("Cleanup:"), "got: {result}");
+        assert!(result.contains("  \u{2022} Entries removed: 5"), "got: {result}");
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn sync_human_output_cleanup_hidden_when_zero() {
+        color::color_enabled(true);
+        let result = format_sync_human_output(1, 0, 0, 0, 0, 0, 0, 0, &[]);
+        assert!(!result.contains("Cleanup:"), "got: {result}");
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn sync_human_output_warnings_section() {
+        color::color_enabled(true);
+        let errors = vec!["unsupported chain 999".into()];
+        let result = format_sync_human_output(1, 0, 0, 0, 0, 0, 0, 0, &errors);
+        assert!(result.contains("Warnings:"), "got: {result}");
+        assert!(result.contains("  \u{2022} unsupported chain 999"), "got: {result}");
+        assert!(result.contains("\u{2713} Registry sync completed with warnings"), "got: {result}");
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn sync_human_output_footer_success_when_no_errors() {
+        color::color_enabled(true);
+        let result = format_sync_human_output(1, 0, 0, 0, 0, 0, 0, 0, &[]);
+        assert!(result.contains("\u{2713} Registry synced successfully"), "got: {result}");
+        assert!(!result.contains("with warnings"), "got: {result}");
+        owo_colors::set_override(true);
     }
 }

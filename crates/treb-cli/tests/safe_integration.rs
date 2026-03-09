@@ -237,7 +237,9 @@ fn sync_plaintext_output_with_empty_registry() {
         .current_dir(tmp.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("No safe transactions"));
+        .stdout(predicate::str::contains("Syncing registry..."))
+        .stdout(predicate::str::contains("No pending Safe transactions found"))
+        .stdout(predicate::str::contains("Registry synced successfully"));
 }
 
 // ── Fixture deserialization tests ─────────────────────────────────────────

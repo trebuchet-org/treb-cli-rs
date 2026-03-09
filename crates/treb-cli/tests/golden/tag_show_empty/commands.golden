@@ -1,2 +1,5 @@
 === cmd 0: [tag mainnet/42220/FPMM:v<VERSION>] ===
-No tags on 'mainnet/42220/FPMM:v<VERSION>'
+
+Deployment: mainnet/42220/FPMM:v<VERSION>
+Address: 0x42eddd7dC046da254A93659CA9b02f294606833D
+Tags:    No tags

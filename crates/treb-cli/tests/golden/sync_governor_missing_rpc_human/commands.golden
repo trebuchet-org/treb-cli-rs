@@ -5,6 +5,8 @@ No pending Safe transactions found
 
 Governor Proposals:
   • Checked: 1
-  • Proposals updated: 1
 
-✓ Registry synced successfully
+Warnings:
+  • no RPC endpoint found for chain 1 (governor 0xaaaa...aaaa)
+
+✓ Registry sync completed with warnings

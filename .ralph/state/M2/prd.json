@@ -1,119 +1,108 @@
 {
   "project": "treb-cli-rs",
-  "branchName": "feat/M2-P06-run-command-output",
-  "description": "Port the treb run command's human-readable output from Rust's current format to exact Go CLI visual parity, replacing tree-grouped deployments and numbered transaction lists with Go's section-based format (Transactions, Collisions, Deployment Summary, Script Logs, Registry Update, Success message).",
+  "branchName": "feat/M2-P10-sync-and-tag-command-output",
+  "description": "Port sync and tag command human-readable output to match Go CLI format exactly — section-based bullet format for sync, deployment context with inline tags for tag commands",
   "userStories": [
     {
-      "id": "P6-US-001",
-      "title": "Restructure display_result_human Section Ordering and Add Section Headers",
-      "description": "As a developer, I want display_result_human() restructured to follow Go's RenderExecution output order with consistent section headers so that subsequent stories can fill in each section's content.",
+      "id": "P10-US-001",
+      "title": "Port sync Command Human Output to Go Section/Bullet Format",
+      "description": "As a CLI user, I want the sync command output to use section-based bullet format with 'Syncing registry...' header, bullet metrics, and a green checkmark footer so that output matches Go CLI exactly",
       "acceptanceCriteria": [
-        "display_result_human() calls sections in order: transactions, collisions, deployment summary, logs, registry update",
-        "A print_section_header(emoji, title, separator_width) helper renders bold header + gray separator consistently",
-        "Summary line block is removed",
-        "DRY RUN banner is removed from display_result_human (dry-run state conveyed via pre-execution banner Mode field)",
-        "cargo clippy --workspace --all-targets passes",
-        "Typecheck passes (cargo check -p treb-cli)"
+        "Human output prints 'Syncing registry...' as the first line, replaces '✅ Sync complete.' stage header",
+        "SyncDetailRow struct and comfy_table detail table rendering removed",
+        "Safe Transactions section uses '•' bullets: Checked (always), Executed in green (when > 0), Transactions updated (when > 0)",
+        "When no safe txs pending, outputs 'No pending Safe transactions found'",
+        "Governor Proposals section follows same bullet pattern as safe transactions",
+        "Cleanup section shows removed entry count when applicable",
+        "Warnings section renders in yellow with '•' bullet per warning",
+        "Footer uses ✓ (U+2713) in green: 'Registry synced successfully' or 'Registry sync completed with warnings'",
+        "JSON output (--json) is completely unchanged",
+        "cargo clippy --workspace --all-targets passes with no new warnings"
       ],
       "priority": 1,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "P6-US-002",
-      "title": "Port Transaction Section with Status Colors and Operation Info",
-      "description": "As a user, I want each transaction displayed with a colored status string, green sender name, and operation description followed by a gray footer with hash/block/gas so that the output matches Go's transaction rendering.",
+      "id": "P10-US-002",
+      "title": "Port tag show Human Output to Go Deployment Context Format",
+      "description": "As a CLI user, I want the tag show output to display deployment context with address and comma-separated inline tags so that output matches Go CLI format",
       "acceptanceCriteria": [
-        "Transaction status is colored per Go palette (simulated=faint, queued=yellow, executed=green, failed=red, unknown=white) with fixed-width padding",
-        "Sender name is displayed in green",
-        "Operations from RecordedTransaction.transaction.operations are used to show call info",
-        "Footer shows hash, block number, and gas in gray, pipe-separated, only when non-empty",
-        "Empty transaction list shows gray fallback message",
-        "Typecheck passes (cargo check -p treb-cli)"
+        "Tag show prints cyan bold 'Deployment: NS/CHAINID/NAME' header",
+        "Prints white bold 'Address: ' with green bold address value",
+        "Prints white bold 'Tags:    ' with cyan comma-separated sorted tags or faint 'No tags'",
+        "Tags are sorted alphabetically for consistent display",
+        "Blank line before and after the output block",
+        "JSON output unchanged",
+        "cargo clippy --workspace --all-targets passes"
       ],
       "priority": 2,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "P6-US-003",
-      "title": "Port Deployment Summary and Collision Sections",
-      "description": "As a user, I want deployments shown as a flat list with cyan names and green addresses, and collisions shown with yellow warning headers and per-collision details, so that the output matches Go's format.",
+      "id": "P10-US-003",
+      "title": "Port tag add Human Output to Go Format",
+      "description": "As a CLI user, I want the tag add output to show a green success line with deployment path and 'Current tags:' with inline cyan tags so that output matches Go CLI format",
       "acceptanceCriteria": [
-        "Deployment summary shows flat list with cyan contract names and green addresses",
-        "Label appended as :{label} format when present",
-        "Proxy deployments show [{impl}] suffix",
-        "Collisions show yellow warning header with per-collision output including contract name and address",
-        "Collision label and entropy shown only when non-empty",
-        "Empty deployments section is omitted entirely",
-        "Typecheck passes (cargo check -p treb-cli)"
+        "No '📝 Updating tags...' line in output",
+        "Success line is green with ✅ emoji: 'Added tag TAG to deployment_id'",
+        "Tags displayed as 'Current tags: tag1, tag2' with cyan tag names, comma-separated",
+        "Tags are sorted alphabetically",
+        "JSON output unchanged",
+        "cargo clippy --workspace --all-targets passes"
       ],
       "priority": 3,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "P6-US-004",
-      "title": "Port Console Logs, Registry Update, and Success Message",
-      "description": "As a user, I want console logs displayed with a bold emoji header and 2-space indented lines, registry update confirmation with green/yellow coloring, and the final success message matching Go's format.",
+      "id": "P10-US-004",
+      "title": "Port tag remove Human Output to Go Format",
+      "description": "As a CLI user, I want the tag remove output to show a green success line and 'Remaining tags:' with inline cyan tags or faint 'No tags' so that output matches Go CLI format",
       "acceptanceCriteria": [
-        "Console logs section has bold emoji header + 40-char gray separator + 2-space indented lines",
-        "Console logs section only appears when logs exist",
-        "Registry update message shows in green when successful with changes",
-        "Registry update message shows in yellow when no changes",
-        "Registry update only appears when not dry-run and execution succeeded",
-        "Final success message reads '✓ Script execution completed successfully' in green",
-        "Typecheck passes (cargo check -p treb-cli)"
+        "No '📝 Updating tags...' line in output",
+        "Success line is green with ✅ emoji: 'Removed tag TAG from deployment_id'",
+        "When tags remain: 'Remaining tags: tag1, tag2' with cyan names",
+        "When no tags left: 'Remaining tags: No tags' with faint styling",
+        "Tags are sorted alphabetically",
+        "JSON output unchanged",
+        "cargo clippy --workspace --all-targets passes"
       ],
       "priority": 4,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "P6-US-005",
-      "title": "Port Pre-Execution Deployment Banner (Verbose Mode)",
-      "description": "As a user running verbose mode, I want the pre-execution banner to show Go's PrintDeploymentBanner format with emoji header, dash separators, and per-field coloring so that the output matches Go's layout.",
+      "id": "P10-US-005",
+      "title": "Update Unit Tests for sync and tag Output Changes",
+      "description": "As a developer, I want the unit tests in sync.rs and tag.rs to assert on the new Go-matching output format so that tests validate the correct behavior",
       "acceptanceCriteria": [
-        "Pre-execution banner shows '🚀 Running Deployment Script' in bold with 50-char dash separators",
-        "Script name is cyan, network name is blue, chain ID in gray parentheses",
-        "Namespace is magenta",
-        "Mode is colored by type (DRY_RUN=yellow, FORK=magenta, LIVE=green)",
-        "Env vars show key=value with yellow keys and green values, aligned",
-        "Senders shown in gray",
-        "Typecheck passes (cargo check -p treb-cli)"
+        "cargo test -p treb-cli --lib -- sync passes (all sync unit tests)",
+        "cargo test -p treb-cli --lib -- tag passes (all tag unit tests)",
+        "Expected strings updated: sync uses bullet format with •, section headers, ✓ footer",
+        "Expected strings updated: tag show uses deployment header, address, comma-separated tags",
+        "Expected strings updated: tag add uses '✅ Added...' + 'Current tags:' inline",
+        "Expected strings updated: tag remove uses '✅ Removed...' + 'Remaining tags:' inline",
+        "No dead code warnings from removed helpers (e.g., SyncDetailRow)",
+        "cargo clippy --workspace --all-targets passes"
       ],
       "priority": 5,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "P6-US-006",
-      "title": "Port Governor Proposals Display and Debug Output Format",
-      "description": "As a user, I want the governor proposals section formatted with a bold emoji header and colored per-proposal details consistent with Go's transaction rendering style.",
+      "id": "P10-US-006",
+      "title": "Update All Golden Test Expected Files",
+      "description": "As a developer, I want all golden test expected files for sync and tag commands regenerated and verified so that the test suite passes with no cross-command drift",
       "acceptanceCriteria": [
-        "Governor proposals section has bold emoji header with separator consistent with other sections",
-        "Per-proposal shows proposal ID, governor/timelock addresses, status, and linked transaction count",
-        "Skipped deployments section matches Go format or is removed if Go handles via collisions only",
-        "Debug log file writes successfully with updated format",
-        "Typecheck passes (cargo check -p treb-cli)"
+        "UPDATE_GOLDEN=1 cargo test -p treb-cli --test integration_sync --test integration_tag passes",
+        "All golden file diffs match expected output format changes (no unexpected regressions)",
+        "cargo test -p treb-cli passes (full CLI test suite, no cross-command failures)",
+        "cargo test --workspace --all-targets passes (full workspace)",
+        "cargo clippy --workspace --all-targets passes"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "P6-US-007",
-      "title": "Update All Golden Test Expected Files",
-      "description": "As a developer, I want all 14 run-related golden test expected files regenerated to match the new Go-parity output format so that the full test suite passes.",
-      "acceptanceCriteria": [
-        "All 14 run golden test directories produce passing tests",
-        "Golden file diffs show expected format changes (section headers, separators, removed summary line)",
-        "cargo test -p treb-cli --test integration_run passes without UPDATE_GOLDEN",
-        "cargo test -p treb-cli --test cli_run passes (argument parsing unaffected)",
-        "cargo clippy --workspace --all-targets passes",
-        "No regressions in other test suites: cargo test -p treb-cli passes fully"
-      ],
-      "priority": 7,
       "passes": true,
       "notes": ""
     }
