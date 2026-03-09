@@ -332,13 +332,6 @@ pub async fn run(
     let _ = resolved;
 
     // --- Multi-verifier loop ---
-    if !json {
-        output::print_stage(
-            "\u{1f50d}",
-            &format!("Verifying {} ({})", display_name, output::truncate_address(&address)),
-        );
-    }
-
     let mut dep = registry.get_deployment(&deployment_id).unwrap().clone();
     let verifier_count = verifiers.len();
     let mut attempted_verifiers: HashMap<String, VerifierStatus> = HashMap::new();
