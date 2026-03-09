@@ -24,7 +24,7 @@ use treb_registry::Registry;
 
 use crate::{
     output,
-    ui::{color, interactive::is_non_interactive},
+    ui::{color, emoji, interactive::is_non_interactive},
 };
 
 // ── Compose file schema ──────────────────────────────────────────────────
@@ -269,33 +269,57 @@ fn build_plan(
         .collect()
 }
 
-/// Display the dry-run plan in human-readable format.
-fn print_dry_run_plan(compose: &ComposeFile, plan: &[PlanEntry]) {
-    eprintln!("\nOrchestrating {}", compose.group);
-    eprintln!("Execution plan: {} components\n", plan.len());
-    eprintln!("Execution Plan:");
+/// Display the execution plan in human-readable format (matches Go `RenderExecutionPlan`).
+fn print_execution_plan(compose: &ComposeFile, plan: &[PlanEntry]) {
+    eprintln!(
+        "\n{} Orchestrating {}",
+        emoji::TARGET,
+        compose.group,
+    );
+    eprintln!(
+        "{} Execution plan: {} components\n",
+        emoji::CLIPBOARD,
+        plan.len(),
+    );
+    eprintln!(
+        "{} {}",
+        emoji::CLIPBOARD,
+        styled("Execution Plan:", color::BOLD),
+    );
     eprintln!("{}", "─".repeat(50));
     for entry in plan {
         if entry.skipped {
             eprint!(
                 "{}. {} → {}",
-                styled(&entry.step.to_string(), color::LABEL),
+                entry.step,
                 styled(&entry.component, color::WARNING),
-                styled(&entry.script, color::MUTED),
+                styled(&entry.script, color::GREEN),
             );
             if !entry.deps.is_empty() {
-                eprint!(" (depends on: [{}])", entry.deps.join(", "));
+                eprint!(
+                    " {}",
+                    styled(
+                        &format!("(depends on: [{}])", entry.deps.join(", ")),
+                        color::GRAY,
+                    ),
+                );
             }
             eprint!(" {}", styled("(skipped)", color::WARNING));
         } else {
             eprint!(
                 "{}. {} → {}",
-                styled(&entry.step.to_string(), color::LABEL),
-                styled(&entry.component, color::LABEL),
-                styled(&entry.script, color::MUTED),
+                entry.step,
+                styled(&entry.component, color::CYAN),
+                styled(&entry.script, color::GREEN),
             );
             if !entry.deps.is_empty() {
-                eprint!(" (depends on: [{}])", entry.deps.join(", "));
+                eprint!(
+                    " {}",
+                    styled(
+                        &format!("(depends on: [{}])", entry.deps.join(", ")),
+                        color::GRAY,
+                    ),
+                );
             }
         }
         eprintln!();
@@ -560,7 +584,7 @@ pub async fn run(
                 )
             );
             eprintln!();
-            print_dry_run_plan(&compose, &plan);
+            print_execution_plan(&compose, &plan);
         }
         return Ok(());
     }
