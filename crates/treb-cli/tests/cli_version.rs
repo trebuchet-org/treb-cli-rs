@@ -13,13 +13,9 @@ fn version_displays_expected_fields() {
         .arg("version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Version"))
-        .stdout(predicate::str::contains("Commit"))
-        .stdout(predicate::str::contains("Date"))
-        .stdout(predicate::str::contains("Rust Version"))
-        .stdout(predicate::str::contains("Forge Version"))
-        .stdout(predicate::str::contains("Foundry Version"))
-        .stdout(predicate::str::contains("treb-sol Commit"));
+        .stdout(predicate::str::starts_with("treb "))
+        .stdout(predicate::str::contains("commit: "))
+        .stdout(predicate::str::contains("built:  "));
 }
 
 #[test]
