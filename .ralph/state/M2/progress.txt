@@ -1,0 +1,131 @@
+# Ralph Progress Log
+Started: Mon Mar  9 07:50:47 AM CET 2026
+---
+
+## Codebase Patterns
+- `output::print_section_header(emoji, title, separator_width)` renders Go-style bold header + gray `─` separator; use for all run command sections
+- `emoji::*` constants in `crates/treb-cli/src/ui/emoji.rs` — use named constants, never raw Unicode in display code
+- `color::BOLD` and `color::GRAY` are the styles for section headers and separators respectively
+- `display_result_human()` section order must follow Go: transactions → collisions → deployment summary → logs → registry update
+- DRY RUN banner is NOT shown in `display_result_human`; dry-run state is conveyed via the pre-execution banner Mode field
+- Pre-execution banner (verbose mode) outputs to **stdout** via `println!`, not stderr — matches Go's renderer writer
+- Color-conditional rendering pattern: `if color::is_color_enabled() { text.style(color::X) } else { text }` — use throughout run.rs for styled output
+- `format_tx_status()`, `format_tx_operations()`, `format_tx_footer()` are the transaction rendering helpers in run.rs
+- Deployment summary uses flat list format: `"{name} at {address}"` with cyan name, green address — tree display code has been removed
+- `ExtractedCollision.existing_address` is alloy `Address` type — needs `format!("{}", addr)` for string display
+- `display_result_human()` accepts `network: Option<&str>` and `namespace: &str` — these must be threaded from the `run()` function context (not in PipelineResult)
+- Success message is printed at the end of `display_result_human`, not via `print_stage` before display
+- Governor proposals rendering is inline in `display_result_human` — no separate helper function; uses `print_section_header` like other sections
+- Skipped deployments section was removed from human output; skipped info only in JSON and debug log
+
+## 2026-03-09 - P6-US-001
+- Restructured `display_result_human()` to follow Go's RenderExecution section ordering
+- Added `print_section_header(emoji, title, separator_width)` helper to `output.rs`
+- Removed the summary line block (deployment count, tx count, gas used)
+- Removed the DRY RUN banner from `display_result_human`
+- Reordered sections: transactions → collisions → deployment summary → console logs → governor proposals → skipped
+- Console logs now use 2-space indentation
+- Files changed: `crates/treb-cli/src/output.rs`, `crates/treb-cli/src/commands/run.rs`
+- **Learnings for future iterations:**
+  - The `emoji` module must be imported alongside `color` in run.rs via `crate::ui::emoji`
+  - The tree-based deployment display code (group_recorded_deployments, etc.) is still used for deployment summary — will be replaced in P6-US-003 with flat list
+  - `print_warning_banner` is no longer used in run.rs after removing the DRY RUN banner
+---
+
+## 2026-03-09 - P6-US-002
+- Replaced numbered transaction list (`1. {hash} (STATUS)`) with Go-style rendering
+- Added `format_tx_status()` — fixed-width 9-char lowercase status with color (simulated=MUTED/faint, queued=YELLOW, executed=GREEN, failed=RED)
+- Added `format_tx_operations()` — shows first operation as `{target}::{method}({type})` or `{type} {target}` when no method
+- Added `format_tx_footer()` — pipe-separated gray footer with `Tx: {hash} | Block: {block}` (only non-empty/non-zero fields)
+- Transaction section now always shows (even when empty), with gray fallback message for empty lists
+- Sender address displayed in green
+- Added `owo_colors::OwoColorize` and `treb_core::types::{Operation, TransactionStatus}` imports to run.rs
+- Files changed: `crates/treb-cli/src/commands/run.rs`
+- **Learnings for future iterations:**
+  - `owo_colors::OwoColorize` must be imported in any file that uses `.style()` on strings
+  - `Transaction` has no per-transaction `gas_used` field — only the aggregate `PipelineResult.gas_used` exists
+  - `TransactionStatus` has 4 variants (Simulated, Queued, Executed, Failed) — no Unknown variant exists in the enum
+  - Transaction section is now unconditionally displayed (always shows header), unlike other sections which are conditional on non-empty data
+---
+
+## 2026-03-09 - P6-US-003
+- Replaced tree-grouped deployment display with Go's flat list format
+- Deployment summary: `{name} at {address}` with cyan name and green address
+- Label appended as `:{label}` when present; proxy shows `[{impl_name}]` suffix
+- Proxy implementation name resolved by matching deployment address to `proxy_info.implementation`
+- Collision section: per-collision `{contractName} already deployed at {address}` with cyan/yellow coloring
+- Collision label shown when non-empty; gray note "Existing deployments were not overwritten" at end
+- Removed tree grouping code: `group_recorded_deployments()`, `RunTypeGroup`, `type_sort_key()`, `build_run_deployment_node()`, `format_run_deployment_entry()`
+- Removed unused imports: `BTreeMap`, `DeploymentType`, `RecordedDeployment`, `badge`, `tree::TreeNode`
+- Cleaned up test module: removed `env_lock`, `EnvVarGuard`, `sample_deployment`, and associated test
+- Files changed: `crates/treb-cli/src/commands/run.rs`
+- **Learnings for future iterations:**
+  - `ExtractedCollision.existing_address` is an alloy `Address` — use `format!("{}", addr)` for display
+  - `ExtractedCollision` has no `entropy` field — only `label`, `salt`, `bytecode_hash`, `init_code_hash`
+  - Proxy implementation name lookup: iterate `result.deployments` to find one whose `address` matches `proxy_info.implementation`
+  - After removing tree-based display, `TreeNode` struct in `ui/tree.rs` becomes unused (pre-existing dead_code warnings)
+  - The `badge` module is no longer imported in run.rs after removing tree display code
+---
+
+## 2026-03-09 - P6-US-004
+- Replaced the `print_stage("✅", "Execution complete.")` with Go-format success message: `"✓ Script execution completed successfully"` in green
+- Updated `print_registry_update_section` to show context-aware messages with network/namespace:
+  - Green: `"✓ Updated registry for {network} network in namespace {namespace}"` when deployments exist
+  - Yellow: `"- No registry changes recorded for {network} network in namespace {namespace}"` when no deployments
+  - Only shown when not dry-run and execution succeeded
+- Updated `display_result_human`, `display_result` signatures to accept `network: Option<&str>` and `namespace: &str`
+- Removed `registry_update_section_message` function and its tests (logic inlined into `print_registry_update_section`)
+- Removed unused `sample_pipeline_result` test helper
+- Console logs section was already correct from P6-US-001 (bold emoji header + 40-char separator + 2-space indent)
+- Files changed: `crates/treb-cli/src/commands/run.rs`
+- **Learnings for future iterations:**
+  - `display_result` and `display_result_human` now require network/namespace parameters — callers must pass them through
+  - `PipelineResult` does NOT contain network or namespace — these must be threaded from the `run()` function context
+  - The success message is printed inside `display_result_human` at the end, not via `print_stage` before display
+---
+
+## 2026-03-09 - P6-US-005
+- Replaced `eprint_kv()` pre-execution verbose block with Go's `PrintDeploymentBanner` format
+- Banner outputs to stdout (println!) instead of stderr (eprintln!) to match Go's renderer writer
+- Header: "🚀 Running Deployment Script" in bold + 50-char `─` separator in gray
+- Fields with consistent `{:10}` label padding: Script (cyan), Network (blue + gray chain ID), Namespace (magenta), Mode (colored by type), Env Vars (yellow key + green value), Senders (gray)
+- Mode mapping: dry_run → "DRY_RUN" (yellow), broadcast → "LIVE" (green), simulate → "SIMULATE" (magenta)
+- Env Vars and Senders use multi-line format: first value on same line as label, subsequent values indented to align
+- Added `color::BLUE` and `color::MAGENTA` style constants to the script renderer palette in `color.rs`
+- Files changed: `crates/treb-cli/src/commands/run.rs`, `crates/treb-cli/src/ui/color.rs`
+- **Learnings for future iterations:**
+  - `color::BLUE` (plain blue) and `color::MAGENTA` (plain magenta) are now available in the script renderer palette
+  - Pre-execution banner goes to stdout (println!), NOT stderr — this matches Go's renderer writer behavior
+  - The `format!("{:10}", label)` pattern with 2-space indent gives consistent 13-char alignment across all banner fields
+  - Verbose post-execution output (event counts, per-deployment confirmations) still uses stderr — was not changed in this story
+---
+
+## 2026-03-09 - P6-US-006
+- Updated governor proposals section to use `print_section_header(emoji::CLASSICAL_BUILDING, "Governor Proposals", 50)` for consistent Go-style formatting
+- Per-proposal now shows: proposal ID (cyan), status label (proposed/would be proposed), and details line with governor/timelock (gray), status (yellow), and linked transaction count
+- Added `CLASSICAL_BUILDING` emoji constant (`🏛️`) to `emoji.rs`
+- Removed standalone `format_governor_proposal_details()` function — formatting is now inline in `display_result_human` with color support
+- Removed standalone skipped deployments section from `display_result_human` — Go handles skipped via collisions, not a separate section
+- Added governor proposals to debug log output with proposal ID, governor/timelock addresses, status, and transaction count
+- Removed two tests that referenced the deleted `format_governor_proposal_details()` function
+- Files changed: `crates/treb-cli/src/commands/run.rs`, `crates/treb-cli/src/ui/emoji.rs`
+- **Learnings for future iterations:**
+  - `emoji::CLASSICAL_BUILDING` (`🏛️`) is now available for governor-related sections
+  - Governor proposal rendering is now inline in `display_result_human` — no separate helper function
+  - The skipped deployments section has been removed from human output; skipped info is only in JSON output and debug logs
+  - Debug log now includes a `--- Governor Proposals ---` section with per-proposal details
+---
+
+## 2026-03-09 - P6-US-007
+- Verified all 14 run golden test directories already have updated expected files from incremental updates in US-001 through US-006 fix commits
+- All 87 integration_run tests pass without UPDATE_GOLDEN
+- All 13 cli_run tests pass (argument parsing unaffected)
+- cargo clippy --workspace --all-targets passes with no warnings
+- One pre-existing failure (show_proxy_deployment_shows_proxy_info in cli_list_show) confirmed unrelated to P6 changes
+- No code changes needed — golden files were maintained incrementally during each story's review fix commits
+- Files changed: `.ralph/current/prd.json` (marked passes: true)
+- **Learnings for future iterations:**
+  - Golden test expected files should be updated as part of each story's implementation, not deferred to a final story — the review fix commits for US-001 through US-006 already handled this
+  - `UPDATE_GOLDEN=1 cargo test -p treb-cli --test integration_run` regenerates all run golden files in one pass
+  - Golden file normalization strips ANSI colors, timestamps, versions, hashes, and paths — so format changes to colored output still appear as structural diffs in golden files
+---
