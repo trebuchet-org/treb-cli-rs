@@ -116,11 +116,10 @@ fn show_tags(registry: &Registry, deployment_id: &str, json: bool) -> anyhow::Re
 fn format_add_tag(tag: &str, deployment_id: &str, tags: &[String]) -> String {
     let mut sorted = tags.to_vec();
     sorted.sort();
-    let tags_display =
-        sorted.iter().map(|t| styled(t, color::CYAN)).collect::<Vec<_>>().join(", ");
+    let tags_display = sorted.iter().map(|t| styled(t, color::CYAN)).collect::<Vec<_>>().join(", ");
     format!(
         "{}\n\nCurrent tags: {tags_display}",
-        styled(&format!("\u{2705} Added tag '{tag}' to {deployment_id}"), color::GREEN),
+        styled(&format!("\u{2705} Added tag {tag} to {deployment_id}"), color::GREEN),
     )
 }
 
@@ -437,7 +436,7 @@ mod tests {
             &["v1.0.0".into(), "v2.0.0".into()],
         );
         assert!(
-            result.contains("\u{2705} Added tag 'v2.0.0' to mainnet/42220/Counter:v1.0.0"),
+            result.contains("\u{2705} Added tag v2.0.0 to mainnet/42220/Counter:v1.0.0"),
             "got: {result}"
         );
         owo_colors::set_override(true);
@@ -458,11 +457,8 @@ mod tests {
     #[test]
     fn format_remove_tag_success_line() {
         color::color_enabled(true);
-        let result = super::format_remove_tag(
-            "v1.0.0",
-            "mainnet/42220/Counter:v1.0.0",
-            &["stable".into()],
-        );
+        let result =
+            super::format_remove_tag("v1.0.0", "mainnet/42220/Counter:v1.0.0", &["stable".into()]);
         assert!(
             result.contains("\u{2705} Removed tag v1.0.0 from mainnet/42220/Counter:v1.0.0"),
             "got: {result}"

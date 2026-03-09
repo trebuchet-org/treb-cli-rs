@@ -1071,10 +1071,7 @@ mainnet = "${TREB_SYNC_RPC_URL}"
         let result = format_sync_human_output(1, 0, 0, 0, 0, 0, 0, 0, &errors);
         assert!(result.contains("Warnings:"), "got: {result}");
         assert!(result.contains("  \u{2022} unsupported chain 999"), "got: {result}");
-        assert!(
-            result.contains("\u{2713} Registry sync completed with warnings"),
-            "got: {result}"
-        );
+        assert!(result.contains("\u{2713} Registry sync completed with warnings"), "got: {result}");
         owo_colors::set_override(true);
     }
 
