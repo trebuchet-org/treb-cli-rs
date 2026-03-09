@@ -2,7 +2,8 @@
 
 use std::{
     collections::{BTreeMap, HashSet},
-    env, fmt,
+    env,
+    fmt::{self, Write as _},
 };
 
 use anyhow::{Context, bail};
@@ -151,6 +152,21 @@ pub struct TypeGroup<'a> {
 /// - Deployments within each type group are sorted by contract name.
 pub type GroupedDeployments<'a> = BTreeMap<String, BTreeMap<u64, Vec<TypeGroup<'a>>>>;
 
+/// Result of the list command query, holding filtered deployments and context
+/// needed for display and JSON output.
+#[allow(dead_code)]
+pub struct ListResult<'a> {
+    /// Filtered deployments matching the query criteria.
+    pub deployments: Vec<&'a Deployment>,
+    /// Other namespaces with deployment counts (populated when filtered results
+    /// are empty and a namespace filter was applied).
+    pub other_namespaces: BTreeMap<String, usize>,
+    /// Chain ID to network name mapping for display in chain headers.
+    pub network_names: BTreeMap<u64, String>,
+    /// Set of deployment IDs in fork namespaces.
+    pub fork_deployment_ids: HashSet<String>,
+}
+
 /// Returns the sort key for the fixed display order of display categories.
 fn type_sort_key(cat: &DisplayCategory) -> u8 {
     match cat {
@@ -174,6 +190,74 @@ fn collect_implementation_keys(deployments: &[&Deployment]) -> HashSet<Implement
                 .map(|pi| (d.namespace.clone(), d.chain_id, pi.implementation.to_lowercase()))
         })
         .collect()
+}
+
+/// Build a map of other namespaces with their deployment counts, excluding the
+/// specified namespace. Used for the namespace discovery hint.
+fn build_other_namespaces(
+    all_deployments: &[&Deployment],
+    exclude_namespace: &str,
+) -> BTreeMap<String, usize> {
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for d in all_deployments {
+        if !d.namespace.eq_ignore_ascii_case(exclude_namespace) {
+            *counts.entry(d.namespace.clone()).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+/// Collect deployment IDs from fork namespaces (namespace starts with "fork/").
+fn collect_fork_deployment_ids(deployments: &[&Deployment]) -> HashSet<String> {
+    deployments
+        .iter()
+        .filter(|d| d.namespace.starts_with("fork/"))
+        .map(|d| d.id.clone())
+        .collect()
+}
+
+/// Format the namespace discovery hint shown when the current namespace has no
+/// deployments but other namespaces do.
+///
+/// Matches Go CLI's `renderNamespaceDiscoveryHint()` format:
+/// ```text
+/// No deployments found in namespace "<name>" [on <network>]
+///
+/// Other namespaces with deployments:
+///
+///   <namespace>          <count> deployment(s)
+///
+/// Use --namespace <name> or `treb config set namespace <name>` to switch.
+/// ```
+fn format_namespace_discovery_hint(
+    namespace: &str,
+    network: Option<&str>,
+    other_namespaces: &BTreeMap<String, usize>,
+) -> String {
+    let mut out = String::new();
+
+    // First line
+    write!(out, "No deployments found in namespace \"{namespace}\"").unwrap();
+    if let Some(net) = network {
+        write!(out, " on {net}").unwrap();
+    }
+    writeln!(out).unwrap();
+
+    // Other namespaces section
+    if !other_namespaces.is_empty() {
+        writeln!(out).unwrap();
+        writeln!(out, "Other namespaces with deployments:").unwrap();
+        writeln!(out).unwrap();
+        for (ns, count) in other_namespaces {
+            let plural = if *count == 1 { "deployment" } else { "deployments" };
+            writeln!(out, "  {ns:<20}{count} {plural}").unwrap();
+        }
+        writeln!(out).unwrap();
+        write!(out, "Use --namespace <name> or `treb config set namespace <name>` to switch.")
+            .unwrap();
+    }
+
+    out
 }
 
 /// Format a deployment entry label for tree display.
@@ -318,12 +402,43 @@ pub async fn run(
     let implementation_keys = collect_implementation_keys(&all_deployments);
     let filtered = filter_deployments(&all_deployments, &filters);
 
-    if json {
-        output::print_json(&filtered)?;
-    } else if filtered.is_empty() {
-        println!("No deployments found.");
+    // Build other_namespaces when filtered is empty and namespace filter is set
+    let other_namespaces = if filtered.is_empty() {
+        if let Some(ref ns) = filters.namespace {
+            build_other_namespaces(&all_deployments, ns)
+        } else {
+            BTreeMap::new()
+        }
     } else {
-        let grouped = group_deployments_with_implementation_keys(&filtered, &implementation_keys);
+        BTreeMap::new()
+    };
+
+    let fork_deployment_ids = collect_fork_deployment_ids(&all_deployments);
+    let network_names: BTreeMap<u64, String> = BTreeMap::new();
+
+    let result = ListResult {
+        deployments: filtered,
+        other_namespaces,
+        network_names,
+        fork_deployment_ids,
+    };
+
+    if json {
+        output::print_json(&result.deployments)?;
+    } else if result.deployments.is_empty() {
+        if let Some(ref ns) = filters.namespace {
+            let hint = format_namespace_discovery_hint(
+                ns,
+                filters.network.as_deref(),
+                &result.other_namespaces,
+            );
+            print!("{hint}");
+        } else {
+            println!("No deployments found.");
+        }
+    } else {
+        let grouped =
+            group_deployments_with_implementation_keys(&result.deployments, &implementation_keys);
         let mut first = true;
         for (namespace, chains) in &grouped {
             if !first {
@@ -1038,5 +1153,158 @@ mod tests {
         assert!(entry.contains('\x1b'), "styled entry should contain ANSI codes: {entry:?}");
         assert!(entry.contains("e[✔︎]"), "styled entry should contain Go-format verifier text");
         assert!(entry.contains("[fork]"), "styled entry should include the fork badge text");
+    }
+
+    // -----------------------------------------------------------------------
+    // Other-namespaces and fork deployment ID tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn build_other_namespaces_excludes_specified() {
+        let deployments = sample_deployments();
+        let refs: Vec<&Deployment> = deployments.iter().collect();
+        let other = build_other_namespaces(&refs, "mainnet");
+
+        assert!(!other.contains_key("mainnet"));
+        assert_eq!(other["testnet"], 1);
+        assert_eq!(other["fork/42220"], 1);
+    }
+
+    #[test]
+    fn build_other_namespaces_empty_when_all_match() {
+        let deployments =
+            [make_deployment("ns/1/A", "ns", 1, "A", "", DeploymentType::Singleton, None)];
+        let refs: Vec<&Deployment> = deployments.iter().collect();
+        let other = build_other_namespaces(&refs, "ns");
+
+        assert!(other.is_empty());
+    }
+
+    #[test]
+    fn build_other_namespaces_counts_per_namespace() {
+        let deployments = sample_deployments();
+        let refs: Vec<&Deployment> = deployments.iter().collect();
+        let other = build_other_namespaces(&refs, "nonexistent");
+
+        assert_eq!(other["mainnet"], 2);
+        assert_eq!(other["testnet"], 1);
+        assert_eq!(other["fork/42220"], 1);
+    }
+
+    #[test]
+    fn build_other_namespaces_case_insensitive_exclude() {
+        let deployments = sample_deployments();
+        let refs: Vec<&Deployment> = deployments.iter().collect();
+        let other = build_other_namespaces(&refs, "MAINNET");
+
+        assert!(!other.contains_key("mainnet"));
+        assert_eq!(other.len(), 2);
+    }
+
+    #[test]
+    fn collect_fork_ids_finds_fork_namespaces() {
+        let deployments = sample_deployments();
+        let refs: Vec<&Deployment> = deployments.iter().collect();
+        let fork_ids = collect_fork_deployment_ids(&refs);
+
+        assert_eq!(fork_ids.len(), 1);
+        assert!(fork_ids.contains("fork/42220/FPMM:dev"));
+    }
+
+    #[test]
+    fn collect_fork_ids_empty_for_non_fork() {
+        let deployments =
+            [make_deployment("ns/1/A", "ns", 1, "A", "", DeploymentType::Singleton, None)];
+        let refs: Vec<&Deployment> = deployments.iter().collect();
+        let fork_ids = collect_fork_deployment_ids(&refs);
+
+        assert!(fork_ids.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Namespace discovery hint formatting tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn hint_without_network_and_with_other_namespaces() {
+        let mut other = BTreeMap::new();
+        other.insert("default".into(), 3usize);
+        other.insert("production".into(), 1usize);
+
+        let hint = format_namespace_discovery_hint("staging", None, &other);
+
+        assert!(
+            hint.starts_with("No deployments found in namespace \"staging\"\n"),
+            "hint should start with namespace message, got: {hint:?}"
+        );
+        assert!(hint.contains("Other namespaces with deployments:"));
+        assert!(hint.contains("  default             3 deployments"));
+        assert!(hint.contains("  production          1 deployment\n"));
+        assert!(hint.contains(
+            "Use --namespace <name> or `treb config set namespace <name>` to switch."
+        ));
+    }
+
+    #[test]
+    fn hint_with_network_filter() {
+        let other = BTreeMap::new();
+        let hint = format_namespace_discovery_hint("staging", Some("42220"), &other);
+
+        assert!(
+            hint.starts_with("No deployments found in namespace \"staging\" on 42220\n"),
+            "hint should include network filter, got: {hint:?}"
+        );
+        // No other namespaces, so no extra sections
+        assert!(!hint.contains("Other namespaces"));
+    }
+
+    #[test]
+    fn hint_singular_deployment_count() {
+        let mut other = BTreeMap::new();
+        other.insert("default".into(), 1usize);
+
+        let hint = format_namespace_discovery_hint("staging", None, &other);
+
+        assert!(hint.contains("1 deployment\n"), "count=1 should use singular 'deployment'");
+        assert!(!hint.contains("1 deployments"), "count=1 should NOT use plural 'deployments'");
+    }
+
+    #[test]
+    fn hint_plural_deployment_count() {
+        let mut other = BTreeMap::new();
+        other.insert("default".into(), 5usize);
+
+        let hint = format_namespace_discovery_hint("staging", None, &other);
+
+        assert!(hint.contains("5 deployments"), "count>1 should use plural 'deployments'");
+    }
+
+    #[test]
+    fn hint_namespaces_sorted_alphabetically() {
+        let mut other = BTreeMap::new();
+        other.insert("z-ns".into(), 1usize);
+        other.insert("a-ns".into(), 2usize);
+        other.insert("m-ns".into(), 3usize);
+
+        let hint = format_namespace_discovery_hint("staging", None, &other);
+
+        let lines: Vec<&str> = hint.lines().collect();
+        // Find the namespace lines (indented with 2 spaces)
+        let ns_lines: Vec<&str> = lines.iter().filter(|l| l.starts_with("  ")).copied().collect();
+        assert_eq!(ns_lines.len(), 3);
+        assert!(ns_lines[0].contains("a-ns"), "first should be a-ns");
+        assert!(ns_lines[1].contains("m-ns"), "second should be m-ns");
+        assert!(ns_lines[2].contains("z-ns"), "third should be z-ns");
+    }
+
+    #[test]
+    fn hint_empty_other_namespaces_shows_only_first_line() {
+        let other = BTreeMap::new();
+        let hint = format_namespace_discovery_hint("staging", None, &other);
+
+        assert_eq!(
+            hint, "No deployments found in namespace \"staging\"\n",
+            "empty other_namespaces should produce only the first line"
+        );
     }
 }

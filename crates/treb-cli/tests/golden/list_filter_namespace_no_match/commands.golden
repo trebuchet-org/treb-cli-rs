@@ -1,2 +1,9 @@
 === cmd 0: [list --namespace nonexistent] ===
-No deployments found.
+No deployments found in namespace "nonexistent"
+
+Other namespaces with deployments:
+
+  fork/42220          1 deployment
+  mainnet             3 deployments
+
+Use --namespace <name> or `treb config set namespace <name>` to switch.
