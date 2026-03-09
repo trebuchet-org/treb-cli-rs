@@ -162,8 +162,8 @@ async fn e2e_prune_onchain_clean_registry() {
     )
     .await;
     assert!(
-        prune_output.contains("All registry entries are valid. Nothing to prune."),
-        "clean prune must show 'All registry entries are valid. Nothing to prune.', got: {prune_output}"
+        prune_output.contains("✅ All registry entries are valid. Nothing to prune."),
+        "clean prune must show '✅ All registry entries are valid. Nothing to prune.', got: {prune_output}"
     );
 
     // Step 2b: Prune with --json --check-onchain --dry-run → no candidates.
@@ -229,8 +229,12 @@ async fn e2e_prune_detects_selfdestructed() {
     )
     .await;
     assert!(
-        prune_output.contains("Found 1 items to prune:"),
-        "prune dry-run must show 'Found 1 items to prune:', got: {prune_output}"
+        prune_output.contains("🔍 Checking registry entries..."),
+        "prune dry-run must show '🔍 Checking registry entries...', got: {prune_output}"
+    );
+    assert!(
+        prune_output.contains("🗑️  Found 1 items to prune:"),
+        "prune dry-run must show '🗑️  Found 1 items to prune:', got: {prune_output}"
     );
     assert!(
         prune_output.contains("Deployments ("),
@@ -291,17 +295,14 @@ async fn e2e_reset_scoped_by_namespace() {
     // Step 2: Reset with a non-matching namespace → no files change.
     let reset_output = run_human(
         tmp.path().to_path_buf(),
-        vec![
-            "reset".into(),
-            "--namespace".into(),
-            "nonexistent".into(),
-            "--yes".into(),
-        ],
+        vec!["reset".into(), "--namespace".into(), "nonexistent".into(), "--yes".into()],
     )
     .await;
     assert!(
-        reset_output.contains("Nothing to reset."),
-        "non-matching namespace reset must show 'Nothing to reset.', got: {reset_output}"
+        reset_output.contains(
+            "Nothing to reset. No registry entries found for the current namespace and network."
+        ),
+        "non-matching namespace reset must show the full empty-state message, got: {reset_output}"
     );
     assert_eq!(
         read_deployments(tmp.path()),
@@ -375,18 +376,11 @@ async fn e2e_deploy_reset_redeploy() {
     assert_eq!(read_transactions(tmp.path()).as_object().unwrap().len(), 1);
 
     // Step 2a: Reset human output check.
-    let reset_output = run_human(
-        tmp.path().to_path_buf(),
-        vec!["reset".into(), "--yes".into()],
-    )
-    .await;
+    let reset_output =
+        run_human(tmp.path().to_path_buf(), vec!["reset".into(), "--yes".into()]).await;
     assert!(
-        reset_output.contains("Successfully reset"),
-        "reset must show 'Successfully reset N items from the registry.', got: {reset_output}"
-    );
-    assert!(
-        reset_output.contains("items from the registry."),
-        "reset must show 'items from the registry.', got: {reset_output}"
+        reset_output.contains("Successfully reset 2 items from the registry."),
+        "reset must show 'Successfully reset 2 items from the registry.', got: {reset_output}"
     );
     assert_deployment_count(tmp.path().to_path_buf(), 0).await;
 

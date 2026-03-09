@@ -107,7 +107,7 @@ async fn e2e_register_from_tx_hash() {
     )
     .await;
     assert!(
-        register_output.contains("Successfully registered"),
+        register_output.contains("✓ Successfully registered"),
         "register output must contain '✓ Successfully registered', got: {register_output}"
     );
     assert!(
@@ -157,8 +157,8 @@ async fn e2e_register_tag_show_roundtrip() {
     )
     .await;
     assert!(
-        register_output.contains("Successfully registered"),
-        "register output must contain '✓ Successfully registered'"
+        register_output.contains("✓ Successfully registered"),
+        "register output must contain '✓ Successfully registered', got: {register_output}"
     );
 
     // Get the registered deployment ID.
