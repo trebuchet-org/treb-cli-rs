@@ -325,7 +325,7 @@ pub async fn run_exit(network: String, all: bool, json: bool) -> anyhow::Result<
     let mut store = ForkStateStore::new(&treb_dir);
     store.load().context("failed to load fork state")?;
 
-    let networks: Vec<String> = if all { store.list_active_networks() } else { vec![network] };
+    let networks: Vec<String> = if all { exit_ordered_networks(&store) } else { vec![network] };
 
     if networks.is_empty() {
         if json {
@@ -379,10 +379,10 @@ pub async fn run_exit(network: String, all: bool, json: bool) -> anyhow::Result<
     }
 
     if json {
-        if json_results.len() == 1 {
-            output::print_json(&json_results.into_iter().next().unwrap())?;
-        } else {
+        if all {
             output::print_json(&json_results)?;
+        } else {
+            output::print_json(&json_results.into_iter().next().unwrap())?;
         }
     } else {
         println!("Exited fork mode.");
@@ -1089,6 +1089,22 @@ fn resolve_fork_session_entry<'a>(
                 .then_with(|| left.resolved_instance_name().cmp(right.resolved_instance_name()))
         })
     })
+}
+
+fn exit_ordered_networks(store: &ForkStateStore) -> Vec<String> {
+    let mut networks: Vec<(String, chrono::DateTime<Utc>)> = store
+        .list_active_networks()
+        .into_iter()
+        .filter_map(|network| {
+            resolve_fork_session_entry(store, &network).map(|entry| (network, entry.entered_at))
+        })
+        .collect();
+
+    networks.sort_by(|(left_network, left_entered_at), (right_network, right_entered_at)| {
+        right_entered_at.cmp(left_entered_at).then_with(|| left_network.cmp(right_network))
+    });
+
+    networks.into_iter().map(|(network, _)| network).collect()
 }
 
 fn tracked_anvil_entries_for_network<'a>(

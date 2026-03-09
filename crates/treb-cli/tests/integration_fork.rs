@@ -21,10 +21,21 @@ use framework::{
 
 /// Build a ForkEntry with fixed, deterministic values for golden file stability.
 fn sample_fork_entry(treb_dir: &std::path::Path) -> ForkEntry {
-    let ts = Utc.with_ymd_and_hms(2026, 1, 15, 10, 30, 0).unwrap();
-    let snapshot_dir = treb_dir.join("snapshots").join("mainnet");
+    sample_fork_entry_for_network(
+        treb_dir,
+        "mainnet",
+        Utc.with_ymd_and_hms(2026, 1, 15, 10, 30, 0).unwrap(),
+    )
+}
+
+fn sample_fork_entry_for_network(
+    treb_dir: &std::path::Path,
+    network: &str,
+    entered_at: chrono::DateTime<Utc>,
+) -> ForkEntry {
+    let snapshot_dir = treb_dir.join("snapshots").join(network);
     ForkEntry {
-        network: "mainnet".to_string(),
+        network: network.to_string(),
         instance_name: None,
         rpc_url: "http://localhost:18545".to_string(),
         port: 18545,
@@ -32,13 +43,13 @@ fn sample_fork_entry(treb_dir: &std::path::Path) -> ForkEntry {
         fork_url: "https://eth.example.com".to_string(),
         fork_block_number: None,
         snapshot_dir: snapshot_dir.to_string_lossy().into_owned(),
-        started_at: ts,
-        env_var_name: "ETH_RPC_URL_MAINNET".to_string(),
+        started_at: entered_at,
+        env_var_name: format!("ETH_RPC_URL_{}", network.to_uppercase()),
         original_rpc: "https://eth.example.com".to_string(),
         anvil_pid: 0,
         pid_file: String::new(),
         log_file: String::new(),
-        entered_at: ts,
+        entered_at,
         snapshots: vec![],
     }
 }
@@ -398,6 +409,37 @@ fn seed_fork_exit(project_root: &std::path::Path) {
     // Insert active fork entry
     let mut store = ForkStateStore::new(&treb_dir);
     store.insert_active_fork(entry).unwrap();
+}
+
+fn seed_fork_exit_all(project_root: &std::path::Path) {
+    let treb_dir = project_root.join(".treb");
+    let mainnet_entry = sample_fork_entry_for_network(
+        &treb_dir,
+        "mainnet",
+        Utc.with_ymd_and_hms(2026, 1, 15, 10, 30, 0).unwrap(),
+    );
+    let sepolia_entry = sample_fork_entry_for_network(
+        &treb_dir,
+        "sepolia",
+        Utc.with_ymd_and_hms(2026, 1, 16, 10, 30, 0).unwrap(),
+    );
+
+    let mainnet_snapshot_dir = std::path::PathBuf::from(&mainnet_entry.snapshot_dir);
+    let sepolia_snapshot_dir = std::path::PathBuf::from(&sepolia_entry.snapshot_dir);
+    std::fs::create_dir_all(&mainnet_snapshot_dir).unwrap();
+    std::fs::create_dir_all(&sepolia_snapshot_dir).unwrap();
+
+    let state_before_mainnet = r#"{"phase":"before-mainnet"}"#;
+    let state_before_sepolia = r#"{"phase":"during-mainnet"}"#;
+    let active_state = r#"{"phase":"during-sepolia"}"#;
+
+    std::fs::write(mainnet_snapshot_dir.join(DEPLOYMENTS_FILE), state_before_mainnet).unwrap();
+    std::fs::write(sepolia_snapshot_dir.join(DEPLOYMENTS_FILE), state_before_sepolia).unwrap();
+    std::fs::write(treb_dir.join(DEPLOYMENTS_FILE), active_state).unwrap();
+
+    let mut store = ForkStateStore::new(&treb_dir);
+    store.insert_active_fork(mainnet_entry).unwrap();
+    store.insert_active_fork(sepolia_entry).unwrap();
 }
 
 /// Configure `foundry.toml` with a one-shot local JSON-RPC endpoint that
@@ -935,6 +977,46 @@ fn fork_exit_json() {
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
+}
+
+#[test]
+fn fork_exit_all_restores_earliest_snapshot_last() {
+    let ctx = TestContext::new("minimal-project");
+
+    ctx.run(["init"]).success();
+    seed_fork_exit_all(ctx.path());
+
+    ctx.run(["fork", "exit", "--network", "mainnet", "--all"]).success();
+
+    let deployments =
+        std::fs::read_to_string(ctx.treb_dir().join(DEPLOYMENTS_FILE)).expect("read deployments");
+    assert_eq!(deployments, r#"{"phase":"before-mainnet"}"#);
+
+    let mut store = ForkStateStore::new(&ctx.treb_dir());
+    store.load().expect("load fork state after exit");
+    assert!(store.list_active_forks().is_empty(), "all fork entries should be removed");
+
+    assert!(!ctx.treb_dir().join("snapshots").join("mainnet").exists());
+    assert!(!ctx.treb_dir().join("snapshots").join("sepolia").exists());
+}
+
+#[test]
+fn fork_exit_all_json_is_always_an_array() {
+    let ctx = TestContext::new("minimal-project");
+
+    ctx.run(["init"]).success();
+    seed_fork_exit(ctx.path());
+
+    let assertion = ctx.run(["fork", "exit", "--network", "mainnet", "--all", "--json"]).success();
+    let output = assertion.get_output();
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("parse fork exit JSON output");
+    let results = json.as_array().expect("--all JSON output should be an array");
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0]["network"], "mainnet");
+    assert_eq!(results[0]["restoredEntries"], 1);
+    assert_eq!(results[0]["cleanedUp"], true);
 }
 
 // ── fork revert: JSON output ────────────────────────────────────────────
