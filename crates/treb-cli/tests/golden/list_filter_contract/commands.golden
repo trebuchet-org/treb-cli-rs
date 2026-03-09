@@ -2,5 +2,5 @@
    ◎ namespace:   MAINNET                       
 └─ ⛓ chain:       celo (42220)                  
   
-  └─ SINGLETONS
-     └─ FPMM:v<VERSION> 0x42ed...833D e[✔︎]  s[-] b[-]
+  SINGLETONS
+  FPMM:v<VERSION>     0x42eddd7dC046da254A93659CA9b02f294606833D   e[✔︎]  s[-] b[-]   <TIMESTAMP>

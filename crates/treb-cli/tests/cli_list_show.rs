@@ -118,15 +118,18 @@ fn list_shows_table_with_deployments() {
 }
 
 #[test]
-fn list_table_shows_truncated_addresses() {
+fn list_table_shows_full_addresses() {
     let tmp = tempfile::tempdir().unwrap();
     init_project_with_deployments(&tmp);
 
     let output = treb().arg("list").current_dir(tmp.path()).output().unwrap();
 
     let stdout = String::from_utf8(output.stdout).unwrap();
-    // Address should be truncated: 0x42ed...833D
-    assert!(stdout.contains("0x42ed...833D"), "expected truncated address, got:\n{stdout}");
+    // Address should be full (not truncated) in the table format
+    assert!(
+        stdout.contains("0x42eddd7dC046da254A93659CA9b02f294606833D"),
+        "expected full address, got:\n{stdout}"
+    );
 }
 
 #[test]
@@ -141,8 +144,11 @@ fn list_adds_separator_between_chains_in_same_namespace() {
 
     assert!(output.status.success(), "treb list should exit 0");
     let stdout = String::from_utf8(output.stdout).unwrap();
+    // The separator between chains is a blank continuation line (│ ) followed
+    // by the next chain header (└─). ANSI codes may appear between └─ and the
+    // chain label, so just check for the structural separator pattern.
     assert!(
-        stdout.contains("UNVERIFIED\n│ \n└─ ⛓ chain:"),
+        stdout.contains("\n│ \n└─"),
         "expected a post-chain separator before the next chain header, got:\n{stdout}"
     );
 }

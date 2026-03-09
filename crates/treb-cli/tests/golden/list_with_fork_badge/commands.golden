@@ -2,5 +2,5 @@
    ◎ namespace:   FORK/42220                    
 └─ ⛓ chain:       celo (42220)                  
   
-  └─ SINGLETONS
-     └─ MockToken 0xDeaD...beeF UNVERIFIED [fork]
+  SINGLETONS
+  MockToken [fork]     0xDeaDbeefdEAdbeefdEadbEEFdeadbeEFdEaDbeeF   UNVERIFIED   <TIMESTAMP>

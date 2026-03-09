@@ -1,7 +1,7 @@
 //! `treb list` command implementation.
 
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     env,
     fmt::{self, Write as _},
     path::Path,
@@ -15,7 +15,7 @@ use treb_registry::Registry;
 
 use crate::{
     output,
-    ui::{badge, color, emoji, tree::TreeNode},
+    ui::{badge, color, emoji},
 };
 
 /// Filter criteria for deployments. All specified filters are combined with AND logic.
@@ -355,43 +355,146 @@ fn format_namespace_discovery_hint(
     out
 }
 
-/// Format a deployment entry label for tree display.
+// ---------------------------------------------------------------------------
+// Table-based deployment rendering (Go format)
+// ---------------------------------------------------------------------------
+
+/// Lookup table for resolving implementation addresses to contract display names.
+type ImplNameLookup = HashMap<(String, u64, String), String>;
+
+/// Build a lookup table mapping (namespace_lower, chain_id, address_lower) to
+/// contract display names for implementation resolution.
+fn build_impl_name_lookup(deployments: &[&Deployment]) -> ImplNameLookup {
+    deployments
+        .iter()
+        .map(|d| {
+            let display_name = if d.label.is_empty() {
+                d.contract_name.clone()
+            } else {
+                format!("{}:{}", d.contract_name, d.label)
+            };
+            ((d.namespace.to_lowercase(), d.chain_id, d.address.to_lowercase()), display_name)
+        })
+        .collect()
+}
+
+/// Build the contract display string for column 0 of a deployment table row.
 ///
-/// Format: `ContractName[:label] address badge [fork]`
-fn format_deployment_entry(d: &Deployment) -> String {
-    let addr = output::truncate_address(&d.address);
-    let name_part = if d.label.is_empty() {
+/// Format: `TypeColored(ContractName[:Label]) [fork] (first_tag)`
+fn build_contract_display(
+    d: &Deployment,
+    category: &DisplayCategory,
+    fork_deployment_ids: &HashSet<String>,
+) -> String {
+    let name = if d.label.is_empty() {
         d.contract_name.clone()
     } else {
         format!("{}:{}", d.contract_name, d.label)
     };
+
+    let mut display = if color::is_color_enabled() {
+        format!("{}", name.style(category.style()))
+    } else {
+        name
+    };
+
+    if fork_deployment_ids.contains(&d.id) {
+        if color::is_color_enabled() {
+            write!(display, " {}", "[fork]".style(color::FORK_INDICATOR)).unwrap();
+        } else {
+            display.push_str(" [fork]");
+        }
+    }
+
+    if let Some(tags) = &d.tags {
+        if let Some(first_tag) = tags.first() {
+            let tag_str = format!("({first_tag})");
+            if color::is_color_enabled() {
+                write!(display, " {}", tag_str.style(color::TAGS)).unwrap();
+            } else {
+                write!(display, " {tag_str}").unwrap();
+            }
+        }
+    }
+
+    display
+}
+
+/// Build a 4-column table row for a deployment.
+///
+/// Columns: [contract_display, full_address, verification_badges, timestamp]
+fn build_deployment_row(
+    d: &Deployment,
+    category: &DisplayCategory,
+    fork_deployment_ids: &HashSet<String>,
+) -> Vec<String> {
+    let name = build_contract_display(d, category, fork_deployment_ids);
+
+    let address = if color::is_color_enabled() {
+        format!("{}", d.address.style(color::ADDRESS))
+    } else {
+        d.address.clone()
+    };
+
     let ver_badge = if color::is_color_enabled() {
         badge::verification_badge_styled(&d.verification.verifiers)
     } else {
         badge::verification_badge(&d.verification.verifiers)
     };
-    let mut parts = vec![name_part, addr, ver_badge];
-    let fork_badge = if color::is_color_enabled() {
-        badge::fork_badge_styled(&d.namespace)
-    } else {
-        badge::fork_badge(&d.namespace)
+
+    let timestamp = {
+        let ts = d.created_at.format("%Y-%m-%d %H:%M:%S").to_string();
+        if color::is_color_enabled() {
+            format!("{}", ts.style(color::TIMESTAMP))
+        } else {
+            ts
+        }
     };
-    if let Some(fb) = fork_badge {
-        parts.push(fb);
-    }
-    parts.join(" ")
+
+    vec![name, address, ver_badge, timestamp]
 }
 
-/// Build a TreeNode for a deployment entry, including an implementation child
-/// node when proxy_info is present.
-fn build_deployment_node(d: &Deployment) -> TreeNode {
-    let label = format_deployment_entry(d);
-    let mut node = TreeNode::new(label);
-    if let Some(ref pi) = d.proxy_info {
-        let impl_label = format!("Implementation {}", output::truncate_address(&pi.implementation));
-        node = node.child(TreeNode::new(impl_label));
+/// Build an implementation sub-row for a proxy deployment.
+///
+/// Format: `└─ impl_display_name` in faint style, with empty columns 1-3.
+fn build_impl_row(
+    namespace: &str,
+    chain_id: u64,
+    impl_address: &str,
+    impl_lookup: &ImplNameLookup,
+) -> Vec<String> {
+    let key = (namespace.to_lowercase(), chain_id, impl_address.to_lowercase());
+    let impl_name = impl_lookup
+        .get(&key)
+        .cloned()
+        .unwrap_or_else(|| output::truncate_address(impl_address));
+
+    let display = format!("└─ {impl_name}");
+    let col0 = if color::is_color_enabled() {
+        format!("{}", display.style(color::IMPL_PREFIX))
+    } else {
+        display
+    };
+
+    vec![col0, String::new(), String::new(), String::new()]
+}
+
+/// Build table data for all deployments in a type group.
+fn build_type_group_table(
+    tg: &TypeGroup,
+    namespace: &str,
+    chain_id: u64,
+    fork_deployment_ids: &HashSet<String>,
+    impl_lookup: &ImplNameLookup,
+) -> output::TableData {
+    let mut table = Vec::new();
+    for d in &tg.deployments {
+        table.push(build_deployment_row(d, &tg.category, fork_deployment_ids));
+        if let Some(ref pi) = d.proxy_info {
+            table.push(build_impl_row(namespace, chain_id, &pi.implementation, impl_lookup));
+        }
     }
-    node
+    table
 }
 
 /// Organize a flat list of deployments into a hierarchical grouping:
@@ -530,8 +633,29 @@ pub async fn run(
     } else {
         let grouped =
             group_deployments_with_implementation_keys(&result.deployments, &implementation_keys);
+        let impl_lookup = build_impl_name_lookup(&result.deployments);
+
+        // First pass: collect all table data for global column width calculation
+        let mut all_tables: Vec<output::TableData> = Vec::new();
         for (namespace, chains) in &grouped {
-            // Namespace header (Go format: ◎ namespace: UPPERCASE)
+            for (&chain_id, type_groups) in chains {
+                for tg in type_groups {
+                    all_tables.push(build_type_group_table(
+                        tg,
+                        namespace,
+                        chain_id,
+                        &result.fork_deployment_ids,
+                        &impl_lookup,
+                    ));
+                }
+            }
+        }
+
+        let widths = output::calculate_column_widths(&all_tables);
+
+        // Second pass: render with headers and table data
+        let mut table_idx = 0;
+        for (namespace, chains) in &grouped {
             println!("{}", format_namespace_header(namespace));
 
             let chain_count = chains.len();
@@ -539,37 +663,39 @@ pub async fn run(
                 let is_last_chain = chain_idx == chain_count - 1;
                 let chain_label = format_chain_header_label(*chain_id, &result.network_names);
 
-                // Chain header (Go format: ├─/└─ ⛓ chain: network (chainid))
                 println!("{}", format_chain_header(&chain_label, is_last_chain));
 
-                // Continuation prefix for content under this chain
                 let cont_prefix = if is_last_chain { "  " } else { "│ " };
 
                 // Blank continuation line after chain header
                 println!("{cont_prefix}");
 
-                // Build type groups as a synthetic tree for inner content
-                let mut content_root = TreeNode::new(String::new());
-                for tg in type_groups {
-                    let type_label = tg.category.to_string();
-                    let type_style = tg.category.style();
-                    let mut type_node = TreeNode::new(type_label).with_style(type_style);
-                    for d in &tg.deployments {
-                        type_node = type_node.child(build_deployment_node(d));
+                for (tg_idx, tg) in type_groups.iter().enumerate() {
+                    // Blank line between type sections
+                    if tg_idx > 0 {
+                        println!("{cont_prefix}");
                     }
-                    content_root = content_root.child(type_node);
-                }
 
-                let rendered = if color::is_color_enabled() {
-                    content_root.render_styled()
-                } else {
-                    content_root.render()
-                };
+                    // Type section header
+                    if color::is_color_enabled() {
+                        println!(
+                            "{cont_prefix}{}",
+                            tg.category.to_string().style(color::SECTION_HEADER)
+                        );
+                    } else {
+                        println!("{cont_prefix}{}", tg.category);
+                    }
 
-                // Skip the first line (empty root label) and prefix remaining
-                // lines with the continuation prefix
-                for line in rendered.lines().skip(1) {
-                    println!("{cont_prefix}{line}");
+                    // Deployment table rows
+                    let rendered = output::render_table_with_widths(
+                        &all_tables[table_idx],
+                        &widths,
+                        cont_prefix,
+                    );
+                    if !rendered.is_empty() {
+                        println!("{rendered}");
+                    }
+                    table_idx += 1;
                 }
 
                 if is_last_chain {
@@ -1179,11 +1305,15 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Tree node rendering tests
+    // Table row rendering tests
     // -----------------------------------------------------------------------
 
     #[test]
-    fn build_deployment_node_proxy_has_implementation_child() {
+    fn deployment_row_proxy_has_implementation_row() {
+        let _lock = env_lock();
+        let _no_color = EnvVarGuard::set("NO_COLOR", "1");
+        color::color_enabled(false);
+
         let mut d = make_deployment(
             "mainnet/42220/TransparentUpgradeableProxy:FPMMFactory",
             "mainnet",
@@ -1201,26 +1331,30 @@ mod tests {
             history: vec![],
         });
 
-        let node = build_deployment_node(&d);
-        let rendered = node.render();
-        let lines: Vec<&str> = rendered.lines().collect();
+        let fork_ids = HashSet::new();
+        let impl_lookup = ImplNameLookup::new();
+        let tg = TypeGroup { category: DisplayCategory::Proxy, deployments: vec![&d] };
+        let table = build_type_group_table(&tg, "mainnet", 42220, &fork_ids, &impl_lookup);
 
-        // Should have 2 lines: the deployment entry + implementation child
-        assert_eq!(lines.len(), 2, "proxy deployment should have 1 child node, got:\n{rendered}");
+        assert_eq!(table.len(), 2, "proxy deployment should produce 2 table rows");
         assert!(
-            lines[0].contains("TransparentUpgradeableProxy:FPMMFactory"),
-            "first line should contain contract name:label"
+            table[0][0].contains("TransparentUpgradeableProxy:FPMMFactory"),
+            "first row col0 should contain contract name:label"
         );
-        assert!(lines[0].contains("UNVERIFIED"), "first line should contain verification badge");
-        assert!(lines[1].contains("Implementation"), "child should be an Implementation node");
         assert!(
-            lines[1].contains("0x9595...79dF"),
-            "child should contain truncated implementation address"
+            table[0][1].contains("0x22A81Fc75b0d5F7cac19cABa9F0c3719b3897F03"),
+            "first row col1 should contain full address"
         );
+        assert!(table[0][2].contains("UNVERIFIED"), "first row col2 should contain verification badge");
+        assert!(table[1][0].contains("└─"), "second row should be an implementation row");
     }
 
     #[test]
-    fn build_deployment_node_non_proxy_has_no_children() {
+    fn deployment_row_non_proxy_has_no_impl_row() {
+        let _lock = env_lock();
+        let _no_color = EnvVarGuard::set("NO_COLOR", "1");
+        color::color_enabled(false);
+
         let d = make_deployment(
             "mainnet/42220/FPMM",
             "mainnet",
@@ -1231,13 +1365,20 @@ mod tests {
             None,
         );
 
-        let node = build_deployment_node(&d);
-        let rendered = node.render();
-        assert_eq!(rendered.lines().count(), 1, "non-proxy deployment should have no child nodes");
+        let fork_ids = HashSet::new();
+        let impl_lookup = ImplNameLookup::new();
+        let tg = TypeGroup { category: DisplayCategory::Singleton, deployments: vec![&d] };
+        let table = build_type_group_table(&tg, "mainnet", 42220, &fork_ids, &impl_lookup);
+
+        assert_eq!(table.len(), 1, "non-proxy deployment should produce 1 table row");
     }
 
     #[test]
-    fn format_entry_includes_fork_badge() {
+    fn contract_display_includes_fork_badge() {
+        let _lock = env_lock();
+        let _no_color = EnvVarGuard::set("NO_COLOR", "1");
+        color::color_enabled(false);
+
         let d = make_deployment(
             "fork/42220/FPMM:dev",
             "fork/42220",
@@ -1247,13 +1388,15 @@ mod tests {
             DeploymentType::Proxy,
             None,
         );
-        let entry = format_deployment_entry(&d);
-        assert!(entry.contains("[fork]"), "fork-namespace entry should contain [fork] badge");
-        assert!(entry.contains("UNVERIFIED"), "entry should contain verification badge");
+        let mut fork_ids = HashSet::new();
+        fork_ids.insert(d.id.clone());
+
+        let display = build_contract_display(&d, &DisplayCategory::Proxy, &fork_ids);
+        assert!(display.contains("[fork]"), "fork deployment display should contain [fork] badge");
     }
 
     #[test]
-    fn format_entry_uses_styled_badges_when_color_enabled() {
+    fn deployment_row_uses_styled_badges_when_color_enabled() {
         let _lock = env_lock();
         let _no_color = EnvVarGuard::unset("NO_COLOR");
         let _term = EnvVarGuard::set("TERM", "xterm-256color");
@@ -1274,11 +1417,13 @@ mod tests {
             VerifierStatus { status: "VERIFIED".into(), url: String::new(), reason: String::new() },
         );
 
-        let entry = format_deployment_entry(&d);
+        let mut fork_ids = HashSet::new();
+        fork_ids.insert(d.id.clone());
+        let row = build_deployment_row(&d, &DisplayCategory::Proxy, &fork_ids);
 
-        assert!(entry.contains('\x1b'), "styled entry should contain ANSI codes: {entry:?}");
-        assert!(entry.contains("e[✔︎]"), "styled entry should contain Go-format verifier text");
-        assert!(entry.contains("[fork]"), "styled entry should include the fork badge text");
+        assert!(row[0].contains('\x1b'), "styled contract name should contain ANSI codes: {:?}", row[0]);
+        assert!(row[2].contains("e[✔︎]"), "styled verification should contain Go-format verifier text");
+        assert!(row[0].contains("[fork]"), "styled row should include the fork badge text");
     }
 
     // -----------------------------------------------------------------------
