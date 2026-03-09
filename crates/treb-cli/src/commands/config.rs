@@ -9,6 +9,7 @@ use treb_config::{
 };
 
 use crate::output;
+use crate::ui::emoji;
 
 const FOUNDRY_TOML: &str = "foundry.toml";
 const TREB_DIR: &str = ".treb";
@@ -31,7 +32,7 @@ pub async fn show(json: bool) -> anyhow::Result<()> {
     ensure_initialized(&cwd)?;
 
     let resolved = resolve_config(ResolveOpts {
-        project_root: cwd,
+        project_root: cwd.clone(),
         namespace: None,
         network: None,
         profile: None,
@@ -51,15 +52,21 @@ pub async fn show(json: bool) -> anyhow::Result<()> {
     if json {
         output::print_json(&output_data)?;
     } else {
-        let network_display = resolved.network.as_deref().unwrap_or("not set");
+        let network_display = resolved.network.as_deref().unwrap_or("(not set)");
 
-        output::print_kv(&[
-            ("Namespace", &resolved.namespace),
-            ("Network", network_display),
-            ("Profile", &resolved.profile),
-            ("Config Source", &resolved.config_source),
-            ("Project Root", &resolved.project_root.display().to_string()),
-        ]);
+        println!("{} Current config:", emoji::CLIPBOARD);
+        println!("Namespace: {}", resolved.namespace);
+        println!("Network:   {}", network_display);
+
+        println!();
+        println!("{} Config source: {}", emoji::PACKAGE, resolved.config_source);
+
+        let config_path = resolved.project_root.join(".treb/config.local.json");
+        let relative_path = config_path
+            .strip_prefix(&cwd)
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| config_path.display().to_string());
+        println!("{} config file: {}", emoji::FOLDER, relative_path);
 
         if !resolved.senders.is_empty() {
             println!();
