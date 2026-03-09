@@ -1,2 +1,2 @@
 === cmd 0: [verify dep-verified --etherscan --sourcify] ===
-  ✓ TestContract is already verified — use --force to re-verify
+Contract TestContract:v1 is already verified. Use --force to re-verify.

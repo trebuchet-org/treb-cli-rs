@@ -6,7 +6,7 @@ use anyhow::{Context, bail};
 use chrono::Utc;
 use owo_colors::{OwoColorize, Style};
 use serde::Serialize;
-use treb_core::types::{VerificationStatus, VerifierStatus};
+use treb_core::types::{VerificationStatus, VerifierStatus, contract_display_name};
 use treb_registry::Registry;
 use treb_verify::VerifyOpts;
 
@@ -14,7 +14,7 @@ use crate::{
     commands::resolve::resolve_deployment,
     output,
     ui::{
-        badge, color,
+        badge, color, emoji,
         interactive::is_non_interactive,
         selector::{fuzzy_select_deployment_id, multiselect_deployments},
     },
@@ -109,6 +109,51 @@ fn styled(text: &str, style: Style) -> String {
     if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
 }
 
+/// Title-case a verifier name (e.g., "etherscan" → "Etherscan").
+fn title_case(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+    }
+}
+
+/// Print the `Verification Status:` section with per-verifier results.
+fn print_verification_status(verifiers: &HashMap<String, VerifierStatus>) {
+    if verifiers.is_empty() {
+        return;
+    }
+    eprintln!();
+    eprintln!("  Verification Status:");
+    let mut names: Vec<_> = verifiers.keys().collect();
+    names.sort();
+    for name in names {
+        let v = &verifiers[name];
+        let title = title_case(name);
+        if v.status == "VERIFIED" {
+            eprintln!(
+                "    {} {} {}",
+                styled(emoji::CHECK_MARK, color::VERIFIED),
+                title,
+                styled("Verified", color::VERIFIED),
+            );
+            if !v.url.is_empty() {
+                eprintln!("      {}", styled(&v.url, color::MUTED));
+            }
+        } else {
+            eprintln!(
+                "    {} {} {}",
+                styled(emoji::CROSS_MARK, color::FAILED),
+                title,
+                styled("Failed", color::FAILED),
+            );
+            if !v.reason.is_empty() {
+                eprintln!("      {}", styled(&v.reason, color::MUTED));
+            }
+        }
+    }
+}
+
 /// Run the verify command.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
@@ -188,12 +233,14 @@ pub async fn run(
     // Capture fields we need after the borrow on registry is released.
     let deployment_id = resolved.id.clone();
     let contract_name = resolved.contract_name.clone();
+    let label = resolved.label.clone();
     let address = resolved.address.clone();
     let chain_id = resolved.chain_id;
     let already_verified = resolved.verification.status == VerificationStatus::Verified;
     let existing_url = resolved.verification.etherscan_url.clone();
     let existing_verified_at = resolved.verification.verified_at;
     let existing_verifiers = resolved.verification.verifiers.clone();
+    let display_name = contract_display_name(&contract_name, &label);
 
     // Skip if already verified and not forced.
     if already_verified && !force {
@@ -214,9 +261,14 @@ pub async fn run(
             output::print_json(&out)?;
         } else {
             eprintln!(
-                "  {} {} is already verified — use --force to re-verify",
-                styled("\u{2713}", color::SUCCESS),
-                contract_name,
+                "{}",
+                styled(
+                    &format!(
+                        "Contract {} is already verified. Use --force to re-verify.",
+                        display_name
+                    ),
+                    color::WARNING,
+                ),
             );
         }
         return Ok(());
@@ -336,16 +388,6 @@ pub async fn run(
 
     registry.update_deployment(dep.clone())?;
 
-    // Show verification badge summary on stdout.
-    if !json {
-        let ver_badge = if color::is_color_enabled() {
-            badge::verification_badge_styled(&attempted_verifiers)
-        } else {
-            badge::verification_badge(&attempted_verifiers)
-        };
-        println!("  {}", ver_badge);
-    }
-
     // Output.
     if json {
         let agg_status_str = match dep.verification.status {
@@ -368,8 +410,40 @@ pub async fn run(
             verifiers: verifier_results_json(&attempted_verifiers),
         };
         output::print_json(&out)?;
-    } else if dep.verification.status == VerificationStatus::Failed {
-        bail!("verification failed for {}", contract_name);
+    } else {
+        // Print success/failure message and verification status section.
+        match dep.verification.status {
+            VerificationStatus::Verified => {
+                eprintln!(
+                    "{} {}",
+                    styled(emoji::CHECK_MARK, color::SUCCESS),
+                    styled("Verification completed successfully!", color::SUCCESS),
+                );
+            }
+            VerificationStatus::Failed => {
+                // Print per-error failure messages.
+                for v in attempted_verifiers.values() {
+                    if v.status == "FAILED" {
+                        eprintln!(
+                            "{} {}",
+                            styled(emoji::CROSS_MARK, color::FAILED),
+                            styled(
+                                &format!("Verification failed: {}", v.reason),
+                                color::FAILED,
+                            ),
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        // Show verification status section.
+        print_verification_status(&attempted_verifiers);
+
+        if dep.verification.status == VerificationStatus::Failed {
+            bail!("verification failed for {}", contract_name);
+        }
     }
 
     Ok(())
