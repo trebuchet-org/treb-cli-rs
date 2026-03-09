@@ -139,6 +139,25 @@ pub fn print_warning_banner(emoji: &str, message: &str) {
     println!("{}", format_warning_banner(emoji, message));
 }
 
+/// Print a section header matching Go's script renderer format.
+///
+/// Outputs `"\n{emoji} {title}:"` in bold + a gray `─` separator of the given width.
+/// When color is disabled, outputs the same structure without ANSI codes.
+pub fn print_section_header(emoji: &str, title: &str, separator_width: usize) {
+    let separator: String = "─".repeat(separator_width);
+    if color::is_color_enabled() {
+        println!(
+            "\n{} {}",
+            emoji,
+            format!("{title}:").style(color::BOLD)
+        );
+        println!("{}", separator.style(color::GRAY));
+    } else {
+        println!("\n{} {title}:", emoji);
+        println!("{separator}");
+    }
+}
+
 /// Print a JSON error object to stderr: `{"error":"<message>"}`.
 ///
 /// Used by the top-level error handler when `--json` is set so that

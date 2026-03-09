@@ -29,7 +29,7 @@ use treb_registry::Registry;
 use crate::{
     output,
     ui::{
-        badge, color, interactive::is_non_interactive, selector::fuzzy_select_network,
+        badge, color, emoji, interactive::is_non_interactive, selector::fuzzy_select_network,
         tree::TreeNode,
     },
 };
@@ -753,25 +753,27 @@ fn build_run_deployment_node(d: &treb_core::types::Deployment) -> TreeNode {
 }
 
 fn display_result_human(result: &PipelineResult) {
-    // Dry-run banner
-    if result.dry_run {
-        output::print_warning_banner(
-            "\u{1f6a7}",
-            "[DRY RUN] No changes were written to the registry.",
-        );
-        println!();
-    }
-
-    // Console.log output
-    if !result.console_logs.is_empty() {
-        for log in &result.console_logs {
-            println!("{}", log);
+    // ── Transactions ────────────────────────────────────────────────────
+    if !result.transactions.is_empty() {
+        output::print_section_header(emoji::REFRESH, "Transactions", 50);
+        for (i, rt) in result.transactions.iter().enumerate() {
+            let tx = &rt.transaction;
+            let status = tx.status.to_string();
+            println!("  {}. {} ({})", i + 1, tx.hash, status);
         }
         println!();
     }
 
-    // Deployment tree
+    // ── Collisions ──────────────────────────────────────────────────────
+    if !result.collisions.is_empty() {
+        output::print_section_header(emoji::WARNING, "Deployment Collisions Detected", 50);
+        println!("Collisions detected: {}", result.collisions.len());
+        println!();
+    }
+
+    // ── Deployment Summary ──────────────────────────────────────────────
     if !result.deployments.is_empty() {
+        output::print_section_header(emoji::PACKAGE, "Deployment Summary", 50);
         let grouped = group_recorded_deployments(&result.deployments);
         let mut first = true;
         for (namespace, chains) in &grouped {
@@ -802,18 +804,16 @@ fn display_result_human(result: &PipelineResult) {
         println!();
     }
 
-    // Transactions
-    if !result.transactions.is_empty() {
-        println!("Transactions:");
-        for (i, rt) in result.transactions.iter().enumerate() {
-            let tx = &rt.transaction;
-            let status = tx.status.to_string();
-            println!("  {}. {} ({})", i + 1, tx.hash, status);
+    // ── Console Logs ────────────────────────────────────────────────────
+    if !result.console_logs.is_empty() {
+        output::print_section_header(emoji::MEMO, "Script Logs", 40);
+        for log in &result.console_logs {
+            println!("  {}", log);
         }
         println!();
     }
 
-    // Governor proposals
+    // ── Governor Proposals ──────────────────────────────────────────────
     if !result.governor_proposals.is_empty() {
         println!("Governor Proposals:");
         for (i, gp) in result.governor_proposals.iter().enumerate() {
@@ -824,7 +824,7 @@ fn display_result_human(result: &PipelineResult) {
         println!();
     }
 
-    // Skipped deployments
+    // ── Skipped Deployments ─────────────────────────────────────────────
     if !result.skipped.is_empty() {
         println!("Skipped:");
         for s in &result.skipped {
@@ -836,53 +836,6 @@ fn display_result_human(result: &PipelineResult) {
             );
         }
         println!();
-    }
-
-    // Collisions
-    if !result.collisions.is_empty() {
-        println!("Collisions detected: {}", result.collisions.len());
-        println!();
-    }
-
-    // Summary
-    let dep_count = result.deployments.len();
-    let tx_count = result.transactions.len();
-    let skip_count = result.skipped.len();
-    let proposal_count = result.governor_proposals.len();
-
-    if dep_count == 0 && skip_count == 0 && proposal_count == 0 {
-        println!("No deployments found in script output.");
-    } else {
-        let action = if result.dry_run { "would be recorded" } else { "recorded" };
-        let mut parts = Vec::new();
-        if dep_count > 0 {
-            parts.push(format!(
-                "{} deployment{} {}",
-                dep_count,
-                if dep_count == 1 { "" } else { "s" },
-                action
-            ));
-        }
-        if tx_count > 0 {
-            parts.push(format!("{} transaction{}", tx_count, if tx_count == 1 { "" } else { "s" }));
-        }
-        if proposal_count > 0 {
-            let proposal_verb = if result.dry_run { "would be proposed" } else { "proposed" };
-            parts.push(format!(
-                "{} governor proposal{} {}",
-                proposal_count,
-                if proposal_count == 1 { "" } else { "s" },
-                proposal_verb,
-            ));
-        }
-        if skip_count > 0 {
-            parts.push(format!("{} skipped", skip_count));
-        }
-        if result.gas_used > 0 {
-            let gas_verb = if result.dry_run { "gas would be used" } else { "gas used" };
-            parts.push(format!("{} {}", output::format_gas(result.gas_used), gas_verb));
-        }
-        println!("{}", parts.join(", "));
     }
 }
 
