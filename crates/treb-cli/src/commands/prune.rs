@@ -93,10 +93,10 @@ pub struct PruneCandidate {
     /// Chain ID of the entry, if available.
     pub chain_id: Option<u64>,
     /// Contract address (for deployment candidates, used in human output).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip)]
     pub address: Option<String>,
     /// Transaction status (for transaction candidates, used in human output).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip)]
     pub status: Option<String>,
 }
 
@@ -324,14 +324,10 @@ fn validate_onchain_args(args: &PruneArgs) -> anyhow::Result<()> {
 
 /// Print section listings for prune candidates grouped by type (deployment vs transaction).
 fn print_candidate_sections(candidates: &[PruneCandidate]) {
-    let dep_candidates: Vec<&PruneCandidate> = candidates
-        .iter()
-        .filter(|c| targets_deployment(&c.kind))
-        .collect();
-    let tx_candidates: Vec<&PruneCandidate> = candidates
-        .iter()
-        .filter(|c| !targets_deployment(&c.kind))
-        .collect();
+    let dep_candidates: Vec<&PruneCandidate> =
+        candidates.iter().filter(|c| targets_deployment(&c.kind)).collect();
+    let tx_candidates: Vec<&PruneCandidate> =
+        candidates.iter().filter(|c| !targets_deployment(&c.kind)).collect();
 
     if !dep_candidates.is_empty() {
         println!("Deployments ({}):", dep_candidates.len());
@@ -349,11 +345,8 @@ fn print_candidate_sections(candidates: &[PruneCandidate]) {
         for c in &tx_candidates {
             let status = c.status.as_deref().unwrap_or("Unknown");
             // Convert status to title case (e.g., "EXECUTED" -> "Executed") to match Go output.
-            let status_display = format!(
-                "{}{}",
-                &status[..1].to_uppercase(),
-                &status[1..].to_lowercase()
-            );
+            let status_display =
+                format!("{}{}", &status[..1].to_uppercase(), &status[1..].to_lowercase());
             println!("  - {} [{}] (reason: {})", c.id, status_display, c.reason);
         }
     }
@@ -401,10 +394,7 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
         if args.json {
             output::print_json(&serde_json::json!({ "candidates": [] }))?;
         } else {
-            println!(
-                "{} All registry entries are valid. Nothing to prune.",
-                emoji::CHECK
-            );
+            println!("{} All registry entries are valid. Nothing to prune.", emoji::CHECK);
         }
         return Ok(());
     }
@@ -414,15 +404,8 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
         if args.json {
             output::print_json(&candidates)?;
         } else {
-            println!(
-                "{} Checking registry entries against on-chain state...",
-                emoji::MAGNIFYING_GLASS
-            );
-            println!(
-                "\n{}  Found {} items to prune:\n",
-                emoji::WASTEBASKET,
-                candidates.len()
-            );
+            println!("{} Checking registry entries...", emoji::MAGNIFYING_GLASS);
+            println!("\n{}  Found {} items to prune:\n", emoji::WASTEBASKET, candidates.len());
             print_candidate_sections(&candidates);
         }
         return Ok(());
@@ -430,15 +413,8 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
 
     // Destructive mode: confirm, backup, then remove.
     if !args.json {
-        println!(
-            "{} Checking registry entries against on-chain state...",
-            emoji::MAGNIFYING_GLASS
-        );
-        println!(
-            "\n{}  Found {} items to prune:\n",
-            emoji::WASTEBASKET,
-            candidates.len()
-        );
+        println!("{} Checking registry entries...", emoji::MAGNIFYING_GLASS);
+        println!("\n{}  Found {} items to prune:\n", emoji::WASTEBASKET, candidates.len());
         print_candidate_sections(&candidates);
     }
 
@@ -495,11 +471,7 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
             backup_path: _backup_path.display().to_string(),
         })?;
     } else {
-        println!(
-            "{} Successfully pruned {} items from the registry.",
-            emoji::CHECK,
-            removed.len()
-        );
+        println!("{} Successfully pruned {} items.", emoji::CHECK, removed.len());
     }
 
     Ok(())
@@ -662,13 +634,15 @@ mod tests {
             reason: "test reason".to_string(),
             chain_id: Some(1),
             address: Some("0x1234".to_string()),
-            status: None,
+            status: Some("EXECUTED".to_string()),
         };
         let json = serde_json::to_string(&candidate).unwrap();
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(value["id"], "dep-1");
         assert_eq!(value["kind"], "BrokenTransactionRef");
         assert_eq!(value["chainId"], 1);
+        assert!(value.get("address").is_none());
+        assert!(value.get("status").is_none());
     }
 
     #[test]

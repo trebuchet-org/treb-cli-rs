@@ -1,9 +1,7 @@
 === cmd 0: [prune --check-onchain --rpc-url http://127.0.0.1:<PORT> --dry-run --network 31337] ===
-┌────────────┬──────────────────┬────────────────────────────────────────────────────────────────────────────────────────────────┬──────────┐
-│ ID         ┆ Kind             ┆ Reason                                                                                         ┆ Chain ID │
-╞════════════╪══════════════════╪════════════════════════════════════════════════════════════════════════════════════════════════╪══════════╡
-│ dep-nocode ┆ DestroyedOnChain ┆ deployment 'dep-nocode' at 0x0000000000000000000000000000000000001234 has no on-chain bytecode ┆ 31337    │
-└────────────┴──────────────────┴────────────────────────────────────────────────────────────────────────────────────────────────┴──────────┘
+🔍 Checking registry entries...
 
-1 prune candidate(s) found. Re-run without --dry-run to remove.
-🔍 Scanning registry...
+🗑️  Found 1 items to prune:
+
+Deployments (1):
+  - dep-nocode at 0x0000000000000000000000000000000000001234 (reason: deployment 'dep-nocode' at 0x0000000000000000000000000000000000001234 has no on-chain bytecode)

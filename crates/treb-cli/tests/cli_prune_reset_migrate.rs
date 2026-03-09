@@ -150,14 +150,14 @@ fn prune_yes_removes_broken_entry_and_creates_backup() {
     assert!(output.status.success(), "prune --yes should succeed");
     let stdout = String::from_utf8(output.stdout).unwrap();
 
-    // Output mentions removal and backup path.
+    // Output reports prune success without exposing the backup path.
     assert!(
-        stdout.to_lowercase().contains("removed") || stdout.contains("dep-broken"),
-        "stdout should mention removal: {stdout}"
+        stdout.contains("✅ Successfully pruned 1 items."),
+        "stdout should report prune success: {stdout}"
     );
     assert!(
-        stdout.to_lowercase().contains("backup"),
-        "stdout should mention backup path: {stdout}"
+        !stdout.to_lowercase().contains("backup"),
+        "stdout should not mention backup path: {stdout}"
     );
 
     // A backup directory should exist under .treb/backups/.
