@@ -1,5 +1,7 @@
 //! Tree rendering with box-drawing prefixes for hierarchical data display.
 
+#![cfg_attr(not(test), allow(dead_code))]
+
 use owo_colors::{OwoColorize, Style};
 
 /// A node in a tree structure that can be rendered with box-drawing characters.

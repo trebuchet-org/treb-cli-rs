@@ -12,11 +12,8 @@ No files changed, compilation skipped
   Counter:Counter at 0x5b73C5498c1E3b4dbA84de0F1833c4a029d90519
 
 
-✓ Registry Update:
-──────────────────────────────────────────────────
-  Registry update details pending.
-
+✓ Updated registry for anvil-31337 network in namespace default
+✓ Script execution completed successfully
 🔨 Compiling and executing script/Deploy.s.sol...
 📡 Broadcasting...
-✅ Execution complete.
 Debug log saved to <PROJECT_ROOT>/.treb/debug-<DEBUG_TIMESTAMP>.log

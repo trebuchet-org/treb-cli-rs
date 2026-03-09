@@ -167,6 +167,12 @@ impl RunPipeline {
         // 10. Duplicate detection
         let resolved = resolve_duplicates(hydrated_deployments, registry, DuplicateStrategy::Skip)?;
         let skipped = resolved.skipped;
+        let registry_updated = !self.context.config.dry_run
+            && (!resolved.to_insert.is_empty()
+                || !resolved.to_update.is_empty()
+                || !transactions.is_empty()
+                || !safe_transactions.is_empty()
+                || (is_governor_sender && !governor_proposals.is_empty()));
 
         // 11. Record to registry (or build dry-run result)
         let mut recorded_deployments = Vec::new();
@@ -228,6 +234,7 @@ impl RunPipeline {
         Ok(PipelineResult {
             deployments: recorded_deployments,
             transactions: recorded_transactions,
+            registry_updated,
             collisions,
             skipped,
             dry_run: self.context.config.dry_run,

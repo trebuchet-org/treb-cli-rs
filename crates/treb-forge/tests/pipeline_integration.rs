@@ -106,6 +106,7 @@ fn build_pipeline_result(
     PipelineResult {
         deployments: recorded_deployments,
         transactions: recorded_transactions,
+        registry_updated: false,
         collisions,
         skipped,
         dry_run,

@@ -7,14 +7,12 @@ No files changed, compilation skipped
   simulated governance → 0x0000000000000000000000000000000000001000::0xdeadbeef(CALL)
 
 
-✓ Registry Update:
-──────────────────────────────────────────────────
-  Registry update details pending.
-
+✓ Updated registry for anvil-31337 network in namespace default
 Governor Proposals:
   1. 42 (proposed)
      Governor: 0xaAaA...aaAa | Timelock: 0xbBbB...BBbB | Status: pending | 1 linked transaction
 
+✓ Script execution completed successfully
  Config source:  treb.toml (v2)
      Namespace:  default
       Chain ID:  31337
@@ -27,7 +25,6 @@ Broadcast mode:  broadcast
 
 🔨 Compiling and executing script/GovernorProposal.s.sol...
 🏛️ Creating governance proposal...
-✅ Execution complete.
 
             Events:  2 event(s) decoded
            Console:  0 console.log line(s)

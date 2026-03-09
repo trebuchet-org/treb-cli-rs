@@ -80,6 +80,8 @@ pub struct PipelineResult {
     pub deployments: Vec<RecordedDeployment>,
     /// Transactions that were successfully recorded (or would be in dry-run).
     pub transactions: Vec<RecordedTransaction>,
+    /// Whether the pipeline performed any registry writes.
+    pub registry_updated: bool,
     /// Collision events reported during script execution.
     pub collisions: Vec<ExtractedCollision>,
     /// Deployments that were skipped due to duplicate detection.

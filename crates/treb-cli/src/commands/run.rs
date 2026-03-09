@@ -451,7 +451,7 @@ pub async fn run(
     }
 
     // ── Display results ──────────────────────────────────────────────────
-    display_result(&result, json, network.as_deref(), &resolved.namespace)?;
+    display_result(&result, json, resolved.network.as_deref(), &resolved.namespace)?;
 
     // ── Debug log output ────────────────────────────────────────────────
     if debug {
@@ -652,43 +652,45 @@ fn format_governor_proposal_details(gp: &treb_core::types::GovernorProposal) -> 
     )
 }
 
-fn print_registry_update_section(
+fn print_registry_update_section(result: &PipelineResult, network: Option<&str>, namespace: &str) {
+    let Some((msg, updated)) = registry_update_message(result, network, namespace) else {
+        return;
+    };
+
+    if color::is_color_enabled() {
+        let style = if updated { color::GREEN } else { color::YELLOW };
+        println!("\n{}", msg.style(style));
+    } else {
+        println!("\n{msg}");
+    }
+}
+
+fn registry_update_message(
     result: &PipelineResult,
     network: Option<&str>,
     namespace: &str,
-) {
-    // Only show registry update when not dry-run and execution succeeded
+) -> Option<(String, bool)> {
     if result.dry_run || !result.success {
-        return;
+        return None;
     }
 
     let network_display = network.unwrap_or("unknown");
-
-    if !result.deployments.is_empty() {
-        // Green message when changes were made
-        let msg = format!(
+    let updated = result.registry_updated;
+    let msg = if updated {
+        format!(
             "{} Updated registry for {} network in namespace {}",
             emoji::CHECK_MARK,
             network_display,
             namespace,
-        );
-        if color::is_color_enabled() {
-            println!("\n{}", msg.style(color::GREEN));
-        } else {
-            println!("\n{msg}");
-        }
+        )
     } else {
-        // Yellow message when no changes
-        let msg = format!(
+        format!(
             "- No registry changes recorded for {} network in namespace {}",
             network_display, namespace,
-        );
-        if color::is_color_enabled() {
-            println!("\n{}", msg.style(color::YELLOW));
-        } else {
-            println!("\n{msg}");
-        }
-    }
+        )
+    };
+
+    Some((msg, updated))
 }
 
 fn format_warning_section_header_with_style(title: &str, style_enabled: bool) -> String {
@@ -917,10 +919,7 @@ fn display_result_human(result: &PipelineResult, network: Option<&str>, namespac
     }
 
     // ── Success Message ───────────────────────────────────────────────
-    let success_msg = format!(
-        "{} Script execution completed successfully",
-        emoji::CHECK_MARK,
-    );
+    let success_msg = format!("{} Script execution completed successfully", emoji::CHECK_MARK,);
     if color::is_color_enabled() {
         println!("{}", success_msg.style(color::GREEN));
     } else {
@@ -949,6 +948,22 @@ mod tests {
             description: String::new(),
             executed_at: None,
             execution_tx_hash: String::new(),
+        }
+    }
+
+    fn sample_pipeline_result() -> PipelineResult {
+        PipelineResult {
+            deployments: Vec::new(),
+            transactions: Vec::new(),
+            registry_updated: false,
+            collisions: Vec::new(),
+            skipped: Vec::new(),
+            dry_run: false,
+            success: true,
+            gas_used: 0,
+            event_count: 0,
+            console_logs: Vec::new(),
+            governor_proposals: Vec::new(),
         }
     }
 
@@ -1126,7 +1141,6 @@ mod tests {
         owo_colors::set_override(false);
     }
 
-
     #[test]
     fn format_tx_footer_includes_gas_when_present() {
         let recorded = treb_forge::pipeline::RecordedTransaction {
@@ -1176,5 +1190,31 @@ mod tests {
         };
 
         assert_eq!(tx_sender_label(&recorded), "anvil");
+    }
+
+    #[test]
+    fn registry_update_message_uses_provided_network_name() {
+        let mut result = sample_pipeline_result();
+        result.registry_updated = true;
+
+        let (message, updated) =
+            registry_update_message(&result, Some("sepolia"), "default").unwrap();
+
+        assert!(updated);
+        assert_eq!(message, "✓ Updated registry for sepolia network in namespace default");
+    }
+
+    #[test]
+    fn registry_update_message_treats_governor_only_results_as_registry_updates() {
+        let mut result = sample_pipeline_result();
+        result.registry_updated = true;
+        result.governor_proposals.push(sample_governor_proposal());
+
+        let (message, updated) =
+            registry_update_message(&result, Some("anvil-31337"), "default").unwrap();
+
+        assert!(updated);
+        assert!(message.contains("Updated registry for anvil-31337 network"));
+        assert!(!message.contains("No registry changes recorded"));
     }
 }

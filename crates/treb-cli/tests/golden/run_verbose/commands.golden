@@ -12,10 +12,8 @@ No files changed, compilation skipped
   Counter:Counter at 0x5b73C5498c1E3b4dbA84de0F1833c4a029d90519
 
 
-✓ Registry Update:
-──────────────────────────────────────────────────
-  Registry update details pending.
-
+✓ Updated registry for anvil-31337 network in namespace default
+✓ Script execution completed successfully
  Config source:  treb.toml (v2)
      Namespace:  default
       Chain ID:  31337
@@ -27,7 +25,6 @@ Broadcast mode:  broadcast
 
 🔨 Compiling and executing script/Deploy.s.sol...
 📡 Broadcasting...
-✅ Execution complete.
 
             Events:  2 event(s) decoded
            Console:  0 console.log line(s)

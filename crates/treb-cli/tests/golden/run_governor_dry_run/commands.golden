@@ -6,14 +6,10 @@ No files changed, compilation skipped
 
   simulated governance → 0x0000000000000000000000000000000000001000::0xdeadbeef(CALL)
 
-
-✓ Registry Update:
-──────────────────────────────────────────────────
-
 Governor Proposals:
   1. 42 (would be proposed)
      Governor: 0xaAaA...aaAa | Timelock: 0xbBbB...BBbB | Status: pending | 1 linked transaction
 
+✓ Script execution completed successfully
 🔨 Compiling and executing script/GovernorProposal.s.sol...
 🧪 Simulating...
-✅ Execution complete.
