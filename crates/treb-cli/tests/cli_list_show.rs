@@ -332,17 +332,45 @@ fn show_by_full_id() {
         .current_dir(tmp.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("Identity"))
+        .stdout(predicate::str::contains("Basic Information"))
         .stdout(predicate::str::contains("FPMM"))
         .stdout(predicate::str::contains("v3.0.0"))
         .stdout(predicate::str::contains("mainnet"))
-        .stdout(predicate::str::contains("On-Chain"))
+        .stdout(predicate::str::contains("Network: 42220"))
         .stdout(predicate::str::contains("42220"))
         .stdout(predicate::str::contains("0x42eddd7dC046da254A93659CA9b02f294606833D"))
-        .stdout(predicate::str::contains("Transaction"))
-        .stdout(predicate::str::contains("Artifact"))
-        .stdout(predicate::str::contains("Verification"))
+        .stdout(predicate::str::contains("Deployment Strategy"))
+        .stdout(predicate::str::contains("Artifact Information"))
+        .stdout(predicate::str::contains("Verification Status"))
         .stdout(predicate::str::contains("Timestamps"));
+}
+
+#[test]
+fn show_fork_badge_stays_in_header_only() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_deployments(&tmp);
+
+    let output = treb()
+        .args(["show", "fork/42220/MockToken"])
+        .env("NO_COLOR", "1")
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "treb show should exit 0");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains("Deployment: fork/42220/MockToken [fork]"),
+        "expected fork badge in header, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Namespace: fork/42220"),
+        "expected raw namespace in Basic Information, got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("Namespace: fork/42220 [fork]"),
+        "fork badge must not be repeated in Namespace, got:\n{stdout}"
+    );
 }
 
 #[test]
@@ -359,11 +387,36 @@ fn show_json_outputs_full_deployment() {
     assert!(output.status.success());
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("output is not valid JSON");
-    let obj = json.as_object().expect("JSON output should be an object");
-    assert_eq!(obj["id"], "mainnet/42220/FPMM:v3.0.0");
-    assert_eq!(obj["contractName"], "FPMM");
-    assert_eq!(obj["chainId"], 42220);
-    assert_eq!(obj["address"], "0x42eddd7dC046da254A93659CA9b02f294606833D");
+    let deployment = &json["deployment"];
+    assert!(deployment.is_object(), "JSON output should contain a deployment object");
+    assert_eq!(deployment["id"], "mainnet/42220/FPMM:v3.0.0");
+    assert_eq!(deployment["contractName"], "FPMM");
+    assert_eq!(deployment["chainId"], 42220);
+    assert_eq!(deployment["address"], "0x42eddd7dC046da254A93659CA9b02f294606833D");
+    assert_eq!(deployment["verification"]["status"], "PARTIAL");
+    assert_eq!(
+        deployment["verification"]["etherscanUrl"],
+        "https://celoscan.io/address/0x42eddd7dC046da254A93659CA9b02f294606833D#code"
+    );
+    assert!(json.get("fork").is_none(), "non-fork deployments must not include a fork flag");
+}
+
+#[test]
+fn show_json_sets_fork_flag_only_for_fork_namespaces() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_deployments(&tmp);
+
+    let output = treb()
+        .args(["show", "fork/42220/MockToken", "--json"])
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("output is not valid JSON");
+    assert_eq!(json["deployment"]["id"], "fork/42220/MockToken");
+    assert_eq!(json["fork"], true, "fork deployments must include fork=true");
 }
 
 #[test]
@@ -439,9 +492,10 @@ fn show_proxy_deployment_shows_proxy_info() {
         .current_dir(tmp.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("Proxy Info"))
+        .stdout(predicate::str::contains("Proxy Information"))
         .stdout(predicate::str::contains("UUPS"))
-        .stdout(predicate::str::contains("Implementation"));
+        .stdout(predicate::str::contains("Implementation"))
+        .stdout(predicate::str::contains("Implementation ID: mainnet/42220/FPMMFactory:v3.0.0"));
 }
 
 #[test]
@@ -453,7 +507,7 @@ fn show_non_proxy_deployment_hides_proxy_info() {
 
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(
-        !stdout.contains("Proxy Info"),
-        "non-proxy deployment should not show Proxy Info section"
+        !stdout.contains("Proxy Information"),
+        "non-proxy deployment should not show Proxy Information section"
     );
 }

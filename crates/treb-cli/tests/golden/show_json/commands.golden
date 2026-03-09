@@ -1,42 +1,45 @@
 === cmd 0: [show --json mainnet/42220/FPMM:v<VERSION>] ===
 {
-  "address": "0x42eddd7dC046da254A93659CA9b02f294606833D",
-  "artifact": {
-    "bytecodeHash": "0x6b7fb93a42cf317aec80a67fcdc73ba8d75edb0be9e0bb01185e70f2028a5d6a",
-    "compilerVersion": "0.8.24+commit.e11b9ed9",
-    "gitCommit": "f7c896cf0da6eca082cf90066d7e9510978e4659",
-    "path": "lib/mento-core/contracts/swap/FPMM.sol",
-    "scriptPath": "script/deploy/v3/DeployV3PreStage.s.sol"
-  },
-  "chainId": 42220,
-  "contractName": "FPMM",
-  "createdAt": "<TIMESTAMP>",
-  "deploymentStrategy": {
-    "constructorArgs": "0x0000000000000000000000000000000000000000000000000000000000000001",
-    "entropy": "mainnet/FPMM:v<VERSION>",
-    "factory": "0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed",
-    "initCodeHash": "0xa0f13f7e31f02ed554bbaf380dbd9e8afe60c5a5965eb9fadfaf2a25de14510c",
-    "method": "CREATE3",
-    "salt": "0x32cb58b145d3f7e28c45ce4b2cc31fa94248b23f00a2e3014050467acb6c25eb"
-  },
-  "id": "mainnet/42220/FPMM:v<VERSION>",
-  "label": "v<VERSION>",
-  "namespace": "mainnet",
-  "proxyInfo": null,
-  "tags": null,
-  "transactionId": "",
-  "type": "SINGLETON",
-  "updatedAt": "<TIMESTAMP>",
-  "verification": {
-    "status": "UNVERIFIED",
-    "verifiers": {
-      "etherscan": {
-        "status": "VERIFIED",
-        "url": "https://celoscan.io/address/0x42eddd7dC046da254A93659CA9b02f294606833D#code"
-      },
-      "sourcify": {
-        "reason": "Contract not found on Sourcify",
-        "status": "FAILED"
+  "deployment": {
+    "address": "0x42eddd7dC046da254A93659CA9b02f294606833D",
+    "artifact": {
+      "bytecodeHash": "0x6b7fb93a42cf317aec80a67fcdc73ba8d75edb0be9e0bb01185e70f2028a5d6a",
+      "compilerVersion": "0.8.24+commit.e11b9ed9",
+      "gitCommit": "f7c896cf0da6eca082cf90066d7e9510978e4659",
+      "path": "lib/mento-core/contracts/swap/FPMM.sol",
+      "scriptPath": "script/deploy/v3/DeployV3PreStage.s.sol"
+    },
+    "chainId": 42220,
+    "contractName": "FPMM",
+    "createdAt": "<TIMESTAMP>",
+    "deploymentStrategy": {
+      "constructorArgs": "0x0000000000000000000000000000000000000000000000000000000000000001",
+      "entropy": "mainnet/FPMM:v<VERSION>",
+      "factory": "0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed",
+      "initCodeHash": "0xa0f13f7e31f02ed554bbaf380dbd9e8afe60c5a5965eb9fadfaf2a25de14510c",
+      "method": "CREATE3",
+      "salt": "0x32cb58b145d3f7e28c45ce4b2cc31fa94248b23f00a2e3014050467acb6c25eb"
+    },
+    "id": "mainnet/42220/FPMM:v<VERSION>",
+    "label": "v<VERSION>",
+    "namespace": "mainnet",
+    "proxyInfo": null,
+    "tags": null,
+    "transactionId": "",
+    "type": "SINGLETON",
+    "updatedAt": "<TIMESTAMP>",
+    "verification": {
+      "etherscanUrl": "https://celoscan.io/address/0x42eddd7dC046da254A93659CA9b02f294606833D#code",
+      "status": "PARTIAL",
+      "verifiers": {
+        "etherscan": {
+          "status": "VERIFIED",
+          "url": "https://celoscan.io/address/0x42eddd7dC046da254A93659CA9b02f294606833D#code"
+        },
+        "sourcify": {
+          "reason": "Contract not found on Sourcify",
+          "status": "FAILED"
+        }
       }
     }
   }

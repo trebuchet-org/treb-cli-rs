@@ -40,14 +40,24 @@ async fn e2e_full_deployment_lifecycle() {
 
     // Step 4: show <id> --json → validate fields
     let show_json = run_json(tmp.path().to_path_buf(), vec!["show".into(), dep_id.clone()]).await;
-    assert_eq!(show_json["id"].as_str().unwrap(), dep_id, "show id must match");
-    assert_eq!(show_json["address"].as_str().unwrap(), dep_address, "show address must match");
+    let show_deployment = &show_json["deployment"];
+    assert_eq!(show_deployment["id"].as_str().unwrap(), dep_id, "show id must match");
     assert_eq!(
-        show_json["contractName"].as_str().unwrap(),
+        show_deployment["address"].as_str().unwrap(),
+        dep_address,
+        "show address must match"
+    );
+    assert_eq!(
+        show_deployment["contractName"].as_str().unwrap(),
         dep_contract_name,
         "show contractName must match"
     );
-    assert_eq!(show_json["chainId"].as_u64().unwrap(), dep_chain_id, "show chainId must match");
+    assert_eq!(
+        show_deployment["chainId"].as_u64().unwrap(),
+        dep_chain_id,
+        "show chainId must match"
+    );
+    assert!(show_json.get("fork").is_none(), "non-fork deployment must not include fork=true");
 
     // Step 5: tag add "v1.0.0"
     let tmp_path = tmp.path().to_path_buf();
@@ -100,7 +110,7 @@ async fn e2e_full_deployment_lifecycle() {
 
     // Step 9: show --json → verify tags absent or empty
     let show_after = run_json(tmp.path().to_path_buf(), vec!["show".into(), dep_id.clone()]).await;
-    let tags = &show_after["tags"];
+    let tags = &show_after["deployment"]["tags"];
     assert!(
         tags.is_null() || tags.as_array().is_none_or(|a| a.is_empty()),
         "tags should be absent or empty after removal, got: {tags}"
