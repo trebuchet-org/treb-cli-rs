@@ -137,11 +137,9 @@ fn print_deployment_details(d: &Deployment) {
     if let Some(ref proxy) = d.proxy_info {
         print_section("Proxy Information");
         print_field("Type", &proxy.proxy_type);
-        let impl_styled = styled(&proxy.implementation, color::ADDRESS);
-        print_field("Implementation", &impl_styled);
+        print_field("Implementation", &proxy.implementation);
         if !proxy.admin.is_empty() {
-            let admin_styled = styled(&proxy.admin, color::ADDRESS);
-            print_field("Admin", &admin_styled);
+            print_field("Admin", &proxy.admin);
         }
         if !proxy.history.is_empty() {
             println!("  Upgrade History:");
@@ -150,7 +148,7 @@ fn print_deployment_details(d: &Deployment) {
                     "    {}. {} (upgraded at {})",
                     i + 1,
                     upgrade.implementation_id,
-                    upgrade.upgraded_at.to_rfc3339(),
+                    upgrade.upgraded_at.format("%Y-%m-%d %H:%M:%S"),
                 );
             }
         }
