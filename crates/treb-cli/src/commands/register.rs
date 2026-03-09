@@ -16,7 +16,11 @@ use treb_core::types::{
 };
 use treb_registry::Registry;
 
-use crate::output;
+use crate::{
+    output,
+    ui::{color, emoji},
+};
+use owo_colors::{OwoColorize, Style};
 
 const FOUNDRY_TOML: &str = "foundry.toml";
 const TREB_DIR: &str = ".treb";
@@ -244,6 +248,19 @@ fn resolve_contract_name(
     None
 }
 
+fn deployment_labels(
+    label: Option<&str>,
+    total_creations: usize,
+    index: usize,
+) -> (String, Option<String>) {
+    let display_label = label.filter(|label| !label.is_empty()).map(str::to_owned);
+    let effective_label = display_label.clone().unwrap_or_default();
+    let registry_label =
+        if total_creations == 1 { effective_label } else { format!("{effective_label}_{index}") };
+
+    (registry_label, display_label)
+}
+
 // ── Output types ────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -265,6 +282,11 @@ struct RegisteredDeploymentJson {
     address: String,
     namespace: String,
     chain_id: u64,
+}
+
+/// Apply a color style when color is enabled, plain text otherwise.
+fn styled(text: &str, style: Style) -> String {
+    if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
 }
 
 // ── Main entry point ────────────────────────────────────────────────────
@@ -424,7 +446,6 @@ pub async fn run(
 
     // ── Build defaults ──────────────────────────────────────────────────
     let effective_namespace = namespace.unwrap_or_else(|| "default".to_string());
-    let effective_label = label.unwrap_or_default();
     let effective_name = resolve_contract_name(contract_name, contract);
     let tx_id = format!("tx-{tx_hash}");
 
@@ -437,6 +458,7 @@ pub async fn run(
     }
 
     let mut registered: Vec<(RegisteredDeploymentJson, String)> = Vec::new();
+    let mut dep_labels: Vec<Option<String>> = Vec::new();
 
     for (i, creation) in creations.iter().enumerate() {
         let name = match &effective_name {
@@ -446,11 +468,7 @@ pub async fn run(
             None => format!("Unknown_{i}"),
         };
 
-        let dep_label = if creations.len() == 1 {
-            effective_label.clone()
-        } else {
-            format!("{}_{i}", effective_label)
-        };
+        let (dep_label, display_label) = deployment_labels(label.as_deref(), creations.len(), i);
 
         let deployment_id =
             generate_deployment_id(&effective_namespace, chain_id, &name, &dep_label);
@@ -489,6 +507,8 @@ pub async fn run(
                 None => (DeploymentType::Unknown, None),
             },
         };
+
+        dep_labels.push(display_label);
 
         let deployment = Deployment {
             id: deployment_id.clone(),
@@ -594,25 +614,22 @@ pub async fn run(
             transaction_id: tx_id,
         })?;
     } else {
-        let mut table = output::build_table(&["Contract", "Address", "Namespace", "Chain"]);
-
-        for dep in &dep_jsons {
-            table.add_row(vec![
-                &dep.contract_name,
-                &dep.address,
-                &dep.namespace,
-                &dep.chain_id.to_string(),
-            ]);
-        }
-
-        output::print_table(&table);
-        println!();
         let n = dep_jsons.len();
-        println!(
-            "{n} deployment{} registered from transaction {}",
-            if n == 1 { "" } else { "s" },
-            output::truncate_address(tx_hash),
-        );
+        let header = format!("{} Successfully registered {} deployment(s)", emoji::CHECK_MARK, n);
+        println!("{}\n", styled(&header, color::SUCCESS));
+
+        for (i, (dep, label)) in dep_jsons.iter().zip(dep_labels.iter()).enumerate() {
+            println!("  Deployment {}:", i + 1);
+            println!("    Deployment ID: {}", dep.id);
+            println!("    Address: {}", dep.address);
+            println!("    Contract: {}", dep.contract_name);
+            if let Some(label) = label {
+                println!("    Label: {}", label);
+            }
+            if i < n - 1 {
+                println!();
+            }
+        }
     }
 
     Ok(())
@@ -837,6 +854,22 @@ needs_env = "https://rpc.example.com/${API_KEY}"
     fn contract_name_none_when_both_empty() {
         let result = resolve_contract_name(None, None);
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn deployment_labels_hide_generated_suffix_for_unlabeled_multi_create() {
+        let (registry_label, display_label) = deployment_labels(None, 2, 0);
+
+        assert_eq!(registry_label, "_0");
+        assert_eq!(display_label, None);
+    }
+
+    #[test]
+    fn deployment_labels_hide_generated_suffix_for_labeled_multi_create() {
+        let (registry_label, display_label) = deployment_labels(Some("factory"), 2, 1);
+
+        assert_eq!(registry_label, "factory_1");
+        assert_eq!(display_label.as_deref(), Some("factory"));
     }
 
     // ── parse_hex_u64 ───────────────────────────────────────────────────

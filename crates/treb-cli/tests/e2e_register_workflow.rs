@@ -6,7 +6,7 @@
 
 mod e2e;
 
-use e2e::{assert_deployment_count, run_json, setup_project, spawn_anvil_or_skip, treb};
+use e2e::{assert_deployment_count, run_human, run_json, setup_project, spawn_anvil_or_skip, treb};
 
 /// Deploy a minimal contract directly on Anvil via `eth_sendTransaction` and
 /// return `(tx_hash, contract_address)`.
@@ -93,19 +93,27 @@ async fn e2e_register_from_tx_hash() {
     // Deploy a contract directly on Anvil (bypassing treb run).
     let (tx_hash, expected_address) = deploy_contract_on_anvil(&rpc_url).await;
 
-    // Register the deployment from the transaction hash.
-    let tmp_path = tmp.path().to_path_buf();
-    let rpc = rpc_url.clone();
-    let hash = tx_hash.clone();
-    tokio::task::spawn_blocking(move || {
-        treb()
-            .args(["register", "--tx-hash", &hash, "--rpc-url", &rpc, "--skip-verify"])
-            .current_dir(&tmp_path)
-            .assert()
-            .success();
-    })
-    .await
-    .unwrap();
+    // Register the deployment from the transaction hash and verify human output.
+    let register_output = run_human(
+        tmp.path().to_path_buf(),
+        vec![
+            "register".into(),
+            "--tx-hash".into(),
+            tx_hash.clone(),
+            "--rpc-url".into(),
+            rpc_url.clone(),
+            "--skip-verify".into(),
+        ],
+    )
+    .await;
+    assert!(
+        register_output.contains("✓ Successfully registered"),
+        "register output must contain '✓ Successfully registered', got: {register_output}"
+    );
+    assert!(
+        register_output.contains("Deployment ID:"),
+        "register output must contain 'Deployment ID:', got: {register_output}"
+    );
 
     // Verify deployment appears in list.
     let deployments = assert_deployment_count(tmp.path().to_path_buf(), 1).await;
@@ -133,21 +141,25 @@ async fn e2e_register_tag_show_roundtrip() {
 
     let tmp = setup_project().await;
 
-    // Deploy and register a contract.
+    // Deploy and register a contract, verifying human output.
     let (tx_hash, _) = deploy_contract_on_anvil(&rpc_url).await;
 
-    let tmp_path = tmp.path().to_path_buf();
-    let rpc = rpc_url.clone();
-    let hash = tx_hash.clone();
-    tokio::task::spawn_blocking(move || {
-        treb()
-            .args(["register", "--tx-hash", &hash, "--rpc-url", &rpc, "--skip-verify"])
-            .current_dir(&tmp_path)
-            .assert()
-            .success();
-    })
-    .await
-    .unwrap();
+    let register_output = run_human(
+        tmp.path().to_path_buf(),
+        vec![
+            "register".into(),
+            "--tx-hash".into(),
+            tx_hash.clone(),
+            "--rpc-url".into(),
+            rpc_url.clone(),
+            "--skip-verify".into(),
+        ],
+    )
+    .await;
+    assert!(
+        register_output.contains("✓ Successfully registered"),
+        "register output must contain '✓ Successfully registered', got: {register_output}"
+    );
 
     // Get the registered deployment ID.
     let dep_id = {

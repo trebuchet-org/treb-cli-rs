@@ -1,8 +1,10 @@
 === cmd 0: [reset --yes] ===
-⚠️ Warning: About to remove 3 deployment(s), 2 transaction(s), 2 safe transaction(s), 2 governor proposal(s). A backup will be created first.
-Reset complete.
-Removed 3 deployment(s), 2 transaction(s), 2 safe transaction(s), 2 governor proposal(s).
-Backup created at: <PROJECT_ROOT>/.treb/backups/reset-<UNIX_TIME>
-🔍 Scanning registry...
-💾 Creating backup...
-✅ Reset complete
+Found 9 items to reset for namespace 'default' across all networks:
+
+  Deployments:        3
+  Transactions:       2
+  Safe Transactions:  2
+  Governor Proposals: 2
+
+Running in non-interactive mode. Proceeding with reset...
+Successfully reset 9 items from the registry.

@@ -150,14 +150,18 @@ fn prune_yes_removes_broken_entry_and_creates_backup() {
     assert!(output.status.success(), "prune --yes should succeed");
     let stdout = String::from_utf8(output.stdout).unwrap();
 
-    // Output mentions removal and backup path.
+    // Output reports prune success without exposing the backup path.
     assert!(
-        stdout.to_lowercase().contains("removed") || stdout.contains("dep-broken"),
-        "stdout should mention removal: {stdout}"
+        stdout.contains("Running in non-interactive mode. Proceeding with prune..."),
+        "stdout should include the non-interactive proceed line: {stdout}"
     );
     assert!(
-        stdout.to_lowercase().contains("backup"),
-        "stdout should mention backup path: {stdout}"
+        stdout.contains("✅ Successfully pruned 1 items."),
+        "stdout should report prune success: {stdout}"
+    );
+    assert!(
+        !stdout.to_lowercase().contains("backup"),
+        "stdout should not mention backup path: {stdout}"
     );
 
     // A backup directory should exist under .treb/backups/.
@@ -175,6 +179,39 @@ fn prune_yes_removes_broken_entry_and_creates_backup() {
     assert!(
         registry_after.get_deployment("dep-broken").is_none(),
         "dep-broken should be removed after prune --yes"
+    );
+}
+
+#[test]
+fn prune_non_interactive_proceeds_without_yes_and_creates_backup() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut registry = init_project(&tmp);
+
+    registry.insert_deployment(make_deployment("dep-broken", "tx-missing", 1, "default")).unwrap();
+
+    let output = treb()
+        .args(["prune"])
+        .env("TREB_NON_INTERACTIVE", "true")
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "prune should succeed in non-interactive mode");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    assert!(
+        stdout.contains("Running in non-interactive mode. Proceeding with prune..."),
+        "stdout should include the non-interactive proceed line: {stdout}"
+    );
+    assert!(
+        stdout.contains("✅ Successfully pruned 1 items."),
+        "stdout should report prune success: {stdout}"
+    );
+
+    let registry_after = treb_registry::Registry::open(tmp.path()).unwrap();
+    assert!(
+        registry_after.get_deployment("dep-broken").is_none(),
+        "dep-broken should be removed after non-interactive prune"
     );
 }
 
@@ -203,7 +240,7 @@ fn reset_yes_empties_all_stores_and_creates_backup() {
     let mut registry = init_project(&tmp);
 
     registry.insert_deployment(make_deployment("dep-1", "", 1, "default")).unwrap();
-    registry.insert_deployment(make_deployment("dep-2", "", 1, "staging")).unwrap();
+    registry.insert_deployment(make_deployment("dep-2", "", 42220, "staging")).unwrap();
 
     let output = treb().args(["reset", "--yes"]).current_dir(tmp.path()).output().unwrap();
 
@@ -211,10 +248,26 @@ fn reset_yes_empties_all_stores_and_creates_backup() {
     let stdout = String::from_utf8(output.stdout).unwrap();
 
     assert!(
-        stdout.contains("Reset complete."),
-        "stdout should contain 'Reset complete.': {stdout}"
+        stdout.contains("Found 2 items to reset for namespace 'default' across all networks:"),
+        "stdout should describe the mixed-chain reset scope without inventing a default network: {stdout}"
     );
-    assert!(stdout.to_lowercase().contains("backup"), "stdout should mention backup: {stdout}");
+    assert!(
+        stdout.contains("  Deployments:        2"),
+        "stdout should include aligned reset counts: {stdout}"
+    );
+    assert!(
+        stdout.contains("Running in non-interactive mode. Proceeding with reset..."),
+        "stdout should include the non-interactive proceed line: {stdout}"
+    );
+    assert!(
+        stdout.contains("Successfully reset 2 items from the registry."),
+        "stdout should contain the plain reset success line: {stdout}"
+    );
+    assert!(!stdout.contains("31337"), "stdout should not claim chain 31337: {stdout}");
+    assert!(
+        !stdout.to_lowercase().contains("backup"),
+        "stdout should not mention backup paths: {stdout}"
+    );
 
     // Backup directory should exist.
     let backups_dir = tmp.path().join(".treb/backups");

@@ -4,18 +4,17 @@
 //! candidates, and (in destructive mode) removes them with a timestamped backup.
 
 use std::{
-    env,
+    env, io,
     path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, bail};
 use clap::Args;
-use owo_colors::{OwoColorize, Style};
 use serde::{Deserialize, Serialize};
 use treb_registry::{REGISTRY_DIR, Registry, snapshot_registry};
 
-use crate::{output, ui::color};
+use crate::{output, ui::emoji};
 
 // ── Args ─────────────────────────────────────────────────────────────────────
 
@@ -53,11 +52,6 @@ pub struct PruneArgs {
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
-}
-
-/// Apply a color style when color is enabled, plain text otherwise.
-fn styled(text: &str, style: Style) -> String {
-    if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -98,6 +92,12 @@ pub struct PruneCandidate {
     pub reason: String,
     /// Chain ID of the entry, if available.
     pub chain_id: Option<u64>,
+    /// Contract address (for deployment candidates, used in human output).
+    #[serde(skip)]
+    pub address: Option<String>,
+    /// Transaction status (for transaction candidates, used in human output).
+    #[serde(skip)]
+    pub status: Option<String>,
 }
 
 // ── find_prune_candidates ─────────────────────────────────────────────────────
@@ -134,6 +134,8 @@ pub fn find_prune_candidates(
                     dep.id, dep.transaction_id
                 ),
                 chain_id: Some(dep.chain_id),
+                address: Some(dep.address.clone()),
+                status: None,
             });
         }
     }
@@ -158,6 +160,8 @@ pub fn find_prune_candidates(
                         tx.id, dep_id
                     ),
                     chain_id: Some(tx.chain_id),
+                    address: None,
+                    status: Some(tx.status.to_string()),
                 });
                 // Only flag once per transaction even if multiple refs are broken.
                 break;
@@ -176,6 +180,8 @@ pub fn find_prune_candidates(
                         tx.id
                     ),
                     chain_id: Some(tx.chain_id),
+                    address: None,
+                    status: Some(tx.status.to_string()),
                 });
             }
         }
@@ -260,6 +266,8 @@ pub async fn find_onchain_prune_candidates(
                 kind: PruneCandidateKind::DestroyedOnChain,
                 reason: format!("deployment '{}' at {} has no on-chain bytecode", dep.id, address),
                 chain_id: Some(dep.chain_id),
+                address: Some(address.clone()),
+                status: None,
             });
         }
     }
@@ -314,6 +322,43 @@ fn validate_onchain_args(args: &PruneArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn prune_confirmation_prompt() -> String {
+    format!(
+        "{}  Are you sure you want to prune these items? This cannot be undone. [y/N]: ",
+        emoji::WARNING
+    )
+}
+
+/// Print section listings for prune candidates grouped by type (deployment vs transaction).
+fn print_candidate_sections(candidates: &[PruneCandidate]) {
+    let dep_candidates: Vec<&PruneCandidate> =
+        candidates.iter().filter(|c| targets_deployment(&c.kind)).collect();
+    let tx_candidates: Vec<&PruneCandidate> =
+        candidates.iter().filter(|c| !targets_deployment(&c.kind)).collect();
+
+    if !dep_candidates.is_empty() {
+        println!("Deployments ({}):", dep_candidates.len());
+        for c in &dep_candidates {
+            let addr = c.address.as_deref().unwrap_or("unknown");
+            println!("  - {} at {} (reason: {})", c.id, addr, c.reason);
+        }
+        if !tx_candidates.is_empty() {
+            println!();
+        }
+    }
+
+    if !tx_candidates.is_empty() {
+        println!("Transactions ({}):", tx_candidates.len());
+        for c in &tx_candidates {
+            let status = c.status.as_deref().unwrap_or("Unknown");
+            // Convert status to title case (e.g., "EXECUTED" -> "Executed") to match Go output.
+            let status_display =
+                format!("{}{}", &status[..1].to_uppercase(), &status[1..].to_lowercase());
+            println!("  - {} [{}] (reason: {})", c.id, status_display, c.reason);
+        }
+    }
+}
+
 // ── run ───────────────────────────────────────────────────────────────────────
 
 /// Entry point for `treb prune`.
@@ -356,7 +401,7 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
         if args.json {
             output::print_json(&serde_json::json!({ "candidates": [] }))?;
         } else {
-            println!("{}", styled("Nothing to prune.", color::SUCCESS));
+            println!("{} All registry entries are valid. Nothing to prune.", emoji::CHECK);
         }
         return Ok(());
     }
@@ -366,60 +411,63 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
         if args.json {
             output::print_json(&candidates)?;
         } else {
-            output::print_stage("\u{1f50d}", "Scanning registry...");
-            let mut table = output::build_table(&["ID", "Kind", "Reason", "Chain ID"]);
-            for c in &candidates {
-                table.add_row(vec![
-                    c.id.clone(),
-                    c.kind.to_string(),
-                    c.reason.clone(),
-                    c.chain_id.map(|id| id.to_string()).unwrap_or_default(),
-                ]);
-            }
-            output::print_table(&table);
-            println!(
-                "\n{}",
-                styled(
-                    &format!(
-                        "{} prune candidate(s) found. Re-run without --dry-run to remove.",
-                        candidates.len()
-                    ),
-                    color::SUCCESS,
-                )
-            );
+            println!("{} Checking registry entries...", emoji::MAGNIFYING_GLASS);
+            println!("\n{}  Found {} items to prune:\n", emoji::WASTEBASKET, candidates.len());
+            print_candidate_sections(&candidates);
         }
         return Ok(());
     }
 
     // Destructive mode: confirm, backup, then remove.
     if !args.json {
-        output::print_stage("\u{1f50d}", "Scanning registry...");
-        output::print_warning_banner(
-            "\u{26a0}\u{fe0f}",
-            &format!(
-                "Warning: About to remove {} prune candidate(s). A backup will be created first.",
-                candidates.len()
-            ),
-        );
+        println!("{} Checking registry entries...", emoji::MAGNIFYING_GLASS);
+        println!("\n{}  Found {} items to prune:\n", emoji::WASTEBASKET, candidates.len());
+        print_candidate_sections(&candidates);
     }
 
-    if !args.yes {
-        let message = format!("Remove {} entry(s)?", candidates.len());
-        if !crate::ui::prompt::confirm(&message, false) {
+    let skip_confirmation = args.yes || crate::ui::interactive::is_non_interactive(false);
+    if skip_confirmation {
+        if !args.json {
+            println!("Running in non-interactive mode. Proceeding with prune...");
+        }
+    } else {
+        if !args.json {
+            println!();
+        }
+
+        let prompt = prune_confirmation_prompt();
+        let confirmed = if args.json {
+            let stdin = io::stdin();
+            let mut stdin = stdin.lock();
+            let stderr = io::stderr();
+            let mut stderr = stderr.lock();
+            crate::ui::prompt::confirm_raw(&mut stderr, &mut stdin, &prompt)
+                .context("failed to read prune confirmation")?
+        } else {
+            let stdin = io::stdin();
+            let mut stdin = stdin.lock();
+            let stdout = io::stdout();
+            let mut stdout = stdout.lock();
+            crate::ui::prompt::confirm_raw(&mut stdout, &mut stdin, &prompt)
+                .context("failed to read prune confirmation")?
+        };
+
+        if !confirmed {
             if !args.json {
-                println!("{}", styled("Cancelled.", color::MUTED));
+                println!("{} Prune cancelled.", emoji::CROSS);
             }
             return Ok(());
         }
     }
 
-    if !args.json {
-        output::print_stage("\u{1f4be}", "Creating backup...");
-    }
-    let backup_path = backup_registry(&cwd)?;
+    let _backup_path = backup_registry(&cwd)?;
 
     // Re-open registry mutably for removals.
     let mut registry = Registry::open(&cwd).context("failed to open registry")?;
+
+    if !args.json {
+        println!("\n{} Pruning registry entries...", emoji::WRENCH);
+    }
 
     let mut removed: Vec<PruneCandidate> = Vec::new();
     for c in candidates {
@@ -437,10 +485,6 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
         }
     }
 
-    if !args.json {
-        output::print_stage("\u{2705}", "Prune complete");
-    }
-
     if args.json {
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
@@ -450,21 +494,10 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
         }
         output::print_json(&PruneResult {
             removed: &removed,
-            backup_path: backup_path.display().to_string(),
+            backup_path: _backup_path.display().to_string(),
         })?;
     } else {
-        let mut table = output::build_table(&["ID", "Kind", "Reason", "Chain ID"]);
-        for c in &removed {
-            table.add_row(vec![
-                c.id.clone(),
-                c.kind.to_string(),
-                c.reason.clone(),
-                c.chain_id.map(|id| id.to_string()).unwrap_or_default(),
-            ]);
-        }
-        output::print_table(&table);
-        println!("\n{}", styled(&format!("Removed {} entry(s).", removed.len()), color::SUCCESS,));
-        println!("Backup created at: {}", backup_path.display());
+        println!("{} Successfully pruned {} items.", emoji::CHECK, removed.len());
     }
 
     Ok(())
@@ -626,12 +659,16 @@ mod tests {
             kind: PruneCandidateKind::BrokenTransactionRef,
             reason: "test reason".to_string(),
             chain_id: Some(1),
+            address: Some("0x1234".to_string()),
+            status: Some("EXECUTED".to_string()),
         };
         let json = serde_json::to_string(&candidate).unwrap();
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(value["id"], "dep-1");
         assert_eq!(value["kind"], "BrokenTransactionRef");
         assert_eq!(value["chainId"], 1);
+        assert!(value.get("address").is_none());
+        assert!(value.get("status").is_none());
     }
 
     #[test]
@@ -655,6 +692,14 @@ mod tests {
         let candidates_with_pending = find_prune_candidates(&registry, None, true);
         assert_eq!(candidates_with_pending.len(), 1);
         assert_eq!(candidates_with_pending[0].kind, PruneCandidateKind::OrphanedPendingEntry);
+    }
+
+    #[test]
+    fn prune_confirmation_prompt_matches_phase_11_contract() {
+        assert_eq!(
+            prune_confirmation_prompt(),
+            "⚠️  Are you sure you want to prune these items? This cannot be undone. [y/N]: "
+        );
     }
 
     #[test]
@@ -742,12 +787,16 @@ mod tests {
             kind: PruneCandidateKind::BrokenTransactionRef,
             reason: "broken tx ref".to_string(),
             chain_id: Some(1),
+            address: Some("0x1234".to_string()),
+            status: None,
         }];
         let onchain_candidates = vec![PruneCandidate {
             id: "dep-1".to_string(),
             kind: PruneCandidateKind::DestroyedOnChain,
             reason: "no bytecode at address".to_string(),
             chain_id: Some(1),
+            address: Some("0x1234".to_string()),
+            status: None,
         }];
 
         merge_onchain_candidates(&mut candidates, onchain_candidates);
@@ -765,12 +814,16 @@ mod tests {
             kind: PruneCandidateKind::BrokenDeploymentRef,
             reason: "tx references missing deployment".to_string(),
             chain_id: Some(1),
+            address: None,
+            status: Some("EXECUTED".to_string()),
         }];
         let onchain_candidates = vec![PruneCandidate {
             id: "shared-id".to_string(),
             kind: PruneCandidateKind::DestroyedOnChain,
             reason: "deployment has no bytecode".to_string(),
             chain_id: Some(1),
+            address: Some("0x5678".to_string()),
+            status: None,
         }];
 
         merge_onchain_candidates(&mut candidates, onchain_candidates);

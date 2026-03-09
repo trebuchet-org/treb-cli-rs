@@ -1,98 +1,106 @@
 # Ralph Progress Log
-Started: Mon Mar  9 08:18:15 PM CET 2026
+Started: Mon Mar  9 10:23:09 PM CET 2026
 ---
 
 ## Codebase Patterns
-- Sync output uses `println!` for stdout results and `output::print_stage` (eprintln) for stderr progress indicators — don't mix them
-- `emoji::CHECK_MARK` is ✓ (U+2713), `emoji::CHECK` is ✅ (U+2705) — sync footer uses CHECK_MARK, tag add/remove uses CHECK
-- `color::GREEN` is plain green (Go `FgGreen`), `color::SUCCESS` is green+bold — use GREEN for inline styled text
-- Bullet character is `\u{2022}` (•) for Go-matching section bullets
-- Golden files for sync/tag human output were updated across review fix commits — they match the Go format
-- To disable color in unit tests: call `color::color_enabled(true)` (override_disabled=true), restore with `owo_colors::set_override(true)` after
-- Extract `format_*` helper functions that return `String` to make output testable without stdout capture
+- Register, prune, reset, show, tag, compose, verify all define a local `styled(text, style) -> String` helper for conditional color application
+- Use `emoji::CHECK_MARK` (✓ U+2713) for register success; `emoji::CHECK` (✅) for prune/reset success
+- `color::SUCCESS` is green+bold, matching Go `color.New(color.FgGreen, color.Bold)`
+- Human output uses `println!` to stdout; stage/progress messages use `eprintln!` to stderr
+- `dep_labels` Vec tracks labels separately from `RegisteredDeploymentJson` since that struct is used for JSON serialization and shouldn't have extra fields
+- `PruneCandidate` has optional `address` and `status` fields (with `skip_serializing_if`) — must be included in all struct constructions
+- When removing `styled()` from a command, also clean up `owo_colors` and `color` imports
+- Reset uses `--network` as chain ID integer; defaults are namespace="default", network="31337"
+- E2E tests: `run_json()` adds `--json` automatically; use `run_human()` for human output assertions
+- Prune section headers include count: "Deployments (N):" — match with "Deployments (" pattern
 
-## 2026-03-09 - P10-US-001
-- Ported sync command human output from comfy_table detail table + aligned metrics to Go section/bullet format
-- Removed `SyncDetailRow` struct and all detail_rows usage
-- Added "Syncing registry..." header, Safe Transactions/Governor Proposals sections with • bullets, Cleanup/Warnings sections, ✓ footer
-- Files changed: `crates/treb-cli/src/commands/sync.rs`
+## 2026-03-09 - P11-US-001
+- Ported register command human output from comfy_table format to Go-matching indented format
+- Green bold `✓ Successfully registered N deployment(s)` header with per-deployment indented details
+- Label line omitted when empty; blank line between deployments, no trailing blank line
+- Files changed: `crates/treb-cli/src/commands/register.rs`
 - **Learnings for future iterations:**
-  - The `errors` Vec in sync.rs serves dual purpose: warnings section display AND footer message selection (empty → "synced successfully", non-empty → "completed with warnings")
-  - `old_status_str` variable was only used for detail table rows — removing the table made it unused, needed to remove it too
-  - The `clean` flag is still used in the sync logic (lines 416, 506) even after output changes — don't remove it
-  - JSON golden tests (`sync_json_empty`, `sync_governor_json`) pass without changes, confirming JSON output is untouched
-  - Only `sync_governor_human` and `sync_governor_clean` golden tests fail — expected until US-006 regenerates golden files
+  - `RegisteredDeploymentJson` doesn't carry a `label` field (to keep JSON output unchanged), so labels are tracked in a parallel `dep_labels: Vec<String>`
+  - Must clone `dep_label` before it's moved into the `Deployment` struct
+  - The `styled()` helper is duplicated per-command module (not centralized) — follow existing pattern
+  - All 31 register unit tests pass without changes (they test RPC resolution, trace parsing, proxy detection — not output formatting)
 ---
 
-## 2026-03-09 - P10-US-002
-- Ported tag show output from vertical bullet list to Go deployment context format
-- `show_tags()` now prints: blank line, cyan bold "Deployment: ID", white bold "Address:" + green bold address, white bold "Tags:" with cyan comma-separated sorted tags or faint "No tags", blank line
-- Removed old patterns: "No tags on '...'" and "Tags for '...': - tag"
-- Files changed: `crates/treb-cli/src/commands/tag.rs`
+## 2026-03-09 - P11-US-002
+- Ported prune command human output from comfy_table format to Go-matching emoji-staged section format
+- Empty result: `✅ All registry entries are valid. Nothing to prune.`
+- Dry-run: `🔍 Checking...` + `🗑️  Found N items to prune:` + per-section listings (Deployments/Transactions)
+- Destructive: same section listing + `⚠️` confirmation + `🔧 Pruning...` + `✅ Successfully pruned N items`
+- Cancellation: `❌ Prune cancelled.`
+- Added optional `address` and `status` fields to `PruneCandidate` struct (with `skip_serializing_if = "Option::is_none"` to preserve JSON compat)
+- Removed `styled()` helper and `owo_colors`/`color` imports since prune no longer uses colored output
+- Added `print_candidate_sections()` helper to group candidates by type (deployment vs transaction) and render per-section
+- Files changed: `crates/treb-cli/src/commands/prune.rs`
 - **Learnings for future iterations:**
-  - `color::SECTION_HEADER` is `bold().bright_white()` — matches Go's `FgHiWhite, Bold` for label text like "Address:" and "Tags:"
-  - `color::SUCCESS` is `green().bold()` — use for address value display (matches Go `FgGreen, Bold`)
-  - `color::GRAY` is `bright_black()` — use for faint "No tags" text (matches Go `Faint`)
-  - Tags need `mut` to sort alphabetically before display — sort in-place before rendering
-  - Golden tests `tag_show_empty` and `tag_add_then_show` fail as expected — will be fixed in US-006
+  - `PruneCandidate` now has `address: Option<String>` and `status: Option<String>` fields — all constructions must include these
+  - Transaction status is stored as uppercase (e.g., "EXECUTED") but displayed as title case (e.g., "Executed") in human output to match Go
+  - `#[serde(skip_serializing_if = "Option::is_none")]` ensures new optional fields don't appear in JSON when None — preserves backward compatibility
+  - When removing `styled()` helper, also remove the `owo_colors` and `color` imports to avoid dead code warnings
+  - `backup_registry()` is still called but the path is no longer displayed — use `_backup_path` prefix to suppress unused variable warnings
 ---
 
-## 2026-03-09 - P10-US-003
-- Ported tag add output from old format (print_stage + quoted names + vertical bullet list) to Go format
-- Removed `print_stage("📝", "Updating tags...")` line
-- Success line now uses `color::GREEN` (not SUCCESS/bold) with ✅ emoji: "✅ Added tag TAG to deployment_id" (no quotes)
-- Tags displayed as "Current tags: tag1, tag2" with cyan comma-separated, sorted alphabetically
-- Files changed: `crates/treb-cli/src/commands/tag.rs`
+## 2026-03-09 - P11-US-003
+- Ported reset command human output to Go aligned-count format
+- Empty result: plain text `Nothing to reset. No registry entries found for the current namespace and network.`
+- Items found: `Found N items to reset for namespace '...' on network '...' (chain ...):` + aligned per-type counts
+- Per-type counts use fixed-width label alignment: `Deployments:`, `Transactions:`, `Safe Transactions:`, `Governor Proposals:`
+- Confirmation prompt: `Are you sure you want to reset the registry for namespace '...' on network '...'? This cannot be undone.`
+- Cancellation: `Reset cancelled.`
+- Success: plain text `Successfully reset N items from the registry.`
+- Removed `styled()` helper, `owo_colors`/`color` imports (reset no longer uses colored output)
+- Backup still created internally but path not displayed
+- Files changed: `crates/treb-cli/src/commands/reset.rs`
 - **Learnings for future iterations:**
-  - Tag add success uses `color::GREEN` (plain green) not `color::SUCCESS` (green+bold) — matches Go's inline styled text pattern
-  - No quotes around tag name or deployment_id in success message — Go format uses bare names
-  - Tags are sorted after push but before display — sort happens in the else branch, not before registry update
-  - Golden tests `tag_add` and `tag_add_then_show` fail as expected — will be fixed in US-006
+  - Reset uses `--network` as a chain ID integer; for the `Found N items...` message, the chain ID value is used for both `network` and `chain` fields
+  - Default namespace is "default", default network is "31337" when not provided via args
+  - Per-type count lines are only printed when count > 0 (matching Go behavior)
+  - All 4 reset unit tests pass without changes (they test filtering logic, not output formatting)
 ---
 
-## 2026-03-09 - P10-US-004
-- Ported tag remove output from old format (print_stage + quoted names + vertical bullet list) to Go format
-- Removed `print_stage("📝", "Updating tags...")` line
-- Success line now uses `color::GREEN` with ✅ emoji: "✅ Removed tag 'TAG' from deployment_id"
-- Remaining tags displayed as "Remaining tags: tag1, tag2" with cyan comma-separated, or "Remaining tags: No tags" with faint styling
-- Tags sorted alphabetically before display
-- Files changed: `crates/treb-cli/src/commands/tag.rs`
+## 2026-03-09 - P11-US-004
+- Verified all unit tests and CLI assertion-based integration tests already pass with Go-matching output format
+- Unit tests (prune: 12 tests, reset: 7 tests) test logic only (candidate detection, filtering, scope resolution, confirmation prompt), not output formatting
+- Integration tests (cli_prune_reset_migrate: 10 tests) already assert on Go-matching format from US-001/002/003 changes
+- Assertions verified: emoji headers (✅), aligned counts, no backup path display, Go-style confirmation prompt
+- No stale references to comfy_table, old stage markers, or backup path lines found in any test files
+- No code changes required — all acceptance criteria were already satisfied by prior stories
+- Files changed: none (PRD updated only)
 - **Learnings for future iterations:**
-  - Tag remove follows same pattern as tag add: `color::GREEN` (not SUCCESS/bold), ✅ emoji, single quotes around tag name, bare deployment_id
-  - "Remaining tags:" label is plain text (not styled), matching "Current tags:" in add_tag
-  - Empty tags case uses "No tags" with `color::GRAY` (faint) — same pattern as show_tags
-  - `final_tags` changed from `let` to `let mut` for sorting before display
-  - Golden test `tag_remove` fails as expected — will be fixed in US-006
+  - When output formatting stories are split into implementation + test-update stories, the implementation stories may already update the integration tests, making the test-update story a no-op verification
+  - Unit tests in prune.rs/reset.rs test pure logic (find_prune_candidates, describe_reset_scope, prompt_for_reset_confirmation) — they don't test CLI output formatting
+  - `PruneCandidate.address` and `PruneCandidate.status` fields use `#[serde(skip)]` (not `skip_serializing_if`) — they're never serialized
 ---
 
-## 2026-03-09 - P10-US-005
-- Extracted formatting logic from sync.rs and tag.rs into testable `format_*` functions that return `String`
-- Added `format_sync_human_output()` in sync.rs covering all section/bullet/footer rendering
-- Added `format_show_tags()`, `format_add_tag()`, `format_remove_tag()` in tag.rs
-- Original `show_tags`/`add_tag`/`remove_tag`/run now call format helpers + `print!()`
-- Added 9 tag format tests: deployment header, address, sorted tags, blank lines, success lines, Current/Remaining tags, No tags
-- Added 8 sync format tests: no safe txs, section bullets, hidden zero executed, governor bullets, cleanup, warnings, footer variants
-- Files changed: `crates/treb-cli/src/commands/sync.rs`, `crates/treb-cli/src/commands/tag.rs`
+## 2026-03-09 - P11-US-005
+- Added `run_human()` helper to e2e module for capturing human (non-JSON) CLI output
+- Updated register E2E tests to assert on "Successfully registered" and "Deployment ID:" in human output
+- Updated prune E2E tests: clean registry asserts "All registry entries are valid. Nothing to prune."; selfdestructed test asserts "Found 1 items to prune:" and "Deployments (" section header
+- Updated reset E2E tests: non-matching namespace asserts "Nothing to reset."; lifecycle test asserts "Successfully reset" and "items from the registry."
+- Files changed: `crates/treb-cli/tests/e2e/mod.rs`, `crates/treb-cli/tests/e2e_register_workflow.rs`, `crates/treb-cli/tests/e2e_prune_reset_workflow.rs`
 - **Learnings for future iterations:**
-  - `owo_colors::set_override(false)` alone doesn't disable color — must also call `color::color_enabled(true)` to set the `COLOR_ENABLED` atomic to false
-  - `color::color_enabled(true)` internally calls `owo_colors::set_override(false)`, so just calling `color::color_enabled(true)` is sufficient to disable both
-  - Restore color after each test with `owo_colors::set_override(true)` to avoid leaking state to parallel tests
-  - `remove_tag` no longer needs `let mut final_tags` since sorting moved into `format_remove_tag`
-  - The `#[allow(clippy::too_many_arguments)]` attribute is needed on `format_sync_human_output` (8 params + 1 slice)
+  - Prune section headers include count: "Deployments (N):" not just "Deployments:" — assertions should match with "Deployments (" pattern
+  - `run_human()` captures stdout only; stage/progress messages go to stderr via eprintln — human output assertions check stdout
+  - E2E tests that use `run_json` add `--json` flag automatically — for human output checks, use `run_human` which omits `--json`
+  - When replacing a JSON reset with human reset in lifecycle tests, downstream registry file checks still work since the actual reset operation still executes
 ---
 
-## 2026-03-09 - P10-US-006
-- Verified all golden test expected files for sync and tag commands are already up to date
-- Golden files were already regenerated during prior review fix commits (f30d315, a4b922b, a2c14c8, c71259e, 748cfe9)
-- Confirmed golden file content matches new Go format: sync uses section/bullet with • and ✓ footer, tag uses deployment context with inline tags
-- All acceptance criteria verified:
-  - `UPDATE_GOLDEN=1 cargo test -p treb-cli --test integration_sync --test integration_tag` — 169 tests pass
-  - `cargo test -p treb-cli` — full CLI test suite passes (49 test binaries, 0 failures)
-  - `cargo test --workspace --all-targets` — full workspace passes
-  - `cargo clippy --workspace --all-targets` — clean, no warnings
-- Files changed: `.ralph/current/prd.json` (mark passes: true)
+## 2026-03-09 - P11-US-006
+- Verified all golden test expected files are already up-to-date with Go-matching output format
+- Ran `UPDATE_GOLDEN=1 cargo test` for register, prune, and reset integration tests — all pass (244 tests total)
+- Confirmed golden files have correct formats: register uses `✓ Successfully registered` + indented details, prune uses emoji-staged sections (🔍, 🗑️, ✅), reset uses `Found N items to reset` with aligned counts
+- Verified error golden files (register_error_no_init, register_error_bad_prefix, register_error_tx_not_found, prune_uninitialized, reset_uninitialized) remain unchanged with simple error messages
+- Full CLI test suite passes (`cargo test -p treb-cli` — all test binaries green)
+- Full workspace validation passes (`cargo test --workspace --all-targets` — 0 failures)
+- `cargo clippy --workspace --all-targets` passes with no warnings
+- No code changes required — golden files were already correctly updated by US-001/002/003 implementation stories
+- Files changed: none (PRD updated only)
 - **Learnings for future iterations:**
-  - Golden files can be pre-updated during review fix commits — always check git log before assuming regeneration is needed
-  - When review fixes touch golden files, US-006 becomes a verification-only story with no code changes needed
-  - The `UPDATE_GOLDEN=1` run confirmed no drift: zero golden files were modified, meaning all prior updates were correct
+  - When output formatting is changed in implementation stories (US-001/002/003), golden tests that run via `TrebRunner` subprocess automatically produce the updated output, so golden files get updated in the same commit if `UPDATE_GOLDEN=1` is used during development
+  - The golden test verification story (US-006) serves as a final validation pass — confirming no cross-command drift and no unexpected regressions across all 20 golden files
+  - Error golden files are inherently stable since error paths don't go through the human output formatting code that was changed
 ---

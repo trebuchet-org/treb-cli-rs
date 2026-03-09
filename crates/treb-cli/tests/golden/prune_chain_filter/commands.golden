@@ -1,11 +1,10 @@
 === cmd 0: [prune --dry-run --network 1] ===
-┌───────────┬──────────────────────┬──────────────────────────────────────────────────────────────────┬──────────┐
-│ ID        ┆ Kind                 ┆ Reason                                                           ┆ Chain ID │
-╞═══════════╪══════════════════════╪══════════════════════════════════════════════════════════════════╪══════════╡
-│ dep-1     ┆ BrokenTransactionRef ┆ deployment 'dep-1' references missing transaction 'tx-missing-1' ┆ 1        │
-├╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌┤
-│ tx-orphan ┆ BrokenDeploymentRef  ┆ transaction 'tx-orphan' references missing deployment 'dep-gone' ┆ 1        │
-└───────────┴──────────────────────┴──────────────────────────────────────────────────────────────────┴──────────┘
+🔍 Checking registry entries...
 
-2 prune candidate(s) found. Re-run without --dry-run to remove.
-🔍 Scanning registry...
+🗑️  Found 2 items to prune:
+
+Deployments (1):
+  - dep-1 at 0x0000000000000000000000000000000000000001 (reason: deployment 'dep-1' references missing transaction 'tx-missing-1')
+
+Transactions (1):
+  - tx-orphan [Executed] (reason: transaction 'tx-orphan' references missing deployment 'dep-gone')

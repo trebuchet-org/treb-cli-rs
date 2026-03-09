@@ -4,18 +4,50 @@
 //! creating a timestamped backup before any mutation.
 
 use std::{
-    collections::HashSet,
-    env,
+    collections::{BTreeSet, HashSet},
+    env, io,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, bail};
 use clap::Args;
-use owo_colors::{OwoColorize, Style};
 use serde::Serialize;
 use treb_registry::{REGISTRY_DIR, Registry, snapshot_registry};
 
-use crate::{output, ui::color};
+use crate::output;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResetScopeDisplay {
+    header_scope: String,
+    confirmation_target: String,
+}
+
+fn describe_reset_scope(
+    namespace: &str,
+    requested_chain_id: Option<u64>,
+    targeted_chain_ids: &BTreeSet<u64>,
+) -> ResetScopeDisplay {
+    let resolved_chain_id = requested_chain_id.or_else(|| {
+        if targeted_chain_ids.len() == 1 { targeted_chain_ids.iter().next().copied() } else { None }
+    });
+
+    match resolved_chain_id {
+        Some(chain_id) => ResetScopeDisplay {
+            header_scope: format!(
+                "for namespace '{namespace}' on network '{chain_id}' (chain {chain_id})"
+            ),
+            confirmation_target: format!(
+                "the registry for namespace '{namespace}' on network '{chain_id}'"
+            ),
+        },
+        None => ResetScopeDisplay {
+            header_scope: format!("for namespace '{namespace}' across all networks"),
+            confirmation_target: format!(
+                "the registry for namespace '{namespace}' across all networks"
+            ),
+        },
+    }
+}
 
 // ── Args ─────────────────────────────────────────────────────────────────────
 
@@ -40,11 +72,6 @@ pub struct ResetArgs {
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
-}
-
-/// Apply a color style when color is enabled, plain text otherwise.
-fn styled(text: &str, style: Style) -> String {
-    if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
 }
 
 // ── run ───────────────────────────────────────────────────────────────────────
@@ -154,6 +181,26 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
         .map(|p| p.proposal_id.clone())
         .collect();
 
+    let targeted_chain_ids: BTreeSet<u64> = deployments_to_remove
+        .iter()
+        .filter_map(|id| registry.get_deployment(id).map(|d| d.chain_id))
+        .chain(
+            transactions_to_remove
+                .iter()
+                .filter_map(|id| registry.get_transaction(id).map(|t| t.chain_id)),
+        )
+        .chain(
+            safe_txs_to_remove
+                .iter()
+                .filter_map(|hash| registry.get_safe_transaction(hash).map(|t| t.chain_id)),
+        )
+        .chain(
+            governor_proposals_to_remove
+                .iter()
+                .filter_map(|id| registry.get_governor_proposal(id).map(|p| p.chain_id)),
+        )
+        .collect();
+
     let total = deployments_to_remove.len()
         + transactions_to_remove.len()
         + safe_txs_to_remove.len()
@@ -161,42 +208,70 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
 
     if total == 0 {
         if !args.json {
-            println!("{}", styled("Nothing to reset.", color::SUCCESS));
+            println!(
+                "Nothing to reset. No registry entries found for the current namespace and network."
+            );
         }
         return Ok(());
     }
 
-    // Scanning stage.
+    // Summary header with aligned per-type counts.
+    let ns = args.namespace.as_deref().unwrap_or("default");
+    let scope = describe_reset_scope(ns, chain_id_filter, &targeted_chain_ids);
+
     if !args.json {
-        output::print_stage("\u{1f50d}", "Scanning registry...");
-        output::print_warning_banner(
-            "\u{26a0}\u{fe0f}",
-            &format!(
-                "Warning: About to remove {} deployment(s), {} transaction(s), {} safe transaction(s), \
-                 {} governor proposal(s). A backup will be created first.",
-                deployments_to_remove.len(),
-                transactions_to_remove.len(),
-                safe_txs_to_remove.len(),
-                governor_proposals_to_remove.len(),
-            ),
-        );
+        println!("Found {} items to reset {}:\n", total, scope.header_scope);
+        if !deployments_to_remove.is_empty() {
+            println!("  Deployments:        {}", deployments_to_remove.len());
+        }
+        if !transactions_to_remove.is_empty() {
+            println!("  Transactions:       {}", transactions_to_remove.len());
+        }
+        if !safe_txs_to_remove.is_empty() {
+            println!("  Safe Transactions:  {}", safe_txs_to_remove.len());
+        }
+        if !governor_proposals_to_remove.is_empty() {
+            println!("  Governor Proposals: {}", governor_proposals_to_remove.len());
+        }
+        println!();
     }
 
     // Confirm.
-    if !args.yes {
-        let message = format!("Remove {} total entry(s)?", total,);
-        if !crate::ui::prompt::confirm(&message, false) {
+    let skip_confirmation = args.yes || crate::ui::interactive::is_non_interactive(false);
+    if skip_confirmation {
+        if !args.json {
+            println!("Running in non-interactive mode. Proceeding with reset...");
+        }
+    } else {
+        let prompt = format!(
+            "Are you sure you want to reset {}? This cannot be undone. [y/N]: ",
+            scope.confirmation_target
+        );
+        let confirmed = if args.json {
+            let stdin = io::stdin();
+            let mut stdin = stdin.lock();
+            let stderr = io::stderr();
+            let mut stderr = stderr.lock();
+            crate::ui::prompt::confirm_raw(&mut stderr, &mut stdin, &prompt)
+                .context("failed to read reset confirmation")?
+        } else {
+            let stdin = io::stdin();
+            let mut stdin = stdin.lock();
+            let stdout = io::stdout();
+            let mut stdout = stdout.lock();
+            crate::ui::prompt::confirm_raw(&mut stdout, &mut stdin, &prompt)
+                .context("failed to read reset confirmation")?
+        };
+
+        if !confirmed {
             if !args.json {
-                println!("{}", styled("Cancelled.", color::MUTED));
+                println!("Reset cancelled.");
             }
             return Ok(());
         }
     }
 
-    // Backup.
-    if !args.json {
-        output::print_stage("\u{1f4be}", "Creating backup...");
-    }
+    // Backup (created internally, path not displayed).
     let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
     let registry_dir = cwd.join(REGISTRY_DIR);
     let backup_dir = registry_dir.join(format!("backups/reset-{ts}"));
@@ -217,11 +292,6 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
         let _ = registry.remove_governor_proposal(id);
     }
 
-    // Completion stage.
-    if !args.json {
-        output::print_stage("\u{2705}", "Reset complete");
-    }
-
     if args.json {
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
@@ -240,21 +310,7 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
             backup_path: backup_dir.display().to_string(),
         })?;
     } else {
-        println!("{}", styled("Reset complete.", color::SUCCESS));
-        println!(
-            "{}",
-            styled(
-                &format!(
-                    "Removed {} deployment(s), {} transaction(s), {} safe transaction(s), {} governor proposal(s).",
-                    deployments_to_remove.len(),
-                    transactions_to_remove.len(),
-                    safe_txs_to_remove.len(),
-                    governor_proposals_to_remove.len(),
-                ),
-                color::SUCCESS,
-            )
-        );
-        println!("Backup created at: {}", backup_dir.display());
+        println!("Successfully reset {} items from the registry.", total);
     }
 
     Ok(())
@@ -264,7 +320,12 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use super::describe_reset_scope;
+    use crate::ui::prompt::confirm_raw;
+    use std::{
+        collections::{BTreeSet, HashMap},
+        io::Cursor,
+    };
 
     use chrono::Utc;
     use tempfile::TempDir;
@@ -387,6 +448,51 @@ mod tests {
         assert!(
             index_after.by_address.is_empty(),
             "lookup.by_address should be empty after full reset"
+        );
+    }
+
+    #[test]
+    fn describe_reset_scope_uses_target_chain_for_unfiltered_single_chain_resets() {
+        let chain_ids = BTreeSet::from([1u64]);
+
+        let scope = describe_reset_scope("staging", None, &chain_ids);
+
+        assert_eq!(scope.header_scope, "for namespace 'staging' on network '1' (chain 1)");
+        assert_eq!(
+            scope.confirmation_target,
+            "the registry for namespace 'staging' on network '1'"
+        );
+    }
+
+    #[test]
+    fn describe_reset_scope_uses_all_networks_for_unfiltered_mixed_chain_resets() {
+        let chain_ids = BTreeSet::from([1u64, 42220u64]);
+
+        let scope = describe_reset_scope("default", None, &chain_ids);
+
+        assert_eq!(scope.header_scope, "for namespace 'default' across all networks");
+        assert_eq!(
+            scope.confirmation_target,
+            "the registry for namespace 'default' across all networks"
+        );
+    }
+
+    #[test]
+    fn prompt_for_reset_confirmation_writes_go_style_prompt() {
+        let mut output = Vec::new();
+        let mut input = Cursor::new(b"y\n");
+
+        let confirmed = confirm_raw(
+            &mut output,
+            &mut input,
+            "Are you sure you want to reset the registry for namespace 'default' on network '1'? This cannot be undone. [y/N]: ",
+        )
+        .unwrap();
+
+        assert!(confirmed);
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "Are you sure you want to reset the registry for namespace 'default' on network '1'? This cannot be undone. [y/N]: "
         );
     }
 }
