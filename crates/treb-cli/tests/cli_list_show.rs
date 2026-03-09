@@ -52,7 +52,7 @@ fn list_shows_table_with_deployments() {
         .stdout(predicate::str::contains("FPMM"))
         .stdout(predicate::str::contains("FPMMFactory"))
         .stdout(predicate::str::contains("TransparentUpgradeableProxy"))
-        .stdout(predicate::str::contains("mainnet"))
+        .stdout(predicate::str::contains("MAINNET"))
         .stdout(predicate::str::contains("42220"))
         .stdout(predicate::str::contains("SINGLETONS"))
         .stdout(predicate::str::contains("PROXIES"));

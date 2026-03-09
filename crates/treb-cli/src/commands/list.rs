@@ -9,12 +9,13 @@ use std::{
 
 use alloy_chains::Chain;
 use anyhow::{Context, bail};
+use owo_colors::OwoColorize;
 use treb_core::types::{Deployment, DeploymentType};
 use treb_registry::Registry;
 
 use crate::{
     output,
-    ui::{badge, color, tree::TreeNode},
+    ui::{badge, color, emoji, tree::TreeNode},
 };
 
 /// Filter criteria for deployments. All specified filters are combined with AND logic.
@@ -273,6 +274,43 @@ fn format_chain_header_label(chain_id: u64, network_names: &BTreeMap<u64, String
         .unwrap_or_else(|| chain_id.to_string())
 }
 
+/// Format a namespace header line in Go CLI format.
+///
+/// Format: `   ◎ namespace:   UPPERCASE_NAMESPACE              `
+/// Uses `%-12s` for `"namespace:"` and `%-30s` for the uppercase value.
+/// Styled with `NS_HEADER` (black on yellow) and `NS_HEADER_BOLD` (black bold
+/// on yellow) when color is enabled.
+fn format_namespace_header(namespace: &str) -> String {
+    let label = format!("   {} {:<12} ", emoji::CIRCLE, "namespace:");
+    let value = format!("{:<30}", namespace.to_uppercase());
+    if color::is_color_enabled() {
+        format!("{}{}", label.style(color::NS_HEADER), value.style(color::NS_HEADER_BOLD))
+    } else {
+        format!("{label}{value}")
+    }
+}
+
+/// Format a chain header line in Go CLI format.
+///
+/// Format: `├─ ⛓ chain:       network (chainid)               `
+/// Uses `├─` for non-last chains and `└─` for the last chain.
+/// Styled with `CHAIN_HEADER` and `CHAIN_HEADER_BOLD` when color is enabled.
+fn format_chain_header(chain_label: &str, is_last: bool) -> String {
+    let tree_prefix = if is_last { "└─" } else { "├─" };
+    let label = format!(" {} {:<12} ", emoji::CHAIN_EMOJI, "chain:");
+    let value = format!("{:<30}", chain_label);
+    if color::is_color_enabled() {
+        format!(
+            "{}{}{}",
+            tree_prefix,
+            label.style(color::CHAIN_HEADER),
+            value.style(color::CHAIN_HEADER_BOLD),
+        )
+    } else {
+        format!("{tree_prefix}{label}{value}")
+    }
+}
+
 /// Format the namespace discovery hint shown when the current namespace has no
 /// deployments but other namespaces do.
 ///
@@ -492,16 +530,32 @@ pub async fn run(
     } else {
         let grouped =
             group_deployments_with_implementation_keys(&result.deployments, &implementation_keys);
-        let mut first = true;
+        let mut first_ns = true;
         for (namespace, chains) in &grouped {
-            if !first {
+            if !first_ns {
                 println!();
             }
-            first = false;
-            let mut ns_node = TreeNode::new(namespace.clone()).with_style(color::NAMESPACE);
-            for (chain_id, type_groups) in chains {
+            first_ns = false;
+
+            // Namespace header (Go format: ◎ namespace: UPPERCASE)
+            println!("{}", format_namespace_header(namespace));
+
+            let chain_count = chains.len();
+            for (chain_idx, (chain_id, type_groups)) in chains.iter().enumerate() {
+                let is_last_chain = chain_idx == chain_count - 1;
                 let chain_label = format_chain_header_label(*chain_id, &result.network_names);
-                let mut chain_node = TreeNode::new(chain_label).with_style(color::CHAIN);
+
+                // Chain header (Go format: ├─/└─ ⛓ chain: network (chainid))
+                println!("{}", format_chain_header(&chain_label, is_last_chain));
+
+                // Continuation prefix for content under this chain
+                let cont_prefix = if is_last_chain { "  " } else { "│ " };
+
+                // Blank continuation line after chain header
+                println!("{cont_prefix}");
+
+                // Build type groups as a synthetic tree for inner content
+                let mut content_root = TreeNode::new(String::new());
                 for tg in type_groups {
                     let type_label = tg.category.to_string();
                     let type_style = tg.category.style();
@@ -509,14 +563,20 @@ pub async fn run(
                     for d in &tg.deployments {
                         type_node = type_node.child(build_deployment_node(d));
                     }
-                    chain_node = chain_node.child(type_node);
+                    content_root = content_root.child(type_node);
                 }
-                ns_node = ns_node.child(chain_node);
-            }
-            if color::is_color_enabled() {
-                println!("{}", ns_node.render_styled());
-            } else {
-                println!("{}", ns_node.render());
+
+                let rendered = if color::is_color_enabled() {
+                    content_root.render_styled()
+                } else {
+                    content_root.render()
+                };
+
+                // Skip the first line (empty root label) and prefix remaining
+                // lines with the continuation prefix
+                for line in rendered.lines().skip(1) {
+                    println!("{cont_prefix}{line}");
+                }
             }
         }
     }

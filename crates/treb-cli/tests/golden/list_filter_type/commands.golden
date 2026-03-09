@@ -1,6 +1,7 @@
 === cmd 0: [list --type PROXY] ===
-mainnet
-└─ celo (42220)
-   └─ PROXIES
-      └─ TransparentUpgradeableProxy:FPMMFactory 0x22A8...7F03 UNVERIFIED
-         └─ Implementation 0x9595...79dF
+   ◎ namespace:   MAINNET                       
+└─ ⛓ chain:       celo (42220)                  
+  
+  └─ PROXIES
+     └─ TransparentUpgradeableProxy:FPMMFactory 0x22A8...7F03 UNVERIFIED
+        └─ Implementation 0x9595...79dF

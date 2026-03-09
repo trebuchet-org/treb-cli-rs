@@ -1,10 +1,11 @@
 === cmd 0: [list --namespace mainnet] ===
-mainnet
-└─ celo (42220)
-   ├─ PROXIES
-   │  └─ TransparentUpgradeableProxy:FPMMFactory 0x22A8...7F03 UNVERIFIED
-   │     └─ Implementation 0x9595...79dF
-   ├─ IMPLEMENTATIONS
-   │  └─ FPMMFactory:v<VERSION> 0x9595...79dF UNVERIFIED
-   └─ SINGLETONS
-      └─ FPMM:v<VERSION> 0x42ed...833D e[✔︎]  s[-] b[-]
+   ◎ namespace:   MAINNET                       
+└─ ⛓ chain:       celo (42220)                  
+  
+  ├─ PROXIES
+  │  └─ TransparentUpgradeableProxy:FPMMFactory 0x22A8...7F03 UNVERIFIED
+  │     └─ Implementation 0x9595...79dF
+  ├─ IMPLEMENTATIONS
+  │  └─ FPMMFactory:v<VERSION> 0x9595...79dF UNVERIFIED
+  └─ SINGLETONS
+     └─ FPMM:v<VERSION> 0x42ed...833D e[✔︎]  s[-] b[-]
