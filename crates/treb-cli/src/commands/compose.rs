@@ -746,21 +746,13 @@ pub async fn run(
     let mut failed_component: Option<String> = None;
 
     if !json {
-        output::print_stage(
-            "\u{1f680}",
-            &format!("Orchestrating {} ({} components)", compose.group, total),
-        );
+        let plan = build_plan(&compose, &order, &skip_set);
+        print_execution_plan(&compose, &plan);
     }
 
     for (i, name) in order.iter().enumerate() {
         // Skip already-completed components (resume mode).
         if skip_set.contains(name) {
-            if !json {
-                output::print_stage(
-                    "\u{23ed}\u{fe0f}",
-                    &format!("[{}/{}] Skipping '{}' (already completed)", i + 1, total, name),
-                );
-            }
             component_results.push(ComponentResultEntry {
                 component: name.clone(),
                 status: ComponentStatus::Skipped,
@@ -788,9 +780,11 @@ pub async fn run(
         let component = &compose.components[name];
 
         if !json {
-            output::print_stage(
-                "\u{1f528}",
-                &format!("[{}/{}] Executing '{}'...", i + 1, total, name),
+            eprintln!(
+                "\n{}. {} → {}",
+                i + 1,
+                styled(name, color::CYAN),
+                styled(&component.script, color::GREEN),
             );
         }
 
@@ -905,10 +899,16 @@ pub async fn run(
             Ok(result) => {
                 completed += 1;
                 if !json {
-                    output::print_stage(
-                        "\u{2705}",
-                        &format!("[{}/{}] '{}' completed", i + 1, total, name),
+                    eprintln!(
+                        "{}",
+                        styled(
+                            &format!("{} Step completed successfully", emoji::CHECK_MARK),
+                            color::GREEN,
+                        ),
                     );
+                    if !result.deployments.is_empty() {
+                        eprintln!("  Created {} deployment(s)", result.deployments.len());
+                    }
                 }
 
                 // Verbose post-execution summary per component.
@@ -984,8 +984,11 @@ pub async fn run(
                 let error_msg = format!("{}", e);
                 if !json {
                     eprintln!(
-                        "Component '{}' failed ({}/{} completed): {}",
-                        name, completed, total, error_msg
+                        "{}",
+                        styled(
+                            &format!("{} Failed: {}", emoji::CROSS, error_msg),
+                            color::RED,
+                        ),
                     );
                 }
 
@@ -1030,11 +1033,6 @@ pub async fn run(
     });
 
     if !json {
-        if success {
-            output::print_stage("\u{2705}", "Orchestration complete.");
-        } else {
-            output::print_stage("\u{274c}", "Orchestration failed.");
-        }
         display_compose_human(&compose.group, &component_results, &totals);
 
         if let Some(ref dir) = debug_dir {
