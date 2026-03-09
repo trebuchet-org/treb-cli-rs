@@ -1,6 +1,6 @@
 //! `treb show` command implementation.
 
-use std::env;
+use std::{collections::HashMap, env};
 
 use anyhow::{Context, bail};
 use owo_colors::{OwoColorize, Style};
@@ -16,6 +16,9 @@ use crate::{
 /// Verifier display order with human-readable labels (matches badge::VERIFIER_ORDER).
 const VERIFIER_DISPLAY_ORDER: [(&str, &str); 3] =
     [("etherscan", "Etherscan"), ("sourcify", "Sourcify"), ("blockscout", "Blockscout")];
+
+/// Lookup table for resolving proxy implementation addresses to display names.
+type ImplNameLookup = HashMap<(String, u64, String), String>;
 
 pub async fn run(deployment_query: Option<String>, json: bool) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
@@ -37,6 +40,8 @@ pub async fn run(deployment_query: Option<String>, json: bool) -> anyhow::Result
 
     let registry = Registry::open(&cwd).context("failed to open registry")?;
     let lookup = registry.load_lookup_index().context("failed to load lookup index")?;
+    let deployments = registry.list_deployments();
+    let impl_lookup = build_impl_name_lookup(&deployments);
 
     let query = match deployment_query {
         Some(q) => q,
@@ -53,7 +58,7 @@ pub async fn run(deployment_query: Option<String>, json: bool) -> anyhow::Result
     if json {
         output::print_json(deployment)?;
     } else {
-        print_deployment_details(deployment);
+        print_deployment_details(deployment, &impl_lookup);
     }
 
     Ok(())
@@ -96,7 +101,34 @@ fn styled_verification_status(status: &str) -> String {
     styled(status, style)
 }
 
-fn print_deployment_details(d: &Deployment) {
+fn build_impl_name_lookup(deployments: &[&Deployment]) -> ImplNameLookup {
+    deployments
+        .iter()
+        .map(|d| {
+            let display_name = contract_display_name(&d.contract_name, &d.label);
+            ((d.namespace.to_lowercase(), d.chain_id, d.address.to_lowercase()), display_name)
+        })
+        .collect()
+}
+
+fn resolve_proxy_implementation_display(
+    namespace: &str,
+    chain_id: u64,
+    implementation: &str,
+    impl_lookup: &ImplNameLookup,
+) -> String {
+    let key = (namespace.to_lowercase(), chain_id, implementation.to_lowercase());
+
+    match impl_lookup.get(&key) {
+        Some(display_name) => {
+            let styled_name = styled(display_name, Style::new().yellow().bold());
+            format!("{styled_name} at {implementation}")
+        }
+        None => implementation.to_string(),
+    }
+}
+
+fn print_deployment_details(d: &Deployment, impl_lookup: &ImplNameLookup) {
     // Header: Deployment: {id} [fork]
     let fork = badge::fork_badge(&d.namespace);
     print_deployment_header(&d.id, fork.as_deref());
@@ -137,7 +169,13 @@ fn print_deployment_details(d: &Deployment) {
     if let Some(ref proxy) = d.proxy_info {
         print_section("Proxy Information");
         print_field("Type", &proxy.proxy_type);
-        print_field("Implementation", &proxy.implementation);
+        let implementation = resolve_proxy_implementation_display(
+            &d.namespace,
+            d.chain_id,
+            &proxy.implementation,
+            impl_lookup,
+        );
+        print_field("Implementation", &implementation);
         if !proxy.admin.is_empty() {
             print_field("Admin", &proxy.admin);
         }

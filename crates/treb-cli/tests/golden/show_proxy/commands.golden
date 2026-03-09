@@ -19,7 +19,7 @@ Deployment Strategy:
 
 Proxy Information:
   Type: UUPS
-  Implementation: 0x959597fD009876e6f53EbdB2F1c1Bc3f994579dF
+  Implementation: FPMMFactory:v<VERSION> at 0x959597fD009876e6f53EbdB2F1c1Bc3f994579dF
 
 Artifact Information:
   Path: lib/openzeppelin-contracts/contracts/proxy/transparent/TransparentUpgradeableProxy.sol
