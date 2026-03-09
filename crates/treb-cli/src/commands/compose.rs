@@ -137,6 +137,9 @@ pub struct ComposeState {
     pub compose_hash: String,
     /// Names of components that completed successfully.
     pub completed: Vec<String>,
+    /// Aggregate deployments created by previously completed components.
+    #[serde(default)]
+    pub deployment_total: usize,
 }
 
 /// Compute a hash of file contents for change detection.
@@ -445,7 +448,7 @@ fn display_compose_human(
     failed_component: &Option<String>,
 ) {
     let separator = "═".repeat(70);
-    eprintln!("\n{separator}");
+    eprintln!("{separator}");
 
     let success = failed_component.is_none();
 
@@ -461,13 +464,7 @@ fn display_compose_human(
         eprintln!("  • Steps executed: {}/{}", completed, total);
         eprintln!("  • Total deployments: {}", totals.deployments);
     } else {
-        eprintln!(
-            "{}",
-            styled(
-                &format!("{} Orchestration failed", emoji::CROSS),
-                color::ERROR,
-            ),
-        );
+        eprintln!("{}", styled(&format!("{} Orchestration failed", emoji::CROSS), color::ERROR,),);
         eprintln!("\n{} Summary:", emoji::CHART);
         if let Some(failed) = failed_component {
             eprintln!("  • Failed at step: {}", failed);
@@ -533,20 +530,20 @@ pub async fn run(
         .with_context(|| format!("failed to read compose file: {}", file))?;
     let compose_hash = compute_file_hash(&compose_contents);
 
-    let skip_set: HashSet<String> = if resume {
+    let (skip_set, resumed_deployments): (HashSet<String>, usize) = if resume {
         if let Some(state) = load_compose_state()? {
             // Warn if compose file changed since the state was saved.
             if state.compose_hash != compose_hash && !json {
                 eprintln!("Warning: compose file has changed since the last run; resuming anyway");
             }
-            state.completed.into_iter().collect()
+            (state.completed.into_iter().collect(), state.deployment_total)
         } else {
-            HashSet::new()
+            (HashSet::new(), 0)
         }
     } else {
         // Fresh start: clear any existing state file.
         delete_compose_state();
-        HashSet::new()
+        (HashSet::new(), 0)
     };
 
     // ── Verbose resume context ────────────────────────────────────────
@@ -720,6 +717,7 @@ pub async fn run(
     let mut state = ComposeState {
         compose_hash: compose_hash.clone(),
         completed: skip_set.iter().cloned().collect(),
+        deployment_total: resumed_deployments,
     };
 
     // ── Debug log directory ─────────────────────────────────────────
@@ -979,6 +977,7 @@ pub async fn run(
 
                 // Update state file after each successful component.
                 state.completed.push(name.clone());
+                state.deployment_total += result.deployments.len();
                 save_compose_state(&state)?;
             }
             Err(e) => {
@@ -1019,7 +1018,8 @@ pub async fn run(
     }
 
     // ── Display results ──────────────────────────────────────────────
-    let totals = compute_totals(&component_results);
+    let mut totals = compute_totals(&component_results);
+    totals.deployments += resumed_deployments;
     let success = failed_component.is_none();
     let failure_error = failed_component.as_ref().map(|failed| {
         anyhow::anyhow!(
@@ -1685,11 +1685,25 @@ components:
         let state = ComposeState {
             compose_hash: "abc123".to_string(),
             completed: vec!["libs".to_string(), "core".to_string()],
+            deployment_total: 3,
         };
         let json = serde_json::to_string_pretty(&state).unwrap();
         let parsed: ComposeState = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.compose_hash, "abc123");
         assert_eq!(parsed.completed, vec!["libs", "core"]);
+        assert_eq!(parsed.deployment_total, 3);
+    }
+
+    #[test]
+    fn compose_state_legacy_json_defaults_deployment_total_to_zero() {
+        let parsed: ComposeState = serde_json::from_str(
+            r#"{
+                "compose_hash": "abc123",
+                "completed": ["libs", "core"]
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(parsed.deployment_total, 0);
     }
 
     #[test]
@@ -1702,6 +1716,7 @@ components:
         let state = ComposeState {
             compose_hash: "test_hash".to_string(),
             completed: vec!["alpha".to_string(), "bravo".to_string()],
+            deployment_total: 5,
         };
 
         // Write state
@@ -1713,6 +1728,7 @@ components:
             serde_json::from_str(&std::fs::read_to_string(&state_file).unwrap()).unwrap();
         assert_eq!(loaded.compose_hash, "test_hash");
         assert_eq!(loaded.completed, vec!["alpha", "bravo"]);
+        assert_eq!(loaded.deployment_total, 5);
     }
 
     #[test]

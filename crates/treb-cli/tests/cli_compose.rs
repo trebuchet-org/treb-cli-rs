@@ -389,7 +389,8 @@ fn compose_json_debug_does_not_emit_human_debug_line() {
         &state_path,
         serde_json::to_string_pretty(&serde_json::json!({
             "compose_hash": compose_hash,
-            "completed": ["registry", "token"]
+            "completed": ["registry", "token"],
+            "deployment_total": 4
         }))
         .unwrap(),
     )
@@ -402,8 +403,11 @@ fn compose_json_debug_does_not_emit_human_debug_line() {
         .expect("failed to run compose --resume --json --debug");
 
     assert!(output.status.success());
-    let _: serde_json::Value =
+    let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    assert_eq!(json["success"], true);
+    assert_eq!(json["totals"]["deployments"], 4);
+    assert_eq!(json["totals"]["skipped"], 2);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         !stderr.contains("Debug logs saved to"),
@@ -527,12 +531,20 @@ fn compose_setup_failure_uses_component_failed_renderer() {
         ),
         "missing per-component failure line: {stderr}"
     );
+    let separator = "═".repeat(70);
+    assert!(
+        stderr.contains(&format!(
+            "❌ Failed: invalid --env value 'BADENV': expected KEY=VALUE format (missing '=')\n{separator}\n❌ Orchestration failed"
+        )),
+        "summary separator should follow the failed step without a blank line: {stderr}"
+    );
     assert!(
         stderr.contains("Error: compose failed: component 'missing' failed (0/1 completed)"),
         "unexpected top-level error: {stderr}"
     );
     // The raw error should not appear as a top-level Error: line — it should only
-    // appear inside the component failure renderer (❌ Failed: ...) and summary bullet (• Error: ...).
+    // appear inside the component failure renderer (❌ Failed: ...) and summary bullet (• Error:
+    // ...).
     assert!(
         !stderr.lines().any(|l| l.starts_with("Error: invalid --env value")),
         "setup error should be rendered through the component failure path, not as a top-level error: {stderr}"
