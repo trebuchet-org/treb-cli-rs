@@ -1,5 +1,6 @@
 === cmd 0: [sync --clean] ===
 Syncing registry...
+🏛️ Syncing governor proposals...
 No pending Safe transactions found
 
 Governor Proposals:
@@ -9,4 +10,3 @@ Cleanup:
   • Entries removed: 1
 
 ✓ Registry synced successfully
-🏛️ Syncing governor proposals...

@@ -86,7 +86,7 @@ fn format_show_tags(deployment_id: &str, address: &str, tags: &[String]) -> Stri
         sorted.iter().map(|t| styled(t, color::CYAN)).collect::<Vec<_>>().join(", ")
     };
     format!(
-        "\n{dep_label} {dep_id}\n{addr_label} {addr}\n{tags_label} {tags_value}\n",
+        "\n{dep_label} {dep_id}\n{addr_label} {addr}\n{tags_label} {tags_value}\n\n",
         dep_label = styled("Deployment:", color::STAGE),
         dep_id = styled(deployment_id, color::STAGE),
         addr_label = styled("Address:", color::SECTION_HEADER),
@@ -423,7 +423,7 @@ mod tests {
         color::color_enabled(true);
         let result = super::format_show_tags("x", "0xAddr", &[]);
         assert!(result.starts_with('\n'), "should start with blank line, got: {result}");
-        assert!(result.ends_with('\n'), "should end with blank line, got: {result}");
+        assert!(result.ends_with("\n\n"), "should end with blank line, got: {result}");
         owo_colors::set_override(true);
     }
 

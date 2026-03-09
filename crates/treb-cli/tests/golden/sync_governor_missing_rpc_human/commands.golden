@@ -1,5 +1,6 @@
 === cmd 0: [sync] ===
 Syncing registry...
+🏛️ Syncing governor proposals...
 No pending Safe transactions found
 
 Governor Proposals:
@@ -9,4 +10,3 @@ Warnings:
   • no RPC endpoint found for chain 1 (governor 0xaaaa...aaaa)
 
 ✓ Registry sync completed with warnings
-🏛️ Syncing governor proposals...

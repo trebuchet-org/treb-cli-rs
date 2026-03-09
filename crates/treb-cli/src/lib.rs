@@ -1,13 +1,8 @@
 //! treb-cli library.
 //!
-//! The command modules are compiled into the library target so their unit tests
-//! run under `cargo test -p treb-cli --lib`.
+//! Shared CLI modules live in the library target so tests and the binary use
+//! the same module graph.
 
-pub mod commands {
-    pub mod resolve;
-    pub mod run;
-    pub mod sync;
-    pub mod tag;
-}
+pub mod commands;
 pub mod output;
 pub mod ui;

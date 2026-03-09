@@ -1,10 +1,7 @@
-mod commands;
-mod output;
-mod ui;
-
 use std::env;
 
 use clap::{CommandFactory, Parser, Subcommand};
+use treb_cli::{commands, output, ui};
 use treb_core::types::DeploymentType;
 
 /// Parse a deployment type string (case-insensitive).
@@ -484,53 +481,48 @@ impl Commands {
             }
             Commands::Prune(args) => args.json,
             Commands::Reset(args) => args.json,
-            Commands::Fork { subcommand } => subcommand.json_flag(),
-            Commands::Dev { subcommand } => subcommand.json_flag(),
-            Commands::Migrate { subcommand } => subcommand.json_flag(),
+            Commands::Fork { subcommand } => fork_subcommand_json_flag(subcommand),
+            Commands::Dev { subcommand } => dev_subcommand_json_flag(subcommand),
+            Commands::Migrate { subcommand } => migrate_subcommand_json_flag(subcommand),
             Commands::Init { .. } | Commands::Completions { .. } => false,
         }
     }
 }
 
-impl commands::fork::ForkSubcommand {
-    fn json_flag(&self) -> bool {
-        match self {
-            Self::Status { json, .. }
-            | Self::History { json, .. }
-            | Self::Diff { json, .. }
-            | Self::Enter { json, .. }
-            | Self::Exit { json, .. }
-            | Self::Revert { json, .. }
-            | Self::Restart { json, .. } => *json,
+fn fork_subcommand_json_flag(subcommand: &commands::fork::ForkSubcommand) -> bool {
+    match subcommand {
+        commands::fork::ForkSubcommand::Status { json, .. }
+        | commands::fork::ForkSubcommand::History { json, .. }
+        | commands::fork::ForkSubcommand::Diff { json, .. }
+        | commands::fork::ForkSubcommand::Enter { json, .. }
+        | commands::fork::ForkSubcommand::Exit { json, .. }
+        | commands::fork::ForkSubcommand::Revert { json, .. }
+        | commands::fork::ForkSubcommand::Restart { json, .. } => *json,
+    }
+}
+
+fn migrate_subcommand_json_flag(subcommand: &commands::migrate::MigrateSubcommand) -> bool {
+    match subcommand {
+        commands::migrate::MigrateSubcommand::Config { json, .. } => *json,
+        commands::migrate::MigrateSubcommand::Registry { .. } => false,
+    }
+}
+
+fn dev_subcommand_json_flag(subcommand: &commands::dev::DevSubcommand) -> bool {
+    match subcommand {
+        commands::dev::DevSubcommand::Anvil { subcommand } => {
+            anvil_subcommand_json_flag(subcommand)
         }
     }
 }
 
-impl commands::migrate::MigrateSubcommand {
-    fn json_flag(&self) -> bool {
-        match self {
-            Self::Config { json, .. } => *json,
-            Self::Registry { .. } => false,
-        }
-    }
-}
-
-impl commands::dev::DevSubcommand {
-    fn json_flag(&self) -> bool {
-        match self {
-            Self::Anvil { subcommand } => subcommand.json_flag(),
-        }
-    }
-}
-
-impl commands::dev::AnvilSubcommand {
-    fn json_flag(&self) -> bool {
-        match self {
-            Self::Status { json, .. } => *json,
-            Self::Start { .. } | Self::Stop { .. } | Self::Restart { .. } | Self::Logs { .. } => {
-                false
-            }
-        }
+fn anvil_subcommand_json_flag(subcommand: &commands::dev::AnvilSubcommand) -> bool {
+    match subcommand {
+        commands::dev::AnvilSubcommand::Status { json, .. } => *json,
+        commands::dev::AnvilSubcommand::Start { .. }
+        | commands::dev::AnvilSubcommand::Stop { .. }
+        | commands::dev::AnvilSubcommand::Restart { .. }
+        | commands::dev::AnvilSubcommand::Logs { .. } => false,
     }
 }
 

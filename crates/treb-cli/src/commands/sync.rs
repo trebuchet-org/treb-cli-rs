@@ -259,7 +259,7 @@ pub async fn run(
 
     if !safe_filtered.is_empty() {
         if !json {
-            output::print_stage("\u{1f50d}", "Syncing safe transactions...");
+            println!("{}", output::format_stage("\u{1f50d}", "Syncing safe transactions..."));
         }
 
         // Group safe transactions by (safe_address, chain_id) for batched API calls.
@@ -275,7 +275,10 @@ pub async fn run(
         let mut clients: HashMap<u64, SafeServiceClient> = HashMap::new();
 
         if !json {
-            output::print_stage("\u{2699}\u{fe0f}", "Processing safe transactions...");
+            println!(
+                "{}",
+                output::format_stage("\u{2699}\u{fe0f}", "Processing safe transactions...")
+            );
         }
 
         for ((safe_address, chain_id), local_hashes) in &groups {
@@ -416,7 +419,10 @@ pub async fn run(
 
     if !gov_filtered.is_empty() {
         if !json {
-            output::print_stage("\u{1f3db}\u{fe0f}", "Syncing governor proposals...");
+            println!(
+                "{}",
+                output::format_stage("\u{1f3db}\u{fe0f}", "Syncing governor proposals...")
+            );
         }
 
         // Resolve RPC URLs for needed chain_ids from foundry.toml endpoints

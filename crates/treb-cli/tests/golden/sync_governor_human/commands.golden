@@ -1,5 +1,6 @@
 === cmd 0: [sync] ===
 Syncing registry...
+🏛️ Syncing governor proposals...
 No pending Safe transactions found
 
 Governor Proposals:
@@ -7,4 +8,3 @@ Governor Proposals:
   • Proposals updated: 1
 
 ✓ Registry synced successfully
-🏛️ Syncing governor proposals...

@@ -56,7 +56,7 @@ impl fmt::Display for RenderedVerifyFailure {
 
 impl std::error::Error for RenderedVerifyFailure {}
 
-pub(crate) fn is_rendered_verify_failure(err: &anyhow::Error) -> bool {
+pub fn is_rendered_verify_failure(err: &anyhow::Error) -> bool {
     err.downcast_ref::<RenderedVerifyFailure>().is_some()
 }
 
