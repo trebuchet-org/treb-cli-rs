@@ -122,10 +122,6 @@ fn add_tag(
         bail!("tag '{}' already exists on deployment '{}'", tag, deployment_id);
     }
 
-    if !json {
-        output::print_stage("\u{1f4dd}", "Updating tags...");
-    }
-
     let mut dep = dep.clone();
     let mut tags = existing_tags;
     tags.push(tag.to_string());
@@ -140,12 +136,17 @@ fn add_tag(
             tag: Some(tag.to_string()),
         })?;
     } else {
-        println!("{}", styled(&format!("Added tag '{tag}' to '{deployment_id}'"), color::SUCCESS,));
-        println!();
-        println!("{}", styled("Tags:", color::STAGE));
-        for t in &tags {
-            println!("  - {}", styled(t, color::LABEL));
-        }
+        println!(
+            "{}",
+            styled(
+                &format!("\u{2705} Added tag {tag} to {deployment_id}"),
+                color::GREEN,
+            )
+        );
+        tags.sort();
+        let tags_display =
+            tags.iter().map(|t| styled(t, color::CYAN)).collect::<Vec<_>>().join(", ");
+        println!("Current tags: {tags_display}");
     }
 
     Ok(())
