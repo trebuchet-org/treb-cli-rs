@@ -269,23 +269,24 @@ fn build_plan(
         .collect()
 }
 
+fn format_execution_plan_header_lines(compose: &ComposeFile, plan_len: usize) -> [String; 3] {
+    let lines = [
+        format!("{} Orchestrating {}", emoji::TARGET, compose.group),
+        format!("{} Execution plan: {} components", emoji::CLIPBOARD, plan_len),
+        format!("{} Execution Plan:", emoji::CLIPBOARD),
+    ];
+
+    if color::is_color_enabled() { lines.map(|line| styled(&line, color::STAGE)) } else { lines }
+}
+
 /// Display the execution plan in human-readable format (matches Go `RenderExecutionPlan`).
 fn print_execution_plan(compose: &ComposeFile, plan: &[PlanEntry]) {
-    eprintln!(
-        "\n{} Orchestrating {}",
-        emoji::TARGET,
-        compose.group,
-    );
-    eprintln!(
-        "{} Execution plan: {} components\n",
-        emoji::CLIPBOARD,
-        plan.len(),
-    );
-    eprintln!(
-        "{} {}",
-        emoji::CLIPBOARD,
-        styled("Execution Plan:", color::BOLD),
-    );
+    let [orchestration_header, plan_summary_header, plan_header] =
+        format_execution_plan_header_lines(compose, plan.len());
+
+    eprintln!("\n{orchestration_header}");
+    eprintln!("{plan_summary_header}\n");
+    eprintln!("{plan_header}");
     eprintln!("{}", "─".repeat(50));
     for entry in plan {
         if entry.skipped {
@@ -298,10 +299,7 @@ fn print_execution_plan(compose: &ComposeFile, plan: &[PlanEntry]) {
             if !entry.deps.is_empty() {
                 eprint!(
                     " {}",
-                    styled(
-                        &format!("(depends on: [{}])", entry.deps.join(", ")),
-                        color::GRAY,
-                    ),
+                    styled(&format!("(depends on: [{}])", entry.deps.join(", ")), color::GRAY,),
                 );
             }
             eprint!(" {}", styled("(skipped)", color::WARNING));
@@ -315,10 +313,7 @@ fn print_execution_plan(compose: &ComposeFile, plan: &[PlanEntry]) {
             if !entry.deps.is_empty() {
                 eprint!(
                     " {}",
-                    styled(
-                        &format!("(depends on: [{}])", entry.deps.join(", ")),
-                        color::GRAY,
-                    ),
+                    styled(&format!("(depends on: [{}])", entry.deps.join(", ")), color::GRAY,),
                 );
             }
         }
@@ -1069,6 +1064,51 @@ pub async fn run(
 mod tests {
     use super::*;
     use crate::commands::run as run_cmd;
+    use std::{
+        ffi::OsString,
+        sync::{LazyLock, Mutex, MutexGuard},
+    };
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+        ENV_LOCK.lock().unwrap()
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        old: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let old = std::env::var_os(key);
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, old }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let old = std::env::var_os(key);
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.old {
+                Some(value) => unsafe {
+                    std::env::set_var(self.key, value);
+                },
+                None => unsafe {
+                    std::env::remove_var(self.key);
+                },
+            }
+        }
+    }
 
     #[test]
     fn deserialize_minimal_compose_file() {
@@ -1526,6 +1566,32 @@ components:
         assert_eq!(arr[0]["component"], "a");
         assert_eq!(arr[1]["step"], 2);
         assert_eq!(arr[1]["deps"][0], "a");
+    }
+
+    #[test]
+    fn execution_plan_headers_use_stage_style_when_color_enabled() {
+        let _lock = env_lock();
+        let _no_color = EnvVarGuard::unset("NO_COLOR");
+        let _term = EnvVarGuard::set("TERM", "xterm-256color");
+        owo_colors::set_override(true);
+        color::color_enabled(false);
+
+        let compose =
+            make_compose(vec![("registry", make_component("script/Registry.s.sol", None))]);
+        let headers = format_execution_plan_header_lines(&compose, 1);
+        let expected =
+            ["🎯 Orchestrating test", "📋 Execution plan: 1 components", "📋 Execution Plan:"];
+
+        for (header, plain_text) in headers.iter().zip(expected) {
+            assert!(
+                header.starts_with("\x1b["),
+                "header should be fully stage-styled, got: {header:?}"
+            );
+            assert_eq!(crate::ui::terminal::strip_ansi_codes(header), plain_text);
+        }
+
+        owo_colors::set_override(false);
+        color::color_enabled(true);
     }
 
     // ── Env var and verify override tests ─────────────────────────────

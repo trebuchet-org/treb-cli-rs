@@ -2,10 +2,10 @@
 🚧 [DRY RUN] Showing execution plan only — no changes will be made.
 
 
-Orchestrating diamond-deploy
-Execution plan: 4 components
+🎯 Orchestrating diamond-deploy
+📋 Execution plan: 4 components
 
-Execution Plan:
+📋 Execution Plan:
 ──────────────────────────────────────────────────
 1. base → script/DeployBase.s.sol
 2. left → script/DeployLeft.s.sol (depends on: [base])

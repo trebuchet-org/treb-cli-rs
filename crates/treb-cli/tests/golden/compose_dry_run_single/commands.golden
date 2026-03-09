@@ -2,9 +2,9 @@
 🚧 [DRY RUN] Showing execution plan only — no changes will be made.
 
 
-Orchestrating single-deploy
-Execution plan: 1 components
+🎯 Orchestrating single-deploy
+📋 Execution plan: 1 components
 
-Execution Plan:
+📋 Execution Plan:
 ──────────────────────────────────────────────────
 1. token → script/DeployToken.s.sol
