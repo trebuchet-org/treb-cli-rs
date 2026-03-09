@@ -163,17 +163,13 @@ fn remove_tag(
         bail!("tag '{}' not found on deployment '{}'", tag, deployment_id);
     }
 
-    if !json {
-        output::print_stage("\u{1f4dd}", "Updating tags...");
-    }
-
     let mut dep = dep.clone();
     let mut tags = existing_tags;
     tags.retain(|t| t != tag);
     dep.tags = if tags.is_empty() { None } else { Some(tags.clone()) };
     registry.update_deployment(dep)?;
 
-    let final_tags = tags;
+    let mut final_tags = tags;
 
     if json {
         output::print_json(&TagOutputJson {
@@ -185,17 +181,19 @@ fn remove_tag(
     } else {
         println!(
             "{}",
-            styled(&format!("Removed tag '{tag}' from '{deployment_id}'"), color::SUCCESS,)
+            styled(
+                &format!("\u{2705} Removed tag '{tag}' from {deployment_id}"),
+                color::GREEN,
+            )
         );
-        println!();
-        if final_tags.is_empty() {
-            println!("No tags remaining");
+        final_tags.sort();
+        let tags_value = if final_tags.is_empty() {
+            styled("No tags", color::GRAY)
         } else {
-            println!("{}", styled("Tags:", color::STAGE));
-            for t in &final_tags {
-                println!("  - {}", styled(t, color::LABEL));
-            }
-        }
+            final_tags.iter().map(|t| styled(t, color::CYAN)).collect::<Vec<_>>().join(", ")
+        };
+        println!();
+        println!("Remaining tags: {tags_value}");
     }
 
     Ok(())
