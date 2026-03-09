@@ -236,7 +236,7 @@ pub async fn assert_deployment_count(
     expected: usize,
 ) -> Vec<serde_json::Value> {
     let json = run_json(tmp_path, vec!["list".into()]).await;
-    let arr = json.as_array().expect("treb list --json must be an array");
+    let arr = json["deployments"].as_array().expect("treb list --json must have deployments array");
     assert_eq!(arr.len(), expected, "expected {expected} deployments, got {}", arr.len());
     arr.clone()
 }
@@ -246,7 +246,7 @@ pub async fn assert_deployment_count(
 /// Panics if there are no deployments or the `id` field is missing.
 pub async fn get_deployment_id(tmp_path: std::path::PathBuf) -> String {
     let json = run_json(tmp_path, vec!["list".into()]).await;
-    let arr = json.as_array().expect("treb list --json must be an array");
+    let arr = json["deployments"].as_array().expect("treb list --json must have deployments array");
     assert!(!arr.is_empty(), "no deployments found");
     arr[0]["id"].as_str().expect("deployment must have 'id' field").to_string()
 }

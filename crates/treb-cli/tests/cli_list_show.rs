@@ -154,7 +154,7 @@ fn list_adds_separator_between_chains_in_same_namespace() {
 }
 
 #[test]
-fn list_json_outputs_valid_json_array() {
+fn list_json_outputs_wrapped_object() {
     let tmp = tempfile::tempdir().unwrap();
     init_project_with_deployments(&tmp);
 
@@ -163,14 +163,18 @@ fn list_json_outputs_valid_json_array() {
     assert!(output.status.success());
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("output is not valid JSON");
-    let arr = json.as_array().expect("JSON output should be an array");
+    assert!(json.is_object(), "JSON output should be a wrapper object");
+    let arr = json["deployments"].as_array().expect("should have deployments array");
     assert_eq!(arr.len(), 4);
 
-    // Verify deployment objects have expected fields.
+    // Verify deployment entries have the Go schema fields.
     let first = &arr[0];
     assert!(first.get("id").is_some());
     assert!(first.get("contractName").is_some());
     assert!(first.get("address").is_some());
+    assert!(first.get("namespace").is_some());
+    assert!(first.get("chainId").is_some());
+    assert!(first.get("type").is_some());
 }
 
 #[test]
@@ -223,7 +227,7 @@ fn list_filter_by_contract() {
 
     assert!(output.status.success());
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    let arr = json.as_array().unwrap();
+    let arr = json["deployments"].as_array().unwrap();
     assert_eq!(arr.len(), 1);
     assert_eq!(arr[0]["contractName"], "FPMM");
 }
@@ -256,7 +260,7 @@ fn list_filter_by_type() {
 
     assert!(output.status.success());
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    let arr = json.as_array().unwrap();
+    let arr = json["deployments"].as_array().unwrap();
     assert_eq!(arr.len(), 1);
     assert_eq!(arr[0]["type"], "PROXY");
 }

@@ -10,6 +10,7 @@ use std::{
 use alloy_chains::Chain;
 use anyhow::{Context, bail};
 use owo_colors::OwoColorize;
+use serde::Serialize;
 use treb_core::types::{Deployment, DeploymentType};
 use treb_registry::Registry;
 
@@ -545,6 +546,65 @@ fn group_deployments_with_implementation_keys<'a>(
     result
 }
 
+// ---------------------------------------------------------------------------
+// JSON output types (Go's listJSONOutput schema)
+// ---------------------------------------------------------------------------
+
+/// A single deployment entry in the JSON output, matching Go's `listJSONEntry`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ListJsonEntry {
+    id: String,
+    contract_name: String,
+    address: String,
+    namespace: String,
+    chain_id: u64,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    label: String,
+    #[serde(rename = "type")]
+    deployment_type: String,
+    #[serde(skip_serializing_if = "is_false")]
+    fork: bool,
+}
+
+/// Top-level JSON output wrapper matching Go's `listJSONOutput`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ListJsonOutput {
+    deployments: Vec<ListJsonEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    other_namespaces: Option<BTreeMap<String, usize>>,
+}
+
+fn is_false(v: &bool) -> bool {
+    !v
+}
+
+fn build_list_json_output(result: &ListResult) -> ListJsonOutput {
+    let entries: Vec<ListJsonEntry> = result
+        .deployments
+        .iter()
+        .map(|d| ListJsonEntry {
+            id: d.id.clone(),
+            contract_name: d.contract_name.clone(),
+            address: d.address.clone(),
+            namespace: d.namespace.clone(),
+            chain_id: d.chain_id,
+            label: d.label.clone(),
+            deployment_type: d.deployment_type.to_string(),
+            fork: result.fork_deployment_ids.contains(&d.id),
+        })
+        .collect();
+
+    let other_namespaces = if entries.is_empty() && !result.other_namespaces.is_empty() {
+        Some(result.other_namespaces.clone())
+    } else {
+        None
+    };
+
+    ListJsonOutput { deployments: entries, other_namespaces }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     network: Option<String>,
@@ -609,7 +669,8 @@ pub async fn run(
         ListResult { deployments: filtered, other_namespaces, network_names, fork_deployment_ids };
 
     if json {
-        output::print_json(&result.deployments)?;
+        let json_output = build_list_json_output(&result);
+        output::print_json(&json_output)?;
     } else if result.deployments.is_empty() {
         if let Some(ref ns) = filters.namespace {
             if result.other_namespaces.is_empty() {
@@ -1662,6 +1723,151 @@ mod tests {
         assert_eq!(
             hint, "No deployments found in namespace \"staging\"\n",
             "empty other_namespaces should produce only the first line"
+        );
+    }
+
+    // -- build_list_json_output tests --
+
+    #[test]
+    fn json_output_wraps_deployments_in_object() {
+        let d = make_deployment("ns/1/A", "ns", 1, "A", "", DeploymentType::Singleton, None);
+        let result = ListResult {
+            deployments: vec![&d],
+            other_namespaces: BTreeMap::new(),
+            network_names: BTreeMap::new(),
+            fork_deployment_ids: HashSet::new(),
+        };
+
+        let output = build_list_json_output(&result);
+        let json = serde_json::to_value(&output).unwrap();
+
+        assert!(json.is_object(), "top-level should be an object");
+        assert!(json.get("deployments").unwrap().is_array(), "should have deployments array");
+        assert_eq!(json["deployments"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn json_output_entry_has_exactly_go_fields() {
+        let d = make_deployment("ns/1/A", "ns", 1, "A", "lbl", DeploymentType::Proxy, None);
+        let result = ListResult {
+            deployments: vec![&d],
+            other_namespaces: BTreeMap::new(),
+            network_names: BTreeMap::new(),
+            fork_deployment_ids: HashSet::new(),
+        };
+
+        let output = build_list_json_output(&result);
+        let json = serde_json::to_value(&output).unwrap();
+        let entry = &json["deployments"][0];
+
+        assert_eq!(entry["id"], "ns/1/A");
+        assert_eq!(entry["contractName"], "A");
+        assert_eq!(entry["address"], format!("0x{:040x}", 1));
+        assert_eq!(entry["namespace"], "ns");
+        assert_eq!(entry["chainId"], 1);
+        assert_eq!(entry["label"], "lbl");
+        assert_eq!(entry["type"], "PROXY");
+        // fork should be omitted (false)
+        assert!(entry.get("fork").is_none(), "fork should be omitted when false");
+    }
+
+    #[test]
+    fn json_output_label_omitted_when_empty() {
+        let d = make_deployment("ns/1/A", "ns", 1, "A", "", DeploymentType::Singleton, None);
+        let result = ListResult {
+            deployments: vec![&d],
+            other_namespaces: BTreeMap::new(),
+            network_names: BTreeMap::new(),
+            fork_deployment_ids: HashSet::new(),
+        };
+
+        let output = build_list_json_output(&result);
+        let json = serde_json::to_value(&output).unwrap();
+        let entry = &json["deployments"][0];
+
+        assert!(entry.get("label").is_none(), "label should be omitted when empty");
+    }
+
+    #[test]
+    fn json_output_fork_true_for_fork_deployment() {
+        let d =
+            make_deployment("fork/42220/A", "fork/42220", 42220, "A", "", DeploymentType::Singleton, None);
+        let mut fork_ids = HashSet::new();
+        fork_ids.insert("fork/42220/A".to_string());
+
+        let result = ListResult {
+            deployments: vec![&d],
+            other_namespaces: BTreeMap::new(),
+            network_names: BTreeMap::new(),
+            fork_deployment_ids: fork_ids,
+        };
+
+        let output = build_list_json_output(&result);
+        let json = serde_json::to_value(&output).unwrap();
+        let entry = &json["deployments"][0];
+
+        assert_eq!(entry["fork"], true, "fork should be true for fork deployments");
+    }
+
+    #[test]
+    fn json_output_other_namespaces_included_when_empty_deployments() {
+        let mut other_ns = BTreeMap::new();
+        other_ns.insert("production".into(), 3usize);
+        other_ns.insert("staging".into(), 1usize);
+
+        let result = ListResult {
+            deployments: vec![],
+            other_namespaces: other_ns,
+            network_names: BTreeMap::new(),
+            fork_deployment_ids: HashSet::new(),
+        };
+
+        let output = build_list_json_output(&result);
+        let json = serde_json::to_value(&output).unwrap();
+
+        assert!(json["deployments"].as_array().unwrap().is_empty());
+        let other = json.get("otherNamespaces").expect("otherNamespaces should be present");
+        assert_eq!(other["production"], 3);
+        assert_eq!(other["staging"], 1);
+    }
+
+    #[test]
+    fn json_output_other_namespaces_omitted_when_deployments_exist() {
+        let d = make_deployment("ns/1/A", "ns", 1, "A", "", DeploymentType::Singleton, None);
+        let mut other_ns = BTreeMap::new();
+        other_ns.insert("production".into(), 3usize);
+
+        let result = ListResult {
+            deployments: vec![&d],
+            other_namespaces: other_ns,
+            network_names: BTreeMap::new(),
+            fork_deployment_ids: HashSet::new(),
+        };
+
+        let output = build_list_json_output(&result);
+        let json = serde_json::to_value(&output).unwrap();
+
+        assert!(
+            json.get("otherNamespaces").is_none(),
+            "otherNamespaces should be omitted when deployments exist"
+        );
+    }
+
+    #[test]
+    fn json_output_other_namespaces_omitted_when_empty() {
+        let result = ListResult {
+            deployments: vec![],
+            other_namespaces: BTreeMap::new(),
+            network_names: BTreeMap::new(),
+            fork_deployment_ids: HashSet::new(),
+        };
+
+        let output = build_list_json_output(&result);
+        let json = serde_json::to_value(&output).unwrap();
+
+        assert!(
+            json.get("otherNamespaces").is_none(),
+            "otherNamespaces should be omitted when empty"
         );
     }
 }
