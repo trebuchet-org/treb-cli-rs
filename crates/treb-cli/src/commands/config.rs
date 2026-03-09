@@ -8,8 +8,7 @@ use treb_config::{
     LocalConfig, ResolveOpts, SenderConfig, load_local_config, resolve_config, save_local_config,
 };
 
-use crate::output;
-use crate::ui::emoji;
+use crate::{output, ui::emoji};
 
 const FOUNDRY_TOML: &str = "foundry.toml";
 const TREB_DIR: &str = ".treb";
@@ -59,7 +58,11 @@ pub async fn show(json: bool) -> anyhow::Result<()> {
         println!("Network:   {}", network_display);
 
         println!();
-        println!("{} Config source: {}", emoji::PACKAGE, resolved.config_source);
+        println!(
+            "{} Config source: {}",
+            emoji::PACKAGE,
+            human_config_source(&resolved.config_source)
+        );
 
         let config_path = resolved.project_root.join(".treb/config.local.json");
         let relative_path = config_path
@@ -150,4 +153,17 @@ fn ensure_treb_dir(cwd: &std::path::Path) -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+fn human_config_source(config_source: &str) -> &str {
+    if let Some((source_name, version)) = config_source.rsplit_once(" (v") {
+        if version
+            .strip_suffix(')')
+            .is_some_and(|v| !v.is_empty() && v.chars().all(|c| c.is_ascii_digit()))
+        {
+            return source_name;
+        }
+    }
+
+    config_source
 }
