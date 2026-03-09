@@ -401,7 +401,8 @@ fn seed_fork_exit(project_root: &std::path::Path) {
 
 /// Configure `foundry.toml` with a one-shot local JSON-RPC endpoint that
 /// responds to `eth_chainId` for deterministic `fork enter` golden testing.
-fn seed_fork_enter_success(project_root: &std::path::Path) -> std::io::Result<()> {
+/// Returns the dynamically-assigned port so callers can normalize output.
+fn seed_fork_enter_success(project_root: &std::path::Path) -> std::io::Result<u16> {
     let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
     let port = listener.local_addr()?.port();
 
@@ -431,7 +432,7 @@ fn seed_fork_enter_success(project_root: &std::path::Path) -> std::io::Result<()
         stream.flush().unwrap();
     });
 
-    Ok(())
+    Ok(port)
 }
 
 fn read_http_request(stream: &mut std::net::TcpStream) -> std::io::Result<String> {
@@ -633,22 +634,22 @@ fn fork_enter_no_rpc_url() {
 // ── fork enter: success ──────────────────────────────────────────────────
 
 /// `treb fork enter --network localhost` with a deterministic local RPC
-/// endpoint should succeed and print stage indicators for snapshot/completion.
+/// endpoint should succeed and print Go-matching indented field list.
 #[test]
 fn fork_enter_success() {
     let ctx = TestContext::new("minimal-project");
-    if let Err(err) = seed_fork_enter_success(ctx.path()) {
-        if err.kind() == std::io::ErrorKind::PermissionDenied {
-            return;
-        }
-        panic!("seed fork enter success: {err}");
-    }
+    let port = match seed_fork_enter_success(ctx.path()) {
+        Ok(port) => port,
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return,
+        Err(err) => panic!("seed fork enter success: {err}"),
+    };
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("fork_enter_success")
         .setup(&["init"])
         .test(&["fork", "enter", "--network", "localhost"])
-        .extra_normalizer(Box::new(path_normalizer));
+        .extra_normalizer(Box::new(path_normalizer))
+        .extra_normalizer(Box::new(LabelNormalizer::new(format!("http://127.0.0.1:{port}"))));
 
     run_integration_test(&test, &ctx);
 }

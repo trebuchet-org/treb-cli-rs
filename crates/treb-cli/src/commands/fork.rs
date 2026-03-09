@@ -220,9 +220,6 @@ pub async fn run_enter(
         .with_context(|| format!("failed to get chain ID from RPC URL: {fork_url}"))?;
 
     // Create snapshot dir and snapshot registry
-    if !json {
-        output::print_stage("\u{1f4f8}", &format!("Snapshotting registry for '{network}'..."));
-    }
     let snapshot_dir = treb_dir.join(SNAPSHOT_BASE).join(&network);
     snapshot_registry(&treb_dir, &snapshot_dir).context("failed to snapshot registry")?;
 
@@ -246,7 +243,7 @@ pub async fn run_enter(
         entered_at: now,
         snapshots: vec![],
     };
-    store.insert_active_fork(entry).context("failed to record fork entry")?;
+    store.insert_active_fork(entry.clone()).context("failed to record fork entry")?;
 
     // Add history entry
     store
@@ -258,11 +255,11 @@ pub async fn run_enter(
         })
         .context("failed to record fork history")?;
 
-    output::print_stage("\u{2705}", &format!("Fork mode entered for '{network}'."));
-
     println!("Entered fork mode for network '{network}'.");
-    println!("Registry snapshot saved to {}", snapshot_dir.display());
-    println!("Run `treb dev anvil start --network {network}` to start a local Anvil node.");
+    render_fork_fields(&entry);
+    println!();
+    println!("Run 'treb fork status' to check fork state");
+    println!("Run 'treb fork exit' to stop fork and restore original state");
 
     Ok(())
 }
@@ -566,16 +563,6 @@ pub async fn run_restart(
             );
         }
 
-        if !json {
-            output::print_stage(
-                "\u{1f504}",
-                &format!(
-                    "Resetting Anvil for '{network}' (instance '{}', block: {})...",
-                    instance_name,
-                    blk.map_or("latest".into(), |b: u64| b.to_string())
-                ),
-            );
-        }
         anvil_reset_http(&client, &entry.rpc_url, &entry.fork_url, blk).await.with_context(
             || {
                 format!(
@@ -585,15 +572,6 @@ pub async fn run_restart(
             },
         )?;
 
-        if !json {
-            output::print_stage(
-                "\u{1f3ed}",
-                &format!(
-                    "Deploying CreateX factory for '{network}' (instance '{}')...",
-                    instance_name
-                ),
-            );
-        }
         deploy_createx_http(&client, &entry.rpc_url).await.with_context(|| {
             format!(
                 "failed to re-deploy CreateX for network '{}' (instance '{}')",
@@ -601,12 +579,6 @@ pub async fn run_restart(
             )
         })?;
 
-        if !json {
-            output::print_stage(
-                "\u{1f4f8}",
-                &format!("Taking EVM snapshot for '{network}' (instance '{}')...", instance_name),
-            );
-        }
         let snapshot_id = evm_snapshot_http(&client, &entry.rpc_url).await.with_context(|| {
             format!(
                 "failed to take EVM snapshot for network '{}' (instance '{}')",
@@ -640,9 +612,6 @@ pub async fn run_restart(
     }
 
     // Restore registry from snapshot.
-    if !json {
-        output::print_stage("\u{1f504}", &format!("Restoring registry for '{network}'..."));
-    }
     let snapshot_dir = PathBuf::from(&session.snapshot_dir);
     restore_registry(&snapshot_dir, &treb_dir).context("failed to restore registry")?;
 
@@ -683,11 +652,42 @@ pub async fn run_restart(
         let result = json_result.ok_or_else(|| anyhow::anyhow!("missing fork restart result"))?;
         output::print_json(&result)?;
     } else {
-        output::print_stage("\u{2705}", &format!("Fork restarted for '{network}'."));
+        // Use the first runtime entry for the field display
+        let display_entry = &runtime_entries[0];
         println!("Restarted fork for network '{network}'.");
+        render_fork_fields(display_entry);
+        println!();
+        println!("Registry restored to initial fork state. All previous snapshots cleared.");
     }
 
     Ok(())
+}
+
+// ── Fork field rendering (Go-matching format) ────────────────────────────────
+
+/// Render fork entry fields in Go-matching indented key-value format.
+///
+/// Prints 2-space indented fields with labels left-padded to 14 characters
+/// (including colon), matching `render/fork.go`'s `RenderEnter` /
+/// `RenderRestart` layout.  Fields whose values are empty or zero are
+/// omitted.
+fn render_fork_fields(entry: &ForkEntry) {
+    println!();
+    println!("  {:<14}{}", "Network:", entry.network);
+    println!("  {:<14}{}", "Chain ID:", entry.chain_id);
+    if !entry.fork_url.is_empty() {
+        println!("  {:<14}{}", "Fork URL:", entry.fork_url);
+    }
+    if entry.anvil_pid != 0 {
+        println!("  {:<14}{}", "Anvil PID:", entry.anvil_pid);
+    }
+    if !entry.env_var_name.is_empty() {
+        let env_value = if !entry.rpc_url.is_empty() { &entry.rpc_url } else { &entry.fork_url };
+        println!("  {:<14}{}={}", "Env Override:", entry.env_var_name, env_value);
+    }
+    if !entry.log_file.is_empty() {
+        println!("  {:<14}{}", "Logs:", entry.log_file);
+    }
 }
 
 // ── run_status ────────────────────────────────────────────────────────────────
