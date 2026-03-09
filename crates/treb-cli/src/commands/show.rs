@@ -13,8 +13,14 @@ use crate::{
     ui::{badge, color, selector::fuzzy_select_deployment_id},
 };
 
-/// Lookup table for resolving proxy implementation addresses to display names.
-type ImplNameLookup = HashMap<(String, u64, String), String>;
+/// Resolved proxy implementation metadata keyed by `(namespace, chain_id, address)`.
+struct ResolvedImplementation {
+    deployment_id: String,
+    display_name: String,
+}
+
+/// Lookup table for resolving proxy implementation addresses to deployment metadata.
+type ImplLookup = HashMap<(String, u64, String), ResolvedImplementation>;
 
 struct VerificationDisplay<'a> {
     status: VerificationStatus,
@@ -43,7 +49,7 @@ pub async fn run(deployment_query: Option<String>, json: bool) -> anyhow::Result
     let registry = Registry::open(&cwd).context("failed to open registry")?;
     let lookup = registry.load_lookup_index().context("failed to load lookup index")?;
     let deployments = registry.list_deployments();
-    let impl_lookup = build_impl_name_lookup(&deployments);
+    let impl_lookup = build_impl_lookup(&deployments);
 
     let query = match deployment_query {
         Some(q) => q,
@@ -55,7 +61,8 @@ pub async fn run(deployment_query: Option<String>, json: bool) -> anyhow::Result
         }
     };
 
-    let deployment = resolve_deployment(&query, &registry, &lookup)?;
+    let deployment =
+        normalize_deployment_for_show(resolve_deployment(&query, &registry, &lookup)?.clone());
 
     if json {
         let is_fork = deployment.namespace.starts_with("fork/");
@@ -67,7 +74,7 @@ pub async fn run(deployment_query: Option<String>, json: bool) -> anyhow::Result
         }
         output::print_json(&wrapper)?;
     } else {
-        print_deployment_details(deployment, &impl_lookup);
+        print_deployment_details(&deployment, &impl_lookup);
     }
 
     Ok(())
@@ -100,31 +107,28 @@ fn print_field(key: &str, value: &str) {
     println!("  {}: {}", key, value);
 }
 
-fn build_impl_name_lookup(deployments: &[&Deployment]) -> ImplNameLookup {
+fn build_impl_lookup(deployments: &[&Deployment]) -> ImplLookup {
     deployments
         .iter()
         .map(|d| {
             let display_name = contract_display_name(&d.contract_name, &d.label);
-            ((d.namespace.to_lowercase(), d.chain_id, d.address.to_lowercase()), display_name)
+            (
+                (d.namespace.to_lowercase(), d.chain_id, d.address.to_lowercase()),
+                ResolvedImplementation { deployment_id: d.id.clone(), display_name },
+            )
         })
         .collect()
 }
 
-fn resolve_proxy_implementation_display(
+fn resolve_proxy_implementation<'a>(
     namespace: &str,
     chain_id: u64,
     implementation: &str,
-    impl_lookup: &ImplNameLookup,
-) -> String {
+    impl_lookup: &'a ImplLookup,
+) -> Option<&'a ResolvedImplementation> {
     let key = (namespace.to_lowercase(), chain_id, implementation.to_lowercase());
 
-    match impl_lookup.get(&key) {
-        Some(display_name) => {
-            let styled_name = styled(display_name, Style::new().yellow().bold());
-            format!("{styled_name} at {implementation}")
-        }
-        None => implementation.to_string(),
-    }
+    impl_lookup.get(&key)
 }
 
 fn aggregate_verification_status(
@@ -167,7 +171,24 @@ fn verification_display(d: &Deployment) -> VerificationDisplay<'_> {
     VerificationDisplay { status, etherscan_url, verified_at: d.verification.verified_at.as_ref() }
 }
 
-fn print_deployment_details(d: &Deployment, impl_lookup: &ImplNameLookup) {
+fn normalize_deployment_for_show(mut deployment: Deployment) -> Deployment {
+    let (status, etherscan_url, verified_at) = {
+        let verification = verification_display(&deployment);
+        (
+            verification.status,
+            verification.etherscan_url.to_string(),
+            verification.verified_at.cloned(),
+        )
+    };
+
+    deployment.verification.status = status;
+    deployment.verification.etherscan_url = etherscan_url;
+    deployment.verification.verified_at = verified_at;
+
+    deployment
+}
+
+fn print_deployment_details(d: &Deployment, impl_lookup: &ImplLookup) {
     // Header: Deployment: {id} [fork]
     let fork = badge::fork_badge(&d.namespace);
     print_deployment_header(&d.id, fork.as_deref());
@@ -208,13 +229,23 @@ fn print_deployment_details(d: &Deployment, impl_lookup: &ImplNameLookup) {
     if let Some(ref proxy) = d.proxy_info {
         print_section("Proxy Information");
         print_field("Type", &proxy.proxy_type);
-        let implementation = resolve_proxy_implementation_display(
+        let resolved_implementation = resolve_proxy_implementation(
             &d.namespace,
             d.chain_id,
             &proxy.implementation,
             impl_lookup,
         );
+        let implementation = match resolved_implementation {
+            Some(resolved) => {
+                let styled_name = styled(&resolved.display_name, Style::new().yellow().bold());
+                format!("{styled_name} at {}", proxy.implementation)
+            }
+            None => proxy.implementation.clone(),
+        };
         print_field("Implementation", &implementation);
+        if let Some(resolved) = resolved_implementation {
+            print_field("Implementation ID", &styled(&resolved.deployment_id, color::CYAN));
+        }
         if !proxy.admin.is_empty() {
             print_field("Admin", &proxy.admin);
         }
@@ -365,5 +396,32 @@ mod tests {
         assert_eq!(display.status, VerificationStatus::Verified);
         assert_eq!(display.etherscan_url, "https://etherscan.io/address/0xabc");
         assert_eq!(display.verified_at, Some(&verified_at));
+    }
+
+    #[test]
+    fn normalize_deployment_for_show_updates_stale_verification_fields() {
+        let mut deployment = sample_deployment();
+        deployment.verification.verifiers.insert(
+            "etherscan".into(),
+            VerifierStatus {
+                status: "VERIFIED".into(),
+                url: "https://etherscan.io/address/0x123".into(),
+                reason: String::new(),
+            },
+        );
+        deployment.verification.verifiers.insert(
+            "sourcify".into(),
+            VerifierStatus {
+                status: "FAILED".into(),
+                url: String::new(),
+                reason: "not found".into(),
+            },
+        );
+
+        let normalized = normalize_deployment_for_show(deployment);
+
+        assert_eq!(normalized.verification.status, VerificationStatus::Partial);
+        assert_eq!(normalized.verification.etherscan_url, "https://etherscan.io/address/0x123");
+        assert!(normalized.verification.verified_at.is_none());
     }
 }

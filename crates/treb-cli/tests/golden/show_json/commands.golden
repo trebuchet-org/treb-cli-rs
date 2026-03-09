@@ -29,7 +29,8 @@
     "type": "SINGLETON",
     "updatedAt": "<TIMESTAMP>",
     "verification": {
-      "status": "UNVERIFIED",
+      "etherscanUrl": "https://celoscan.io/address/0x42eddd7dC046da254A93659CA9b02f294606833D#code",
+      "status": "PARTIAL",
       "verifiers": {
         "etherscan": {
           "status": "VERIFIED",

@@ -393,6 +393,11 @@ fn show_json_outputs_full_deployment() {
     assert_eq!(deployment["contractName"], "FPMM");
     assert_eq!(deployment["chainId"], 42220);
     assert_eq!(deployment["address"], "0x42eddd7dC046da254A93659CA9b02f294606833D");
+    assert_eq!(deployment["verification"]["status"], "PARTIAL");
+    assert_eq!(
+        deployment["verification"]["etherscanUrl"],
+        "https://celoscan.io/address/0x42eddd7dC046da254A93659CA9b02f294606833D#code"
+    );
     assert!(json.get("fork").is_none(), "non-fork deployments must not include a fork flag");
 }
 
@@ -489,7 +494,8 @@ fn show_proxy_deployment_shows_proxy_info() {
         .success()
         .stdout(predicate::str::contains("Proxy Information"))
         .stdout(predicate::str::contains("UUPS"))
-        .stdout(predicate::str::contains("Implementation"));
+        .stdout(predicate::str::contains("Implementation"))
+        .stdout(predicate::str::contains("Implementation ID: mainnet/42220/FPMMFactory:v3.0.0"));
 }
 
 #[test]
