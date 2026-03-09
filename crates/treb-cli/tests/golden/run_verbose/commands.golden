@@ -9,10 +9,7 @@ No files changed, compilation skipped
 
 📦 Deployment Summary:
 ──────────────────────────────────────────────────
-default
-└─ 31337
-   └─ SINGLETON
-      └─ Counter:Counter 0x5b73...0519 UNVERIFIED
+  Counter:Counter at 0x5b73C5498c1E3b4dbA84de0F1833c4a029d90519
 
 
 ✓ Registry Update:

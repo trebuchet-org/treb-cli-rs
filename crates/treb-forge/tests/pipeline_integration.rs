@@ -582,6 +582,7 @@ fn collision_events_reported_in_pipeline_result() {
             existing_address: address!("e7f1725E7734CE288F8367e1Bb143E90bb3F0512"),
             contract_name: "Token".to_string(),
             label: "token-v1".to_string(),
+            entropy: String::new(),
             strategy: DeploymentMethod::Create2,
             salt: b256!("2222222222222222222222222222222222222222222222222222222222222222"),
             bytecode_hash: b256!(
@@ -595,6 +596,7 @@ fn collision_events_reported_in_pipeline_result() {
             existing_address: address!("9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"),
             contract_name: "Vault".to_string(),
             label: "vault-v1".to_string(),
+            entropy: String::new(),
             strategy: DeploymentMethod::Create,
             salt: B256::ZERO,
             bytecode_hash: B256::ZERO,

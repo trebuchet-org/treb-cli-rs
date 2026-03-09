@@ -49,6 +49,8 @@ pub struct ExtractedCollision {
     pub contract_name: String,
     /// The label for the attempted deployment.
     pub label: String,
+    /// Optional entropy string used in salt computation.
+    pub entropy: String,
     /// The strategy that was attempted.
     pub strategy: DeploymentMethod,
     /// The salt from the attempted deployment.
@@ -125,6 +127,7 @@ pub fn extract_collisions(events: &[ParsedEvent]) -> Vec<ExtractedCollision> {
                         existing_address: collision.existingContract,
                         contract_name: collision.deployment.artifact.clone(),
                         label: collision.deployment.label.clone(),
+                        entropy: collision.deployment.entropy.clone(),
                         strategy: parse_strategy(&collision.deployment.createStrategy),
                         salt: collision.deployment.salt,
                         bytecode_hash: collision.deployment.bytecodeHash,
@@ -221,7 +224,7 @@ mod tests {
             deployment: DeploymentDetails {
                 artifact: "Token".to_string(),
                 label: "token-v1".to_string(),
-                entropy: String::new(),
+                entropy: "entropy-seed".to_string(),
                 salt: b256!("2222222222222222222222222222222222222222222222222222222222222222"),
                 bytecodeHash: b256!(
                     "3333333333333333333333333333333333333333333333333333333333333333"
@@ -243,6 +246,7 @@ mod tests {
         assert_eq!(c.existing_address, address!("e7f1725E7734CE288F8367e1Bb143E90bb3F0512"));
         assert_eq!(c.contract_name, "Token");
         assert_eq!(c.label, "token-v1");
+        assert_eq!(c.entropy, "entropy-seed");
         assert_eq!(c.strategy, DeploymentMethod::Create2);
         assert_eq!(
             c.salt,

@@ -18,9 +18,7 @@ use serde::Serialize;
 use treb_config::{ResolveOpts, resolve_config};
 use treb_core::types::{Operation, TransactionStatus};
 use treb_forge::{
-    pipeline::{
-        PipelineConfig, PipelineContext, PipelineResult, RunPipeline, resolve_git_commit,
-    },
+    pipeline::{PipelineConfig, PipelineContext, PipelineResult, RunPipeline, resolve_git_commit},
     script::build_script_config_with_senders,
     sender::{ResolvedSender, resolve_all_senders},
 };
@@ -665,6 +663,40 @@ fn print_registry_update_section(result: &PipelineResult) {
     println!();
 }
 
+fn format_warning_section_header_with_style(title: &str, style_enabled: bool) -> String {
+    let title = format!("{title}:");
+    if style_enabled {
+        format!("{}  {}", emoji::WARNING, title.style(color::WARNING))
+    } else {
+        format!("{}  {}", emoji::WARNING, title)
+    }
+}
+
+fn format_warning_section_header(title: &str) -> String {
+    format_warning_section_header_with_style(title, color::is_color_enabled())
+}
+
+fn print_warning_section_header(title: &str, separator_width: usize) {
+    let separator = "─".repeat(separator_width);
+    println!("\n{}", format_warning_section_header(title));
+    if color::is_color_enabled() {
+        println!("{}", separator.style(color::GRAY));
+    } else {
+        println!("{separator}");
+    }
+}
+
+fn collision_metadata_lines(collision: &treb_forge::events::ExtractedCollision) -> Vec<String> {
+    let mut lines = Vec::new();
+    if !collision.label.is_empty() {
+        lines.push(format!("    Label: {}", collision.label));
+    }
+    if !collision.entropy.is_empty() {
+        lines.push(format!("    Entropy: {}", collision.entropy));
+    }
+    lines
+}
+
 // ---------------------------------------------------------------------------
 // Transaction rendering helpers (Go: render/transaction.go)
 // ---------------------------------------------------------------------------
@@ -758,7 +790,7 @@ fn display_result_human(result: &PipelineResult) {
 
     // ── Collisions ──────────────────────────────────────────────────────
     if !result.collisions.is_empty() {
-        output::print_section_header(emoji::WARNING, "Deployment Collisions Detected", 50);
+        print_warning_section_header("Deployment Collisions Detected", 50);
         for collision in &result.collisions {
             let name = if color::is_color_enabled() {
                 format!("{}", collision.contract_name.style(color::CYAN))
@@ -772,8 +804,8 @@ fn display_result_human(result: &PipelineResult) {
                 addr
             };
             println!("  {} already deployed at {}", name, addr_display);
-            if !collision.label.is_empty() {
-                println!("    Label: {}", collision.label);
+            for line in collision_metadata_lines(collision) {
+                println!("{line}");
             }
         }
         let note = "Existing deployments were not overwritten";
@@ -860,9 +892,10 @@ fn display_result_human(result: &PipelineResult) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{Address, B256};
     use chrono::{TimeZone, Utc};
-    use treb_core::types::{GovernorProposal, ProposalStatus};
-    use treb_forge::in_memory_signer;
+    use treb_core::types::{GovernorProposal, ProposalStatus, enums::DeploymentMethod};
+    use treb_forge::{events::ExtractedCollision, in_memory_signer};
 
     fn sample_governor_proposal() -> GovernorProposal {
         GovernorProposal {
@@ -1035,6 +1068,38 @@ mod tests {
             line.contains("proposer=0x70997970C51812dc3A010C7d01b50e0d17dc79C8"),
             "got: {line}"
         );
+    }
+
+    #[test]
+    fn collision_metadata_lines_include_label_and_entropy_when_present() {
+        let collision = ExtractedCollision {
+            existing_address: Address::ZERO,
+            contract_name: "Counter".into(),
+            label: "counter-v1".into(),
+            entropy: "entropy-seed".into(),
+            strategy: DeploymentMethod::Create2,
+            salt: B256::ZERO,
+            bytecode_hash: B256::ZERO,
+            init_code_hash: B256::ZERO,
+        };
+
+        assert_eq!(
+            collision_metadata_lines(&collision),
+            vec!["    Label: counter-v1".to_string(), "    Entropy: entropy-seed".to_string(),]
+        );
+    }
+
+    #[test]
+    fn warning_section_header_uses_warning_spacing_and_style() {
+        owo_colors::set_override(true);
+
+        let header =
+            format_warning_section_header_with_style("Deployment Collisions Detected", true);
+
+        assert!(header.starts_with("⚠️  "), "got: {header}");
+        assert!(header.contains("\u{1b}["), "header should contain ANSI styling: {header}");
+
+        owo_colors::set_override(false);
     }
 
     #[test]
