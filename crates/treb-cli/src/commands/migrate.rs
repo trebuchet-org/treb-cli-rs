@@ -19,7 +19,17 @@ use treb_config::{
 };
 use treb_registry::{REGISTRY_DIR, REGISTRY_VERSION, run_migrations};
 
-use crate::output;
+use owo_colors::OwoColorize;
+
+use crate::{
+    output,
+    ui::{color, emoji},
+};
+
+/// Apply a color style when color is enabled, plain text otherwise.
+fn styled(text: &str, style: owo_colors::Style) -> String {
+    if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
+}
 
 // ── Subcommand ────────────────────────────────────────────────────────────────
 
@@ -233,9 +243,10 @@ where
 
     // Interactive preview + confirmation (unless --yes, --json, or non-TTY).
     if !yes && !json && stdin_is_tty {
+        println!("Generated treb.toml:");
         println!("{v2_toml}");
         if !confirm_prompt("Write this config to treb.toml?", false) {
-            println!("Cancelled.");
+            println!("Migration cancelled.");
             return Ok(());
         }
     }
@@ -280,7 +291,28 @@ where
         if let Some(fp) = &foundry_cleanup_path {
             println!("Foundry backup written to: {}", fp.display());
         }
-        output::print_stage("\u{2705}", "Migration complete — treb.toml updated to v2 format.");
+
+        // Green bold success message matching Go: green.Printf("✓ treb.toml written successfully\n")
+        let success_msg = format!("{} treb.toml written successfully", emoji::CHECK_MARK);
+        println!("{}", styled(&success_msg, color::SUCCESS));
+
+        // Green bold foundry cleanup message if cleanup was performed
+        if foundry_cleanup_path.is_some() {
+            let cleanup_msg = format!("{} foundry.toml cleaned up", emoji::CHECK_MARK);
+            println!("{}", styled(&cleanup_msg, color::SUCCESS));
+        }
+
+        // Next steps section
+        println!();
+        println!("Next steps:");
+        println!("  1. Review the generated treb.toml");
+        if foundry_cleanup_path.is_some() {
+            // Foundry was cleaned up — skip the manual removal step
+            println!("  2. Run `treb config show` to verify your config is loaded correctly");
+        } else {
+            println!("  2. Remove [profile.*.treb.*] sections from foundry.toml");
+            println!("  3. Run `treb config show` to verify your config is loaded correctly");
+        }
     }
 
     Ok(())
