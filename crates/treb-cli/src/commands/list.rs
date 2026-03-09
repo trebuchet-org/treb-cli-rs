@@ -252,9 +252,11 @@ fn resolve_network_names(
     }
 
     if let Some(network) = selected_network {
-        if network.parse::<u64>().is_err() {
-            if let Some(chain_id) = resolve_chain_id(network) {
+        if let Some(chain_id) = resolve_chain_id(network) {
+            if network.parse::<u64>().is_err() {
                 network_names.insert(chain_id, network.to_string());
+            } else if let Some(named_chain) = Chain::from_id(chain_id).named() {
+                network_names.entry(chain_id).or_insert_with(|| named_chain.to_string());
             }
         }
     }
@@ -273,6 +275,18 @@ fn format_chain_header_label(chain_id: u64, network_names: &BTreeMap<u64, String
         .get(&chain_id)
         .map(|network_name| format!("{network_name} ({chain_id})"))
         .unwrap_or_else(|| chain_id.to_string())
+}
+
+fn format_selected_network_label(
+    selected_network: Option<&str>,
+    network_names: &BTreeMap<u64, String>,
+) -> Option<String> {
+    let network = selected_network?;
+    Some(
+        resolve_chain_id(network)
+            .map(|chain_id| format_chain_header_label(chain_id, network_names))
+            .unwrap_or_else(|| network.to_string()),
+    )
 }
 
 /// Format a namespace header line in Go CLI format.
@@ -664,6 +678,8 @@ pub async fn run(
 
     let fork_deployment_ids = collect_fork_deployment_ids(&all_deployments);
     let network_names = resolve_network_names(&cwd, &filtered, filters.network.as_deref());
+    let selected_network_label =
+        format_selected_network_label(filters.network.as_deref(), &network_names);
 
     let result =
         ListResult { deployments: filtered, other_namespaces, network_names, fork_deployment_ids };
@@ -678,7 +694,7 @@ pub async fn run(
             } else {
                 let hint = format_namespace_discovery_hint(
                     ns,
-                    filters.network.as_deref(),
+                    selected_network_label.as_deref(),
                     &result.other_namespaces,
                 );
                 print!("{hint}");
@@ -689,7 +705,7 @@ pub async fn run(
     } else {
         let grouped =
             group_deployments_with_implementation_keys(&result.deployments, &implementation_keys);
-        let impl_lookup = build_impl_name_lookup(&result.deployments);
+        let impl_lookup = build_impl_name_lookup(&all_deployments);
 
         // First pass: collect all table data for global column width calculation
         let mut all_tables: Vec<output::TableData> = Vec::new();
@@ -1411,6 +1427,55 @@ mod tests {
     }
 
     #[test]
+    fn implementation_row_uses_lookup_built_from_full_registry_context() {
+        let _lock = env_lock();
+        let _no_color = EnvVarGuard::set("NO_COLOR", "1");
+        color::color_enabled(false);
+
+        let mut proxy = make_deployment(
+            "mainnet/42220/TransparentUpgradeableProxy:FPMMFactory",
+            "mainnet",
+            42220,
+            "TransparentUpgradeableProxy",
+            "FPMMFactory",
+            DeploymentType::Proxy,
+            None,
+        );
+        proxy.address = "0x22A81Fc75b0d5F7cac19cABa9F0c3719b3897F03".into();
+        proxy.proxy_info = Some(ProxyInfo {
+            proxy_type: "Transparent".into(),
+            implementation: "0x959597fD009876e6f53EbdB2F1c1Bc3f994579dF".into(),
+            admin: String::new(),
+            history: vec![],
+        });
+
+        let mut implementation = make_deployment(
+            "mainnet/42220/FPMMFactory:v3.0.0",
+            "mainnet",
+            42220,
+            "FPMMFactory",
+            "v3.0.0",
+            DeploymentType::Singleton,
+            None,
+        );
+        implementation.address = "0x959597fD009876e6f53EbdB2F1c1Bc3f994579dF".into();
+
+        let deployments = [proxy, implementation];
+        let full_refs: Vec<&Deployment> = deployments.iter().collect();
+        let fork_ids = HashSet::new();
+        let impl_lookup = build_impl_name_lookup(&full_refs);
+        let tg = TypeGroup { category: DisplayCategory::Proxy, deployments: vec![&deployments[0]] };
+        let table = build_type_group_table(&tg, "mainnet", 42220, &fork_ids, &impl_lookup);
+
+        assert_eq!(table.len(), 2);
+        assert!(
+            table[1][0].contains("└─ FPMMFactory:v3.0.0"),
+            "implementation row should resolve from full lookup: {:?}",
+            table[1][0]
+        );
+    }
+
+    #[test]
     fn deployment_row_non_proxy_has_no_impl_row() {
         let _lock = env_lock();
         let _no_color = EnvVarGuard::set("NO_COLOR", "1");
@@ -1615,6 +1680,21 @@ mod tests {
 
         assert_eq!(network_names.get(&1).map(String::as_str), Some("ethlive"));
         assert_eq!(format_chain_header_label(1, &network_names), "ethlive (1)");
+    }
+
+    #[test]
+    fn resolve_network_names_adds_named_chain_for_numeric_selected_network() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("foundry.toml"), "[profile.default]\n").unwrap();
+        let refs: Vec<&Deployment> = Vec::new();
+
+        let network_names = resolve_network_names(tmp.path(), &refs, Some("42220"));
+
+        assert_eq!(network_names.get(&42220).map(String::as_str), Some("celo"));
+        assert_eq!(
+            format_selected_network_label(Some("42220"), &network_names).as_deref(),
+            Some("celo (42220)")
+        );
     }
 
     #[test]

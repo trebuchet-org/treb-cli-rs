@@ -1,0 +1,9 @@
+=== cmd 0: [list --namespace staging --network 42220] ===
+No deployments found in namespace "staging" on celo (42220)
+
+Other namespaces with deployments:
+
+  fork/42220          1 deployment
+  mainnet             3 deployments
+
+Use --namespace <name> or `treb config set namespace <name>` to switch.

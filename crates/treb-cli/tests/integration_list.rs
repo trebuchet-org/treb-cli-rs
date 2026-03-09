@@ -113,6 +113,21 @@ fn list_filter_contract() {
     run_integration_test(&test, &ctx);
 }
 
+/// Filtering to the proxy contract keeps the implementation display name.
+#[test]
+fn list_filter_contract_proxy() {
+    let ctx = TestContext::new("project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("list_filter_contract_proxy")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))
+        .test(&["list", "--contract", "TransparentUpgradeableProxy"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
 /// Filter by deployment type returns only matching deployments.
 #[test]
 fn list_filter_type() {
@@ -153,6 +168,21 @@ fn list_namespace_discovery_hint() {
         .setup(&["init"])
         .post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))
         .test(&["list", "--namespace", "staging"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// Empty namespace hint should use the resolved chain label for network filters.
+#[test]
+fn list_namespace_discovery_hint_network_filter() {
+    let ctx = TestContext::new("project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("list_namespace_discovery_hint_network_filter")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))
+        .test(&["list", "--namespace", "staging", "--network", "42220"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
