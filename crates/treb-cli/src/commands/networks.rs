@@ -8,6 +8,7 @@ use std::time::Duration;
 use serde::Serialize;
 
 use crate::output;
+use crate::ui::emoji;
 
 /// Network information for a single RPC endpoint.
 #[derive(Serialize)]
@@ -74,8 +75,7 @@ pub async fn run(json: bool) -> anyhow::Result<()> {
         if json {
             output::print_json(&Vec::<NetworkInfo>::new())?;
         } else {
-            println!("No RPC endpoints configured in foundry.toml.");
-            println!("Add endpoints under [rpc_endpoints] in your foundry.toml.");
+            println!("No networks configured in foundry.toml [rpc_endpoints]");
         }
         return Ok(());
     }
@@ -120,28 +120,21 @@ pub async fn run(json: bool) -> anyhow::Result<()> {
     if json {
         output::print_json(&results)?;
     } else {
-        let has_errors = results.iter().any(|r| r.status != "ok");
-
-        let headers: Vec<&str> = if has_errors {
-            vec!["Name", "RPC URL", "Chain ID", "Status"]
-        } else {
-            vec!["Name", "RPC URL", "Chain ID"]
-        };
-
-        let mut table = output::build_table(&headers);
+        println!("{} Available Networks:", emoji::GLOBE);
+        println!();
 
         for info in &results {
-            let chain_id_str =
-                info.chain_id.map(|id| id.to_string()).unwrap_or_else(|| "-".to_string());
-
-            if has_errors {
-                table.add_row(vec![&info.name, &info.rpc_url, &chain_id_str, &info.status]);
+            if info.status == "ok" {
+                println!(
+                    "  {} {} - Chain ID: {}",
+                    emoji::CHECK,
+                    info.name,
+                    info.chain_id.unwrap_or(0),
+                );
             } else {
-                table.add_row(vec![&info.name, &info.rpc_url, &chain_id_str]);
+                println!("  {} {} - Error: {}", emoji::CROSS, info.name, info.status);
             }
         }
-
-        output::print_table(&table);
     }
 
     Ok(())

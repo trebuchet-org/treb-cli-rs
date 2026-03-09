@@ -32,7 +32,7 @@ fn networks_errors_without_foundry_toml() {
 }
 
 #[test]
-fn networks_table_shows_endpoint_names() {
+fn networks_shows_emoji_per_line_format() {
     let tmp = tempfile::tempdir().unwrap();
     fs::write(tmp.path().join("foundry.toml"), FIXTURE_FOUNDRY_TOML).unwrap();
 
@@ -41,6 +41,7 @@ fn networks_table_shows_endpoint_names() {
         .current_dir(tmp.path())
         .assert()
         .success()
+        .stdout(predicate::str::contains("🌐 Available Networks:"))
         .stdout(predicate::str::contains("mainnet"))
         .stdout(predicate::str::contains("sepolia"));
 }

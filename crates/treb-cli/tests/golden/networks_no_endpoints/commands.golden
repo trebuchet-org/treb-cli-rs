@@ -1,3 +1,2 @@
 === cmd 0: [networks] ===
-No RPC endpoints configured in foundry.toml.
-Add endpoints under [rpc_endpoints] in your foundry.toml.
+No networks configured in foundry.toml [rpc_endpoints]

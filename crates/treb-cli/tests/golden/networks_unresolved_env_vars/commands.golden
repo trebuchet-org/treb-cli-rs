@@ -1,8 +1,5 @@
 === cmd 0: [networks] ===
-┌─────────┬────────────────────┬──────────┬────────────────────┐
-│ Name    ┆ RPC URL            ┆ Chain ID ┆ Status             │
-╞═════════╪════════════════════╪══════════╪════════════════════╡
-│ mainnet ┆ ${MAINNET_RPC_URL} ┆ -        ┆ unresolved env var │
-├╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
-│ sepolia ┆ ${SEPOLIA_RPC_URL} ┆ -        ┆ unresolved env var │
-└─────────┴────────────────────┴──────────┴────────────────────┘
+🌐 Available Networks:
+
+  ❌ mainnet - Error: unresolved env var
+  ❌ sepolia - Error: unresolved env var
