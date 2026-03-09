@@ -1,8 +1,13 @@
 //! Integration tests for `treb list` and `treb show`.
 
 use assert_cmd::cargo::cargo_bin_cmd;
+use chrono::Utc;
 use predicates::prelude::*;
-use std::fs;
+use std::{collections::HashMap, fs};
+use treb_core::types::{
+    ArtifactInfo, Deployment, DeploymentMethod, DeploymentStrategy, DeploymentType,
+    VerificationInfo, VerificationStatus,
+};
 
 fn treb() -> assert_cmd::Command {
     cargo_bin_cmd!("treb-cli")
@@ -29,10 +34,64 @@ fn init_project_with_deployments(tmp: &tempfile::TempDir) {
     registry.rebuild_lookup_index().expect("lookup index rebuild should succeed");
 }
 
+fn init_project_with_custom_deployments(
+    tmp: &tempfile::TempDir,
+    deployments: impl IntoIterator<Item = Deployment>,
+) {
+    init_empty_project(tmp);
+
+    let mut registry = treb_registry::Registry::open(tmp.path()).expect("registry should open");
+    for deployment in deployments {
+        registry.insert_deployment(deployment).expect("deployment insert should succeed");
+    }
+}
+
 /// Helper: create a temp dir with foundry.toml and run `treb init` (no deployments).
 fn init_empty_project(tmp: &tempfile::TempDir) {
     fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
     treb().arg("init").current_dir(tmp.path()).assert().success();
+}
+
+fn make_list_deployment(namespace: &str, chain_id: u64, contract_name: &str) -> Deployment {
+    let ts = Utc::now();
+    let label = "v1";
+
+    Deployment {
+        id: format!("{namespace}/{chain_id}/{contract_name}:{label}"),
+        namespace: namespace.to_string(),
+        chain_id,
+        contract_name: contract_name.to_string(),
+        label: label.to_string(),
+        address: format!("0x{chain_id:040x}"),
+        deployment_type: DeploymentType::Singleton,
+        transaction_id: format!("tx-{chain_id}"),
+        deployment_strategy: DeploymentStrategy {
+            method: DeploymentMethod::Create,
+            salt: String::new(),
+            init_code_hash: String::new(),
+            factory: String::new(),
+            constructor_args: String::new(),
+            entropy: String::new(),
+        },
+        proxy_info: None,
+        artifact: ArtifactInfo {
+            path: "contracts/Test.sol".to_string(),
+            compiler_version: "0.8.24".to_string(),
+            bytecode_hash: "0xabc".to_string(),
+            script_path: "script/Deploy.s.sol".to_string(),
+            git_commit: "abc123".to_string(),
+        },
+        verification: VerificationInfo {
+            status: VerificationStatus::Unverified,
+            etherscan_url: String::new(),
+            verified_at: None,
+            reason: String::new(),
+            verifiers: HashMap::new(),
+        },
+        tags: None,
+        created_at: ts,
+        updated_at: ts,
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -68,6 +127,24 @@ fn list_table_shows_truncated_addresses() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     // Address should be truncated: 0x42ed...833D
     assert!(stdout.contains("0x42ed...833D"), "expected truncated address, got:\n{stdout}");
+}
+
+#[test]
+fn list_adds_separator_between_chains_in_same_namespace() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_custom_deployments(
+        &tmp,
+        [make_list_deployment("shared", 1, "Alpha"), make_list_deployment("shared", 42220, "Beta")],
+    );
+
+    let output = treb().arg("list").current_dir(tmp.path()).output().unwrap();
+
+    assert!(output.status.success(), "treb list should exit 0");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains("UNVERIFIED\n│ \n└─ ⛓ chain:"),
+        "expected a post-chain separator before the next chain header, got:\n{stdout}"
+    );
 }
 
 #[test]

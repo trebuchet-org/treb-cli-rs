@@ -530,13 +530,7 @@ pub async fn run(
     } else {
         let grouped =
             group_deployments_with_implementation_keys(&result.deployments, &implementation_keys);
-        let mut first_ns = true;
         for (namespace, chains) in &grouped {
-            if !first_ns {
-                println!();
-            }
-            first_ns = false;
-
             // Namespace header (Go format: ◎ namespace: UPPERCASE)
             println!("{}", format_namespace_header(namespace));
 
@@ -576,6 +570,12 @@ pub async fn run(
                 // lines with the continuation prefix
                 for line in rendered.lines().skip(1) {
                     println!("{cont_prefix}{line}");
+                }
+
+                if is_last_chain {
+                    println!();
+                } else {
+                    println!("{cont_prefix}");
                 }
             }
         }
