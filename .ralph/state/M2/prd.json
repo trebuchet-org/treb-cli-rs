@@ -1,21 +1,18 @@
 {
   "project": "treb-cli-rs",
-  "branchName": "feat/M2-P10-sync-and-tag-command-output",
-  "description": "Port sync and tag command human-readable output to match Go CLI format exactly — section-based bullet format for sync, deployment context with inline tags for tag commands",
+  "branchName": "feat/M2-P11-register-prune-and-reset-command-output",
+  "description": "Port human-readable output of register, prune, and reset commands to match the Go CLI exactly, including emoji-staged headers, indented details, section listings, and aligned count lines.",
   "userStories": [
     {
-      "id": "P10-US-001",
-      "title": "Port sync Command Human Output to Go Section/Bullet Format",
-      "description": "As a CLI user, I want the sync command output to use section-based bullet format with 'Syncing registry...' header, bullet metrics, and a green checkmark footer so that output matches Go CLI exactly",
+      "id": "P11-US-001",
+      "title": "Port register Command Human Output to Go Indented Format",
+      "description": "As a developer, I want the register command human output to use green bold checkmark header with indented per-deployment details so that it matches the Go CLI format exactly.",
       "acceptanceCriteria": [
-        "Human output prints 'Syncing registry...' as the first line, replaces '✅ Sync complete.' stage header",
-        "SyncDetailRow struct and comfy_table detail table rendering removed",
-        "Safe Transactions section uses '•' bullets: Checked (always), Executed in green (when > 0), Transactions updated (when > 0)",
-        "When no safe txs pending, outputs 'No pending Safe transactions found'",
-        "Governor Proposals section follows same bullet pattern as safe transactions",
-        "Cleanup section shows removed entry count when applicable",
-        "Warnings section renders in yellow with '•' bullet per warning",
-        "Footer uses ✓ (U+2713) in green: 'Registry synced successfully' or 'Registry sync completed with warnings'",
+        "Register human output prints green bold '✓ Successfully registered N deployment(s)' header",
+        "Each deployment shows indented details: Deployment N, Deployment ID, Address, Contract, and optional Label",
+        "Label line is omitted when empty",
+        "Multiple deployments separated by blank lines, no trailing blank line after last",
+        "comfy_table and truncate_address summary line removed",
         "JSON output (--json) is completely unchanged",
         "cargo clippy --workspace --all-targets passes with no new warnings"
       ],
@@ -24,16 +21,18 @@
       "notes": ""
     },
     {
-      "id": "P10-US-002",
-      "title": "Port tag show Human Output to Go Deployment Context Format",
-      "description": "As a CLI user, I want the tag show output to display deployment context with address and comma-separated inline tags so that output matches Go CLI format",
+      "id": "P11-US-002",
+      "title": "Port prune Command Human Output to Go Section/Emoji Format",
+      "description": "As a developer, I want the prune command human output to use emoji-staged section listings with per-type grouping so that it matches the Go CLI format exactly.",
       "acceptanceCriteria": [
-        "Tag show prints cyan bold 'Deployment: NS/CHAINID/NAME' header",
-        "Prints white bold 'Address: ' with green bold address value",
-        "Prints white bold 'Tags:    ' with cyan comma-separated sorted tags or faint 'No tags'",
-        "Tags are sorted alphabetically for consistent display",
-        "Blank line before and after the output block",
-        "JSON output unchanged",
+        "Empty result prints '✅ All registry entries are valid. Nothing to prune.'",
+        "Dry-run prints '🔍 Checking registry entries...' header and '🗑️  Found N items to prune:' with per-section listings",
+        "Deployment candidates rendered as '  - {id} at {address} (reason: {reason})'",
+        "Transaction candidates rendered as '  - {id} [{status}] (reason: {reason})'",
+        "Destructive mode shows '⚠️' confirmation, '🔧 Pruning registry entries...', and '✅ Successfully pruned N items'",
+        "Cancellation shows '❌ Prune cancelled.'",
+        "Backup still created internally before destructive removal",
+        "JSON output (--json) completely unchanged",
         "cargo clippy --workspace --all-targets passes"
       ],
       "priority": 2,
@@ -41,15 +40,17 @@
       "notes": ""
     },
     {
-      "id": "P10-US-003",
-      "title": "Port tag add Human Output to Go Format",
-      "description": "As a CLI user, I want the tag add output to show a green success line with deployment path and 'Current tags:' with inline cyan tags so that output matches Go CLI format",
+      "id": "P11-US-003",
+      "title": "Port reset Command Human Output to Go Aligned-Count Format",
+      "description": "As a developer, I want the reset command human output to use 'Found N items to reset' header with aligned per-type count lines and plain success message so that it matches the Go CLI format exactly.",
       "acceptanceCriteria": [
-        "No '📝 Updating tags...' line in output",
-        "Success line is green with ✅ emoji: 'Added tag TAG to deployment_id'",
-        "Tags displayed as 'Current tags: tag1, tag2' with cyan tag names, comma-separated",
-        "Tags are sorted alphabetically",
-        "JSON output unchanged",
+        "Empty result prints 'Nothing to reset. No registry entries found for the current namespace and network.' in plain text",
+        "Items found prints 'Found N items to reset for namespace ... on network ... (chain ...):' with aligned per-type counts",
+        "Per-type count lines use fixed-width label alignment matching Go spacing",
+        "Confirmation prompt matches Go wording exactly",
+        "Success message is plain text 'Successfully reset N items from the registry.' with no color or emoji",
+        "Backup still created internally before removal but path not displayed",
+        "JSON output (--json) completely unchanged",
         "cargo clippy --workspace --all-targets passes"
       ],
       "priority": 3,
@@ -57,16 +58,15 @@
       "notes": ""
     },
     {
-      "id": "P10-US-004",
-      "title": "Port tag remove Human Output to Go Format",
-      "description": "As a CLI user, I want the tag remove output to show a green success line and 'Remaining tags:' with inline cyan tags or faint 'No tags' so that output matches Go CLI format",
+      "id": "P11-US-004",
+      "title": "Update Unit Tests for register, prune, and reset Output Changes",
+      "description": "As a developer, I want unit tests and CLI assertion-based integration tests updated to match the new Go-matching output format so that all tests pass.",
       "acceptanceCriteria": [
-        "No '📝 Updating tags...' line in output",
-        "Success line is green with ✅ emoji: 'Removed tag TAG from deployment_id'",
-        "When tags remain: 'Remaining tags: tag1, tag2' with cyan names",
-        "When no tags left: 'Remaining tags: No tags' with faint styling",
-        "Tags are sorted alphabetically",
-        "JSON output unchanged",
+        "cargo test -p treb-cli --lib -- prune passes",
+        "cargo test -p treb-cli --lib -- reset passes",
+        "cargo test -p treb-cli --test cli_prune_reset_migrate passes",
+        "All output string assertions updated to new Go-matching format",
+        "Assertions referencing removed elements (comfy_table headers, stage markers, backup path lines) removed",
         "cargo clippy --workspace --all-targets passes"
       ],
       "priority": 4,
@@ -74,36 +74,34 @@
       "notes": ""
     },
     {
-      "id": "P10-US-005",
-      "title": "Update Unit Tests for sync and tag Output Changes",
-      "description": "As a developer, I want the unit tests in sync.rs and tag.rs to assert on the new Go-matching output format so that tests validate the correct behavior",
+      "id": "P11-US-005",
+      "title": "Update E2E Workflow Test Assertions for register, prune, and reset",
+      "description": "As a developer, I want E2E workflow tests updated to assert on the new Go-matching output format so that all E2E tests pass.",
       "acceptanceCriteria": [
-        "cargo test -p treb-cli --lib -- sync passes (all sync unit tests)",
-        "cargo test -p treb-cli --lib -- tag passes (all tag unit tests)",
-        "Expected strings updated: sync uses bullet format with •, section headers, ✓ footer",
-        "Expected strings updated: tag show uses deployment header, address, comma-separated tags",
-        "Expected strings updated: tag add uses '✅ Added...' + 'Current tags:' inline",
-        "Expected strings updated: tag remove uses '✅ Removed...' + 'Remaining tags:' inline",
-        "No dead code warnings from removed helpers (e.g., SyncDetailRow)",
+        "cargo test -p treb-cli --test e2e_register_workflow passes",
+        "cargo test -p treb-cli --test e2e_prune_reset_workflow passes",
+        "Register assertions check for '✓ Successfully registered' and 'Deployment ID:'",
+        "Prune assertions check for section listings and emoji-staged messages",
+        "Reset assertions check for 'Successfully reset N items from the registry.'",
         "cargo clippy --workspace --all-targets passes"
       ],
       "priority": 5,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P10-US-006",
+      "id": "P11-US-006",
       "title": "Update All Golden Test Expected Files",
-      "description": "As a developer, I want all golden test expected files for sync and tag commands regenerated and verified so that the test suite passes with no cross-command drift",
+      "description": "As a developer, I want all golden test expected files for register, prune, and reset regenerated so that golden tests pass and no cross-command drift occurs.",
       "acceptanceCriteria": [
-        "UPDATE_GOLDEN=1 cargo test -p treb-cli --test integration_sync --test integration_tag passes",
-        "All golden file diffs match expected output format changes (no unexpected regressions)",
+        "UPDATE_GOLDEN=1 cargo test -p treb-cli --test integration_register --test integration_prune --test integration_reset passes",
+        "Golden file diffs match expected output format changes with no unexpected regressions",
         "cargo test -p treb-cli passes (full CLI test suite, no cross-command failures)",
-        "cargo test --workspace --all-targets passes (full workspace)",
-        "cargo clippy --workspace --all-targets passes"
+        "cargo test --workspace --all-targets passes (full workspace validation)",
+        "Error golden files (uninitialized, bad prefix, tx not found) remain unchanged"
       ],
       "priority": 6,
-      "passes": true,
+      "passes": false,
       "notes": ""
     }
   ]
