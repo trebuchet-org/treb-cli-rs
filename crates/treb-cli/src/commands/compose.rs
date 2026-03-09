@@ -788,115 +788,122 @@ pub async fn run(
             );
         }
 
-        // Re-inject global env vars (reset any previous component overrides).
-        super::run::inject_env_vars(&env_vars)?;
+        let sig = component.sig.as_deref().unwrap_or("run()");
+        let effective_verify = component.verify.unwrap_or(verify);
 
-        // Inject per-component env vars (override global for same keys).
-        if let Some(env_map) = &component.env {
-            for (key, value) in env_map {
-                // SAFETY: single-threaded CLI code; no concurrent env access.
-                unsafe { env::set_var(key, value) };
+        let step_result: anyhow::Result<_> = async {
+            // Re-inject global env vars (reset any previous component overrides).
+            super::run::inject_env_vars(&env_vars)?;
+
+            // Inject per-component env vars (override global for same keys).
+            if let Some(env_map) = &component.env {
+                for (key, value) in env_map {
+                    // SAFETY: single-threaded CLI code; no concurrent env access.
+                    unsafe { env::set_var(key, value) };
+                }
             }
-        }
 
-        // Config resolution with global flags.
-        let resolved = resolve_config(ResolveOpts {
-            project_root: cwd.clone(),
-            namespace: namespace.clone(),
-            network: network.clone(),
-            profile: profile.clone(),
-            sender_overrides: HashMap::new(),
-        })
-        .with_context(|| format!("failed to resolve config for component '{}'", name))?;
+            // Config resolution with global flags.
+            let resolved = resolve_config(ResolveOpts {
+                project_root: cwd.clone(),
+                namespace: namespace.clone(),
+                network: network.clone(),
+                profile: profile.clone(),
+                sender_overrides: HashMap::new(),
+            })
+            .with_context(|| format!("failed to resolve config for component '{}'", name))?;
 
-        let effective_rpc_url = rpc_url.clone().or_else(|| resolved.network.clone());
+            let effective_rpc_url = rpc_url.clone().or_else(|| resolved.network.clone());
 
-        // Sender resolution.
-        let resolved_senders = resolve_all_senders(&resolved.senders)
-            .await
-            .with_context(|| format!("failed to resolve senders for component '{}'", name))?;
+            // Sender resolution.
+            let resolved_senders = resolve_all_senders(&resolved.senders)
+                .await
+                .with_context(|| format!("failed to resolve senders for component '{}'", name))?;
 
-        // Build ScriptConfig.
-        let mut script_config =
-            build_script_config_with_senders(&resolved, &component.script, &resolved_senders)
-                .with_context(|| {
+            // Build ScriptConfig.
+            let mut script_config =
+                build_script_config_with_senders(&resolved, &component.script, &resolved_senders)
+                    .with_context(|| {
                     format!("failed to build script config for component '{}'", name)
                 })?;
 
-        let sig = component.sig.as_deref().unwrap_or("run()");
-        let args = component.args.clone().unwrap_or_default();
-        let effective_verify = component.verify.unwrap_or(verify);
+            let args = component.args.clone().unwrap_or_default();
 
-        script_config
-            .sig(sig)
-            .args(args)
-            .broadcast(broadcast)
-            .dry_run(false)
-            .slow(slow || resolved.slow)
-            .legacy(legacy)
-            .verify(effective_verify)
-            .non_interactive(true); // Already prompted above
+            script_config
+                .sig(sig)
+                .args(args)
+                .broadcast(broadcast)
+                .dry_run(false)
+                .slow(slow || resolved.slow)
+                .legacy(legacy)
+                .verify(effective_verify)
+                .non_interactive(true); // Already prompted above
 
-        if let Some(ref url) = effective_rpc_url {
-            script_config.rpc_url(url);
-        }
+            if let Some(ref url) = effective_rpc_url {
+                script_config.rpc_url(url);
+            }
 
-        // Verbose per-component context.
-        if verbose && !json {
-            let sig_display = sig.to_string();
-            let verify_display = effective_verify.to_string();
-            let rpc_display = effective_rpc_url.clone().unwrap_or_default();
-            let chain_id_str = if !rpc_display.is_empty() {
-                let resolved_url = super::run::resolve_rpc_url_for_chain_id(&rpc_display, &cwd);
-                if let Some(url) = resolved_url {
-                    let cid = super::run::fetch_chain_id(&url).await.unwrap_or(0);
-                    if cid > 0 { cid.to_string() } else { String::new() }
+            // Verbose per-component context.
+            if verbose && !json {
+                let sig_display = sig.to_string();
+                let verify_display = effective_verify.to_string();
+                let rpc_display = effective_rpc_url.clone().unwrap_or_default();
+                let chain_id_str = if !rpc_display.is_empty() {
+                    let resolved_url = super::run::resolve_rpc_url_for_chain_id(&rpc_display, &cwd);
+                    if let Some(url) = resolved_url {
+                        let cid = super::run::fetch_chain_id(&url).await.unwrap_or(0);
+                        if cid > 0 { cid.to_string() } else { String::new() }
+                    } else {
+                        String::new()
+                    }
                 } else {
                     String::new()
+                };
+
+                let mut kv_pairs: Vec<(&str, &str)> =
+                    vec![("Script", &component.script), ("Namespace", &resolved.namespace)];
+                if !rpc_display.is_empty() {
+                    kv_pairs.push(("RPC", &rpc_display));
                 }
-            } else {
-                String::new()
+                if !chain_id_str.is_empty() {
+                    kv_pairs.push(("Chain ID", &chain_id_str));
+                }
+                kv_pairs.push(("Sig", &sig_display));
+                kv_pairs.push(("Verify", &verify_display));
+                output::eprint_kv(&kv_pairs);
+                eprintln!();
+            }
+
+            // Build pipeline context.
+            let pipeline_config = PipelineConfig {
+                script_path: component.script.clone(),
+                dry_run: false,
+                namespace: resolved.namespace.clone(),
+                script_sig: sig.to_string(),
+                script_args: Vec::new(),
+                ..Default::default()
             };
 
-            let mut kv_pairs: Vec<(&str, &str)> =
-                vec![("Script", &component.script), ("Namespace", &resolved.namespace)];
-            if !rpc_display.is_empty() {
-                kv_pairs.push(("RPC", &rpc_display));
-            }
-            if !chain_id_str.is_empty() {
-                kv_pairs.push(("Chain ID", &chain_id_str));
-            }
-            kv_pairs.push(("Sig", &sig_display));
-            kv_pairs.push(("Verify", &verify_display));
-            output::eprint_kv(&kv_pairs);
-            eprintln!();
+            let git_commit = resolve_git_commit();
+
+            let pipeline_context = PipelineContext {
+                config: pipeline_config,
+                script_path: PathBuf::from(&component.script),
+                git_commit,
+                project_root: cwd.clone(),
+                deployer_sender: None,
+            };
+
+            // Execute pipeline.
+            let pipeline = RunPipeline::new(pipeline_context).with_script_config(script_config);
+            let result = pipeline.execute(&mut registry).await?;
+
+            Ok((result, resolved.namespace, effective_rpc_url))
         }
+        .await;
 
-        // Build pipeline context.
-        let pipeline_config = PipelineConfig {
-            script_path: component.script.clone(),
-            dry_run: false,
-            namespace: resolved.namespace.clone(),
-            script_sig: sig.to_string(),
-            script_args: Vec::new(),
-            ..Default::default()
-        };
-
-        let git_commit = resolve_git_commit();
-
-        let pipeline_context = PipelineContext {
-            config: pipeline_config,
-            script_path: PathBuf::from(&component.script),
-            git_commit,
-            project_root: cwd.clone(),
-            deployer_sender: None,
-        };
-
-        // Execute pipeline.
-        let pipeline = RunPipeline::new(pipeline_context).with_script_config(script_config);
-
-        match pipeline.execute(&mut registry).await {
-            Ok(result) => {
+        match step_result {
+            Ok((result, resolved_namespace, effective_rpc_url)) => {
                 completed += 1;
                 if !json {
                     eprintln!(
@@ -932,7 +939,7 @@ pub async fn run(
                     log.push_str("status: success\n");
                     log.push_str(&format!("script: {}\n", component.script));
                     log.push_str(&format!("sig: {}\n", sig));
-                    log.push_str(&format!("namespace: {}\n", resolved.namespace));
+                    log.push_str(&format!("namespace: {}\n", resolved_namespace));
                     if let Some(ref url) = effective_rpc_url {
                         log.push_str(&format!("rpc: {}\n", url));
                     }
@@ -985,10 +992,7 @@ pub async fn run(
                 if !json {
                     eprintln!(
                         "{}",
-                        styled(
-                            &format!("{} Failed: {}", emoji::CROSS, error_msg),
-                            color::RED,
-                        ),
+                        styled(&format!("{} Failed: {}", emoji::CROSS, error_msg), color::RED,),
                     );
                 }
 

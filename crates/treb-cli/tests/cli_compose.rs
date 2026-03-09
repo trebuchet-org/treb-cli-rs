@@ -490,6 +490,53 @@ fn compose_json_execution_failure_emits_only_wrapped_json_error() {
     );
 }
 
+#[test]
+fn compose_setup_failure_uses_component_failed_renderer() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join("script")).unwrap();
+    fs::write(tmp.path().join("foundry.toml"), COMPOSE_EXEC_FOUNDRY_TOML).unwrap();
+
+    treb().arg("init").current_dir(tmp.path()).assert().success();
+
+    fs::write(
+        tmp.path().join("broken.yaml"),
+        "group: broken\ncomponents:\n  missing:\n    script: script/NonExistent.s.sol\n",
+    )
+    .unwrap();
+
+    let output = treb()
+        .args([
+            "compose",
+            "broken.yaml",
+            "--network",
+            "localhost",
+            "--non-interactive",
+            "--env",
+            "BADENV",
+        ])
+        .current_dir(tmp.path())
+        .output()
+        .expect("failed to run compose setup failure");
+
+    assert_eq!(output.status.code(), Some(1));
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(
+        stderr.contains(
+            "❌ Failed: invalid --env value 'BADENV': expected KEY=VALUE format (missing '=')"
+        ),
+        "missing per-component failure line: {stderr}"
+    );
+    assert!(
+        stderr.contains("Error: compose failed: component 'missing' failed (0/1 completed)"),
+        "unexpected top-level error: {stderr}"
+    );
+    assert!(
+        !stderr.contains("Error: invalid --env value 'BADENV'"),
+        "setup error should be rendered through the component failure path: {stderr}"
+    );
+}
+
 // ── Compose without init (non-dry-run) ────────────────────────────────
 
 #[test]
