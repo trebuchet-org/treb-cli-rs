@@ -104,7 +104,14 @@ pub async fn set(key: &str, value: &str) -> anyhow::Result<()> {
     }
 
     save_local_config(&cwd, &config).context("failed to save local config")?;
-    println!("Set {} = {}", key, value);
+
+    println!("{} Set {} to: {}", emoji::CHECK, key, value);
+    let config_path = cwd.join(".treb/config.local.json");
+    let relative_path = config_path
+        .strip_prefix(&cwd)
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| config_path.display().to_string());
+    println!("{} config saved to: {}", emoji::FOLDER, relative_path);
 
     Ok(())
 }
@@ -119,13 +126,32 @@ pub async fn remove(key: &str) -> anyhow::Result<()> {
     let defaults = LocalConfig::default();
 
     match key {
-        "namespace" => config.namespace = defaults.namespace,
-        "network" => config.network = defaults.network,
+        "namespace" => {
+            config.namespace = defaults.namespace.clone();
+            save_local_config(&cwd, &config).context("failed to save local config")?;
+            println!(
+                "{} Reset namespace to: {}",
+                emoji::CHECK,
+                defaults.namespace
+            );
+        }
+        "network" => {
+            config.network = defaults.network;
+            save_local_config(&cwd, &config).context("failed to save local config")?;
+            println!(
+                "{} Removed network from config (will be required as flag)",
+                emoji::CHECK
+            );
+        }
         _ => bail!("unknown config key '{}'; valid keys: namespace, network", key),
     }
 
-    save_local_config(&cwd, &config).context("failed to save local config")?;
-    println!("Removed {} (reset to default)", key);
+    let config_path = cwd.join(".treb/config.local.json");
+    let relative_path = config_path
+        .strip_prefix(&cwd)
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| config_path.display().to_string());
+    println!("{} config saved to: {}", emoji::FOLDER, relative_path);
 
     Ok(())
 }
