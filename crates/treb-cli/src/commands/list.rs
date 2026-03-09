@@ -628,7 +628,7 @@ pub async fn run(
             );
             print!("{hint}");
         } else {
-            println!("No deployments found.");
+            println!("No deployments found");
         }
     } else {
         let grouped =
@@ -705,6 +705,8 @@ pub async fn run(
                 }
             }
         }
+
+        println!("Total deployments: {}", result.deployments.len());
     }
 
     Ok(())
