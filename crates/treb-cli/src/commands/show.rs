@@ -4,7 +4,7 @@ use std::env;
 
 use anyhow::{Context, bail};
 use owo_colors::{OwoColorize, Style};
-use treb_core::types::Deployment;
+use treb_core::types::{Deployment, contract_display_name};
 use treb_registry::Registry;
 
 use crate::{
@@ -103,7 +103,9 @@ fn print_deployment_details(d: &Deployment) {
 
     // Basic Information (Go: Identity + On-Chain merged)
     print_section("Basic Information");
-    print_field("Contract", &d.contract_name);
+    let display_name = contract_display_name(&d.contract_name, &d.label);
+    let contract_styled = styled(&display_name, color::YELLOW);
+    print_field("Contract", &contract_styled);
     let addr_styled = styled(&d.address, color::ADDRESS);
     print_field("Address", &addr_styled);
     let type_str = d.deployment_type.to_string();
@@ -117,7 +119,8 @@ fn print_deployment_details(d: &Deployment) {
     print_field("Namespace", &ns_display);
     print_field("Network", &d.chain_id.to_string());
     if !d.label.is_empty() {
-        print_field("Label", &d.label);
+        let label_styled = styled(&d.label, Style::new().magenta());
+        print_field("Label", &label_styled);
     }
 
     // Deployment Strategy (Go: Transaction)
@@ -126,8 +129,15 @@ fn print_deployment_details(d: &Deployment) {
     if !d.deployment_strategy.factory.is_empty() {
         print_field("Factory", &d.deployment_strategy.factory);
     }
-    if !d.deployment_strategy.salt.is_empty() {
+    let zero_hash = "0x0000000000000000000000000000000000000000000000000000000000000000";
+    if !d.deployment_strategy.salt.is_empty() && d.deployment_strategy.salt != zero_hash {
         print_field("Salt", &d.deployment_strategy.salt);
+    }
+    if !d.deployment_strategy.entropy.is_empty() {
+        print_field("Entropy", &d.deployment_strategy.entropy);
+    }
+    if !d.deployment_strategy.init_code_hash.is_empty() {
+        print_field("InitCodeHash", &d.deployment_strategy.init_code_hash);
     }
 
     // Proxy Information (only for proxy deployments)
