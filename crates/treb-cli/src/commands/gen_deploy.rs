@@ -881,25 +881,36 @@ pub async fn run(
         fs::write(&output_path, &code)
             .with_context(|| format!("failed to write deploy script: {}", output_path.display()))?;
         // Leading newline before success message, matching Go render/generate.go
-        eprintln!();
-        output::print_stage(
-            "\u{2705}",
-            &format!("Generated deployment script: {}", output_path.display()),
+        println!();
+        println!(
+            "{}",
+            output::format_success(&format!(
+                "Generated deployment script: {}",
+                output_path.display()
+            ))
         );
         // Type-specific instruction lines matching Go buildInstructions
         if context.is_library {
-            eprintln!(
-                "This library will be deployed with CREATE2 for deterministic addresses."
-            );
+            match context.strategy.as_str() {
+                "create2" => {
+                    println!(
+                        "This library will be deployed with CREATE2 for deterministic addresses."
+                    );
+                }
+                "create3" => {
+                    println!(
+                        "This library will be deployed with CREATE3 for deterministic addresses."
+                    );
+                }
+                _ => {}
+            }
         } else if context.proxy.is_some() {
-            eprintln!(
-                "This script will deploy both the implementation and proxy contracts."
-            );
-            eprintln!("Make sure to update the initializer parameters if needed.");
+            println!("This script will deploy both the implementation and proxy contracts.");
+            println!("Make sure to update the initializer parameters if needed.");
         }
-        eprintln!();
-        eprintln!("To deploy, run:");
-        eprintln!("  treb run {} --network <network>", output_path.display());
+        println!();
+        println!("To deploy, run:");
+        println!("  treb run {} --network <network>", output_path.display());
     }
 
     Ok(())

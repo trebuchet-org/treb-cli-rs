@@ -322,6 +322,118 @@ fn gen_deploy_json_does_not_write_file() {
     );
 }
 
+#[test]
+fn gen_deploy_human_success_block_is_printed_to_stdout() {
+    let tmp = setup_project();
+
+    let output = treb()
+        .args([
+            "gen-deploy",
+            "Counter",
+            "--proxy",
+            "uups",
+            "--output",
+            "script/DeployCounter_uups.s.sol",
+        ])
+        .current_dir(tmp.path())
+        .output()
+        .expect("command should run");
+
+    assert!(output.status.success(), "command should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        stdout.starts_with("\n✅ Generated deployment script: script/DeployCounter_uups.s.sol\n")
+    );
+    assert!(
+        stdout.contains("This script will deploy both the implementation and proxy contracts.")
+    );
+    assert!(stdout.contains("Make sure to update the initializer parameters if needed."));
+    assert!(stdout.contains(
+        "\nTo deploy, run:\n  treb run script/DeployCounter_uups.s.sol --network <network>\n"
+    ));
+
+    assert!(stderr.contains("🔨 Compiling project..."));
+    assert!(stderr.contains("📝 Generating deploy script..."));
+    assert!(!stderr.contains("Generated deployment script:"));
+    assert!(
+        !stderr.contains("This script will deploy both the implementation and proxy contracts.")
+    );
+    assert!(!stderr.contains("To deploy, run:"));
+}
+
+#[test]
+fn gen_deploy_library_guidance_matches_strategy() {
+    let tmp = setup_project();
+
+    let create_output = treb()
+        .args([
+            "gen-deploy",
+            "MathLib",
+            "--strategy",
+            "create",
+            "--output",
+            "script/DeployMathLib_create.s.sol",
+        ])
+        .current_dir(tmp.path())
+        .output()
+        .expect("command should run");
+
+    assert!(create_output.status.success(), "create library command should succeed");
+
+    let create_stdout = String::from_utf8_lossy(&create_output.stdout);
+    assert!(
+        create_stdout
+            .starts_with("\n✅ Generated deployment script: script/DeployMathLib_create.s.sol\n")
+    );
+    assert!(!create_stdout.contains("CREATE2 for deterministic addresses."));
+    assert!(!create_stdout.contains("CREATE3 for deterministic addresses."));
+
+    let create2_output = treb()
+        .args([
+            "gen-deploy",
+            "MathLib",
+            "--strategy",
+            "create2",
+            "--output",
+            "script/DeployMathLib_create2.s.sol",
+        ])
+        .current_dir(tmp.path())
+        .output()
+        .expect("command should run");
+
+    assert!(create2_output.status.success(), "create2 library command should succeed");
+
+    let create2_stdout = String::from_utf8_lossy(&create2_output.stdout);
+    assert!(
+        create2_stdout
+            .contains("This library will be deployed with CREATE2 for deterministic addresses.")
+    );
+
+    let create3_output = treb()
+        .args([
+            "gen-deploy",
+            "MathLib",
+            "--strategy",
+            "create3",
+            "--output",
+            "script/DeployMathLib_create3.s.sol",
+        ])
+        .current_dir(tmp.path())
+        .output()
+        .expect("command should run");
+
+    assert!(create3_output.status.success(), "create3 library command should succeed");
+
+    let create3_stdout = String::from_utf8_lossy(&create3_output.stdout);
+    assert!(
+        create3_stdout
+            .contains("This library will be deployed with CREATE3 for deterministic addresses.")
+    );
+}
+
 // ── Error cases ─────────────────────────────────────────────────────────
 
 #[test]
