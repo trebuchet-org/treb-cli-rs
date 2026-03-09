@@ -315,11 +315,7 @@ pub fn calculate_column_widths(tables: &[TableData]) -> Vec<usize> {
         for row in table {
             for (col_idx, cell) in row.iter().enumerate() {
                 let stripped = strip_ansi_codes(cell);
-                let w = if col_idx == 2 {
-                    display_width(&stripped)
-                } else {
-                    stripped.len()
-                };
+                let w = if col_idx == 2 { display_width(&stripped) } else { stripped.len() };
                 if col_idx >= widths.len() {
                     widths.resize(col_idx + 1, 0);
                 }
@@ -337,7 +333,8 @@ pub fn calculate_column_widths(tables: &[TableData]) -> Vec<usize> {
 /// Produces output matching Go's `renderTableWithWidths`: no borders, no
 /// separators, 3-space right padding between columns, fixed column widths,
 /// and `continuation_prefix` prepended to the first cell of each row.
-/// The first column width is adjusted by `2 + continuation_prefix.len()`.
+/// The first column width is adjusted by `2 + continuation_prefix.len()`,
+/// using stripped byte widths to match `calculate_column_widths`.
 #[allow(dead_code)]
 pub fn render_table_with_widths(
     table: &TableData,
@@ -348,8 +345,7 @@ pub fn render_table_with_widths(
         return String::new();
     }
 
-    let first_col_width =
-        widths.first().copied().unwrap_or(0) + 2 + continuation_prefix.len();
+    let first_col_width = widths.first().copied().unwrap_or(0) + 2 + continuation_prefix.len();
 
     let mut lines = Vec::new();
     for row in table {
@@ -358,19 +354,16 @@ pub fn render_table_with_widths(
         for (col_idx, cell) in row.iter().enumerate() {
             if col_idx == 0 {
                 let content = format!("{continuation_prefix}{cell}");
-                let content_chars = content.chars().count();
+                let content_width = continuation_prefix.len() + strip_ansi_codes(cell).len();
                 line.push_str(&content);
-                if content_chars < first_col_width {
-                    line.push_str(&" ".repeat(first_col_width - content_chars));
+                if content_width < first_col_width {
+                    line.push_str(&" ".repeat(first_col_width - content_width));
                 }
             } else {
                 let col_width = widths.get(col_idx).copied().unwrap_or(0);
                 let stripped = strip_ansi_codes(cell);
-                let cell_width = if col_idx == 2 {
-                    display_width(&stripped)
-                } else {
-                    stripped.len()
-                };
+                let cell_width =
+                    if col_idx == 2 { display_width(&stripped) } else { stripped.len() };
                 line.push_str(cell);
                 if cell_width < col_width {
                     line.push_str(&" ".repeat(col_width - cell_width));
@@ -825,24 +818,15 @@ mod tests {
 
     #[test]
     fn calculate_column_widths_multiple_tables() {
-        let table1: TableData = vec![
-            vec!["Short".into(), "A".into()],
-        ];
-        let table2: TableData = vec![
-            vec!["LongerName".into(), "BB".into()],
-        ];
+        let table1: TableData = vec![vec!["Short".into(), "A".into()]];
+        let table2: TableData = vec![vec!["LongerName".into(), "BB".into()]];
         let widths = calculate_column_widths(&[table1, table2]);
         assert_eq!(widths, vec![10, 2]);
     }
 
     #[test]
     fn calculate_column_widths_strips_ansi() {
-        let table: TableData = vec![
-            vec![
-                "\x1b[31mRed\x1b[0m".into(),
-                "plain".into(),
-            ],
-        ];
+        let table: TableData = vec![vec!["\x1b[31mRed\x1b[0m".into(), "plain".into()]];
         let widths = calculate_column_widths(&[table]);
         // "Red" after stripping = 3 bytes
         assert_eq!(widths[0], 3);
@@ -853,9 +837,7 @@ mod tests {
     fn calculate_column_widths_col2_uses_display_width() {
         // Column 2 should use display_width, not byte length
         // "⏳" is 2 display columns but 3 bytes in UTF-8
-        let table: TableData = vec![
-            vec!["a".into(), "b".into(), "⏳".into()],
-        ];
+        let table: TableData = vec![vec!["a".into(), "b".into(), "⏳".into()]];
         let widths = calculate_column_widths(&[table]);
         assert_eq!(widths[2], 2, "column 2 should use display_width (2), not byte len (3)");
     }
@@ -870,10 +852,8 @@ mod tests {
 
     #[test]
     fn render_table_with_widths_no_borders_three_space_padding() {
-        let table: TableData = vec![
-            vec!["Alice".into(), "100".into()],
-            vec!["Bob".into(), "42".into()],
-        ];
+        let table: TableData =
+            vec![vec!["Alice".into(), "100".into()], vec!["Bob".into(), "42".into()]];
         let widths = vec![5, 3];
         let result = render_table_with_widths(&table, &widths, "");
         let lines: Vec<&str> = result.lines().collect();
@@ -892,9 +872,7 @@ mod tests {
 
     #[test]
     fn render_table_with_widths_continuation_prefix() {
-        let table: TableData = vec![
-            vec!["Name".into(), "Val".into()],
-        ];
+        let table: TableData = vec![vec!["Name".into(), "Val".into()]];
         let widths = vec![4, 3];
         let result = render_table_with_widths(&table, &widths, ">> ");
         // first col width = 4 + 2 + 3 = 9
@@ -904,10 +882,16 @@ mod tests {
     }
 
     #[test]
+    fn render_table_with_widths_unicode_continuation_prefix_uses_byte_width() {
+        let table: TableData = vec![vec!["Name".into(), "Val".into()]];
+        let widths = calculate_column_widths(std::slice::from_ref(&table));
+
+        assert_eq!(render_table_with_widths(&table, &widths, "│  "), "│  Name     Val");
+    }
+
+    #[test]
     fn render_table_with_widths_first_col_width_adjustment() {
-        let table: TableData = vec![
-            vec!["ABCDE".into(), "X".into()],
-        ];
+        let table: TableData = vec![vec!["ABCDE".into(), "X".into()]];
         let widths = vec![5, 1];
         // With empty prefix: first_col_width = 5 + 2 + 0 = 7
         let result_no_prefix = render_table_with_widths(&table, &widths, "");
@@ -922,10 +906,8 @@ mod tests {
 
     #[test]
     fn render_table_with_widths_ansi_cells_padded_correctly() {
-        let table: TableData = vec![
-            vec!["plain".into(), "\x1b[32mgreen\x1b[0m".into()],
-            vec!["a".into(), "b".into()],
-        ];
+        let table: TableData =
+            vec![vec!["plain".into(), "\x1b[32mgreen\x1b[0m".into()], vec!["a".into(), "b".into()]];
         let widths = calculate_column_widths(std::slice::from_ref(&table));
         // col 0: max(5, 1) = 5
         // col 1: max(5, 1) = 5
@@ -933,9 +915,25 @@ mod tests {
 
         let result = render_table_with_widths(&table, &widths, "");
         let lines: Vec<&str> = result.lines().collect();
-        // Line 0: "plain" padded to 7, 3 spaces, "\x1b[32mgreen\x1b[0m" (5 visible chars, no padding needed)
-        // Line 1: "a" padded to 7, 3 spaces, "b" padded to 5
+        // Line 0: "plain" padded to 7, 3 spaces, "\x1b[32mgreen\x1b[0m" (5 visible chars, no
+        // padding needed) Line 1: "a" padded to 7, 3 spaces, "b" padded to 5
         assert_eq!(lines[1], "a         b    ");
+    }
+
+    #[test]
+    fn render_table_with_widths_ansi_first_column_uses_stripped_width() {
+        let table: TableData =
+            vec![vec!["\x1b[31mRed\x1b[0m".into(), "A".into()], vec!["plain".into(), "B".into()]];
+        let widths = calculate_column_widths(std::slice::from_ref(&table));
+
+        let result = render_table_with_widths(&table, &widths, "");
+        let lines: Vec<&str> = result.lines().collect();
+        let stripped_lines: Vec<String> =
+            lines.iter().map(|line| strip_ansi_codes(line).into_owned()).collect();
+
+        assert_eq!(lines[0], "\x1b[31mRed\x1b[0m       A");
+        assert_eq!(stripped_lines[0], "Red       A");
+        assert_eq!(stripped_lines[1], "plain     B");
     }
 
     #[test]
