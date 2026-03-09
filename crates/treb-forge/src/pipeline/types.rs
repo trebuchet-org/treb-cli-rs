@@ -118,6 +118,10 @@ pub struct RecordedDeployment {
 pub struct RecordedTransaction {
     /// The core domain transaction that was written.
     pub transaction: Transaction,
+    /// Sender role/name emitted during script execution, if available.
+    pub sender_name: Option<String>,
+    /// Per-transaction gas estimate or usage, if available from execution artifacts.
+    pub gas_used: Option<u64>,
 }
 
 // ---------------------------------------------------------------------------

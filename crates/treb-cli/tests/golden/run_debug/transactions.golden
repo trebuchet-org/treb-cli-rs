@@ -9,7 +9,16 @@
     "deployments": [
       "default/31337/Counter:Counter"
     ],
-    "operations": [],
+    "operations": [
+      {
+        "type": "DEPLOY",
+        "target": "0x5b73C5498c1E3b4dbA84de0F1833c4a029d90519",
+        "method": "CREATE",
+        "result": {
+          "address": "0x5b73C5498c1E3b4dbA84de0F1833c4a029d90519"
+        }
+      }
+    ],
     "environment": "default",
     "createdAt": "<TIMESTAMP>"
   }

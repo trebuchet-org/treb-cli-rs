@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256, hex};
 use chrono::Utc;
 
 pub use treb_core::types::ids::generate_deployment_id;
@@ -15,11 +15,13 @@ use treb_core::types::{
     enums::{DeploymentType, ProposalStatus, TransactionStatus, VerificationStatus},
     governor_proposal::GovernorProposal,
     safe_transaction::SafeTransaction,
-    transaction::Transaction,
+    transaction::{Operation, Transaction},
 };
 
 use crate::events::{
-    abi::{GovernorProposalCreated, SafeTransactionQueued, TransactionSimulated},
+    abi::{
+        GovernorProposalCreated, SafeTransactionQueued, SimulatedTransaction, TransactionSimulated,
+    },
     deployments::ExtractedDeployment,
     proxy::{ProxyRelationship, ProxyType},
 };
@@ -144,11 +146,10 @@ pub fn hydrate_transactions(
             let tx_id_hex = format!("tx-{:#x}", sim_tx.transactionId);
 
             // Find deployment IDs that belong to this transaction.
-            let linked_deployment_ids: Vec<String> = hydrated_deployments
-                .iter()
-                .filter(|d| d.transaction_id == tx_id_hex)
-                .map(|d| d.id.clone())
-                .collect();
+            let linked_deployments: Vec<&Deployment> =
+                hydrated_deployments.iter().filter(|d| d.transaction_id == tx_id_hex).collect();
+            let linked_deployment_ids: Vec<String> =
+                linked_deployments.iter().map(|d| d.id.clone()).collect();
 
             Transaction {
                 id: tx_id_hex,
@@ -159,13 +160,58 @@ pub fn hydrate_transactions(
                 sender: sim_tx.sender.to_checksum(None),
                 nonce: 0,
                 deployments: linked_deployment_ids,
-                operations: Vec::new(),
+                operations: hydrate_transaction_operations(sim_tx, &linked_deployments),
                 safe_context: None,
                 environment: context.config.namespace.clone(),
                 created_at: now,
             }
         })
         .collect()
+}
+
+fn hydrate_transaction_operations(
+    sim_tx: &SimulatedTransaction,
+    linked_deployments: &[&Deployment],
+) -> Vec<Operation> {
+    if !linked_deployments.is_empty() {
+        return linked_deployments
+            .iter()
+            .map(|deployment| Operation {
+                operation_type: "DEPLOY".to_string(),
+                target: deployment.address.clone(),
+                method: deployment.deployment_strategy.method.to_string(),
+                result: {
+                    let mut result = HashMap::new();
+                    result.insert(
+                        "address".to_string(),
+                        serde_json::Value::String(deployment.address.clone()),
+                    );
+                    result
+                },
+            })
+            .collect();
+    }
+
+    let target = if sim_tx.transaction.to == Address::ZERO {
+        "contract creation".to_string()
+    } else {
+        sim_tx.transaction.to.to_checksum(None)
+    };
+
+    vec![Operation {
+        operation_type: if sim_tx.transaction.to == Address::ZERO {
+            "DEPLOY".to_string()
+        } else {
+            "CALL".to_string()
+        },
+        target,
+        method: selector_hex(&sim_tx.transaction.data),
+        result: HashMap::new(),
+    }]
+}
+
+fn selector_hex(data: &[u8]) -> String {
+    if data.len() < 4 { String::new() } else { format!("0x{}", hex::encode(&data[..4])) }
 }
 
 /// Convert [`SafeTransactionQueued`] events into core-domain [`SafeTransaction`] stubs.
@@ -598,11 +644,42 @@ mod tests {
         assert_eq!(tx.block_number, 0);
         assert_eq!(tx.nonce, 0);
         assert!(tx.safe_context.is_none());
+        assert_eq!(tx.operations.len(), 2);
+        assert_eq!(tx.operations[0].operation_type, "DEPLOY");
+        assert_eq!(tx.operations[0].method, "CREATE");
 
         // Both deployments should be linked
         assert_eq!(tx.deployments.len(), 2);
         assert!(tx.deployments.contains(&"production/1/Counter:v1".to_string()));
         assert!(tx.deployments.contains(&"production/1/Token:v1".to_string()));
+    }
+
+    #[test]
+    fn hydrate_call_transaction_adds_call_operation() {
+        let ctx = test_context();
+        let tx_id = b256!("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
+
+        let events = vec![TransactionSimulated {
+            transactions: vec![SimulatedTransaction {
+                transactionId: tx_id,
+                senderId: "governance".to_string(),
+                sender: address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                returnData: Bytes::new(),
+                transaction: crate::events::abi::Transaction {
+                    to: address!("0000000000000000000000000000000000001000"),
+                    data: Bytes::from(vec![0xde, 0xad, 0xbe, 0xef, 0x01]),
+                    value: U256::ZERO,
+                },
+            }],
+        }];
+
+        let transactions = hydrate_transactions(&events, &[], &ctx);
+        let tx = &transactions[0];
+
+        assert_eq!(tx.operations.len(), 1);
+        assert_eq!(tx.operations[0].operation_type, "CALL");
+        assert_eq!(tx.operations[0].target, "0x0000000000000000000000000000000000001000");
+        assert_eq!(tx.operations[0].method, "0xdeadbeef");
     }
 
     #[test]

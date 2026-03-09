@@ -450,8 +450,10 @@ fn dry_run_leaves_registry_unchanged() {
         .into_iter()
         .map(|d| RecordedDeployment { deployment: d, safe_transaction: None })
         .collect();
-    let recorded_txs: Vec<RecordedTransaction> =
-        transactions.into_iter().map(|t| RecordedTransaction { transaction: t }).collect();
+    let recorded_txs: Vec<RecordedTransaction> = transactions
+        .into_iter()
+        .map(|t| RecordedTransaction { transaction: t, sender_name: None, gas_used: None })
+        .collect();
 
     let result = build_pipeline_result(recorded_deps, recorded_txs, vec![], vec![], true);
 

@@ -3,7 +3,8 @@ No files changed, compilation skipped
 
 🔄 Transactions:
 ──────────────────────────────────────────────────
-  1.  (SIMULATED)
+
+  simulated governance → 0x0000000000000000000000000000000000001000::0xdeadbeef(CALL)
 
 
 ✓ Registry Update:

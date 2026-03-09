@@ -7,7 +7,14 @@
     "sender": "0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa",
     "nonce": 0,
     "deployments": [],
-    "operations": [],
+    "operations": [
+      {
+        "type": "CALL",
+        "target": "0x0000000000000000000000000000000000001000",
+        "method": "0xdeadbeef",
+        "result": {}
+      }
+    ],
     "environment": "default",
     "createdAt": "<TIMESTAMP>"
   }

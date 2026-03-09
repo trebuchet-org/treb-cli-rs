@@ -779,11 +779,7 @@ fn format_tx_status(status: &TransactionStatus) -> String {
         TransactionStatus::Executed => ("executed ", color::GREEN),
         TransactionStatus::Failed => ("failed   ", color::RED),
     };
-    if color::is_color_enabled() {
-        format!("{}", label.style(style))
-    } else {
-        label.to_string()
-    }
+    if color::is_color_enabled() { format!("{}", label.style(style)) } else { label.to_string() }
 }
 
 /// Format a summary of the first operation for display after the `→` arrow.
@@ -801,13 +797,16 @@ fn format_tx_operations(operations: &[Operation]) -> String {
 
 /// Build a pipe-separated gray footer line with hash, block number (only
 /// non-empty / non-zero fields).
-fn format_tx_footer(tx: &treb_core::types::Transaction) -> String {
+fn format_tx_footer(tx: &treb_forge::pipeline::RecordedTransaction) -> String {
     let mut parts = Vec::new();
-    if !tx.hash.is_empty() {
-        parts.push(format!("Tx: {}", tx.hash));
+    if !tx.transaction.hash.is_empty() {
+        parts.push(format!("Tx: {}", tx.transaction.hash));
     }
-    if tx.block_number > 0 {
-        parts.push(format!("Block: {}", tx.block_number));
+    if tx.transaction.block_number > 0 {
+        parts.push(format!("Block: {}", tx.transaction.block_number));
+    }
+    if let Some(gas_used) = tx.gas_used.filter(|gas| *gas > 0) {
+        parts.push(format!("Gas: {gas_used}"));
     }
     if parts.is_empty() {
         return String::new();
@@ -818,6 +817,10 @@ fn format_tx_footer(tx: &treb_core::types::Transaction) -> String {
     } else {
         format!("   {}", footer)
     }
+}
+
+fn tx_sender_label(tx: &treb_forge::pipeline::RecordedTransaction) -> &str {
+    tx.sender_name.as_deref().filter(|name| !name.is_empty()).unwrap_or(&tx.transaction.sender)
 }
 
 fn display_result_human(result: &PipelineResult) {
@@ -835,9 +838,9 @@ fn display_result_human(result: &PipelineResult) {
             let tx = &rt.transaction;
             let status_str = format_tx_status(&tx.status);
             let sender_str = if color::is_color_enabled() {
-                format!("{}", tx.sender.style(color::GREEN))
+                format!("{}", tx_sender_label(rt).style(color::GREEN))
             } else {
-                tx.sender.clone()
+                tx_sender_label(rt).to_string()
             };
             let ops_str = format_tx_operations(&tx.operations);
             if ops_str.is_empty() {
@@ -845,7 +848,7 @@ fn display_result_human(result: &PipelineResult) {
             } else {
                 println!("\n  {} {} → {}", status_str, sender_str, ops_str);
             }
-            let footer = format_tx_footer(tx);
+            let footer = format_tx_footer(rt);
             if !footer.is_empty() {
                 println!("{}", footer);
             }
@@ -1230,5 +1233,56 @@ mod tests {
         result.dry_run = true;
 
         assert_eq!(registry_update_section_message(&result), None);
+    }
+
+    #[test]
+    fn format_tx_footer_includes_gas_when_present() {
+        let recorded = treb_forge::pipeline::RecordedTransaction {
+            transaction: treb_core::types::Transaction {
+                id: "tx-001".into(),
+                chain_id: 1,
+                hash: "0xabc".into(),
+                status: TransactionStatus::Executed,
+                block_number: 42,
+                sender: "0xsender".into(),
+                nonce: 0,
+                deployments: Vec::new(),
+                operations: Vec::new(),
+                safe_context: None,
+                environment: "default".into(),
+                created_at: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
+            },
+            sender_name: Some("deployer".into()),
+            gas_used: Some(123456),
+        };
+
+        let footer = format_tx_footer(&recorded);
+        assert!(footer.contains("Tx: 0xabc"), "got: {footer}");
+        assert!(footer.contains("Block: 42"), "got: {footer}");
+        assert!(footer.contains("Gas: 123456"), "got: {footer}");
+    }
+
+    #[test]
+    fn tx_sender_label_prefers_sender_name() {
+        let recorded = treb_forge::pipeline::RecordedTransaction {
+            transaction: treb_core::types::Transaction {
+                id: "tx-001".into(),
+                chain_id: 1,
+                hash: String::new(),
+                status: TransactionStatus::Simulated,
+                block_number: 0,
+                sender: "0xsender".into(),
+                nonce: 0,
+                deployments: Vec::new(),
+                operations: Vec::new(),
+                safe_context: None,
+                environment: "default".into(),
+                created_at: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
+            },
+            sender_name: Some("anvil".into()),
+            gas_used: None,
+        };
+
+        assert_eq!(tx_sender_label(&recorded), "anvil");
     }
 }
