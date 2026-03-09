@@ -926,6 +926,15 @@ fn tx_sender_label(tx: &treb_forge::pipeline::RecordedTransaction) -> &str {
     tx.sender_name.as_deref().filter(|name| !name.is_empty()).unwrap_or(&tx.transaction.sender)
 }
 
+fn format_skipped_deployment_line(skipped: &treb_forge::SkippedDeployment) -> String {
+    format!(
+        "  - {} ({}) — {}",
+        skipped.deployment.contract_name,
+        output::truncate_address(&skipped.deployment.address),
+        skipped.reason
+    )
+}
+
 fn display_result_human(result: &PipelineResult, network: Option<&str>, namespace: &str) {
     // ── Transactions ────────────────────────────────────────────────────
     output::print_section_header(emoji::REFRESH, "Transactions", 50);
@@ -1050,11 +1059,7 @@ fn display_result_human(result: &PipelineResult, network: Option<&str>, namespac
             let tx_suffix = if tx_count == 1 { "" } else { "s" };
 
             if color::is_color_enabled() {
-                println!(
-                    "\n  {} ({})",
-                    proposal_id.style(color::CYAN),
-                    status_label,
-                );
+                println!("\n  {} ({})", proposal_id.style(color::CYAN), status_label,);
                 println!(
                     "   Governor: {} | Timelock: {} | Status: {} | {} linked transaction{}",
                     governor.style(color::GRAY),
@@ -1074,6 +1079,15 @@ fn display_result_human(result: &PipelineResult, network: Option<&str>, namespac
         println!();
     }
 
+    // ── Skipped Deployments ─────────────────────────────────────────────
+    if !result.skipped.is_empty() {
+        println!("Skipped:");
+        for skipped in &result.skipped {
+            println!("{}", format_skipped_deployment_line(skipped));
+        }
+        println!();
+    }
+
     // ── Success Message ───────────────────────────────────────────────
     let success_msg = format!("{} Script execution completed successfully", emoji::CHECK_MARK,);
     if color::is_color_enabled() {
@@ -1088,8 +1102,12 @@ mod tests {
     use super::*;
     use alloy_primitives::{Address, B256};
     use chrono::{TimeZone, Utc};
-    use treb_core::types::{GovernorProposal, ProposalStatus, enums::DeploymentMethod};
-    use treb_forge::{events::ExtractedCollision, in_memory_signer};
+    use treb_core::types::{
+        GovernorProposal, ProposalStatus,
+        deployment::{ArtifactInfo, Deployment, DeploymentStrategy, VerificationInfo},
+        enums::{DeploymentMethod, DeploymentType, VerificationStatus},
+    };
+    use treb_forge::{SkippedDeployment, events::ExtractedCollision, in_memory_signer};
 
     struct TestEnvVarGuard {
         name: &'static str,
@@ -1133,6 +1151,49 @@ mod tests {
             description: String::new(),
             executed_at: None,
             execution_tx_hash: String::new(),
+        }
+    }
+
+    fn sample_skipped_deployment(reason: &str) -> SkippedDeployment {
+        let timestamp = Utc.with_ymd_and_hms(2025, 4, 1, 10, 0, 0).unwrap();
+        SkippedDeployment {
+            deployment: Deployment {
+                id: "production/1/Counter:v1".into(),
+                namespace: "production".into(),
+                chain_id: 1,
+                contract_name: "Counter".into(),
+                label: "v1".into(),
+                address: "0x1234567890abcdef1234567890abcdef12345678".into(),
+                deployment_type: DeploymentType::Singleton,
+                transaction_id: "tx-001".into(),
+                deployment_strategy: DeploymentStrategy {
+                    method: DeploymentMethod::Create,
+                    salt: String::new(),
+                    init_code_hash: String::new(),
+                    factory: String::new(),
+                    constructor_args: String::new(),
+                    entropy: String::new(),
+                },
+                proxy_info: None,
+                artifact: ArtifactInfo {
+                    path: "out/Counter.sol/Counter.json".into(),
+                    compiler_version: "0.8.24".into(),
+                    bytecode_hash: "0xabcdef".into(),
+                    script_path: "script/Deploy.s.sol".into(),
+                    git_commit: "abc1234".into(),
+                },
+                verification: VerificationInfo {
+                    status: VerificationStatus::Unverified,
+                    etherscan_url: String::new(),
+                    verified_at: None,
+                    reason: String::new(),
+                    verifiers: HashMap::new(),
+                },
+                tags: None,
+                created_at: timestamp,
+                updated_at: timestamp,
+            },
+            reason: reason.into(),
         }
     }
 
@@ -1381,6 +1442,18 @@ mod tests {
         assert_eq!(
             collision_metadata_lines(&collision),
             vec!["    Label: counter-v1".to_string(), "    Entropy: entropy-seed".to_string(),]
+        );
+    }
+
+    #[test]
+    fn format_skipped_deployment_line_includes_name_address_and_reason() {
+        let skipped = sample_skipped_deployment(
+            "Deployment with ID 'production/1/Counter:v1' already exists",
+        );
+
+        assert_eq!(
+            format_skipped_deployment_line(&skipped),
+            "  - Counter (0x1234...5678) — Deployment with ID 'production/1/Counter:v1' already exists"
         );
     }
 

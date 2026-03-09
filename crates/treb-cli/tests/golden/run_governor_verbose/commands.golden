@@ -17,9 +17,12 @@ No files changed, compilation skipped
 
 
 ✓ Updated registry for anvil-31337 network in namespace default
-Governor Proposals:
-  1. 42 (proposed)
-     Governor: 0xaAaA...aaAa | Timelock: 0xbBbB...BBbB | Status: pending | 1 linked transaction
+
+🏛️ Governor Proposals:
+──────────────────────────────────────────────────
+
+  42 (proposed)
+   Governor: 0xaAaA...aaAa | Timelock: 0xbBbB...BBbB | Status: pending | 1 linked transaction
 
 ✓ Script execution completed successfully
 🔨 Compiling and executing script/GovernorProposal.s.sol...
