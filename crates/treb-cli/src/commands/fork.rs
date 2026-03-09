@@ -881,51 +881,43 @@ pub async fn run_status(json: bool) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let mut table = crate::output::build_table(&[
-        "Network",
-        "Chain ID",
-        "RPC URL",
-        "Port",
-        "Fork Block",
-        "Started At",
-        "Uptime",
-        "Snapshots",
-        "Deployments",
-        "Status",
-    ]);
+    println!("Active Forks");
+    println!();
 
     for network in &networks {
         let session = resolve_fork_session_entry(&store, network)
             .ok_or_else(|| anyhow::anyhow!("network '{}' is not in fork mode", network))?;
         let runtime = primary_tracked_anvil_entry(&store, network);
         let rpc_url = runtime.map_or(session.rpc_url.as_str(), |entry| entry.rpc_url.as_str());
-        let port = runtime.map_or(session.port, |entry| entry.port);
         let chain_id = runtime.map_or(session.chain_id, |entry| entry.chain_id);
         let started_at = runtime.map_or(session.started_at, |entry| entry.started_at);
-        let snapshot_count = runtime.map_or(session.snapshots.len(), |entry| entry.snapshots.len());
+        let snapshot_count =
+            runtime.map_or(session.snapshots.len(), |entry| entry.snapshots.len());
         let running = network_is_running(runtime).await;
-        let status_text = if running { "running" } else { "stopped" };
-        let status_style = if running { color::SUCCESS } else { color::ERROR };
-        let fork_block =
-            session.fork_block_number.map(|b| b.to_string()).unwrap_or_else(|| "latest".into());
+        let health_detail = if running { "running" } else { "stopped" };
         let uptime = format_uptime(now - started_at);
         let deployment_count = count_fork_deployments_for_chain(&deployments, chain_id);
+        let anvil_pid = runtime.map_or(session.anvil_pid, |entry| entry.anvil_pid);
+        let log_file = runtime.map_or(session.log_file.as_str(), |entry| entry.log_file.as_str());
 
-        table.add_row(vec![
-            styled(network, color::NAMESPACE),
-            chain_id.to_string(),
-            rpc_url.to_string(),
-            port.to_string(),
-            fork_block,
-            started_at.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
-            uptime,
-            snapshot_count.to_string(),
-            deployment_count.to_string(),
-            styled(status_text, status_style),
-        ]);
+        println!("  {network}");
+        println!("    {:<14}{}", "Chain ID:", chain_id);
+        if !rpc_url.is_empty() {
+            println!("    {:<14}{}", "Fork URL:", rpc_url);
+        }
+        if anvil_pid != 0 {
+            println!("    {:<14}{}", "Anvil PID:", anvil_pid);
+        }
+        println!("    {:<14}{}", "Status:", health_detail);
+        println!("    {:<14}{}", "Uptime:", uptime);
+        println!("    {:<14}{}", "Snapshots:", snapshot_count);
+        println!("    {:<14}{}", "Fork Deploys:", deployment_count);
+        if !log_file.is_empty() {
+            println!("    {:<14}{}", "Logs:", log_file);
+        }
+        println!();
     }
 
-    crate::output::print_table(&table);
     Ok(())
 }
 
