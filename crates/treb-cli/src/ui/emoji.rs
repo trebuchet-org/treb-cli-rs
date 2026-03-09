@@ -86,6 +86,9 @@ pub const CIRCLE: &str = "◎";
 /// ⛓ Chain marker in tree
 pub const CHAIN_EMOJI: &str = "⛓";
 
+/// 🏛️ Governor proposals section (script)
+pub const CLASSICAL_BUILDING: &str = "🏛️";
+
 #[cfg(test)]
 mod tests {
     use super::CIRCLE;

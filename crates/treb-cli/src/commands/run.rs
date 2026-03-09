@@ -645,6 +645,25 @@ pub async fn run(
             }
         }
 
+        if !result.governor_proposals.is_empty() {
+            log_content.push_str("\n--- Governor Proposals ---\n");
+            for gp in &result.governor_proposals {
+                let timelock = if gp.timelock_address.is_empty() {
+                    "none".to_string()
+                } else {
+                    gp.timelock_address.clone()
+                };
+                log_content.push_str(&format!(
+                    "  {} governor={} timelock={} status={} txs={}\n",
+                    gp.proposal_id,
+                    gp.governor_address,
+                    timelock,
+                    gp.status,
+                    gp.transaction_ids.len(),
+                ));
+            }
+        }
+
         fs::write(&log_path, &log_content)
             .with_context(|| format!("failed to write debug log to {}", log_path.display()))?;
         eprintln!("Debug log saved to {}", log_path.display());
@@ -772,24 +791,6 @@ fn display_result_json(result: &PipelineResult) -> anyhow::Result<()> {
 
     output::print_json(&output)?;
     Ok(())
-}
-
-fn format_governor_proposal_details(gp: &treb_core::types::GovernorProposal) -> String {
-    let timelock = if gp.timelock_address.is_empty() {
-        "none".to_string()
-    } else {
-        output::truncate_address(&gp.timelock_address)
-    };
-    let tx_count = gp.transaction_ids.len();
-
-    format!(
-        "Governor: {} | Timelock: {} | Status: {} | {} linked transaction{}",
-        output::truncate_address(&gp.governor_address),
-        timelock,
-        gp.status,
-        tx_count,
-        if tx_count == 1 { "" } else { "s" },
-    )
 }
 
 fn print_registry_update_section(result: &PipelineResult, network: Option<&str>, namespace: &str) {
@@ -1035,25 +1036,40 @@ fn display_result_human(result: &PipelineResult, network: Option<&str>, namespac
 
     // ── Governor Proposals ──────────────────────────────────────────────
     if !result.governor_proposals.is_empty() {
-        println!("Governor Proposals:");
-        for (i, gp) in result.governor_proposals.iter().enumerate() {
-            let action = if result.dry_run { "would be proposed" } else { "proposed" };
-            println!("  {}. {} ({})", i + 1, output::truncate_address(&gp.proposal_id), action,);
-            println!("     {}", format_governor_proposal_details(gp));
-        }
-        println!();
-    }
+        output::print_section_header(emoji::CLASSICAL_BUILDING, "Governor Proposals", 50);
+        for gp in &result.governor_proposals {
+            let status_label = if result.dry_run { "would be proposed" } else { "proposed" };
+            let proposal_id = output::truncate_address(&gp.proposal_id);
+            let governor = output::truncate_address(&gp.governor_address);
+            let timelock = if gp.timelock_address.is_empty() {
+                "none".to_string()
+            } else {
+                output::truncate_address(&gp.timelock_address)
+            };
+            let tx_count = gp.transaction_ids.len();
+            let tx_suffix = if tx_count == 1 { "" } else { "s" };
 
-    // ── Skipped Deployments ─────────────────────────────────────────────
-    if !result.skipped.is_empty() {
-        println!("Skipped:");
-        for s in &result.skipped {
-            println!(
-                "  - {} ({}) — {}",
-                s.deployment.contract_name,
-                output::truncate_address(&s.deployment.address),
-                s.reason
-            );
+            if color::is_color_enabled() {
+                println!(
+                    "\n  {} ({})",
+                    proposal_id.style(color::CYAN),
+                    status_label,
+                );
+                println!(
+                    "   Governor: {} | Timelock: {} | Status: {} | {} linked transaction{}",
+                    governor.style(color::GRAY),
+                    timelock.style(color::GRAY),
+                    format!("{}", gp.status).style(color::YELLOW),
+                    tx_count,
+                    tx_suffix,
+                );
+            } else {
+                println!("\n  {} ({})", proposal_id, status_label);
+                println!(
+                    "   Governor: {} | Timelock: {} | Status: {} | {} linked transaction{}",
+                    governor, timelock, gp.status, tx_count, tx_suffix,
+                );
+            }
         }
         println!();
     }
@@ -1266,39 +1282,6 @@ mod tests {
                 ("ZETA".to_string(), "last".to_string()),
             ]
         );
-    }
-
-    #[test]
-    fn format_governor_proposal_details_includes_status() {
-        let mut proposal = sample_governor_proposal();
-        proposal.status = ProposalStatus::Queued;
-        proposal.timelock_address = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd".into();
-        proposal.transaction_ids = vec!["tx-001".into(), "tx-002".into()];
-
-        let details = format_governor_proposal_details(&proposal);
-
-        assert!(details.contains("Status: queued"), "details should include status: {details}");
-        assert!(
-            details.contains("Timelock: 0xabcd...abcd"),
-            "details should include the timelock address: {details}"
-        );
-        assert!(
-            details.contains("2 linked transactions"),
-            "details should include the linked transaction count: {details}"
-        );
-    }
-
-    #[test]
-    fn format_governor_proposal_details_uses_none_for_missing_timelock() {
-        let proposal = sample_governor_proposal();
-
-        let details = format_governor_proposal_details(&proposal);
-
-        assert!(
-            details.contains("Timelock: none"),
-            "details should show an explicit placeholder when timelock is absent: {details}"
-        );
-        assert!(details.contains("Status: pending"), "details should include status: {details}");
     }
 
     #[test]
