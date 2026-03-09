@@ -1062,21 +1062,14 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
             // Collect structured data for human output sections.
             if is_deployments && (change_type == "added" || change_type == "modified") {
                 let data = in_current.unwrap(); // present for added/modified
-                let address = data
-                    .get("address")
+                let name = data
+                    .get("contractName")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let dtype = data
-                    .get("type")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let diff_entry = DiffEntry {
-                    name: key.clone(),
-                    address,
-                    deployment_type: dtype,
-                };
+                    .map_or_else(|| key.clone(), str::to_owned);
+                let address =
+                    data.get("address").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let dtype = data.get("type").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let diff_entry = DiffEntry { name, address, deployment_type: dtype };
                 if change_type == "added" {
                     new_deployments.push(diff_entry);
                 } else {
@@ -1101,7 +1094,9 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
     println!("Fork Diff: {network}");
     println!();
 
-    if changes.is_empty() {
+    let has_human_changes =
+        !new_deployments.is_empty() || !modified_deployments.is_empty() || new_transactions > 0;
+    if !has_human_changes {
         println!("No changes since fork entered.");
         return Ok(());
     }

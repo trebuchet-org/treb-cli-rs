@@ -14,7 +14,7 @@ use std::{
 use tempfile::TempDir;
 use treb_config::{LocalConfig, save_local_config};
 use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
-use treb_registry::{DEPLOYMENTS_FILE, FORK_STATE_FILE, ForkStateStore};
+use treb_registry::{DEPLOYMENTS_FILE, FORK_STATE_FILE, ForkStateStore, TRANSACTIONS_FILE};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -210,6 +210,88 @@ fn fork_diff_with_no_changes() {
         .assert()
         .success()
         .stdout(predicate::str::contains("No changes since fork entered."));
+}
+
+/// `treb fork diff` should render `contractName` for deployment rows rather
+/// than the canonical deployment ID used as the JSON object key.
+#[test]
+fn fork_diff_uses_contract_name_for_human_output() {
+    let (root, treb_dir) = make_project();
+
+    let network = "testnet";
+    let snapshot_dir = treb_dir.join("snapshots").join(network);
+    fs::create_dir_all(&snapshot_dir).unwrap();
+
+    let snapshot_deployments = r#"{
+        "default/1/Counter:default": {
+            "address": "0xaaaa",
+            "contractName": "Counter",
+            "type": "script"
+        }
+    }"#;
+    let current_deployments = r#"{
+        "default/1/Counter:default": {
+            "address": "0xaaaa",
+            "contractName": "Counter",
+            "type": "script"
+        },
+        "default/1/FPMMFactory:default": {
+            "address": "0xbbbb",
+            "contractName": "FPMMFactory",
+            "type": "script"
+        }
+    }"#;
+    fs::write(snapshot_dir.join(DEPLOYMENTS_FILE), snapshot_deployments).unwrap();
+    fs::write(treb_dir.join(DEPLOYMENTS_FILE), current_deployments).unwrap();
+
+    let mut store = ForkStateStore::new(&treb_dir);
+    store.insert_active_fork(sample_entry(&treb_dir, network)).unwrap();
+
+    treb()
+        .args(["fork", "diff", "--network", network])
+        .current_dir(root.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("FPMMFactory"))
+        .stdout(predicate::str::contains("default/1/FPMMFactory:default").not());
+}
+
+/// `treb fork diff` should report "No changes since fork entered." when the
+/// only diffs are categories the human formatter does not render.
+#[test]
+fn fork_diff_removed_only_human_output_stays_clean() {
+    let (root, treb_dir) = make_project();
+
+    let network = "testnet";
+    let snapshot_dir = treb_dir.join("snapshots").join(network);
+    fs::create_dir_all(&snapshot_dir).unwrap();
+
+    let snapshot_deployments = r#"{
+        "default/1/Counter:default": {
+            "address": "0xaaaa",
+            "contractName": "Counter",
+            "type": "script"
+        }
+    }"#;
+    fs::write(snapshot_dir.join(DEPLOYMENTS_FILE), snapshot_deployments).unwrap();
+    fs::write(treb_dir.join(DEPLOYMENTS_FILE), "{}").unwrap();
+
+    let tx_json = r#"{"tx_1":{"hash":"0x111"}}"#;
+    fs::write(snapshot_dir.join(TRANSACTIONS_FILE), tx_json).unwrap();
+    fs::write(treb_dir.join(TRANSACTIONS_FILE), tx_json).unwrap();
+
+    let mut store = ForkStateStore::new(&treb_dir);
+    store.insert_active_fork(sample_entry(&treb_dir, network)).unwrap();
+
+    treb()
+        .args(["fork", "diff", "--network", network])
+        .current_dir(root.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No changes since fork entered."))
+        .stdout(predicate::str::contains("New Deployments").not())
+        .stdout(predicate::str::contains("Modified Deployments").not())
+        .stdout(predicate::str::contains("New Transactions").not());
 }
 
 // ── fork exit restores registry ───────────────────────────────────────────────
