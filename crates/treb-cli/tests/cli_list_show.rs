@@ -196,6 +196,21 @@ fn list_filter_by_namespace() {
 }
 
 #[test]
+fn list_empty_registry_with_namespace_filter_shows_generic_empty_state() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_empty_project(&tmp);
+
+    let output = treb()
+        .args(["list", "--namespace", "nonexistent"])
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "No deployments found\n");
+}
+
+#[test]
 fn list_filter_by_contract() {
     let tmp = tempfile::tempdir().unwrap();
     init_project_with_deployments(&tmp);

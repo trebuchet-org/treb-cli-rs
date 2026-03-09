@@ -392,11 +392,8 @@ fn build_contract_display(
         format!("{}:{}", d.contract_name, d.label)
     };
 
-    let mut display = if color::is_color_enabled() {
-        format!("{}", name.style(category.style()))
-    } else {
-        name
-    };
+    let mut display =
+        if color::is_color_enabled() { format!("{}", name.style(category.style())) } else { name };
 
     if fork_deployment_ids.contains(&d.id) {
         if color::is_color_enabled() {
@@ -444,11 +441,7 @@ fn build_deployment_row(
 
     let timestamp = {
         let ts = d.created_at.format("%Y-%m-%d %H:%M:%S").to_string();
-        if color::is_color_enabled() {
-            format!("{}", ts.style(color::TIMESTAMP))
-        } else {
-            ts
-        }
+        if color::is_color_enabled() { format!("{}", ts.style(color::TIMESTAMP)) } else { ts }
     };
 
     vec![name, address, ver_badge, timestamp]
@@ -464,10 +457,8 @@ fn build_impl_row(
     impl_lookup: &ImplNameLookup,
 ) -> Vec<String> {
     let key = (namespace.to_lowercase(), chain_id, impl_address.to_lowercase());
-    let impl_name = impl_lookup
-        .get(&key)
-        .cloned()
-        .unwrap_or_else(|| output::truncate_address(impl_address));
+    let impl_name =
+        impl_lookup.get(&key).cloned().unwrap_or_else(|| output::truncate_address(impl_address));
 
     let display = format!("└─ {impl_name}");
     let col0 = if color::is_color_enabled() {
@@ -621,12 +612,16 @@ pub async fn run(
         output::print_json(&result.deployments)?;
     } else if result.deployments.is_empty() {
         if let Some(ref ns) = filters.namespace {
-            let hint = format_namespace_discovery_hint(
-                ns,
-                filters.network.as_deref(),
-                &result.other_namespaces,
-            );
-            print!("{hint}");
+            if result.other_namespaces.is_empty() {
+                println!("No deployments found");
+            } else {
+                let hint = format_namespace_discovery_hint(
+                    ns,
+                    filters.network.as_deref(),
+                    &result.other_namespaces,
+                );
+                print!("{hint}");
+            }
         } else {
             println!("No deployments found");
         }
@@ -1347,7 +1342,10 @@ mod tests {
             table[0][1].contains("0x22A81Fc75b0d5F7cac19cABa9F0c3719b3897F03"),
             "first row col1 should contain full address"
         );
-        assert!(table[0][2].contains("UNVERIFIED"), "first row col2 should contain verification badge");
+        assert!(
+            table[0][2].contains("UNVERIFIED"),
+            "first row col2 should contain verification badge"
+        );
         assert!(table[1][0].contains("└─"), "second row should be an implementation row");
     }
 
@@ -1423,8 +1421,15 @@ mod tests {
         fork_ids.insert(d.id.clone());
         let row = build_deployment_row(&d, &DisplayCategory::Proxy, &fork_ids);
 
-        assert!(row[0].contains('\x1b'), "styled contract name should contain ANSI codes: {:?}", row[0]);
-        assert!(row[2].contains("e[✔︎]"), "styled verification should contain Go-format verifier text");
+        assert!(
+            row[0].contains('\x1b'),
+            "styled contract name should contain ANSI codes: {:?}",
+            row[0]
+        );
+        assert!(
+            row[2].contains("e[✔︎]"),
+            "styled verification should contain Go-format verifier text"
+        );
         assert!(row[0].contains("[fork]"), "styled row should include the fork badge text");
     }
 
