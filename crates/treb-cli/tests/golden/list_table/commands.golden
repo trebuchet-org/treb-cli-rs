@@ -1,14 +1,15 @@
 === cmd 0: [list] ===
 fork/42220
 └─ 42220
-   └─ SINGLETON
+   └─ SINGLETONS
       └─ MockToken 0xDeaD...beeF UNVERIFIED [fork]
 
 mainnet
 └─ 42220
-   ├─ PROXY
+   ├─ PROXIES
    │  └─ TransparentUpgradeableProxy:FPMMFactory 0x22A8...7F03 UNVERIFIED
    │     └─ Implementation 0x9595...79dF
-   └─ SINGLETON
-      ├─ FPMM:v<VERSION> 0x42ed...833D e[✔︎]  s[-] b[-]
-      └─ FPMMFactory:v<VERSION> 0x9595...79dF UNVERIFIED
+   ├─ IMPLEMENTATIONS
+   │  └─ FPMMFactory:v<VERSION> 0x9595...79dF UNVERIFIED
+   └─ SINGLETONS
+      └─ FPMM:v<VERSION> 0x42ed...833D e[✔︎]  s[-] b[-]

@@ -1,5 +1,5 @@
 === cmd 0: [list --contract FPMM] ===
 mainnet
 └─ 42220
-   └─ SINGLETON
+   └─ SINGLETONS
       └─ FPMM:v<VERSION> 0x42ed...833D e[✔︎]  s[-] b[-]

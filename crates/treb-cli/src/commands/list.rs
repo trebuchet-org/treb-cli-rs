@@ -1,6 +1,10 @@
 //! `treb list` command implementation.
 
-use std::{collections::BTreeMap, env};
+use std::{
+    collections::{BTreeMap, HashSet},
+    env,
+    fmt,
+};
 
 use anyhow::{Context, bail};
 use treb_core::types::{Deployment, DeploymentType};
@@ -91,30 +95,66 @@ pub fn filter_deployments<'a>(
 }
 
 // ---------------------------------------------------------------------------
-// Deployment grouping: namespace > chain_id > deployment type
+// Deployment grouping: namespace > chain_id > display category
 // ---------------------------------------------------------------------------
 
-/// A group of deployments sharing the same deployment type within a chain.
+/// Display category for deployment grouping in the list command.
+///
+/// Separates singletons that serve as proxy implementations into a distinct
+/// IMPLEMENTATIONS group, matching Go CLI categorization logic.
+/// Display order: Proxy (0) → Implementation (1) → Singleton (2) → Library (3).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum DisplayCategory {
+    Proxy,
+    Implementation,
+    Singleton,
+    Library,
+}
+
+impl fmt::Display for DisplayCategory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Proxy => write!(f, "PROXIES"),
+            Self::Implementation => write!(f, "IMPLEMENTATIONS"),
+            Self::Singleton => write!(f, "SINGLETONS"),
+            Self::Library => write!(f, "LIBRARIES"),
+        }
+    }
+}
+
+impl DisplayCategory {
+    /// Returns the color style for this display category.
+    pub fn style(&self) -> owo_colors::Style {
+        match self {
+            Self::Proxy => color::TYPE_PROXY,
+            Self::Implementation => color::TYPE_SINGLETON,
+            Self::Singleton => color::TYPE_SINGLETON,
+            Self::Library => color::TYPE_LIBRARY,
+        }
+    }
+}
+
+/// A group of deployments sharing the same display category within a chain.
 pub struct TypeGroup<'a> {
-    pub deployment_type: DeploymentType,
+    pub category: DisplayCategory,
     pub deployments: Vec<&'a Deployment>,
 }
 
-/// Deployments organized by namespace > chain_id > deployment type category.
+/// Deployments organized by namespace > chain_id > display category.
 ///
 /// - Namespace keys sort alphabetically (BTreeMap).
 /// - Chain IDs sort numerically (BTreeMap<u64, …>).
-/// - Type groups are in fixed display order: Proxy, Singleton, Library, Unknown.
+/// - Type groups are in fixed display order: Proxy, Implementation, Singleton, Library.
 /// - Deployments within each type group are sorted by contract name.
 pub type GroupedDeployments<'a> = BTreeMap<String, BTreeMap<u64, Vec<TypeGroup<'a>>>>;
 
-/// Returns the sort key for the fixed display order of deployment types.
-fn type_sort_key(dt: &DeploymentType) -> u8 {
-    match dt {
-        DeploymentType::Proxy => 0,
-        DeploymentType::Singleton => 1,
-        DeploymentType::Library => 2,
-        DeploymentType::Unknown => 3,
+/// Returns the sort key for the fixed display order of display categories.
+fn type_sort_key(cat: &DisplayCategory) -> u8 {
+    match cat {
+        DisplayCategory::Proxy => 0,
+        DisplayCategory::Implementation => 1,
+        DisplayCategory::Singleton => 2,
+        DisplayCategory::Library => 3,
     }
 }
 
@@ -158,22 +198,45 @@ fn build_deployment_node(d: &Deployment) -> TreeNode {
 }
 
 /// Organize a flat list of deployments into a hierarchical grouping:
-/// namespace → chain_id → deployment type category.
+/// namespace → chain_id → display category.
+///
+/// Singletons whose addresses match a proxy's `proxy_info.implementation`
+/// address are categorized as `Implementation` instead of `Singleton`.
 ///
 /// The output is suitable for consumption by the tree renderer.
 pub fn group_deployments<'a>(deployments: &[&'a Deployment]) -> GroupedDeployments<'a> {
+    // Build a set of implementation addresses from all proxies
+    let impl_addresses: HashSet<String> = deployments
+        .iter()
+        .filter(|d| d.deployment_type == DeploymentType::Proxy)
+        .filter_map(|d| d.proxy_info.as_ref())
+        .map(|pi| pi.implementation.to_lowercase())
+        .collect();
+
     let mut result: GroupedDeployments<'a> = BTreeMap::new();
 
     for &d in deployments {
+        let category = match d.deployment_type {
+            DeploymentType::Proxy => DisplayCategory::Proxy,
+            DeploymentType::Singleton => {
+                if impl_addresses.contains(&d.address.to_lowercase()) {
+                    DisplayCategory::Implementation
+                } else {
+                    DisplayCategory::Singleton
+                }
+            }
+            DeploymentType::Library => DisplayCategory::Library,
+            DeploymentType::Unknown => DisplayCategory::Singleton,
+        };
+
         let chain_map = result.entry(d.namespace.clone()).or_default();
         let type_groups = chain_map.entry(d.chain_id).or_default();
 
-        if let Some(group) = type_groups.iter_mut().find(|g| g.deployment_type == d.deployment_type)
-        {
+        if let Some(group) = type_groups.iter_mut().find(|g| g.category == category) {
             group.deployments.push(d);
         } else {
             type_groups.push(TypeGroup {
-                deployment_type: d.deployment_type.clone(),
+                category,
                 deployments: vec![d],
             });
         }
@@ -182,7 +245,7 @@ pub fn group_deployments<'a>(deployments: &[&'a Deployment]) -> GroupedDeploymen
     // Sort type groups by fixed order and deployments by contract name
     for chain_map in result.values_mut() {
         for type_groups in chain_map.values_mut() {
-            type_groups.sort_by_key(|g| type_sort_key(&g.deployment_type));
+            type_groups.sort_by_key(|g| type_sort_key(&g.category));
             for group in type_groups.iter_mut() {
                 group.deployments.sort_by(|a, b| a.contract_name.cmp(&b.contract_name));
             }
@@ -253,8 +316,8 @@ pub async fn run(
             for (chain_id, type_groups) in chains {
                 let mut chain_node = TreeNode::new(chain_id.to_string()).with_style(color::CHAIN);
                 for tg in type_groups {
-                    let type_label = tg.deployment_type.to_string();
-                    let type_style = color::style_for_deployment_type(tg.deployment_type.clone());
+                    let type_label = tg.category.to_string();
+                    let type_style = tg.category.style();
                     let mut type_node = TreeNode::new(type_label).with_style(type_style);
                     for d in &tg.deployments {
                         type_node = type_node.child(build_deployment_node(d));
@@ -628,13 +691,13 @@ mod tests {
         assert_eq!(chains.len(), 1);
         assert!(chains.contains_key(&42220));
 
-        // Two type groups: Proxy first (sort key 0), then Singleton (sort key 1)
+        // Two type groups: Proxy first (sort key 0), then Singleton (sort key 2)
         let type_groups = &chains[&42220];
         assert_eq!(type_groups.len(), 2);
-        assert_eq!(type_groups[0].deployment_type, DeploymentType::Proxy);
+        assert_eq!(type_groups[0].category, DisplayCategory::Proxy);
         assert_eq!(type_groups[0].deployments.len(), 1);
         assert_eq!(type_groups[0].deployments[0].contract_name, "TransparentUpgradeableProxy");
-        assert_eq!(type_groups[1].deployment_type, DeploymentType::Singleton);
+        assert_eq!(type_groups[1].category, DisplayCategory::Singleton);
         assert_eq!(type_groups[1].deployments.len(), 2);
         assert_eq!(type_groups[1].deployments[0].contract_name, "FPMM");
         assert_eq!(type_groups[1].deployments[1].contract_name, "FPMMFactory");
@@ -680,9 +743,9 @@ mod tests {
 
         let type_groups = &grouped["ns"][&1];
         assert_eq!(type_groups.len(), 3);
-        assert_eq!(type_groups[0].deployment_type, DeploymentType::Proxy);
-        assert_eq!(type_groups[1].deployment_type, DeploymentType::Singleton);
-        assert_eq!(type_groups[2].deployment_type, DeploymentType::Library);
+        assert_eq!(type_groups[0].category, DisplayCategory::Proxy);
+        assert_eq!(type_groups[1].category, DisplayCategory::Singleton);
+        assert_eq!(type_groups[2].category, DisplayCategory::Library);
     }
 
     #[test]
@@ -716,18 +779,121 @@ mod tests {
         assert_eq!(mainnet_chains.len(), 1);
         let mainnet_types = &mainnet_chains[&42220];
         assert_eq!(mainnet_types.len(), 1);
-        assert_eq!(mainnet_types[0].deployment_type, DeploymentType::Singleton);
+        assert_eq!(mainnet_types[0].category, DisplayCategory::Singleton);
         assert_eq!(mainnet_types[0].deployments.len(), 2);
 
         // testnet has 1 chain (11155111) with 1 type group (Library, 1 entry)
         let testnet_types = &grouped["testnet"][&11155111];
         assert_eq!(testnet_types.len(), 1);
-        assert_eq!(testnet_types[0].deployment_type, DeploymentType::Library);
+        assert_eq!(testnet_types[0].category, DisplayCategory::Library);
 
         // fork/42220 has 1 chain (42220) with 1 type group (Proxy, 1 entry)
         let fork_types = &grouped["fork/42220"][&42220];
         assert_eq!(fork_types.len(), 1);
-        assert_eq!(fork_types[0].deployment_type, DeploymentType::Proxy);
+        assert_eq!(fork_types[0].category, DisplayCategory::Proxy);
+    }
+
+    #[test]
+    fn group_implementation_separation() {
+        // A proxy whose proxy_info.implementation matches a singleton's address
+        // should cause that singleton to be categorized as Implementation.
+        let impl_address = "0x959597fD009876e6f53EbdB2F1c1Bc3f994579dF";
+        let mut proxy = make_deployment(
+            "ns/1/MyProxy",
+            "ns",
+            1,
+            "MyProxy",
+            "",
+            DeploymentType::Proxy,
+            None,
+        );
+        proxy.address = "0x22A81Fc75b0d5F7cac19cABa9F0c3719b3897F03".into();
+        proxy.proxy_info = Some(ProxyInfo {
+            proxy_type: "UUPS".into(),
+            implementation: impl_address.into(),
+            admin: String::new(),
+            history: vec![],
+        });
+
+        let mut impl_singleton = make_deployment(
+            "ns/1/MyImpl",
+            "ns",
+            1,
+            "MyImpl",
+            "",
+            DeploymentType::Singleton,
+            None,
+        );
+        impl_singleton.address = impl_address.into();
+
+        let regular_singleton = make_deployment(
+            "ns/1/RegularContract",
+            "ns",
+            1,
+            "RegularContract",
+            "",
+            DeploymentType::Singleton,
+            None,
+        );
+
+        let deployments = [proxy, impl_singleton, regular_singleton];
+        let refs: Vec<&Deployment> = deployments.iter().collect();
+        let grouped = group_deployments(&refs);
+
+        // Should have 3 groups: Proxy, Implementation, Singleton
+        let type_groups = &grouped["ns"][&1];
+        assert_eq!(type_groups.len(), 3, "expected 3 groups: Proxy, Implementation, Singleton");
+        assert_eq!(type_groups[0].category, DisplayCategory::Proxy);
+        assert_eq!(type_groups[0].deployments.len(), 1);
+        assert_eq!(type_groups[0].deployments[0].contract_name, "MyProxy");
+
+        assert_eq!(type_groups[1].category, DisplayCategory::Implementation);
+        assert_eq!(type_groups[1].deployments.len(), 1);
+        assert_eq!(type_groups[1].deployments[0].contract_name, "MyImpl");
+
+        assert_eq!(type_groups[2].category, DisplayCategory::Singleton);
+        assert_eq!(type_groups[2].deployments.len(), 1);
+        assert_eq!(type_groups[2].deployments[0].contract_name, "RegularContract");
+    }
+
+    #[test]
+    fn group_implementation_case_insensitive_address_match() {
+        // Implementation address matching should be case-insensitive (checksummed vs lowercase)
+        let mut proxy = make_deployment(
+            "ns/1/MyProxy",
+            "ns",
+            1,
+            "MyProxy",
+            "",
+            DeploymentType::Proxy,
+            None,
+        );
+        proxy.proxy_info = Some(ProxyInfo {
+            proxy_type: "UUPS".into(),
+            implementation: "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01".into(),
+            admin: String::new(),
+            history: vec![],
+        });
+
+        let mut impl_singleton = make_deployment(
+            "ns/1/MyImpl",
+            "ns",
+            1,
+            "MyImpl",
+            "",
+            DeploymentType::Singleton,
+            None,
+        );
+        impl_singleton.address = "0xabcdef0123456789abcdef0123456789abcdef01".into();
+
+        let deployments = [proxy, impl_singleton];
+        let refs: Vec<&Deployment> = deployments.iter().collect();
+        let grouped = group_deployments(&refs);
+
+        let type_groups = &grouped["ns"][&1];
+        assert_eq!(type_groups.len(), 2);
+        assert_eq!(type_groups[0].category, DisplayCategory::Proxy);
+        assert_eq!(type_groups[1].category, DisplayCategory::Implementation);
     }
 
     // -----------------------------------------------------------------------
