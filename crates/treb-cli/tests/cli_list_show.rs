@@ -131,6 +131,21 @@ fn list_filter_by_contract() {
 }
 
 #[test]
+fn list_filtered_implementation_stays_in_implementations_group() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_deployments(&tmp);
+
+    treb()
+        .args(["list", "--contract", "FPMMFactory"])
+        .current_dir(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("IMPLEMENTATIONS"))
+        .stdout(predicate::str::contains("FPMMFactory"))
+        .stdout(predicate::str::contains("SINGLETONS").not());
+}
+
+#[test]
 fn list_filter_by_type() {
     let tmp = tempfile::tempdir().unwrap();
     init_project_with_deployments(&tmp);
