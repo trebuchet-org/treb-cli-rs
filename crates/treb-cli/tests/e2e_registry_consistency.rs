@@ -282,7 +282,7 @@ async fn e2e_registry_consistency_after_fork_cycle() {
 
     // Verify the fork-time tag is gone (state was restored)
     let show_json = run_json(tmp.path().to_path_buf(), vec!["show".into(), dep_id.clone()]).await;
-    let tags = &show_json["tags"];
+    let tags = &show_json["deployment"]["tags"];
     assert!(
         tags.is_null() || tags.as_array().is_none_or(|a| a.is_empty()),
         "fork-test tag must be gone after fork exit, got: {tags}"

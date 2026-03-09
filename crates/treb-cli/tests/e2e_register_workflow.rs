@@ -171,7 +171,8 @@ async fn e2e_register_tag_show_roundtrip() {
 
     // Verify all 3 tags present via show --json.
     let show = run_json(tmp.path().to_path_buf(), vec!["show".into(), dep_id.clone()]).await;
-    let tags = show["tags"].as_array().expect("tags must be array after adding 3 tags");
+    let tags =
+        show["deployment"]["tags"].as_array().expect("tags must be array after adding 3 tags");
     assert_eq!(tags.len(), 3, "must have 3 tags");
     let tag_strs: Vec<&str> = tags.iter().map(|t| t.as_str().unwrap()).collect();
     assert!(tag_strs.contains(&"stable"), "must have 'stable' tag");
@@ -193,7 +194,7 @@ async fn e2e_register_tag_show_roundtrip() {
 
     // Verify 2 tags remain.
     let show = run_json(tmp.path().to_path_buf(), vec!["show".into(), dep_id.clone()]).await;
-    let tags = show["tags"].as_array().expect("tags must be array after removal");
+    let tags = show["deployment"]["tags"].as_array().expect("tags must be array after removal");
     assert_eq!(tags.len(), 2, "must have 2 tags after removing one");
     let tag_strs: Vec<&str> = tags.iter().map(|t| t.as_str().unwrap()).collect();
     assert!(tag_strs.contains(&"stable"), "'stable' must still be present");

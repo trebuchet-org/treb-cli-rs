@@ -383,11 +383,31 @@ fn show_json_outputs_full_deployment() {
     assert!(output.status.success());
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("output is not valid JSON");
-    let obj = json.as_object().expect("JSON output should be an object");
-    assert_eq!(obj["id"], "mainnet/42220/FPMM:v3.0.0");
-    assert_eq!(obj["contractName"], "FPMM");
-    assert_eq!(obj["chainId"], 42220);
-    assert_eq!(obj["address"], "0x42eddd7dC046da254A93659CA9b02f294606833D");
+    let deployment = &json["deployment"];
+    assert!(deployment.is_object(), "JSON output should contain a deployment object");
+    assert_eq!(deployment["id"], "mainnet/42220/FPMM:v3.0.0");
+    assert_eq!(deployment["contractName"], "FPMM");
+    assert_eq!(deployment["chainId"], 42220);
+    assert_eq!(deployment["address"], "0x42eddd7dC046da254A93659CA9b02f294606833D");
+    assert!(json.get("fork").is_none(), "non-fork deployments must not include a fork flag");
+}
+
+#[test]
+fn show_json_sets_fork_flag_only_for_fork_namespaces() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_deployments(&tmp);
+
+    let output = treb()
+        .args(["show", "fork/42220/MockToken", "--json"])
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("output is not valid JSON");
+    assert_eq!(json["deployment"]["id"], "fork/42220/MockToken");
+    assert_eq!(json["fork"], true, "fork deployments must include fork=true");
 }
 
 #[test]

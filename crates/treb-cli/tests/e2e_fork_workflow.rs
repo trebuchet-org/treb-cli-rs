@@ -235,10 +235,14 @@ async fn e2e_fork_enter_deploy_exit_restores_state() {
 
     // Verify tag exists during fork
     let show_json = run_json(tmp.path().to_path_buf(), vec!["show".into(), dep_id.clone()]).await;
-    let tags = show_json["tags"].as_array().expect("tags must be array");
+    let tags = show_json["deployment"]["tags"].as_array().expect("tags must be array");
     assert!(
         tags.iter().any(|t| t.as_str() == Some("fork-only-tag")),
         "deployment must have fork-only-tag during fork"
+    );
+    assert!(
+        show_json.get("fork").is_none(),
+        "non-fork namespaces must not include fork=true during fork mode"
     );
 
     // Exit fork → should restore to pre-fork state (no tag)
@@ -256,7 +260,7 @@ async fn e2e_fork_enter_deploy_exit_restores_state() {
     // Registry should be restored to pre-fork state (1 deployment, no tags)
     assert_deployment_count(tmp.path().to_path_buf(), 1).await;
     let show_json = run_json(tmp.path().to_path_buf(), vec!["show".into(), dep_id.clone()]).await;
-    let tags = &show_json["tags"];
+    let tags = &show_json["deployment"]["tags"];
     assert!(
         tags.is_null() || tags.as_array().is_none_or(|a| a.is_empty()),
         "tag must be gone after fork exit, got: {tags}"

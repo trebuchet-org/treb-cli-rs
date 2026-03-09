@@ -51,8 +51,8 @@ async fn e2e_init_run_list() {
     drop(anvil);
 }
 
-/// run → show: `treb show <id> --json` output contains `address`, `contractName`,
-/// and `chainId` fields.
+/// run → show: `treb show <id> --json` output contains a wrapped deployment object
+/// with `address`, `contractName`, and `chainId` fields.
 #[tokio::test(flavor = "multi_thread")]
 async fn e2e_run_show() {
     let Some(anvil) = spawn_anvil_or_skip().await else {
@@ -89,10 +89,15 @@ async fn e2e_run_show() {
 
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("treb show --json must emit valid JSON");
+    let deployment = &json["deployment"];
 
-    assert!(json.get("address").is_some(), "show output must contain 'address'");
-    assert!(json.get("contractName").is_some(), "show output must contain 'contractName'");
-    assert!(json.get("chainId").is_some(), "show output must contain 'chainId'");
+    assert!(deployment.get("address").is_some(), "show output must contain deployment.address");
+    assert!(
+        deployment.get("contractName").is_some(),
+        "show output must contain deployment.contractName"
+    );
+    assert!(deployment.get("chainId").is_some(), "show output must contain deployment.chainId");
+    assert!(json.get("fork").is_none(), "non-fork deployments must not include a fork flag");
 
     drop(anvil);
 }
