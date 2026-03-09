@@ -1,0 +1,8 @@
+=== cmd 0: [list --tag v3-release] ===
+   ◎ namespace:   MAINNET                       
+└─ ⛓ chain:       celo (42220)                  
+  
+  IMPLEMENTATIONS
+  FPMMFactory:v<VERSION> (core)     0x959597fD009876e6f53EbdB2F1c1Bc3f994579dF   UNVERIFIED   <TIMESTAMP>
+
+Total deployments: 1

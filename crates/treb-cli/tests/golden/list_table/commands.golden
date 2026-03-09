@@ -1,14 +1,21 @@
 === cmd 0: [list] ===
-fork/42220
-└─ 42220
-   └─ SINGLETON
-      └─ MockToken 0xDeaD...beeF UNVERIFIED [fork]
+   ◎ namespace:   FORK/42220                    
+└─ ⛓ chain:       celo (42220)                  
+  
+  SINGLETONS
+  MockToken [fork]                            0xDeaDbeefdEAdbeefdEadbEEFdeadbeEFdEaDbeeF   UNVERIFIED        <TIMESTAMP>
 
-mainnet
-└─ 42220
-   ├─ PROXY
-   │  └─ TransparentUpgradeableProxy:FPMMFactory 0x22A8...7F03 UNVERIFIED
-   │     └─ Implementation 0x9595...79dF
-   └─ SINGLETON
-      ├─ FPMM:v<VERSION> 0x42ed...833D e[✔︎]  s[-] b[-]
-      └─ FPMMFactory:v<VERSION> 0x9595...79dF UNVERIFIED
+   ◎ namespace:   MAINNET                       
+└─ ⛓ chain:       celo (42220)                  
+  
+  PROXIES
+  TransparentUpgradeableProxy:FPMMFactory     0x22A81Fc75b0d5F7cac19cABa9F0c3719b3897F03   UNVERIFIED        <TIMESTAMP>
+  └─ FPMMFactory:v<VERSION>                                                                                                     
+  
+  IMPLEMENTATIONS
+  FPMMFactory:v<VERSION> (core)                   0x959597fD009876e6f53EbdB2F1c1Bc3f994579dF   UNVERIFIED        <TIMESTAMP>
+  
+  SINGLETONS
+  FPMM:v<VERSION>                                 0x42eddd7dC046da254A93659CA9b02f294606833D   e[✔︎]  s[-] b[-]   <TIMESTAMP>
+
+Total deployments: 4

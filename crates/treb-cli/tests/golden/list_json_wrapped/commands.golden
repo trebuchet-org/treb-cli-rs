@@ -1,0 +1,8 @@
+=== cmd 0: [list --json --namespace nonexistent] ===
+{
+  "deployments": [],
+  "otherNamespaces": {
+    "fork/42220": 1,
+    "mainnet": 3
+  }
+}

@@ -1,4 +1,4 @@
-=== cmd 0: [list --type PROXY] ===
+=== cmd 0: [list --contract TransparentUpgradeableProxy] ===
    ◎ namespace:   MAINNET                       
 └─ ⛓ chain:       celo (42220)                  
   

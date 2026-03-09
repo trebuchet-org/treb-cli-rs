@@ -152,7 +152,7 @@ async fn e2e_register_tag_show_roundtrip() {
     // Get the registered deployment ID.
     let dep_id = {
         let json = run_json(tmp.path().to_path_buf(), vec!["list".into()]).await;
-        let arr = json.as_array().expect("list must be array");
+        let arr = json["deployments"].as_array().expect("list must contain deployments array");
         assert_eq!(arr.len(), 1, "exactly 1 registered deployment");
         arr[0]["id"].as_str().expect("deployment must have id").to_string()
     };

@@ -1,5 +1,8 @@
 === cmd 0: [list --fork] ===
-fork/42220
-└─ 42220
-   └─ SINGLETON
-      └─ MockToken 0xDeaD...beeF UNVERIFIED [fork]
+   ◎ namespace:   FORK/42220                    
+└─ ⛓ chain:       celo (42220)                  
+  
+  SINGLETONS
+  MockToken [fork]     0xDeaDbeefdEAdbeefdEadbEEFdeadbeEFdEaDbeeF   UNVERIFIED   <TIMESTAMP>
+
+Total deployments: 1

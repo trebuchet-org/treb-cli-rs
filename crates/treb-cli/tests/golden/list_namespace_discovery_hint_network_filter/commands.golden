@@ -1,5 +1,5 @@
-=== cmd 0: [list --namespace nonexistent] ===
-No deployments found in namespace "nonexistent"
+=== cmd 0: [list --namespace staging --network 42220] ===
+No deployments found in namespace "staging" on celo (42220)
 
 Other namespaces with deployments:
 

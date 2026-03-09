@@ -66,7 +66,8 @@ async fn e2e_full_deployment_lifecycle() {
     let filtered =
         run_json(tmp.path().to_path_buf(), vec!["list".into(), "--tag".into(), "v1.0.0".into()])
             .await;
-    let filtered_arr = filtered.as_array().expect("filtered list must be array");
+    let filtered_arr =
+        filtered["deployments"].as_array().expect("filtered list must contain deployments array");
     assert_eq!(filtered_arr.len(), 1, "exactly 1 deployment with tag v1.0.0");
     assert_eq!(
         filtered_arr[0]["id"].as_str().unwrap(),
@@ -80,7 +81,8 @@ async fn e2e_full_deployment_lifecycle() {
         vec!["list".into(), "--tag".into(), "nonexistent".into()],
     )
     .await;
-    let empty_arr = empty.as_array().expect("empty list must be array");
+    let empty_arr =
+        empty["deployments"].as_array().expect("empty list must contain deployments array");
     assert!(empty_arr.is_empty(), "no deployments should match nonexistent tag");
 
     // Step 8: tag remove "v1.0.0"

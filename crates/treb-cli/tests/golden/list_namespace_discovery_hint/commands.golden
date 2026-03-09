@@ -1,5 +1,5 @@
-=== cmd 0: [list --namespace nonexistent] ===
-No deployments found in namespace "nonexistent"
+=== cmd 0: [list --namespace staging] ===
+No deployments found in namespace "staging"
 
 Other namespaces with deployments:
 
