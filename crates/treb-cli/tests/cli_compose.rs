@@ -270,6 +270,68 @@ fn compose_dry_run_json_chain_has_correct_structure() {
     assert_eq!(arr[2]["deps"][0], "core");
 }
 
+#[test]
+fn compose_dry_run_json_does_not_include_component_env() {
+    let tmp = tempfile::tempdir().unwrap();
+    let fixture = tmp.path().join("with-env.yaml");
+    fs::write(
+        &fixture,
+        r#"group: test
+components:
+  token:
+    script: script/DeployToken.s.sol
+    env:
+      FOO: bar
+      BAZ: qux
+"#,
+    )
+    .unwrap();
+
+    let output = treb()
+        .args(["compose", fixture.to_str().unwrap(), "--dry-run", "--json"])
+        .output()
+        .expect("failed to run compose dry-run --json");
+
+    assert!(output.status.success());
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("output is not valid JSON");
+    let arr = json.as_array().expect("JSON output should be an array");
+    assert_eq!(arr.len(), 1, "fixture has 1 component");
+    assert!(arr[0].get("env").is_none(), "dry-run json should not expose component env");
+}
+
+#[test]
+fn compose_dry_run_human_formats_component_env_deterministically() {
+    let tmp = tempfile::tempdir().unwrap();
+    let fixture = tmp.path().join("with-env.yaml");
+    fs::write(
+        &fixture,
+        r#"group: test
+components:
+  token:
+    script: script/DeployToken.s.sol
+    env:
+      ZETA: last
+      ALPHA: first
+"#,
+    )
+    .unwrap();
+
+    let output = treb()
+        .args(["compose", fixture.to_str().unwrap(), "--dry-run"])
+        .output()
+        .expect("failed to run compose dry-run");
+
+    assert!(output.status.success());
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(
+        stderr.contains(r#"Env: {"ALPHA": "first", "ZETA": "last"}"#),
+        "stderr should render env vars in sorted order: {stderr}"
+    );
+}
+
 // ── Flag acceptance tests ─────────────────────────────────────────────
 
 #[test]

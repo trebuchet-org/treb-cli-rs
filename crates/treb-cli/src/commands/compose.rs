@@ -248,8 +248,6 @@ pub struct PlanEntry {
     pub deps: Vec<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub skipped: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub env: Option<HashMap<String, String>>,
 }
 
 /// Build the execution plan for display.
@@ -269,10 +267,18 @@ fn build_plan(
                 script: component.script.clone(),
                 deps: component.deps.as_ref().cloned().unwrap_or_default(),
                 skipped: skip_set.contains(name),
-                env: component.env.clone(),
             }
         })
         .collect()
+}
+
+fn format_env_map(env: &HashMap<String, String>) -> String {
+    let mut entries: Vec<_> = env.iter().collect();
+    entries.sort_by_key(|(key, _)| *key);
+
+    let rendered =
+        entries.into_iter().map(|(key, value)| format!("{key:?}: {value:?}")).collect::<Vec<_>>();
+    format!("{{{}}}", rendered.join(", "))
 }
 
 fn format_execution_plan_header_lines(compose: &ComposeFile, plan_len: usize) -> [String; 3] {
@@ -324,9 +330,14 @@ fn print_execution_plan(compose: &ComposeFile, plan: &[PlanEntry]) {
             }
         }
         eprintln!();
-        if let Some(env) = &entry.env {
+        if let Some(env) =
+            compose.components.get(&entry.component).and_then(|component| component.env.as_ref())
+        {
             if !env.is_empty() {
-                eprintln!("   {}", styled(&format!("Env: {:?}", env), color::WARNING));
+                eprintln!(
+                    "   {}",
+                    styled(&format!("Env: {}", format_env_map(env)), color::WARNING)
+                );
             }
         }
     }
