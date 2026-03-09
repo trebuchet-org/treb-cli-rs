@@ -489,6 +489,7 @@ fn show_proxy_deployment_shows_proxy_info() {
 
     treb()
         .args(["show", "TransparentUpgradeableProxy"])
+        .env("NO_COLOR", "1")
         .current_dir(tmp.path())
         .assert()
         .success()
