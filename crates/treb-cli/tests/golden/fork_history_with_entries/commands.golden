@@ -1,10 +1,9 @@
 === cmd 0: [fork history] ===
-┌─────────────────────────┬─────────┬─────────┬────────────────────────────┐
-│ Timestamp               ┆ Action  ┆ Network ┆ Details                    │
-╞═════════════════════════╪═════════╪═════════╪════════════════════════════╡
-│ <TIMESTAMP> UTC ┆ restart ┆ mainnet ┆ Anvil reset; snapshot: 0x2 │
-├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
-│ <TIMESTAMP> UTC ┆ enter   ┆ sepolia ┆ -                          │
-├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
-│ <TIMESTAMP> UTC ┆ enter   ┆ mainnet ┆ -                          │
-└─────────────────────────┴─────────┴─────────┴────────────────────────────┘
+Fork History: mainnet
+
+    [0] initial  (<TIMESTAMP>)
+  → [1] restart: Anvil reset; snapshot: 0x2  (<TIMESTAMP>)
+
+Fork History: sepolia
+
+  → [0] initial  (<TIMESTAMP>)

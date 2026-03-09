@@ -659,7 +659,7 @@ fn resolve_anvil_start_entry(
 }
 
 /// Update the fork state entry for `network` with the actual Anvil `rpc_url`,
-/// `port`, and `chain_id` after a successful spawn.
+/// `port`, `chain_id`, and tracked process metadata after a successful spawn.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn update_fork_state_with_anvil(
     treb_dir: &Path,
@@ -676,6 +676,7 @@ pub(crate) fn update_fork_state_with_anvil(
     entry.rpc_url = rpc_url.to_string();
     entry.port = port;
     entry.chain_id = chain_id;
+    entry.anvil_pid = current_process_id();
     entry.pid_file = pid_file.to_string_lossy().into_owned();
     entry.log_file = log_file.to_string_lossy().into_owned();
 
@@ -687,6 +688,10 @@ pub(crate) fn update_fork_state_with_anvil(
 
 fn is_tracked_anvil_instance(entry: &ForkEntry) -> bool {
     entry.port != 0 || !entry.pid_file.is_empty() || !entry.log_file.is_empty()
+}
+
+fn current_process_id() -> i32 {
+    i32::try_from(std::process::id()).unwrap_or(i32::MAX)
 }
 
 fn sort_tracked_anvil_entries(entries: &mut Vec<&ForkEntry>) {
@@ -1377,6 +1382,7 @@ mod tests {
         assert_eq!(updated.rpc_url, rpc_url);
         assert_eq!(updated.port, port);
         assert_eq!(updated.chain_id, chain_id);
+        assert_eq!(updated.anvil_pid, current_process_id());
         assert!(port > 0);
         assert_eq!(updated.pid_file, pid_file.to_string_lossy());
         assert_eq!(updated.log_file, log_file.to_string_lossy());
@@ -1412,6 +1418,7 @@ mod tests {
         assert_eq!(default_entry.port, 0);
         assert_eq!(named_entry.instance_name.as_deref(), Some("alpha"));
         assert_eq!(named_entry.port, 8546);
+        assert_eq!(named_entry.anvil_pid, current_process_id());
         assert_eq!(named_entry.pid_file, pid_file.to_string_lossy());
     }
 

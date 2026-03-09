@@ -1,9 +1,7 @@
 === cmd 0: [fork exit --network mainnet] ===
-Exited fork mode for network 'mainnet'.
-Registry restored from snapshot.
-🔄 Restoring registry for 'mainnet'...
-🧹 Cleaning up snapshot for 'mainnet'...
-✅ Fork mode exited for 'mainnet'.
+Exited fork mode.
+
+  - mainnet: registry restored, fork cleaned up
 
 === cmd 1: [fork status] ===
 No active forks.

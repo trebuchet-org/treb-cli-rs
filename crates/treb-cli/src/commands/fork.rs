@@ -1,7 +1,7 @@
 //! `treb fork` subcommands — enter/exit fork mode, status, history, diff, revert, restart.
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashMap, HashSet},
     env,
     path::{Path, PathBuf},
     time::Duration,
@@ -10,17 +10,24 @@ use std::{
 use anyhow::{Context, bail};
 use chrono::Utc;
 use clap::Subcommand;
-use owo_colors::{OwoColorize, Style};
+use foundry_common::{
+    Shell as FoundryShell,
+    shell::{ColorChoice, OutputFormat, OutputMode, Verbosity},
+};
 use serde::Serialize;
 use tokio::net::TcpStream;
-use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
-use treb_forge::createx::createx_deployed_bytecode;
+use treb_config::{ResolveOpts, load_local_config, resolve_config};
+use treb_core::types::fork::{ForkEntry, ForkHistoryEntry, SnapshotEntry};
+use treb_forge::{
+    createx::createx_deployed_bytecode, execute_script, script::build_script_config_with_senders,
+    sender::resolve_all_senders,
+};
 use treb_registry::{
     DEPLOYMENTS_FILE, ForkStateStore, TRANSACTIONS_FILE, remove_snapshot, restore_registry,
     snapshot_registry,
 };
 
-use crate::{output, ui::color};
+use crate::output;
 
 const TREB_DIR: &str = ".treb";
 const SNAPSHOT_BASE: &str = "snapshots";
@@ -57,6 +64,9 @@ pub enum ForkSubcommand {
         /// Network name or chain ID
         #[arg(long)]
         network: String,
+        /// Exit all active forks
+        #[arg(long)]
+        all: bool,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -154,6 +164,64 @@ struct ForkRestartJson {
     snapshot_id: Option<String>,
 }
 
+#[derive(Default)]
+struct RevertCommandSummary {
+    snapshot_count: usize,
+    commands: BTreeSet<String>,
+}
+
+impl RevertCommandSummary {
+    fn record(&mut self, command: &str) {
+        self.snapshot_count += 1;
+        self.commands.insert(command.to_string());
+    }
+
+    fn renderable_command(&self) -> Option<&str> {
+        if self.snapshot_count == 0 || self.commands.len() != 1 {
+            return None;
+        }
+
+        let command = self.commands.iter().next()?;
+        if command.is_empty() { None } else { Some(command.as_str()) }
+    }
+}
+
+/// Restores Foundry's global shell after temporarily silencing it.
+///
+/// Fork setup scripts should not add forge compilation/broadcast chatter to
+/// `fork restart` output, so suppress Foundry's shared shell while they run.
+struct FoundryShellGuard {
+    output_format: OutputFormat,
+    output_mode: OutputMode,
+    color_choice: ColorChoice,
+    verbosity: Verbosity,
+}
+
+impl FoundryShellGuard {
+    fn suppress() -> Self {
+        let mut shell = FoundryShell::get();
+        let previous = Self {
+            output_format: shell.output_format(),
+            output_mode: shell.output_mode(),
+            color_choice: shell.color_choice(),
+            verbosity: shell.verbosity(),
+        };
+        *shell = FoundryShell::empty();
+        previous
+    }
+}
+
+impl Drop for FoundryShellGuard {
+    fn drop(&mut self) {
+        *FoundryShell::get() = FoundryShell::new_with(
+            self.output_format,
+            self.output_mode,
+            self.color_choice,
+            self.verbosity,
+        );
+    }
+}
+
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
 pub async fn run(subcommand: ForkSubcommand) -> anyhow::Result<()> {
@@ -161,7 +229,7 @@ pub async fn run(subcommand: ForkSubcommand) -> anyhow::Result<()> {
         ForkSubcommand::Enter { network, rpc_url, fork_block_number, json } => {
             run_enter(network, rpc_url, fork_block_number, json).await
         }
-        ForkSubcommand::Exit { network, json } => run_exit(network, json).await,
+        ForkSubcommand::Exit { network, all, json } => run_exit(network, all, json).await,
         ForkSubcommand::Revert { network, all, json } => run_revert(network, all, json).await,
         ForkSubcommand::Restart { network, fork_block_number, json } => {
             run_restart(network, fork_block_number, json).await
@@ -220,9 +288,6 @@ pub async fn run_enter(
         .with_context(|| format!("failed to get chain ID from RPC URL: {fork_url}"))?;
 
     // Create snapshot dir and snapshot registry
-    if !json {
-        output::print_stage("\u{1f4f8}", &format!("Snapshotting registry for '{network}'..."));
-    }
     let snapshot_dir = treb_dir.join(SNAPSHOT_BASE).join(&network);
     snapshot_registry(&treb_dir, &snapshot_dir).context("failed to snapshot registry")?;
 
@@ -246,7 +311,7 @@ pub async fn run_enter(
         entered_at: now,
         snapshots: vec![],
     };
-    store.insert_active_fork(entry).context("failed to record fork entry")?;
+    store.insert_active_fork(entry.clone()).context("failed to record fork entry")?;
 
     // Add history entry
     store
@@ -258,11 +323,12 @@ pub async fn run_enter(
         })
         .context("failed to record fork history")?;
 
-    output::print_stage("\u{2705}", &format!("Fork mode entered for '{network}'."));
-
     println!("Entered fork mode for network '{network}'.");
-    println!("Registry snapshot saved to {}", snapshot_dir.display());
-    println!("Run `treb dev anvil start --network {network}` to start a local Anvil node.");
+    render_fork_fields(&entry, false);
+    println!();
+    println!("Run 'treb dev anvil start --network {network}' to start a local Anvil node");
+    println!("Run 'treb fork status' to check fork state");
+    println!("Run 'treb fork exit' to stop fork and restore original state");
 
     Ok(())
 }
@@ -273,53 +339,78 @@ pub async fn run_enter(
 ///
 /// Restores the registry from its snapshot, removes the snapshot directory,
 /// and removes the [`ForkEntry`] from `fork.json`.
-pub async fn run_exit(network: String, json: bool) -> anyhow::Result<()> {
+pub async fn run_exit(network: String, all: bool, json: bool) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     let treb_dir = cwd.join(TREB_DIR);
 
     let mut store = ForkStateStore::new(&treb_dir);
     store.load().context("failed to load fork state")?;
 
-    let entry = resolve_fork_session_entry(&store, &network)
-        .cloned()
-        .ok_or_else(|| anyhow::anyhow!("network '{}' is not in fork mode", network))?;
+    let networks: Vec<String> = if all { exit_ordered_networks(&store) } else { vec![network] };
 
-    // Count restored entries before removing fork state
-    let restored_entries = store.list_active_forks_for_network(&network).len();
-
-    store.remove_active_forks_for_network(&network).context("failed to remove fork entry")?;
-
-    // Restore registry from snapshot
-    if !json {
-        output::print_stage("\u{1f504}", &format!("Restoring registry for '{network}'..."));
+    if networks.is_empty() {
+        if json {
+            output::print_json(&Vec::<ForkExitJson>::new())?;
+        } else {
+            println!("No active forks to exit.");
+        }
+        return Ok(());
     }
-    let snapshot_dir = PathBuf::from(&entry.snapshot_dir);
-    restore_registry(&snapshot_dir, &treb_dir)
-        .context("failed to restore registry from snapshot")?;
 
-    // Remove snapshot dir
-    if !json {
-        output::print_stage("\u{1f9f9}", &format!("Cleaning up snapshot for '{network}'..."));
+    let mut json_results: Vec<ForkExitJson> = Vec::new();
+    let mut exited_networks: Vec<String> = Vec::new();
+
+    for net in &networks {
+        let entry = resolve_fork_session_entry(&store, net)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("network '{}' is not in fork mode", net))?;
+
+        // Count restored entries before removing fork state
+        let restored_entries = store.list_active_forks_for_network(net).len();
+
+        store.remove_active_forks_for_network(net).context("failed to remove fork entry")?;
+
+        // Restore registry from snapshot
+        let snapshot_dir = PathBuf::from(&entry.snapshot_dir);
+        restore_registry(&snapshot_dir, &treb_dir)
+            .context("failed to restore registry from snapshot")?;
+
+        // Remove snapshot dir
+        remove_snapshot(&snapshot_dir).context("failed to remove snapshot directory")?;
+
+        // Add history entry
+        store
+            .add_history(ForkHistoryEntry {
+                action: "exit".into(),
+                network: net.clone(),
+                timestamp: Utc::now(),
+                details: None,
+            })
+            .context("failed to record exit history")?;
+
+        if json {
+            json_results.push(ForkExitJson {
+                network: net.clone(),
+                restored_entries,
+                cleaned_up: true,
+            });
+        } else {
+            exited_networks.push(net.clone());
+        }
     }
-    remove_snapshot(&snapshot_dir).context("failed to remove snapshot directory")?;
-
-    // Add history entry
-    store
-        .add_history(ForkHistoryEntry {
-            action: "exit".into(),
-            network: network.clone(),
-            timestamp: Utc::now(),
-            details: None,
-        })
-        .context("failed to record exit history")?;
 
     if json {
-        output::print_json(&ForkExitJson { network, restored_entries, cleaned_up: true })?;
+        if all {
+            output::print_json(&json_results)?;
+        } else {
+            output::print_json(&json_results.into_iter().next().unwrap())?;
+        }
     } else {
-        output::print_stage("\u{2705}", &format!("Fork mode exited for '{network}'."));
-
-        println!("Exited fork mode for network '{network}'.");
-        println!("Registry restored from snapshot.");
+        println!("Exited fork mode.");
+        println!();
+        for net in &exited_networks {
+            println!("  - {net}: registry restored, fork cleaned up");
+        }
     }
 
     Ok(())
@@ -355,6 +446,11 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
     let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
     let mut json_results: Vec<ForkRevertJson> = Vec::new();
 
+    // Track revert statistics for human output.
+    let mut total_reverted: usize = 0;
+    let mut total_remaining: usize = 0;
+    let mut reverted_commands = RevertCommandSummary::default();
+
     for net in &networks {
         let session = resolve_fork_session_entry(&store, net)
             .cloned()
@@ -389,15 +485,15 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
             }
 
             if let Some(last_snapshot) = entry.snapshots.last() {
-                if !json {
-                    output::print_stage(
-                        "\u{23ee}\u{fe0f}",
-                        &format!(
-                            "Reverting EVM state for '{net}' (instance '{}')...",
-                            instance_name
-                        ),
-                    );
+                // Track reverted command and counts for human output.
+                if !json && !all {
+                    reverted_commands.record(&last_snapshot.command);
                 }
+                if !json {
+                    total_reverted += 1;
+                    total_remaining += entry.snapshots.len().saturating_sub(1);
+                }
+
                 let reverted = evm_revert_http(&client, &entry.rpc_url, &last_snapshot.snapshot_id)
                     .await
                     .with_context(|| {
@@ -424,15 +520,6 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
                 );
             }
 
-            if !json {
-                output::print_stage(
-                    "\u{1f4f8}",
-                    &format!(
-                        "Taking new EVM snapshot for '{net}' (instance '{}')...",
-                        instance_name
-                    ),
-                );
-            }
             let new_snapshot_id =
                 evm_snapshot_http(&client, &entry.rpc_url).await.with_context(|| {
                     format!(
@@ -442,13 +529,8 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
                 })?;
 
             let mut updated = entry.clone();
-            let next_index = updated.snapshots.len() as u32;
-            updated.snapshots.push(treb_core::types::fork::SnapshotEntry {
-                index: next_index,
-                snapshot_id: new_snapshot_id.clone(),
-                command: "revert".into(),
-                timestamp: Utc::now(),
-            });
+            updated.snapshots =
+                revert_snapshot_stack(&updated.snapshots, new_snapshot_id.clone(), Utc::now());
             store.update_active_fork(updated).context("failed to update fork entry")?;
 
             history_snapshots.push((instance_name, new_snapshot_id.clone()));
@@ -458,9 +540,6 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
             }
         }
 
-        if !json {
-            output::print_stage("\u{1f504}", &format!("Restoring registry for '{net}'..."));
-        }
         let snapshot_dir = PathBuf::from(&session.snapshot_dir);
         restore_registry(&snapshot_dir, &treb_dir)
             .context("failed to restore registry from snapshot")?;
@@ -494,9 +573,6 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
                 snapshot_id: json_snapshot_id,
                 new_snapshot_id: json_new_snapshot_id,
             });
-        } else {
-            output::print_stage("\u{2705}", &format!("Fork reverted for '{net}'."));
-            println!("Reverted fork for network '{net}' to initial state.");
         }
     }
 
@@ -510,6 +586,16 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
                 .ok_or_else(|| anyhow::anyhow!("missing fork revert result"))?;
             output::print_json(&result)?;
         }
+    } else {
+        // Print Go-matching revert output.
+        let message = revert_success_message(&networks, all);
+        println!("{message}");
+        println!();
+        if let Some(cmd) = reverted_commands.renderable_command() {
+            println!("  {:<12}{cmd}", "Reverted:");
+        }
+        println!("  {:<12}{total_reverted} snapshot(s)", "Reverted:");
+        println!("  {:<12}{total_remaining} snapshot(s)", "Remaining:");
     }
 
     Ok(())
@@ -555,6 +641,7 @@ pub async fn run_restart(
     let blk = fork_block_number.or(session.fork_block_number);
     let mut json_result = None;
     let mut history_snapshots: Vec<(String, String)> = Vec::new();
+    let mut setup_executed = false;
 
     for entry in &runtime_entries {
         let instance_name = entry.resolved_instance_name().to_string();
@@ -566,16 +653,6 @@ pub async fn run_restart(
             );
         }
 
-        if !json {
-            output::print_stage(
-                "\u{1f504}",
-                &format!(
-                    "Resetting Anvil for '{network}' (instance '{}', block: {})...",
-                    instance_name,
-                    blk.map_or("latest".into(), |b: u64| b.to_string())
-                ),
-            );
-        }
         anvil_reset_http(&client, &entry.rpc_url, &entry.fork_url, blk).await.with_context(
             || {
                 format!(
@@ -585,15 +662,6 @@ pub async fn run_restart(
             },
         )?;
 
-        if !json {
-            output::print_stage(
-                "\u{1f3ed}",
-                &format!(
-                    "Deploying CreateX factory for '{network}' (instance '{}')...",
-                    instance_name
-                ),
-            );
-        }
         deploy_createx_http(&client, &entry.rpc_url).await.with_context(|| {
             format!(
                 "failed to re-deploy CreateX for network '{}' (instance '{}')",
@@ -601,12 +669,16 @@ pub async fn run_restart(
             )
         })?;
 
-        if !json {
-            output::print_stage(
-                "\u{1f4f8}",
-                &format!("Taking EVM snapshot for '{network}' (instance '{}')...", instance_name),
-            );
-        }
+        setup_executed |=
+            execute_fork_setup_if_configured(&cwd, &network, &entry.rpc_url, entry.chain_id)
+                .await
+                .with_context(|| {
+                    format!(
+                        "failed to execute fork setup for network '{}' (instance '{}')",
+                        network, instance_name
+                    )
+                })?;
+
         let snapshot_id = evm_snapshot_http(&client, &entry.rpc_url).await.with_context(|| {
             format!(
                 "failed to take EVM snapshot for network '{}' (instance '{}')",
@@ -618,13 +690,7 @@ pub async fn run_restart(
         if let Some(b) = blk {
             updated.fork_block_number = Some(b);
         }
-        let next_index = updated.snapshots.len() as u32;
-        updated.snapshots.push(treb_core::types::fork::SnapshotEntry {
-            index: next_index,
-            snapshot_id: snapshot_id.clone(),
-            command: "restart".into(),
-            timestamp: Utc::now(),
-        });
+        updated.snapshots = restart_snapshot_stack(snapshot_id.clone(), Utc::now());
         store.update_active_fork(updated).context("failed to update fork entry")?;
 
         history_snapshots.push((instance_name.clone(), snapshot_id.clone()));
@@ -640,9 +706,6 @@ pub async fn run_restart(
     }
 
     // Restore registry from snapshot.
-    if !json {
-        output::print_stage("\u{1f504}", &format!("Restoring registry for '{network}'..."));
-    }
     let snapshot_dir = PathBuf::from(&session.snapshot_dir);
     restore_registry(&snapshot_dir, &treb_dir).context("failed to restore registry")?;
 
@@ -683,11 +746,95 @@ pub async fn run_restart(
         let result = json_result.ok_or_else(|| anyhow::anyhow!("missing fork restart result"))?;
         output::print_json(&result)?;
     } else {
-        output::print_stage("\u{2705}", &format!("Fork restarted for '{network}'."));
+        // Use the first runtime entry for the field display
+        let display_entry = &runtime_entries[0];
         println!("Restarted fork for network '{network}'.");
+        render_fork_fields(display_entry, setup_executed);
+        println!();
+        println!("Registry restored to initial fork state. All previous snapshots cleared.");
     }
 
     Ok(())
+}
+
+// ── Fork field rendering (Go-matching format) ────────────────────────────────
+
+/// Render fork entry fields in Go-matching indented key-value format.
+///
+/// Prints 2-space indented fields with labels left-padded to 14 characters
+/// (including colon), matching `render/fork.go`'s `RenderEnter` /
+/// `RenderRestart` layout.  Fields whose values are empty or zero are
+/// omitted.
+fn render_fork_fields(entry: &ForkEntry, setup_executed: bool) {
+    println!();
+    for line in fork_field_lines(entry, setup_executed) {
+        println!("{line}");
+    }
+}
+
+fn fork_field_lines(entry: &ForkEntry, setup_executed: bool) -> Vec<String> {
+    let mut lines = vec![
+        format!("  {:<14}{}", "Network:", entry.network),
+        format!("  {:<14}{}", "Chain ID:", entry.chain_id),
+    ];
+
+    // Go surfaces the local fork endpoint here. Rust only knows that value
+    // once `dev anvil start` has filled in the runtime entry.
+    if !entry.rpc_url.is_empty() {
+        lines.push(format!("  {:<14}{}", "Fork URL:", entry.rpc_url));
+    }
+    if entry.anvil_pid != 0 {
+        lines.push(format!("  {:<14}{}", "Anvil PID:", entry.anvil_pid));
+    }
+    if !entry.env_var_name.is_empty() && !entry.rpc_url.is_empty() {
+        lines.push(format!("  {:<14}{}={}", "Env Override:", entry.env_var_name, entry.rpc_url));
+    }
+    if !entry.log_file.is_empty() {
+        lines.push(format!("  {:<14}{}", "Logs:", entry.log_file));
+    }
+    if setup_executed {
+        lines.push(format!("  {:<14}{}", "Setup:", "executed successfully"));
+    }
+
+    lines
+}
+
+async fn execute_fork_setup_if_configured(
+    project_root: &Path,
+    network: &str,
+    rpc_url: &str,
+    chain_id: u64,
+) -> anyhow::Result<bool> {
+    let resolved = resolve_config(ResolveOpts {
+        project_root: project_root.to_path_buf(),
+        namespace: None,
+        network: Some(network.to_string()),
+        profile: None,
+        sender_overrides: HashMap::new(),
+    })
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let Some(script_path) = resolved.fork_setup.clone() else {
+        return Ok(false);
+    };
+
+    let resolved_senders =
+        resolve_all_senders(&resolved.senders).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut script_config =
+        build_script_config_with_senders(&resolved, &script_path, &resolved_senders)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    script_config.rpc_url(rpc_url).chain_id(chain_id).broadcast(true).non_interactive(true);
+
+    let script_args = script_config.into_script_args().map_err(|e| anyhow::anyhow!("{e}"))?;
+    let _foundry_shell = FoundryShellGuard::suppress();
+    let result = execute_script(script_args).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    if !result.success {
+        bail!("fork setup script '{}' did not complete successfully", script_path);
+    }
+
+    Ok(true)
 }
 
 // ── run_status ────────────────────────────────────────────────────────────────
@@ -744,51 +891,46 @@ pub async fn run_status(json: bool) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let mut table = crate::output::build_table(&[
-        "Network",
-        "Chain ID",
-        "RPC URL",
-        "Port",
-        "Fork Block",
-        "Started At",
-        "Uptime",
-        "Snapshots",
-        "Deployments",
-        "Status",
-    ]);
+    println!("Active Forks");
+    println!();
+
+    let current_network = load_local_config(&cwd)
+        .ok()
+        .and_then(|config| (!config.network.is_empty()).then_some(config.network));
 
     for network in &networks {
         let session = resolve_fork_session_entry(&store, network)
             .ok_or_else(|| anyhow::anyhow!("network '{}' is not in fork mode", network))?;
         let runtime = primary_tracked_anvil_entry(&store, network);
-        let rpc_url = runtime.map_or(session.rpc_url.as_str(), |entry| entry.rpc_url.as_str());
-        let port = runtime.map_or(session.port, |entry| entry.port);
+        let rpc_url = status_fork_url(session, runtime);
         let chain_id = runtime.map_or(session.chain_id, |entry| entry.chain_id);
         let started_at = runtime.map_or(session.started_at, |entry| entry.started_at);
         let snapshot_count = runtime.map_or(session.snapshots.len(), |entry| entry.snapshots.len());
         let running = network_is_running(runtime).await;
-        let status_text = if running { "running" } else { "stopped" };
-        let status_style = if running { color::SUCCESS } else { color::ERROR };
-        let fork_block =
-            session.fork_block_number.map(|b| b.to_string()).unwrap_or_else(|| "latest".into());
-        let uptime = format_uptime(now - started_at);
+        let health_detail = if running { "running" } else { "stopped" };
+        let uptime = format_status_uptime(now - started_at);
         let deployment_count = count_fork_deployments_for_chain(&deployments, chain_id);
+        let anvil_pid = runtime.map_or(session.anvil_pid, |entry| entry.anvil_pid);
+        let log_file = runtime.map_or(session.log_file.as_str(), |entry| entry.log_file.as_str());
 
-        table.add_row(vec![
-            styled(network, color::NAMESPACE),
-            chain_id.to_string(),
-            rpc_url.to_string(),
-            port.to_string(),
-            fork_block,
-            started_at.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
-            uptime,
-            snapshot_count.to_string(),
-            deployment_count.to_string(),
-            styled(status_text, status_style),
-        ]);
+        println!("{}", status_entry_header(network, current_network.as_deref()));
+        println!("    {:<14}{}", "Chain ID:", chain_id);
+        if !rpc_url.is_empty() {
+            println!("    {:<14}{}", "Fork URL:", rpc_url);
+        }
+        if anvil_pid != 0 {
+            println!("    {:<14}{}", "Anvil PID:", anvil_pid);
+        }
+        println!("    {:<14}{}", "Status:", health_detail);
+        println!("    {:<14}{}", "Uptime:", uptime);
+        println!("    {:<14}{}", "Snapshots:", snapshot_count);
+        println!("    {:<14}{}", "Fork Deploys:", deployment_count);
+        if !log_file.is_empty() {
+            println!("    {:<14}{}", "Logs:", log_file);
+        }
+        println!();
     }
 
-    crate::output::print_table(&table);
     Ok(())
 }
 
@@ -815,32 +957,26 @@ pub async fn run_history(network: Option<String>, json: bool) -> anyhow::Result<
         return Ok(());
     }
 
-    if history.is_empty() {
+    let networks = human_history_networks(&store, network.as_deref());
+    if networks.is_empty() {
         let filter_msg =
             network.as_deref().map_or_else(String::new, |n| format!(" for network '{n}'"));
         println!("No fork history{filter_msg}.");
         return Ok(());
     }
 
-    let mut table = crate::output::build_table(&["Timestamp", "Action", "Network", "Details"]);
+    for net in &networks {
+        let entries = human_history_entries(&store, net);
+        println!("Fork History: {net}");
+        println!();
 
-    for entry in &history {
-        let action_style = match entry.action.as_str() {
-            "enter" => color::SUCCESS,
-            "exit" => color::WARNING,
-            "revert" => color::MUTED,
-            "restart" => color::STAGE,
-            _ => Style::new(),
-        };
-        table.add_row(vec![
-            entry.timestamp.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
-            styled(&entry.action, action_style),
-            styled(&entry.network, color::CHAIN),
-            entry.details.as_deref().unwrap_or("-").to_string(),
-        ]);
+        for line in render_history_lines(&entries) {
+            println!("{line}");
+        }
+
+        println!();
     }
 
-    crate::output::print_table(&table);
     Ok(())
 }
 
@@ -866,6 +1002,16 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
     let diff_files = [DEPLOYMENTS_FILE, TRANSACTIONS_FILE];
     let mut changes: Vec<serde_json::Value> = Vec::new();
 
+    // Structured data for human output (deployment details + transaction count).
+    struct DiffEntry {
+        name: String,
+        address: String,
+        deployment_type: String,
+    }
+    let mut new_deployments: Vec<DiffEntry> = Vec::new();
+    let mut modified_deployments: Vec<DiffEntry> = Vec::new();
+    let mut new_transactions: usize = 0;
+
     for &file_name in &diff_files {
         let current_path = treb_dir.join(file_name);
         let snapshot_path = snapshot_dir.join(file_name);
@@ -881,6 +1027,7 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
             .collect();
 
         let file_label = file_name.trim_end_matches(".json");
+        let is_deployments = file_label == "deployments";
 
         for key in &all_keys {
             let in_current = current_map.as_ref().and_then(|m| m.get(key));
@@ -898,6 +1045,26 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
                 "file":   file_label,
                 "key":    key,
             }));
+
+            // Collect structured data for human output sections.
+            if is_deployments && (change_type == "added" || change_type == "modified") {
+                let data = in_current.unwrap(); // present for added/modified
+                let name = data
+                    .get("contractName")
+                    .and_then(|v| v.as_str())
+                    .map_or_else(|| key.clone(), str::to_owned);
+                let address =
+                    data.get("address").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let dtype = data.get("type").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let diff_entry = DiffEntry { name, address, deployment_type: dtype };
+                if change_type == "added" {
+                    new_deployments.push(diff_entry);
+                } else {
+                    modified_deployments.push(diff_entry);
+                }
+            } else if !is_deployments && change_type == "added" {
+                new_transactions += 1;
+            }
         }
     }
 
@@ -910,31 +1077,54 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    if changes.is_empty() {
-        println!("No changes detected for network '{network}'.");
+    // Human output — Go-matching format.
+    println!("Fork Diff: {network}");
+    println!();
+
+    let has_human_changes =
+        !new_deployments.is_empty() || !modified_deployments.is_empty() || new_transactions > 0;
+    if !has_human_changes {
+        println!("No changes since fork entered.");
         return Ok(());
     }
 
-    let mut table = crate::output::build_table(&["Change", "File", "Key"]);
-    for change in &changes {
-        let change_text = change["change"].as_str().unwrap_or("");
-        let change_style = match change_text {
-            "added" => Style::new().green(),
-            "removed" => Style::new().red(),
-            "modified" => Style::new().yellow(),
-            _ => Style::new(),
-        };
-        table.add_row(vec![
-            styled(change_text, change_style),
-            change["file"].as_str().unwrap_or("").to_string(),
-            styled(change["key"].as_str().unwrap_or(""), color::LABEL),
-        ]);
+    if !new_deployments.is_empty() {
+        println!("New Deployments ({}):", new_deployments.len());
+        for d in &new_deployments {
+            println!("  + {:<20} {}", d.name, format_diff_suffix(&d.address, &d.deployment_type));
+        }
+        println!();
     }
-    crate::output::print_table(&table);
+
+    if !modified_deployments.is_empty() {
+        println!("Modified Deployments ({}):", modified_deployments.len());
+        for d in &modified_deployments {
+            println!("  ~ {:<20} {}", d.name, format_diff_suffix(&d.address, &d.deployment_type));
+        }
+        println!();
+    }
+
+    if new_transactions > 0 {
+        println!("New Transactions: {new_transactions}");
+        println!();
+    }
+
     Ok(())
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+/// Format the address + type suffix for a diff entry line.
+/// Produces `"0xAddr  TYPE"` when both present, `"0xAddr"` when type is empty,
+/// or empty string when address is also empty.
+fn format_diff_suffix(address: &str, deployment_type: &str) -> String {
+    match (address.is_empty(), deployment_type.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => address.to_string(),
+        (true, false) => deployment_type.to_string(),
+        (false, false) => format!("{address}  {deployment_type}"),
+    }
+}
 
 fn is_tracked_anvil_instance(entry: &ForkEntry) -> bool {
     entry.port != 0 || !entry.pid_file.is_empty() || !entry.log_file.is_empty()
@@ -952,6 +1142,112 @@ fn resolve_fork_session_entry<'a>(
                 .then_with(|| left.resolved_instance_name().cmp(right.resolved_instance_name()))
         })
     })
+}
+
+fn human_history_networks(store: &ForkStateStore, network: Option<&str>) -> Vec<String> {
+    match network {
+        Some(network) => {
+            if store.data().history.iter().any(|entry| entry.network == network) {
+                vec![network.to_string()]
+            } else {
+                Vec::new()
+            }
+        }
+        None => {
+            let mut seen = HashSet::new();
+            store
+                .data()
+                .history
+                .iter()
+                .filter_map(|entry| {
+                    seen.insert(entry.network.clone()).then_some(entry.network.clone())
+                })
+                .collect()
+        }
+    }
+}
+
+fn human_history_entries<'a>(
+    store: &'a ForkStateStore,
+    network: &str,
+) -> Vec<&'a ForkHistoryEntry> {
+    let mut entries: Vec<_> =
+        store.data().history.iter().filter(|entry| entry.network == network).collect();
+    entries.reverse();
+    entries
+}
+
+fn render_history_lines(entries: &[&ForkHistoryEntry]) -> Vec<String> {
+    let Some(last_idx) = entries.len().checked_sub(1) else {
+        return Vec::new();
+    };
+
+    entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            let marker = if index == last_idx { "\u{2192} " } else { "  " };
+            let label = history_label(index, entry);
+            format!(
+                "  {marker}[{index}] {label}  ({})",
+                entry.timestamp.format("%Y-%m-%d %H:%M:%S")
+            )
+        })
+        .collect()
+}
+
+fn history_label(index: usize, entry: &ForkHistoryEntry) -> String {
+    if index == 0 && entry.action == "enter" {
+        return "initial".to_string();
+    }
+
+    match entry.details.as_deref() {
+        Some(details) if !details.is_empty() => format!("{}: {details}", entry.action),
+        _ => entry.action.clone(),
+    }
+}
+
+fn restart_snapshot_stack(
+    snapshot_id: String,
+    timestamp: chrono::DateTime<Utc>,
+) -> Vec<SnapshotEntry> {
+    vec![snapshot_entry(0, snapshot_id, "restart", timestamp)]
+}
+
+fn revert_snapshot_stack(
+    existing: &[SnapshotEntry],
+    snapshot_id: String,
+    timestamp: chrono::DateTime<Utc>,
+) -> Vec<SnapshotEntry> {
+    let mut snapshots = existing.to_vec();
+    snapshots.pop();
+    snapshots.push(snapshot_entry(snapshots.len() as u32, snapshot_id, "revert", timestamp));
+    snapshots
+}
+
+fn snapshot_entry(
+    index: u32,
+    snapshot_id: String,
+    command: &str,
+    timestamp: chrono::DateTime<Utc>,
+) -> SnapshotEntry {
+    SnapshotEntry { index, snapshot_id, command: command.into(), timestamp }
+}
+
+fn exit_ordered_networks(store: &ForkStateStore) -> Vec<String> {
+    let mut networks: Vec<(String, chrono::DateTime<Utc>)> = store
+        .list_active_networks()
+        .into_iter()
+        .filter_map(|network| {
+            resolve_fork_session_entry(store, &network).map(|entry| (network, entry.entered_at))
+        })
+        .collect();
+
+    networks.sort_by(|(left_network, left_entered_at), (right_network, right_entered_at)| {
+        right_entered_at.cmp(left_entered_at).then_with(|| left_network.cmp(right_network))
+    });
+
+    networks.into_iter().map(|(network, _)| network).collect()
 }
 
 fn tracked_anvil_entries_for_network<'a>(
@@ -986,8 +1282,37 @@ async fn network_is_running(entry: Option<&ForkEntry>) -> bool {
     }
 }
 
-fn styled(text: &str, style: Style) -> String {
-    if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
+fn status_fork_url<'a>(session: &'a ForkEntry, runtime: Option<&'a ForkEntry>) -> &'a str {
+    runtime.filter(|entry| !entry.rpc_url.is_empty()).map_or_else(
+        || {
+            if !session.fork_url.is_empty() {
+                session.fork_url.as_str()
+            } else {
+                session.rpc_url.as_str()
+            }
+        },
+        |entry| entry.rpc_url.as_str(),
+    )
+}
+
+fn format_status_uptime(duration: chrono::Duration) -> String {
+    output::format_duration(duration.to_std().unwrap_or(Duration::ZERO))
+}
+
+fn status_entry_header(network: &str, current_network: Option<&str>) -> String {
+    if current_network == Some(network) {
+        format!("  {network} (current)")
+    } else {
+        format!("  {network}")
+    }
+}
+
+fn revert_success_message(networks: &[String], all: bool) -> String {
+    if all {
+        "Reverted all active forks.".to_string()
+    } else {
+        format!("Reverted fork for network '{}'.", networks[0])
+    }
 }
 
 /// Format a duration as a human-readable uptime string.
@@ -1181,11 +1506,11 @@ fn load_json_map(path: &Path) -> Option<serde_json::Map<String, serde_json::Valu
 #[cfg(test)]
 mod tests {
     use super::ForkSubcommand;
-    use chrono::Utc;
+    use chrono::{TimeZone, Utc};
     use clap::{Parser, Subcommand};
     use std::{fs, path::PathBuf};
     use tempfile::TempDir;
-    use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
+    use treb_core::types::fork::{ForkEntry, ForkHistoryEntry, SnapshotEntry};
     use treb_registry::{DEPLOYMENTS_FILE, ForkStateStore, restore_registry, snapshot_registry};
 
     // ── Minimal test CLI for clap parsing ─────────────────────────────────
@@ -1257,8 +1582,9 @@ mod tests {
     fn parse_exit() {
         let sub = parse_fork(&["exit", "--network", "sepolia"]).unwrap();
         match sub {
-            ForkSubcommand::Exit { network, json } => {
+            ForkSubcommand::Exit { network, all, json } => {
                 assert_eq!(network, "sepolia");
+                assert!(!all);
                 assert!(!json);
             }
             _ => panic!("expected Exit"),
@@ -1510,6 +1836,108 @@ mod tests {
         assert_eq!(primary.resolved_instance_name(), "alpha");
     }
 
+    #[test]
+    fn status_fork_url_uses_session_fork_url_without_runtime() {
+        let (_root, treb_dir) = make_treb_dir();
+        let session = sample_entry(&treb_dir, "mainnet");
+
+        assert_eq!(super::status_fork_url(&session, None), "https://eth.example.com");
+    }
+
+    #[test]
+    fn status_fork_url_prefers_runtime_rpc_url_when_available() {
+        let (_root, treb_dir) = make_treb_dir();
+        let session = sample_entry(&treb_dir, "mainnet");
+        let mut runtime = sample_named_entry(&treb_dir, "mainnet", "alpha");
+        runtime.rpc_url = "http://127.0.0.1:18545".into();
+        runtime.port = 18545;
+        runtime.log_file = "/tmp/anvil-alpha.log".into();
+
+        assert_eq!(super::status_fork_url(&session, Some(&runtime)), "http://127.0.0.1:18545");
+    }
+
+    #[test]
+    fn status_entry_header_marks_current_network() {
+        assert_eq!(super::status_entry_header("mainnet", Some("mainnet")), "  mainnet (current)");
+        assert_eq!(super::status_entry_header("sepolia", Some("mainnet")), "  sepolia");
+    }
+
+    #[test]
+    fn format_status_uptime_matches_go_duration_format() {
+        assert_eq!(super::format_status_uptime(chrono::Duration::seconds(45)), "45s");
+        assert_eq!(super::format_status_uptime(chrono::Duration::minutes(135)), "2h15m");
+    }
+
+    #[test]
+    fn format_status_uptime_handles_negative_duration() {
+        assert_eq!(super::format_status_uptime(chrono::Duration::seconds(-10)), "0s");
+    }
+
+    #[test]
+    fn revert_success_message_uses_all_flag_for_single_active_network() {
+        let networks = vec!["mainnet".to_string()];
+
+        assert_eq!(super::revert_success_message(&networks, true), "Reverted all active forks.");
+        assert_eq!(
+            super::revert_success_message(&networks, false),
+            "Reverted fork for network 'mainnet'."
+        );
+    }
+
+    #[test]
+    fn revert_command_summary_renders_shared_command() {
+        let mut summary = super::RevertCommandSummary::default();
+        summary.record("deploy");
+        summary.record("deploy");
+
+        assert_eq!(summary.renderable_command(), Some("deploy"));
+    }
+
+    #[test]
+    fn revert_command_summary_hides_mixed_commands() {
+        let mut summary = super::RevertCommandSummary::default();
+        summary.record("deploy");
+        summary.record("upgrade");
+
+        assert_eq!(summary.renderable_command(), None);
+    }
+
+    #[test]
+    fn fork_field_lines_omit_runtime_only_fields_for_placeholder_entry() {
+        let (_root, treb_dir) = make_treb_dir();
+        let mut entry = sample_entry(&treb_dir, "mainnet");
+        entry.env_var_name = "ETH_RPC_URL_MAINNET".into();
+
+        let lines = super::fork_field_lines(&entry, false);
+        let joined = lines.join("\n");
+
+        assert!(joined.contains("Network:"));
+        assert!(joined.contains("Chain ID:"));
+        assert!(!joined.contains("Fork URL:"));
+        assert!(!joined.contains("Env Override:"));
+        assert!(!joined.contains("https://eth.example.com"));
+    }
+
+    #[test]
+    fn fork_field_lines_use_local_runtime_fields_and_setup_marker() {
+        let (_root, treb_dir) = make_treb_dir();
+        let mut entry = sample_entry(&treb_dir, "mainnet");
+        entry.rpc_url = "http://127.0.0.1:8545".into();
+        entry.env_var_name = "ETH_RPC_URL_MAINNET".into();
+        entry.anvil_pid = 4321;
+        entry.log_file = "/tmp/anvil-mainnet.log".into();
+
+        let lines = super::fork_field_lines(&entry, true);
+        let joined = lines.join("\n");
+
+        assert!(joined.contains("Fork URL:     http://127.0.0.1:8545"));
+        assert!(joined.contains("Anvil PID:    4321"));
+        assert!(joined.contains("Env Override: ETH_RPC_URL_MAINNET=http://127.0.0.1:8545"));
+        assert!(joined.contains("Logs:         /tmp/anvil-mainnet.log"));
+        assert!(joined.contains("Setup:        executed successfully"));
+        assert!(!joined.contains("https://eth.example.com"));
+    }
+
     // ── history filtering ─────────────────────────────────────────────────
 
     #[test]
@@ -1557,6 +1985,141 @@ mod tests {
 
         let history: Vec<_> = store.data().history.iter().collect();
         assert!(history.is_empty(), "expected empty history");
+    }
+
+    #[test]
+    fn human_history_networks_use_persisted_audit_log() {
+        let (_root, treb_dir) = make_treb_dir();
+        let mut store = ForkStateStore::new(&treb_dir);
+
+        store
+            .add_history(ForkHistoryEntry {
+                action: "exit".into(),
+                network: "mainnet".into(),
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 12, 9, 0, 0).unwrap(),
+                details: None,
+            })
+            .unwrap();
+        store
+            .add_history(ForkHistoryEntry {
+                action: "enter".into(),
+                network: "sepolia".into(),
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 11, 9, 0, 0).unwrap(),
+                details: None,
+            })
+            .unwrap();
+
+        assert_eq!(
+            super::human_history_networks(&store, None),
+            vec!["sepolia".to_string(), "mainnet".to_string()]
+        );
+        assert_eq!(
+            super::human_history_networks(&store, Some("mainnet")),
+            vec!["mainnet".to_string()]
+        );
+    }
+
+    #[test]
+    fn render_history_lines_use_persisted_audit_entries() {
+        let (_root, treb_dir) = make_treb_dir();
+        let mut store = ForkStateStore::new(&treb_dir);
+
+        store
+            .add_history(ForkHistoryEntry {
+                action: "enter".into(),
+                network: "mainnet".into(),
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap(),
+                details: None,
+            })
+            .unwrap();
+        store
+            .add_history(ForkHistoryEntry {
+                action: "restart".into(),
+                network: "mainnet".into(),
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 12, 9, 0, 0).unwrap(),
+                details: Some("Anvil reset; snapshot: 0x2".into()),
+            })
+            .unwrap();
+        store
+            .add_history(ForkHistoryEntry {
+                action: "revert".into(),
+                network: "mainnet".into(),
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 13, 9, 0, 0).unwrap(),
+                details: Some("new EVM snapshot: 0x3".into()),
+            })
+            .unwrap();
+
+        let entries = super::human_history_entries(&store, "mainnet");
+        let lines = super::render_history_lines(&entries);
+
+        assert_eq!(
+            lines,
+            vec![
+                "    [0] initial  (2026-01-10 09:00:00)".to_string(),
+                "    [1] restart: Anvil reset; snapshot: 0x2  (2026-01-12 09:00:00)".to_string(),
+                "  → [2] revert: new EVM snapshot: 0x3  (2026-01-13 09:00:00)".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn restart_snapshot_stack_clears_previous_snapshots() {
+        let restarted = super::restart_snapshot_stack(
+            "0xrestart".into(),
+            Utc.with_ymd_and_hms(2026, 1, 12, 9, 0, 0).unwrap(),
+        );
+
+        assert_eq!(
+            restarted,
+            vec![SnapshotEntry {
+                index: 0,
+                snapshot_id: "0xrestart".into(),
+                command: "restart".into(),
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 12, 9, 0, 0).unwrap(),
+            }]
+        );
+    }
+
+    #[test]
+    fn revert_snapshot_stack_replaces_consumed_snapshot() {
+        let snapshots = vec![
+            SnapshotEntry {
+                index: 0,
+                snapshot_id: "0xenter".into(),
+                command: "enter".into(),
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap(),
+            },
+            SnapshotEntry {
+                index: 1,
+                snapshot_id: "0xrestart".into(),
+                command: "restart".into(),
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 11, 9, 0, 0).unwrap(),
+            },
+        ];
+
+        let reverted = super::revert_snapshot_stack(
+            &snapshots,
+            "0xrevert".into(),
+            Utc.with_ymd_and_hms(2026, 1, 12, 9, 0, 0).unwrap(),
+        );
+
+        assert_eq!(
+            reverted,
+            vec![
+                SnapshotEntry {
+                    index: 0,
+                    snapshot_id: "0xenter".into(),
+                    command: "enter".into(),
+                    timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap(),
+                },
+                SnapshotEntry {
+                    index: 1,
+                    snapshot_id: "0xrevert".into(),
+                    command: "revert".into(),
+                    timestamp: Utc.with_ymd_and_hms(2026, 1, 12, 9, 0, 0).unwrap(),
+                },
+            ]
+        );
     }
 
     // ── diff detects changes ──────────────────────────────────────────────

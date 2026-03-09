@@ -441,14 +441,16 @@ impl Normalizer for DebugLogNormalizer {
     }
 }
 
-/// Normalizes human-readable uptime strings produced by `format_uptime()`.
+/// Normalizes human-readable uptime strings produced by fork status.
 ///
-/// Matches patterns like `3d 1h`, `2h 15m`, `45m`, `< 1m`.
+/// Matches both the legacy formatter (`3d 1h`, `2h 15m`, `45m`, `< 1m`) and
+/// the Go-parity formatter (`2h15m`, `5m30s`, `45s`).
 pub struct UptimeNormalizer;
 
 impl Normalizer for UptimeNormalizer {
     fn normalize(&self, input: &str) -> String {
-        let re = Regex::new(r"\d+d \d+h|\d+d|\d+h \d+m|\d+h|\d+m|< 1m").unwrap();
+        let re =
+            Regex::new(r"\d+d \d+h|\d+h\d+m|\d+m\d+s|\d+d|\d+h \d+m|\d+h|\d+m|\d+s|< 1m").unwrap();
         re.replace_all(input, "<UPTIME>").into_owned()
     }
 }
@@ -893,6 +895,21 @@ mod tests {
     fn duration_normalizer_no_match() {
         let n = DurationNormalizer;
         assert_eq!(n.normalize("deployed contract to mainnet"), "deployed contract to mainnet");
+    }
+
+    #[test]
+    fn uptime_normalizer_replaces_legacy_uptime_strings() {
+        let n = UptimeNormalizer;
+        assert_eq!(n.normalize("Uptime: 2h 15m"), "Uptime: <UPTIME>");
+        assert_eq!(n.normalize("Uptime: < 1m"), "Uptime: <UPTIME>");
+    }
+
+    #[test]
+    fn uptime_normalizer_replaces_go_style_uptime_strings() {
+        let n = UptimeNormalizer;
+        assert_eq!(n.normalize("Uptime: 45s"), "Uptime: <UPTIME>");
+        assert_eq!(n.normalize("Uptime: 5m30s"), "Uptime: <UPTIME>");
+        assert_eq!(n.normalize("Uptime: 2h15m"), "Uptime: <UPTIME>");
     }
 
     // --- ForgeOutputNormalizer ---

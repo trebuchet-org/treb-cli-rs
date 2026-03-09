@@ -1,0 +1,12 @@
+=== cmd 0: [fork restart --network mainnet] ===
+Restarted fork for network 'mainnet'.
+
+  Network:      mainnet
+  Chain ID:     1
+  Fork URL:     <LABEL>
+  Anvil PID:    4321
+  Env Override: ETH_RPC_URL_MAINNET=<LABEL>
+  Logs:         /tmp/anvil-mainnet.log
+  Setup:        executed successfully
+
+Registry restored to initial fork state. All previous snapshots cleared.

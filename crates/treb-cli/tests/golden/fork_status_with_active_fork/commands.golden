@@ -1,6 +1,10 @@
 === cmd 0: [fork status] ===
-┌─────────┬──────────┬────────────────────────┬───────┬────────────┬─────────────────────────┬────────┬───────────┬─────────────┬─────────┐
-│ Network ┆ Chain ID ┆ RPC URL                ┆ Port  ┆ Fork Block ┆ Started At              ┆ Uptime ┆ Snapshots ┆ Deployments ┆ Status  │
-╞═════════╪══════════╪════════════════════════╪═══════╪════════════╪═════════════════════════╪════════╪═══════════╪═════════════╪═════════╡
-│ mainnet ┆ 1        ┆ http://localhost:18545 ┆ 18545 ┆ latest     ┆ <TIMESTAMP> UTC ┆ <UPTIME> ┆ 0         ┆ 0           ┆ stopped │
-└─────────┴──────────┴────────────────────────┴───────┴────────────┴─────────────────────────┴────────┴───────────┴─────────────┴─────────┘
+Active Forks
+
+  mainnet
+    Chain ID:     1
+    Fork URL:     http://localhost:18545
+    Status:       stopped
+    Uptime:       <UPTIME>
+    Snapshots:    0
+    Fork Deploys: 0
