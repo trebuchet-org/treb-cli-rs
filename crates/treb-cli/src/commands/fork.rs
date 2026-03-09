@@ -425,6 +425,11 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
     let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
     let mut json_results: Vec<ForkRevertJson> = Vec::new();
 
+    // Track revert statistics for human output.
+    let mut total_reverted: usize = 0;
+    let mut total_remaining: usize = 0;
+    let mut reverted_command: Option<String> = None;
+
     for net in &networks {
         let session = resolve_fork_session_entry(&store, net)
             .cloned()
@@ -459,15 +464,15 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
             }
 
             if let Some(last_snapshot) = entry.snapshots.last() {
-                if !json {
-                    output::print_stage(
-                        "\u{23ee}\u{fe0f}",
-                        &format!(
-                            "Reverting EVM state for '{net}' (instance '{}')...",
-                            instance_name
-                        ),
-                    );
+                // Track reverted command and counts for human output.
+                if !json && !all {
+                    reverted_command = Some(last_snapshot.command.clone());
                 }
+                if !json {
+                    total_reverted += 1;
+                    total_remaining += entry.snapshots.len().saturating_sub(1);
+                }
+
                 let reverted = evm_revert_http(&client, &entry.rpc_url, &last_snapshot.snapshot_id)
                     .await
                     .with_context(|| {
@@ -494,15 +499,6 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
                 );
             }
 
-            if !json {
-                output::print_stage(
-                    "\u{1f4f8}",
-                    &format!(
-                        "Taking new EVM snapshot for '{net}' (instance '{}')...",
-                        instance_name
-                    ),
-                );
-            }
             let new_snapshot_id =
                 evm_snapshot_http(&client, &entry.rpc_url).await.with_context(|| {
                     format!(
@@ -528,9 +524,6 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
             }
         }
 
-        if !json {
-            output::print_stage("\u{1f504}", &format!("Restoring registry for '{net}'..."));
-        }
         let snapshot_dir = PathBuf::from(&session.snapshot_dir);
         restore_registry(&snapshot_dir, &treb_dir)
             .context("failed to restore registry from snapshot")?;
@@ -564,9 +557,6 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
                 snapshot_id: json_snapshot_id,
                 new_snapshot_id: json_new_snapshot_id,
             });
-        } else {
-            output::print_stage("\u{2705}", &format!("Fork reverted for '{net}'."));
-            println!("Reverted fork for network '{net}' to initial state.");
         }
     }
 
@@ -580,6 +570,22 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
                 .ok_or_else(|| anyhow::anyhow!("missing fork revert result"))?;
             output::print_json(&result)?;
         }
+    } else {
+        // Print Go-matching revert output.
+        let message = if networks.len() > 1 {
+            "Reverted all active forks.".to_string()
+        } else {
+            format!("Reverted fork for network '{}'.", networks[0])
+        };
+        println!("{message}");
+        println!();
+        if let Some(cmd) = &reverted_command {
+            if !cmd.is_empty() {
+                println!("  {:<12}{cmd}", "Reverted:");
+            }
+        }
+        println!("  {:<12}{total_reverted} snapshot(s)", "Reverted:");
+        println!("  {:<12}{total_remaining} snapshot(s)", "Remaining:");
     }
 
     Ok(())
