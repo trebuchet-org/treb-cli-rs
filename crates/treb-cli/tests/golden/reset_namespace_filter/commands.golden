@@ -1,8 +1,10 @@
 === cmd 0: [reset --yes --namespace staging] ===
-⚠️ Warning: About to remove 1 deployment(s), 1 transaction(s), 1 safe transaction(s), 1 governor proposal(s). A backup will be created first.
-Reset complete.
-Removed 1 deployment(s), 1 transaction(s), 1 safe transaction(s), 1 governor proposal(s).
-Backup created at: <PROJECT_ROOT>/.treb/backups/reset-<UNIX_TIME>
-🔍 Scanning registry...
-💾 Creating backup...
-✅ Reset complete
+Found 4 items to reset for namespace 'staging' on network '1' (chain 1):
+
+  Deployments:        1
+  Transactions:       1
+  Safe Transactions:  1
+  Governor Proposals: 1
+
+Running in non-interactive mode. Proceeding with reset...
+Successfully reset 4 items from the registry.

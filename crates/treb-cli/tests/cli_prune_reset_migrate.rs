@@ -203,7 +203,7 @@ fn reset_yes_empties_all_stores_and_creates_backup() {
     let mut registry = init_project(&tmp);
 
     registry.insert_deployment(make_deployment("dep-1", "", 1, "default")).unwrap();
-    registry.insert_deployment(make_deployment("dep-2", "", 1, "staging")).unwrap();
+    registry.insert_deployment(make_deployment("dep-2", "", 42220, "staging")).unwrap();
 
     let output = treb().args(["reset", "--yes"]).current_dir(tmp.path()).output().unwrap();
 
@@ -211,10 +211,26 @@ fn reset_yes_empties_all_stores_and_creates_backup() {
     let stdout = String::from_utf8(output.stdout).unwrap();
 
     assert!(
-        stdout.contains("Reset complete."),
-        "stdout should contain 'Reset complete.': {stdout}"
+        stdout.contains("Found 2 items to reset for namespace 'default' across all networks:"),
+        "stdout should describe the mixed-chain reset scope without inventing a default network: {stdout}"
     );
-    assert!(stdout.to_lowercase().contains("backup"), "stdout should mention backup: {stdout}");
+    assert!(
+        stdout.contains("  Deployments:        2"),
+        "stdout should include aligned reset counts: {stdout}"
+    );
+    assert!(
+        stdout.contains("Running in non-interactive mode. Proceeding with reset..."),
+        "stdout should include the non-interactive proceed line: {stdout}"
+    );
+    assert!(
+        stdout.contains("Successfully reset 2 items from the registry."),
+        "stdout should contain the plain reset success line: {stdout}"
+    );
+    assert!(!stdout.contains("31337"), "stdout should not claim chain 31337: {stdout}");
+    assert!(
+        !stdout.to_lowercase().contains("backup"),
+        "stdout should not mention backup paths: {stdout}"
+    );
 
     // Backup directory should exist.
     let backups_dir = tmp.path().join(".treb/backups");
