@@ -7,7 +7,7 @@ use framework::{
     context::TestContext,
     golden::GoldenFile,
     integration_test::{IntegrationTest, run_integration_test},
-    normalizer::{Normalizer, NormalizerChain, ShortHexNormalizer},
+    normalizer::{BuildDateNormalizer, Normalizer, NormalizerChain, ShortHexNormalizer},
     pool::ContextPool,
 };
 
@@ -70,11 +70,14 @@ fn golden_file_round_trip() {
     let stdout = String::from_utf8_lossy(&assertion.get_output().stdout).to_string();
     assertion.success();
 
-    // Apply default normalizer chain + short hex normalizer for commit hashes.
+    // Apply the shared default chain, then opt into build-date masking for this
+    // intentionally unstable smoke golden.
     let chain = NormalizerChain::default_chain();
     let normalized = chain.normalize(&stdout);
     let extra = ShortHexNormalizer;
     let normalized = extra.normalize(&normalized);
+    let build_date = BuildDateNormalizer;
+    let normalized = build_date.normalize(&normalized);
 
     // Compare against golden file.
     let golden = GoldenFile::new(golden_dir());

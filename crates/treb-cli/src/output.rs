@@ -10,7 +10,10 @@ use comfy_table::{Attribute, Cell, ContentArrangement, Table};
 use owo_colors::OwoColorize;
 use serde::Serialize;
 
-use crate::ui::{color, emoji};
+use crate::ui::{
+    color, emoji,
+    terminal::{display_width, strip_ansi_codes},
+};
 
 /// Print a value as pretty-printed JSON to stdout.
 ///
@@ -291,6 +294,88 @@ pub fn format_build_date(date: &str) -> String {
     }
 
     date.to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Go-matching table renderer (render/deployments.go)
+// ---------------------------------------------------------------------------
+
+/// A table represented as a list of rows, where each row is a list of cell strings.
+pub type TableData = Vec<Vec<String>>;
+
+/// Calculate the maximum column widths across multiple tables.
+///
+/// Strips ANSI codes from each cell before measuring. Uses Unicode-aware
+/// [`display_width`] for column index 2 (the verification column) and byte
+/// length for all other columns, matching Go's `calculateTableColumnWidths`.
+#[allow(dead_code)]
+pub fn calculate_column_widths(tables: &[TableData]) -> Vec<usize> {
+    let mut widths: Vec<usize> = Vec::new();
+    for table in tables {
+        for row in table {
+            for (col_idx, cell) in row.iter().enumerate() {
+                let stripped = strip_ansi_codes(cell);
+                let w = if col_idx == 2 { display_width(&stripped) } else { stripped.len() };
+                if col_idx >= widths.len() {
+                    widths.resize(col_idx + 1, 0);
+                }
+                if w > widths[col_idx] {
+                    widths[col_idx] = w;
+                }
+            }
+        }
+    }
+    widths
+}
+
+/// Render a table with fixed column widths and no borders.
+///
+/// Produces output matching Go's `renderTableWithWidths`: no borders, no
+/// separators, 3-space right padding between columns, fixed column widths,
+/// and `continuation_prefix` prepended to the first cell of each row.
+/// The first column width is adjusted by `2 + continuation_prefix.len()`,
+/// using stripped byte widths to match `calculate_column_widths`.
+#[allow(dead_code)]
+pub fn render_table_with_widths(
+    table: &TableData,
+    widths: &[usize],
+    continuation_prefix: &str,
+) -> String {
+    if table.is_empty() {
+        return String::new();
+    }
+
+    let first_col_width = widths.first().copied().unwrap_or(0) + 2 + continuation_prefix.len();
+
+    let mut lines = Vec::new();
+    for row in table {
+        let mut line = String::new();
+        let last_col = row.len().saturating_sub(1);
+        for (col_idx, cell) in row.iter().enumerate() {
+            if col_idx == 0 {
+                let content = format!("{continuation_prefix}{cell}");
+                let content_width = continuation_prefix.len() + strip_ansi_codes(cell).len();
+                line.push_str(&content);
+                if content_width < first_col_width {
+                    line.push_str(&" ".repeat(first_col_width - content_width));
+                }
+            } else {
+                let col_width = widths.get(col_idx).copied().unwrap_or(0);
+                let stripped = strip_ansi_codes(cell);
+                let cell_width =
+                    if col_idx == 2 { display_width(&stripped) } else { stripped.len() };
+                line.push_str(cell);
+                if cell_width < col_width {
+                    line.push_str(&" ".repeat(col_width - cell_width));
+                }
+            }
+            if col_idx < last_col {
+                line.push_str("   ");
+            }
+        }
+        lines.push(line);
+    }
+    lines.join("\n")
 }
 
 #[cfg(test)]
@@ -709,5 +794,162 @@ mod tests {
     #[test]
     fn format_build_date_malformed_pseudo_iso_invalid_seconds() {
         assert_eq!(format_build_date("2025-01-26T15:04:05.Z"), "2025-01-26T15:04:05.Z");
+    }
+
+    // -- calculate_column_widths tests --
+
+    #[test]
+    fn calculate_column_widths_empty_input() {
+        assert_eq!(calculate_column_widths(&[]), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn calculate_column_widths_single_table() {
+        let table: TableData = vec![
+            vec!["Name".into(), "Address".into(), "Status".into()],
+            vec!["MyContract".into(), "0xabcd".into(), "OK".into()],
+        ];
+        let widths = calculate_column_widths(&[table]);
+        // col 0: max(4, 10) = 10 (byte len)
+        // col 1: max(7, 6) = 7 (byte len)
+        // col 2: max(6, 2) = 6 (display_width)
+        assert_eq!(widths, vec![10, 7, 6]);
+    }
+
+    #[test]
+    fn calculate_column_widths_multiple_tables() {
+        let table1: TableData = vec![vec!["Short".into(), "A".into()]];
+        let table2: TableData = vec![vec!["LongerName".into(), "BB".into()]];
+        let widths = calculate_column_widths(&[table1, table2]);
+        assert_eq!(widths, vec![10, 2]);
+    }
+
+    #[test]
+    fn calculate_column_widths_strips_ansi() {
+        let table: TableData = vec![vec!["\x1b[31mRed\x1b[0m".into(), "plain".into()]];
+        let widths = calculate_column_widths(&[table]);
+        // "Red" after stripping = 3 bytes
+        assert_eq!(widths[0], 3);
+        assert_eq!(widths[1], 5);
+    }
+
+    #[test]
+    fn calculate_column_widths_col2_uses_display_width() {
+        // Column 2 should use display_width, not byte length
+        // "⏳" is 2 display columns but 3 bytes in UTF-8
+        let table: TableData = vec![vec!["a".into(), "b".into(), "⏳".into()]];
+        let widths = calculate_column_widths(&[table]);
+        assert_eq!(widths[2], 2, "column 2 should use display_width (2), not byte len (3)");
+    }
+
+    // -- render_table_with_widths tests --
+
+    #[test]
+    fn render_table_with_widths_empty_table() {
+        let table: TableData = vec![];
+        assert_eq!(render_table_with_widths(&table, &[], ""), "");
+    }
+
+    #[test]
+    fn render_table_with_widths_no_borders_three_space_padding() {
+        let table: TableData =
+            vec![vec!["Alice".into(), "100".into()], vec!["Bob".into(), "42".into()]];
+        let widths = vec![5, 3];
+        let result = render_table_with_widths(&table, &widths, "");
+        let lines: Vec<&str> = result.lines().collect();
+
+        // No border characters
+        assert!(!result.contains('│'));
+        assert!(!result.contains('─'));
+        assert!(!result.contains('┌'));
+        assert!(!result.contains('└'));
+
+        // First line: "Alice" padded to 5+2+0=7, then 3 spaces, then "100"
+        assert_eq!(lines[0], "Alice     100");
+        // Second line: "Bob" padded to 7, then 3 spaces, then "42 " (padded to 3)
+        assert_eq!(lines[1], "Bob       42 ");
+    }
+
+    #[test]
+    fn render_table_with_widths_continuation_prefix() {
+        let table: TableData = vec![vec!["Name".into(), "Val".into()]];
+        let widths = vec![4, 3];
+        let result = render_table_with_widths(&table, &widths, ">> ");
+        // first col width = 4 + 2 + 3 = 9
+        // content = ">> Name" (7 chars), padded to 9 = 2 spaces
+        // then 3 spaces separator, then "Val"
+        assert_eq!(result, ">> Name     Val");
+    }
+
+    #[test]
+    fn render_table_with_widths_unicode_continuation_prefix_uses_byte_width() {
+        let table: TableData = vec![vec!["Name".into(), "Val".into()]];
+        let widths = calculate_column_widths(std::slice::from_ref(&table));
+
+        assert_eq!(render_table_with_widths(&table, &widths, "│  "), "│  Name     Val");
+    }
+
+    #[test]
+    fn render_table_with_widths_first_col_width_adjustment() {
+        let table: TableData = vec![vec!["ABCDE".into(), "X".into()]];
+        let widths = vec![5, 1];
+        // With empty prefix: first_col_width = 5 + 2 + 0 = 7
+        let result_no_prefix = render_table_with_widths(&table, &widths, "");
+        // "ABCDE" (5 chars) padded to 7 = 2 extra spaces
+        assert_eq!(result_no_prefix, "ABCDE     X");
+
+        // With prefix "P ": first_col_width = 5 + 2 + 2 = 9
+        let result_with_prefix = render_table_with_widths(&table, &widths, "P ");
+        // "P ABCDE" (7 chars) padded to 9 = 2 extra spaces
+        assert_eq!(result_with_prefix, "P ABCDE     X");
+    }
+
+    #[test]
+    fn render_table_with_widths_ansi_cells_padded_correctly() {
+        let table: TableData =
+            vec![vec!["plain".into(), "\x1b[32mgreen\x1b[0m".into()], vec!["a".into(), "b".into()]];
+        let widths = calculate_column_widths(std::slice::from_ref(&table));
+        // col 0: max(5, 1) = 5
+        // col 1: max(5, 1) = 5
+        assert_eq!(widths, vec![5, 5]);
+
+        let result = render_table_with_widths(&table, &widths, "");
+        let lines: Vec<&str> = result.lines().collect();
+        // Line 0: "plain" padded to 7, 3 spaces, "\x1b[32mgreen\x1b[0m" (5 visible chars, no
+        // padding needed) Line 1: "a" padded to 7, 3 spaces, "b" padded to 5
+        assert_eq!(lines[1], "a         b    ");
+    }
+
+    #[test]
+    fn render_table_with_widths_ansi_first_column_uses_stripped_width() {
+        let table: TableData =
+            vec![vec!["\x1b[31mRed\x1b[0m".into(), "A".into()], vec!["plain".into(), "B".into()]];
+        let widths = calculate_column_widths(std::slice::from_ref(&table));
+
+        let result = render_table_with_widths(&table, &widths, "");
+        let lines: Vec<&str> = result.lines().collect();
+        let stripped_lines: Vec<String> =
+            lines.iter().map(|line| strip_ansi_codes(line).into_owned()).collect();
+
+        assert_eq!(lines[0], "\x1b[31mRed\x1b[0m       A");
+        assert_eq!(stripped_lines[0], "Red       A");
+        assert_eq!(stripped_lines[1], "plain     B");
+    }
+
+    #[test]
+    fn render_table_with_widths_display_width_padding_col2() {
+        // Column 2 uses display_width for padding
+        let table: TableData = vec![
+            vec!["a".into(), "b".into(), "wide⏳".into()],
+            vec!["c".into(), "d".into(), "ok".into()],
+        ];
+        let widths = calculate_column_widths(std::slice::from_ref(&table));
+        // col 2: max(display_width("wide⏳"), display_width("ok")) = max(6, 2) = 6
+        assert_eq!(widths[2], 6);
+
+        let result = render_table_with_widths(&table, &widths, "");
+        let lines: Vec<&str> = result.lines().collect();
+        // Line 1, col 2: "ok" has display_width 2, padded to 6 = 4 extra spaces
+        assert!(lines[1].ends_with("ok    "));
     }
 }

@@ -141,6 +141,21 @@ impl Normalizer for VersionNormalizer {
     }
 }
 
+/// Replaces version command build dates in human and JSON output.
+pub struct BuildDateNormalizer;
+
+impl Normalizer for BuildDateNormalizer {
+    fn normalize(&self, input: &str) -> String {
+        // Version JSON build date: "date": "2026-03-09"
+        let json_date = Regex::new(r#"("date":\s*")\d{4}-\d{2}-\d{2}(")"#).unwrap();
+        let result = json_date.replace_all(input, "${1}<DATE>${2}");
+
+        // Human version output build date: "Date:  2026-03-09"
+        let human_date = Regex::new(r"(Date:\s+)\d{4}-\d{2}-\d{2}").unwrap();
+        human_date.replace_all(&result, "${1}<DATE>").into_owned()
+    }
+}
+
 /// Replaces full (40-char) git commit hashes that are NOT 0x-prefixed
 /// (0x-prefixed ones are caught by Hash/Address normalizers).
 /// Also replaces 7-char short hashes after common git indicators like `@` or `commit `.
@@ -551,6 +566,18 @@ mod tests {
     }
 
     #[test]
+    fn build_date_normalizer_json_build_date() {
+        let n = BuildDateNormalizer;
+        assert_eq!(n.normalize(r#""date": "2026-03-09""#), r#""date": "<DATE>""#);
+    }
+
+    #[test]
+    fn build_date_normalizer_human_build_date() {
+        let n = BuildDateNormalizer;
+        assert_eq!(n.normalize("Date:  2026-03-09"), "Date:  <DATE>");
+    }
+
+    #[test]
     fn normalizer_chain_applies_in_sequence() {
         let chain = NormalizerChain::default_chain();
         // Exercises: ColorNormalizer, TimestampNormalizer, VersionNormalizer,
@@ -558,6 +585,14 @@ mod tests {
         let input = "\x1b[32mDeployed\x1b[0m at 2024-01-15T12:30:45Z v0.1.0\nTx: 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef\n";
         let result = chain.normalize(input);
         assert_eq!(result, "Deployed at <TIMESTAMP> v<VERSION>\nTx: 0x<HASH>\n");
+    }
+
+    #[test]
+    fn normalizer_chain_default_keeps_build_dates_strict() {
+        let chain = NormalizerChain::default_chain();
+
+        assert_eq!(chain.normalize("Date:  2026-03-09"), "Date:  2026-03-09\n");
+        assert_eq!(chain.normalize(r#""date": "2026-03-09""#), "\"date\": \"2026-03-09\"\n");
     }
 
     #[test]
