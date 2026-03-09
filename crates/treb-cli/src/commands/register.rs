@@ -17,6 +17,8 @@ use treb_core::types::{
 use treb_registry::Registry;
 
 use crate::output;
+use crate::ui::{color, emoji};
+use owo_colors::{OwoColorize, Style};
 
 const FOUNDRY_TOML: &str = "foundry.toml";
 const TREB_DIR: &str = ".treb";
@@ -267,6 +269,11 @@ struct RegisteredDeploymentJson {
     chain_id: u64,
 }
 
+/// Apply a color style when color is enabled, plain text otherwise.
+fn styled(text: &str, style: Style) -> String {
+    if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
+}
+
 // ── Main entry point ────────────────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
@@ -437,6 +444,7 @@ pub async fn run(
     }
 
     let mut registered: Vec<(RegisteredDeploymentJson, String)> = Vec::new();
+    let mut dep_labels: Vec<String> = Vec::new();
 
     for (i, creation) in creations.iter().enumerate() {
         let name = match &effective_name {
@@ -489,6 +497,8 @@ pub async fn run(
                 None => (DeploymentType::Unknown, None),
             },
         };
+
+        dep_labels.push(dep_label.clone());
 
         let deployment = Deployment {
             id: deployment_id.clone(),
@@ -594,25 +604,25 @@ pub async fn run(
             transaction_id: tx_id,
         })?;
     } else {
-        let mut table = output::build_table(&["Contract", "Address", "Namespace", "Chain"]);
-
-        for dep in &dep_jsons {
-            table.add_row(vec![
-                &dep.contract_name,
-                &dep.address,
-                &dep.namespace,
-                &dep.chain_id.to_string(),
-            ]);
-        }
-
-        output::print_table(&table);
-        println!();
         let n = dep_jsons.len();
-        println!(
-            "{n} deployment{} registered from transaction {}",
-            if n == 1 { "" } else { "s" },
-            output::truncate_address(tx_hash),
+        let header = format!(
+            "{} Successfully registered {} deployment(s)",
+            emoji::CHECK_MARK, n
         );
+        println!("{}\n", styled(&header, color::SUCCESS));
+
+        for (i, (dep, label)) in dep_jsons.iter().zip(dep_labels.iter()).enumerate() {
+            println!("  Deployment {}:", i + 1);
+            println!("    Deployment ID: {}", dep.id);
+            println!("    Address: {}", dep.address);
+            println!("    Contract: {}", dep.contract_name);
+            if !label.is_empty() {
+                println!("    Label: {}", label);
+            }
+            if i < n - 1 {
+                println!();
+            }
+        }
     }
 
     Ok(())
