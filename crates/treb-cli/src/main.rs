@@ -574,7 +574,7 @@ async fn main() {
     if let Err(err) = run(cli).await {
         if json {
             output::print_json_error(&format!("{err:#}"));
-        } else {
+        } else if !commands::verify::is_rendered_verify_failure(&err) {
             // Reproduce the exact format that `main() -> anyhow::Result<()>` uses:
             // "Error: <debug repr>" which includes "Caused by:" chains.
             eprintln!("Error: {err:?}");

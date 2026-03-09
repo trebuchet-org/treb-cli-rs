@@ -56,6 +56,30 @@ fn init_project_with_verified_deployments(tmp: &tempfile::TempDir) {
     registry.rebuild_lookup_index().expect("lookup index rebuild should succeed");
 }
 
+/// Helper: create a project with one unverified deployment whose address is invalid,
+/// so verification fails before any network call.
+fn init_project_with_invalid_address_deployment(tmp: &tempfile::TempDir) {
+    init_project_with_deployments(tmp);
+
+    let path = tmp.path().join(".treb/deployments.json");
+    let json_str = fs::read_to_string(&path).unwrap();
+    let mut map: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+    let deployment =
+        map.get_mut("mainnet/42220/FPMM:v3.0.0").expect("fixture deployment should exist");
+
+    deployment["address"] = serde_json::json!("not-an-address");
+    deployment["verification"]["status"] = serde_json::json!("UNVERIFIED");
+    deployment["verification"]["etherscanUrl"] = serde_json::json!("");
+    deployment["verification"]["verifiedAt"] = serde_json::Value::Null;
+    deployment["verification"]["reason"] = serde_json::json!("");
+    deployment["verification"]["verifiers"] = serde_json::json!({});
+
+    fs::write(&path, serde_json::to_string_pretty(&map).unwrap()).unwrap();
+
+    let registry = treb_registry::Registry::open(tmp.path()).expect("registry should open");
+    registry.rebuild_lookup_index().expect("lookup index rebuild should succeed");
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // --help output
 // ═══════════════════════════════════════════════════════════════════════════
@@ -370,6 +394,43 @@ fn verify_already_verified_skips_with_message() {
         .assert()
         .success()
         .stderr(predicate::str::contains("already verified"));
+}
+
+#[test]
+fn verify_single_failure_uses_go_style_output_without_generic_error_line() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_invalid_address_deployment(&tmp);
+
+    let output = treb()
+        .args(["--no-color", "verify", "FPMM"])
+        .env("NO_COLOR", "1")
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success(), "verification failure should exit non-zero");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("✗ Verification failed: invalid address 'not-an-address'"),
+        "single verify failure should print the handled summary: {stderr}"
+    );
+    assert!(
+        stderr.contains("Verification Status:"),
+        "single verify failure should include the status section: {stderr}"
+    );
+    assert!(
+        stderr.contains("✗ Etherscan Failed"),
+        "single verify failure should print title-cased verifier status: {stderr}"
+    );
+    assert!(
+        !stderr.contains("  etherscan: FAILED"),
+        "legacy lowercase verifier line should be suppressed: {stderr}"
+    );
+    assert!(
+        !stderr.contains("Error:"),
+        "generic main error line should be suppressed for handled verification failures: {stderr}"
+    );
 }
 
 #[test]

@@ -1,6 +1,6 @@
 //! `treb verify` command implementation.
 
-use std::{collections::HashMap, env, time::Duration};
+use std::{collections::HashMap, env, fmt, time::Duration};
 
 use anyhow::{Context, bail};
 use chrono::Utc;
@@ -43,6 +43,21 @@ struct VerifyOutputJson {
     reason: String,
     verified_at: Option<String>,
     verifiers: HashMap<String, VerifierResultJson>,
+}
+
+#[derive(Debug)]
+struct RenderedVerifyFailure;
+
+impl fmt::Display for RenderedVerifyFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("verification failed")
+    }
+}
+
+impl std::error::Error for RenderedVerifyFailure {}
+
+pub(crate) fn is_rendered_verify_failure(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<RenderedVerifyFailure>().is_some()
 }
 
 /// Resolve the API key for a verifier.
@@ -317,10 +332,6 @@ pub async fn run(
                 };
                 dep.verification.verifiers.insert(verifier.to_lowercase(), status.clone());
                 attempted_verifiers.insert(verifier.to_lowercase(), status);
-                if !json {
-                    eprintln!("  {}: {}", verifier, styled("FAILED", color::FAILED),);
-                    eprintln!("    {}", styled(&reason, color::MUTED));
-                }
                 continue;
             }
         };
@@ -346,12 +357,6 @@ pub async fn run(
                 };
                 dep.verification.verifiers.insert(verifier.to_lowercase(), status.clone());
                 attempted_verifiers.insert(verifier.to_lowercase(), status);
-                if !json {
-                    eprintln!("  {}: {}", verifier, styled("VERIFIED", color::VERIFIED),);
-                    if let Some(ref url) = explorer_url {
-                        eprintln!("    {}", styled(url, color::MUTED));
-                    }
-                }
             }
             Err(e) => {
                 let reason = format!("{e:#}");
@@ -362,10 +367,6 @@ pub async fn run(
                 };
                 dep.verification.verifiers.insert(verifier.to_lowercase(), status.clone());
                 attempted_verifiers.insert(verifier.to_lowercase(), status);
-                if !json {
-                    eprintln!("  {}: {}", verifier, styled("FAILED", color::FAILED),);
-                    eprintln!("    {}", styled(&reason, color::MUTED));
-                }
             }
         }
 
@@ -427,10 +428,7 @@ pub async fn run(
                         eprintln!(
                             "{} {}",
                             styled(emoji::CROSS_MARK, color::FAILED),
-                            styled(
-                                &format!("Verification failed: {}", v.reason),
-                                color::FAILED,
-                            ),
+                            styled(&format!("Verification failed: {}", v.reason), color::FAILED,),
                         );
                     }
                 }
@@ -442,7 +440,7 @@ pub async fn run(
         print_verification_status(&attempted_verifiers);
 
         if dep.verification.status == VerificationStatus::Failed {
-            bail!("verification failed for {}", contract_name);
+            return Err(RenderedVerifyFailure.into());
         }
     }
 
