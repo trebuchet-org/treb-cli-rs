@@ -86,7 +86,7 @@
         "cargo clippy --workspace --all-targets passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -101,7 +101,7 @@
         "Error golden files (uninitialized, bad prefix, tx not found) remain unchanged"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]

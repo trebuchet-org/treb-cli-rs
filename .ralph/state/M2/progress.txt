@@ -11,6 +11,8 @@ Started: Mon Mar  9 10:23:09 PM CET 2026
 - `PruneCandidate` has optional `address` and `status` fields (with `skip_serializing_if`) — must be included in all struct constructions
 - When removing `styled()` from a command, also clean up `owo_colors` and `color` imports
 - Reset uses `--network` as chain ID integer; defaults are namespace="default", network="31337"
+- E2E tests: `run_json()` adds `--json` automatically; use `run_human()` for human output assertions
+- Prune section headers include count: "Deployments (N):" — match with "Deployments (" pattern
 
 ## 2026-03-09 - P11-US-001
 - Ported register command human output from comfy_table format to Go-matching indented format
@@ -72,4 +74,33 @@ Started: Mon Mar  9 10:23:09 PM CET 2026
   - When output formatting stories are split into implementation + test-update stories, the implementation stories may already update the integration tests, making the test-update story a no-op verification
   - Unit tests in prune.rs/reset.rs test pure logic (find_prune_candidates, describe_reset_scope, prompt_for_reset_confirmation) — they don't test CLI output formatting
   - `PruneCandidate.address` and `PruneCandidate.status` fields use `#[serde(skip)]` (not `skip_serializing_if`) — they're never serialized
+---
+
+## 2026-03-09 - P11-US-005
+- Added `run_human()` helper to e2e module for capturing human (non-JSON) CLI output
+- Updated register E2E tests to assert on "Successfully registered" and "Deployment ID:" in human output
+- Updated prune E2E tests: clean registry asserts "All registry entries are valid. Nothing to prune."; selfdestructed test asserts "Found 1 items to prune:" and "Deployments (" section header
+- Updated reset E2E tests: non-matching namespace asserts "Nothing to reset."; lifecycle test asserts "Successfully reset" and "items from the registry."
+- Files changed: `crates/treb-cli/tests/e2e/mod.rs`, `crates/treb-cli/tests/e2e_register_workflow.rs`, `crates/treb-cli/tests/e2e_prune_reset_workflow.rs`
+- **Learnings for future iterations:**
+  - Prune section headers include count: "Deployments (N):" not just "Deployments:" — assertions should match with "Deployments (" pattern
+  - `run_human()` captures stdout only; stage/progress messages go to stderr via eprintln — human output assertions check stdout
+  - E2E tests that use `run_json` add `--json` flag automatically — for human output checks, use `run_human` which omits `--json`
+  - When replacing a JSON reset with human reset in lifecycle tests, downstream registry file checks still work since the actual reset operation still executes
+---
+
+## 2026-03-09 - P11-US-006
+- Verified all golden test expected files are already up-to-date with Go-matching output format
+- Ran `UPDATE_GOLDEN=1 cargo test` for register, prune, and reset integration tests — all pass (244 tests total)
+- Confirmed golden files have correct formats: register uses `✓ Successfully registered` + indented details, prune uses emoji-staged sections (🔍, 🗑️, ✅), reset uses `Found N items to reset` with aligned counts
+- Verified error golden files (register_error_no_init, register_error_bad_prefix, register_error_tx_not_found, prune_uninitialized, reset_uninitialized) remain unchanged with simple error messages
+- Full CLI test suite passes (`cargo test -p treb-cli` — all test binaries green)
+- Full workspace validation passes (`cargo test --workspace --all-targets` — 0 failures)
+- `cargo clippy --workspace --all-targets` passes with no warnings
+- No code changes required — golden files were already correctly updated by US-001/002/003 implementation stories
+- Files changed: none (PRD updated only)
+- **Learnings for future iterations:**
+  - When output formatting is changed in implementation stories (US-001/002/003), golden tests that run via `TrebRunner` subprocess automatically produce the updated output, so golden files get updated in the same commit if `UPDATE_GOLDEN=1` is used during development
+  - The golden test verification story (US-006) serves as a final validation pass — confirming no cross-command drift and no unexpected regressions across all 20 golden files
+  - Error golden files are inherently stable since error paths don't go through the human output formatting code that was changed
 ---
