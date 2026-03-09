@@ -13,7 +13,7 @@ use foundry_common::{
     Shell as FoundryShell,
     shell::{ColorChoice, OutputFormat, OutputMode, Verbosity},
 };
-use owo_colors::OwoColorize;
+use owo_colors::{OwoColorize, Style};
 use serde::Serialize;
 use treb_config::{ResolveOpts, resolve_config};
 use treb_core::types::{Operation, TransactionStatus};
@@ -22,7 +22,7 @@ use treb_forge::{
     script::build_script_config_with_senders,
     sender::{ResolvedSender, resolve_all_senders},
 };
-use treb_registry::Registry;
+use treb_registry::{ForkStateStore, Registry};
 
 use crate::{
     output,
@@ -63,6 +63,84 @@ fn format_verbose_sender(role: &str, sender: &ResolvedSender) -> String {
             )
         }
         _ => format!("{}: {}", role, sender.sender_address()),
+    }
+}
+
+fn format_verbose_senders(resolved_senders: &HashMap<String, ResolvedSender>) -> String {
+    let mut senders: Vec<String> =
+        resolved_senders.iter().map(|(role, sender)| format_verbose_sender(role, sender)).collect();
+    senders.sort();
+    senders.join(", ")
+}
+
+fn sorted_env_var_entries(env_vars: &[String]) -> Vec<(String, String)> {
+    let mut entries: Vec<(String, String)> = env_vars
+        .iter()
+        .map(|pair| match parse_env_var(pair) {
+            Ok((key, value)) => (key.to_string(), value.to_string()),
+            Err(_) => (pair.clone(), String::new()),
+        })
+        .collect();
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    entries
+}
+
+fn env_var_is_truthy(name: &str) -> bool {
+    env::var(name).ok().is_some_and(|value| {
+        matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
+    })
+}
+
+fn active_fork_matches(
+    entry: &treb_core::types::fork::ForkEntry,
+    cwd: &std::path::Path,
+    network: Option<&str>,
+    effective_rpc_url: Option<&str>,
+) -> bool {
+    if entry.rpc_url.is_empty() {
+        return false;
+    }
+
+    if effective_rpc_url
+        .and_then(|target| resolve_rpc_url_for_chain_id(target, cwd))
+        .as_deref()
+        .is_some_and(|target| target == entry.rpc_url)
+    {
+        return true;
+    }
+
+    network.is_some_and(|net| net == entry.network)
+        && !entry.env_var_name.is_empty()
+        && env::var(&entry.env_var_name).ok().as_deref() == Some(entry.rpc_url.as_str())
+}
+
+fn is_active_fork_run(
+    cwd: &std::path::Path,
+    network: Option<&str>,
+    effective_rpc_url: Option<&str>,
+) -> bool {
+    if env_var_is_truthy("TREB_FORK_MODE") {
+        return true;
+    }
+
+    let mut store = ForkStateStore::new(&cwd.join(TREB_DIR));
+    if store.load().is_err() {
+        return false;
+    }
+
+    store
+        .list_active_forks()
+        .into_iter()
+        .any(|entry| active_fork_matches(entry, cwd, network, effective_rpc_url))
+}
+
+fn deployment_banner_mode(dry_run: bool, active_fork: bool) -> (&'static str, Style) {
+    if dry_run {
+        ("DRY_RUN", color::YELLOW)
+    } else if active_fork {
+        ("FORK", color::MAGENTA)
+    } else {
+        ("LIVE", color::GREEN)
     }
 }
 
@@ -318,6 +396,8 @@ pub async fn run(
     if verbose && !json {
         let separator: String = "─".repeat(50);
         let use_color = color::is_color_enabled();
+        let active_fork =
+            is_active_fork_run(&cwd, network.as_deref(), effective_rpc_url.as_deref());
 
         // Header
         println!();
@@ -357,23 +437,13 @@ pub async fn run(
 
         // Namespace
         if use_color {
-            println!(
-                "  {:10} {}",
-                "Namespace:",
-                resolved.namespace.style(color::MAGENTA)
-            );
+            println!("  {:10} {}", "Namespace:", resolved.namespace.style(color::MAGENTA));
         } else {
             println!("  {:10} {}", "Namespace:", resolved.namespace);
         }
 
         // Mode
-        let (mode_label, mode_style) = if dry_run {
-            ("DRY_RUN", color::YELLOW)
-        } else if broadcast {
-            ("LIVE", color::GREEN)
-        } else {
-            ("SIMULATE", color::MAGENTA)
-        };
+        let (mode_label, mode_style) = deployment_banner_mode(dry_run, active_fork);
         if use_color {
             println!("  {:10} {}", "Mode:", mode_label.style(mode_style));
         } else {
@@ -381,9 +451,9 @@ pub async fn run(
         }
 
         // Env Vars (only when present)
-        if !env_vars.is_empty() {
-            for (i, var) in env_vars.iter().enumerate() {
-                let (key, value) = parse_env_var(var).unwrap_or((var.as_str(), ""));
+        let sorted_env_vars = sorted_env_var_entries(&env_vars);
+        if !sorted_env_vars.is_empty() {
+            for (i, (key, value)) in sorted_env_vars.iter().enumerate() {
                 let formatted = if use_color {
                     format!("{}={}", key.style(color::YELLOW), value.style(color::GREEN))
                 } else {
@@ -398,20 +468,12 @@ pub async fn run(
         }
 
         // Senders
-        let mut sender_lines: Vec<String> =
-            resolved_senders.iter().map(|(role, s)| format_verbose_sender(role, s)).collect();
-        sender_lines.sort();
-        for (i, line) in sender_lines.iter().enumerate() {
+        let sender_line = format_verbose_senders(&resolved_senders);
+        if !sender_line.is_empty() {
             if use_color {
-                if i == 0 {
-                    println!("  {:10} {}", "Senders:", line.style(color::GRAY));
-                } else {
-                    println!("  {:10} {}", "", line.style(color::GRAY));
-                }
-            } else if i == 0 {
-                println!("  {:10} {}", "Senders:", line);
+                println!("  {:10} {}", "Senders:", sender_line.style(color::GRAY));
             } else {
-                println!("  {:10} {}", "", line);
+                println!("  {:10} {}", "Senders:", sender_line);
             }
         }
 
@@ -1013,6 +1075,35 @@ mod tests {
     use treb_core::types::{GovernorProposal, ProposalStatus, enums::DeploymentMethod};
     use treb_forge::{events::ExtractedCollision, in_memory_signer};
 
+    struct TestEnvVarGuard {
+        name: &'static str,
+        original: Option<String>,
+    }
+
+    impl TestEnvVarGuard {
+        fn set(name: &'static str, value: &str) -> Self {
+            let original = env::var(name).ok();
+            // SAFETY: tests here are scoped and restore the original environment on drop.
+            unsafe { env::set_var(name, value) };
+            Self { name, original }
+        }
+    }
+
+    impl Drop for TestEnvVarGuard {
+        fn drop(&mut self) {
+            match self.original.as_deref() {
+                Some(value) => {
+                    // SAFETY: restores process env to its original test value.
+                    unsafe { env::set_var(self.name, value) };
+                }
+                None => {
+                    // SAFETY: restores process env to its original test value.
+                    unsafe { env::remove_var(self.name) };
+                }
+            }
+        }
+    }
+
     fn sample_governor_proposal() -> GovernorProposal {
         GovernorProposal {
             proposal_id: "proposal-001".into(),
@@ -1043,6 +1134,39 @@ mod tests {
             console_logs: Vec::new(),
             governor_proposals: Vec::new(),
         }
+    }
+
+    fn sample_active_fork_entry(
+        network: &str,
+        rpc_url: &str,
+        env_var_name: &str,
+    ) -> treb_core::types::fork::ForkEntry {
+        let ts = Utc.with_ymd_and_hms(2026, 3, 9, 12, 0, 0).unwrap();
+        treb_core::types::fork::ForkEntry {
+            network: network.into(),
+            instance_name: None,
+            rpc_url: rpc_url.into(),
+            port: 8545,
+            chain_id: 1,
+            fork_url: "https://eth.example.com".into(),
+            fork_block_number: Some(19_000_000),
+            snapshot_dir: ".treb/snapshots/mainnet".into(),
+            started_at: ts,
+            env_var_name: env_var_name.into(),
+            original_rpc: "https://eth.example.com".into(),
+            anvil_pid: 1234,
+            pid_file: ".treb/anvil.pid".into(),
+            log_file: ".treb/anvil.log".into(),
+            entered_at: ts,
+            snapshots: vec![],
+        }
+    }
+
+    fn write_active_fork(project_root: &std::path::Path, entry: treb_core::types::fork::ForkEntry) {
+        let treb_dir = project_root.join(TREB_DIR);
+        fs::create_dir_all(&treb_dir).unwrap();
+        let mut store = ForkStateStore::new(&treb_dir);
+        store.insert_active_fork(entry).unwrap();
     }
 
     #[test]
@@ -1120,6 +1244,31 @@ mod tests {
     }
 
     #[test]
+    fn deployment_banner_mode_uses_go_parity_labels() {
+        assert_eq!(deployment_banner_mode(true, false).0, "DRY_RUN");
+        assert_eq!(deployment_banner_mode(false, true).0, "FORK");
+        assert_eq!(deployment_banner_mode(false, false).0, "LIVE");
+    }
+
+    #[test]
+    fn sorted_env_var_entries_orders_by_key() {
+        let sorted = sorted_env_var_entries(&[
+            "ZETA=last".to_string(),
+            "ALPHA=first".to_string(),
+            "MIDDLE=value".to_string(),
+        ]);
+
+        assert_eq!(
+            sorted,
+            vec![
+                ("ALPHA".to_string(), "first".to_string()),
+                ("MIDDLE".to_string(), "value".to_string()),
+                ("ZETA".to_string(), "last".to_string()),
+            ]
+        );
+    }
+
+    #[test]
     fn format_governor_proposal_details_includes_status() {
         let mut proposal = sample_governor_proposal();
         proposal.status = ProposalStatus::Queued;
@@ -1185,6 +1334,52 @@ mod tests {
             line.contains("proposer=0x70997970C51812dc3A010C7d01b50e0d17dc79C8"),
             "got: {line}"
         );
+    }
+
+    #[test]
+    fn format_verbose_senders_joins_sorted_entries_on_one_line() {
+        let mut senders = HashMap::new();
+        senders
+            .insert("deployer".to_string(), ResolvedSender::InMemory(in_memory_signer(0).unwrap()));
+        senders.insert("anvil".to_string(), ResolvedSender::InMemory(in_memory_signer(1).unwrap()));
+
+        let line = format_verbose_senders(&senders);
+
+        assert_eq!(
+            line,
+            "anvil: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8, deployer: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+        );
+    }
+
+    #[test]
+    fn is_active_fork_run_detects_direct_rpc_match() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_active_fork(
+            tmp.path(),
+            sample_active_fork_entry("mainnet", "http://127.0.0.1:8545", "ETH_RPC_URL_MAINNET"),
+        );
+
+        assert!(is_active_fork_run(tmp.path(), None, Some("http://127.0.0.1:8545")));
+    }
+
+    #[test]
+    fn is_active_fork_run_detects_network_env_override() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_active_fork(
+            tmp.path(),
+            sample_active_fork_entry("mainnet", "http://127.0.0.1:8545", "ETH_RPC_URL_MAINNET"),
+        );
+        let _rpc_override = TestEnvVarGuard::set("ETH_RPC_URL_MAINNET", "http://127.0.0.1:8545");
+
+        assert!(is_active_fork_run(tmp.path(), Some("mainnet"), Some("mainnet")));
+    }
+
+    #[test]
+    fn is_active_fork_run_honors_treb_fork_mode_env() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _fork_mode = TestEnvVarGuard::set("TREB_FORK_MODE", "true");
+
+        assert!(is_active_fork_run(tmp.path(), None, None));
     }
 
     #[test]

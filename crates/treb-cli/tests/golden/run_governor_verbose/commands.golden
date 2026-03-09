@@ -1,4 +1,13 @@
 === cmd 0: [run script/GovernorProposal.s.sol --network anvil-31337 --broadcast --non-interactive --verbose] ===
+
+🚀 Running Deployment Script
+──────────────────────────────────────────────────
+  Script:    script/GovernorProposal.s.sol
+  Network:   anvil-31337 (31337)
+  Namespace: default
+  Mode:      LIVE
+  Senders:   anvil: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266, deployer: governor=0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa timelock=0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB proposer=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+──────────────────────────────────────────────────
 No files changed, compilation skipped
 
 🔄 Transactions:
@@ -13,16 +22,6 @@ Governor Proposals:
      Governor: 0xaAaA...aaAa | Timelock: 0xbBbB...BBbB | Status: pending | 1 linked transaction
 
 ✓ Script execution completed successfully
- Config source:  treb.toml (v2)
-     Namespace:  default
-      Chain ID:  31337
-           RPC:  anvil-31337
-        Sender:  anvil: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
-        Sender:  deployer: governor=0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa timelock=0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB proposer=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
-   Script path:  script/GovernorProposal.s.sol
-  Function sig:  run()
-Broadcast mode:  broadcast
-
 🔨 Compiling and executing script/GovernorProposal.s.sol...
 🏛️ Creating governance proposal...
 
