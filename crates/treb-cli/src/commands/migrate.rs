@@ -244,8 +244,9 @@ where
     // Interactive preview + confirmation (unless --yes, --json, or non-TTY).
     if !yes && !json && stdin_is_tty {
         println!("Generated treb.toml:");
+        println!();
         println!("{v2_toml}");
-        if !confirm_prompt("Write this config to treb.toml?", false) {
+        if !confirm_prompt("Write this to treb.toml?", false) {
             println!("Migration cancelled.");
             return Ok(());
         }
@@ -292,7 +293,8 @@ where
             println!("Foundry backup written to: {}", fp.display());
         }
 
-        // Green bold success message matching Go: green.Printf("✓ treb.toml written successfully\n")
+        // Green bold success message matching Go: green.Printf("✓ treb.toml written
+        // successfully\n")
         let success_msg = format!("{} treb.toml written successfully", emoji::CHECK_MARK);
         println!("{}", styled(&success_msg, color::SUCCESS));
 
@@ -763,7 +765,8 @@ private_key = "0xDeployerKey"
             false,
             None,
             true,
-            |_, default| {
+            |prompt, default| {
+                assert_eq!(prompt, "Write this to treb.toml?");
                 assert!(!default, "interactive migrate confirmation must default to no");
                 false
             },
