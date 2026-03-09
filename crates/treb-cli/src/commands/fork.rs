@@ -976,25 +976,39 @@ pub async fn run_history(network: Option<String>, json: bool) -> anyhow::Result<
         return Ok(());
     }
 
-    let mut table = crate::output::build_table(&["Timestamp", "Action", "Network", "Details"]);
-
+    // Collect unique networks in order of first appearance (most-recent-first).
+    let mut networks: Vec<String> = Vec::new();
     for entry in &history {
-        let action_style = match entry.action.as_str() {
-            "enter" => color::SUCCESS,
-            "exit" => color::WARNING,
-            "revert" => color::MUTED,
-            "restart" => color::STAGE,
-            _ => Style::new(),
-        };
-        table.add_row(vec![
-            entry.timestamp.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
-            styled(&entry.action, action_style),
-            styled(&entry.network, color::CHAIN),
-            entry.details.as_deref().unwrap_or("-").to_string(),
-        ]);
+        if !networks.contains(&entry.network) {
+            networks.push(entry.network.clone());
+        }
     }
 
-    crate::output::print_table(&table);
+    for net in &networks {
+        // Filter entries for this network and reverse to chronological order.
+        let net_entries: Vec<_> = history.iter().filter(|e| e.network == *net).rev().collect();
+        let last_idx = net_entries.len() - 1;
+
+        println!("Fork History: {net}");
+        println!();
+
+        for (i, entry) in net_entries.iter().enumerate() {
+            let marker = if i == last_idx { "\u{2192} " } else { "  " };
+            let label = if i == 0 {
+                "initial".to_string()
+            } else {
+                match &entry.details {
+                    Some(d) => format!("{} {d}", entry.action),
+                    None => entry.action.clone(),
+                }
+            };
+            let ts = entry.timestamp.format("%Y-%m-%d %H:%M:%S");
+            println!("  {marker}[{i}] {label}  ({ts})");
+        }
+
+        println!();
+    }
+
     Ok(())
 }
 
