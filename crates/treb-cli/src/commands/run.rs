@@ -13,9 +13,10 @@ use foundry_common::{
     Shell as FoundryShell,
     shell::{ColorChoice, OutputFormat, OutputMode, Verbosity},
 };
+use owo_colors::OwoColorize;
 use serde::Serialize;
 use treb_config::{ResolveOpts, resolve_config};
-use treb_core::types::DeploymentType;
+use treb_core::types::{DeploymentType, Operation, TransactionStatus};
 use treb_forge::{
     pipeline::{
         PipelineConfig, PipelineContext, PipelineResult, RecordedDeployment, RunPipeline,
@@ -764,17 +765,93 @@ fn print_registry_update_section(result: &PipelineResult) {
     println!();
 }
 
+// ---------------------------------------------------------------------------
+// Transaction rendering helpers (Go: render/transaction.go)
+// ---------------------------------------------------------------------------
+
+/// Format a transaction status as a fixed-width (9-char) lowercase string
+/// with Go-matching color: simulated=faint, queued=yellow, executed=green,
+/// failed=red.
+fn format_tx_status(status: &TransactionStatus) -> String {
+    let (label, style) = match status {
+        TransactionStatus::Simulated => ("simulated", color::MUTED),
+        TransactionStatus::Queued => ("queued   ", color::YELLOW),
+        TransactionStatus::Executed => ("executed ", color::GREEN),
+        TransactionStatus::Failed => ("failed   ", color::RED),
+    };
+    if color::is_color_enabled() {
+        format!("{}", label.style(style))
+    } else {
+        label.to_string()
+    }
+}
+
+/// Format a summary of the first operation for display after the `→` arrow.
+fn format_tx_operations(operations: &[Operation]) -> String {
+    if operations.is_empty() {
+        return String::new();
+    }
+    let op = &operations[0];
+    if op.method.is_empty() {
+        format!("{} {}", op.operation_type, op.target)
+    } else {
+        format!("{}::{}({})", op.target, op.method, op.operation_type)
+    }
+}
+
+/// Build a pipe-separated gray footer line with hash, block number (only
+/// non-empty / non-zero fields).
+fn format_tx_footer(tx: &treb_core::types::Transaction) -> String {
+    let mut parts = Vec::new();
+    if !tx.hash.is_empty() {
+        parts.push(format!("Tx: {}", tx.hash));
+    }
+    if tx.block_number > 0 {
+        parts.push(format!("Block: {}", tx.block_number));
+    }
+    if parts.is_empty() {
+        return String::new();
+    }
+    let footer = parts.join(" | ");
+    if color::is_color_enabled() {
+        format!("   {}", footer.style(color::GRAY))
+    } else {
+        format!("   {}", footer)
+    }
+}
+
 fn display_result_human(result: &PipelineResult) {
     // ── Transactions ────────────────────────────────────────────────────
-    if !result.transactions.is_empty() {
-        output::print_section_header(emoji::REFRESH, "Transactions", 50);
-        for (i, rt) in result.transactions.iter().enumerate() {
-            let tx = &rt.transaction;
-            let status = tx.status.to_string();
-            println!("  {}. {} ({})", i + 1, tx.hash, status);
+    output::print_section_header(emoji::REFRESH, "Transactions", 50);
+    if result.transactions.is_empty() {
+        let msg = "No transactions executed (dry run or all deployments skipped)";
+        if color::is_color_enabled() {
+            println!("  {}", msg.style(color::GRAY));
+        } else {
+            println!("  {}", msg);
         }
-        println!();
+    } else {
+        for rt in &result.transactions {
+            let tx = &rt.transaction;
+            let status_str = format_tx_status(&tx.status);
+            let sender_str = if color::is_color_enabled() {
+                format!("{}", tx.sender.style(color::GREEN))
+            } else {
+                tx.sender.clone()
+            };
+            let ops_str = format_tx_operations(&tx.operations);
+            if ops_str.is_empty() {
+                println!("\n  {} {}", status_str, sender_str);
+            } else {
+                println!("\n  {} {} → {}", status_str, sender_str, ops_str);
+            }
+            let footer = format_tx_footer(tx);
+            if !footer.is_empty() {
+                println!("{}", footer);
+            }
+        }
     }
+    println!();
 
     // ── Collisions ──────────────────────────────────────────────────────
     if !result.collisions.is_empty() {
