@@ -1,7 +1,7 @@
 //! `treb fork` subcommands — enter/exit fork mode, status, history, diff, revert, restart.
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashMap},
     env,
     path::{Path, PathBuf},
     time::Duration,
@@ -10,11 +10,19 @@ use std::{
 use anyhow::{Context, bail};
 use chrono::Utc;
 use clap::Subcommand;
+use foundry_common::{
+    Shell as FoundryShell,
+    shell::{ColorChoice, OutputFormat, OutputMode, Verbosity},
+};
 use owo_colors::{OwoColorize, Style};
 use serde::Serialize;
 use tokio::net::TcpStream;
+use treb_config::{ResolveOpts, resolve_config};
 use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
-use treb_forge::createx::createx_deployed_bytecode;
+use treb_forge::{
+    createx::createx_deployed_bytecode, execute_script, script::build_script_config_with_senders,
+    sender::resolve_all_senders,
+};
 use treb_registry::{
     DEPLOYMENTS_FILE, ForkStateStore, TRANSACTIONS_FILE, remove_snapshot, restore_registry,
     snapshot_registry,
@@ -154,6 +162,42 @@ struct ForkRestartJson {
     snapshot_id: Option<String>,
 }
 
+/// Restores Foundry's global shell after temporarily silencing it.
+///
+/// Fork setup scripts should not add forge compilation/broadcast chatter to
+/// `fork restart` output, so suppress Foundry's shared shell while they run.
+struct FoundryShellGuard {
+    output_format: OutputFormat,
+    output_mode: OutputMode,
+    color_choice: ColorChoice,
+    verbosity: Verbosity,
+}
+
+impl FoundryShellGuard {
+    fn suppress() -> Self {
+        let mut shell = FoundryShell::get();
+        let previous = Self {
+            output_format: shell.output_format(),
+            output_mode: shell.output_mode(),
+            color_choice: shell.color_choice(),
+            verbosity: shell.verbosity(),
+        };
+        *shell = FoundryShell::empty();
+        previous
+    }
+}
+
+impl Drop for FoundryShellGuard {
+    fn drop(&mut self) {
+        *FoundryShell::get() = FoundryShell::new_with(
+            self.output_format,
+            self.output_mode,
+            self.color_choice,
+            self.verbosity,
+        );
+    }
+}
+
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
 pub async fn run(subcommand: ForkSubcommand) -> anyhow::Result<()> {
@@ -256,8 +300,9 @@ pub async fn run_enter(
         .context("failed to record fork history")?;
 
     println!("Entered fork mode for network '{network}'.");
-    render_fork_fields(&entry);
+    render_fork_fields(&entry, false);
     println!();
+    println!("Run 'treb dev anvil start --network {network}' to start a local Anvil node");
     println!("Run 'treb fork status' to check fork state");
     println!("Run 'treb fork exit' to stop fork and restore original state");
 
@@ -552,6 +597,7 @@ pub async fn run_restart(
     let blk = fork_block_number.or(session.fork_block_number);
     let mut json_result = None;
     let mut history_snapshots: Vec<(String, String)> = Vec::new();
+    let mut setup_executed = false;
 
     for entry in &runtime_entries {
         let instance_name = entry.resolved_instance_name().to_string();
@@ -578,6 +624,16 @@ pub async fn run_restart(
                 network, instance_name
             )
         })?;
+
+        setup_executed |=
+            execute_fork_setup_if_configured(&cwd, &network, &entry.rpc_url, entry.chain_id)
+                .await
+                .with_context(|| {
+                    format!(
+                        "failed to execute fork setup for network '{}' (instance '{}')",
+                        network, instance_name
+                    )
+                })?;
 
         let snapshot_id = evm_snapshot_http(&client, &entry.rpc_url).await.with_context(|| {
             format!(
@@ -655,7 +711,7 @@ pub async fn run_restart(
         // Use the first runtime entry for the field display
         let display_entry = &runtime_entries[0];
         println!("Restarted fork for network '{network}'.");
-        render_fork_fields(display_entry);
+        render_fork_fields(display_entry, setup_executed);
         println!();
         println!("Registry restored to initial fork state. All previous snapshots cleared.");
     }
@@ -671,23 +727,76 @@ pub async fn run_restart(
 /// (including colon), matching `render/fork.go`'s `RenderEnter` /
 /// `RenderRestart` layout.  Fields whose values are empty or zero are
 /// omitted.
-fn render_fork_fields(entry: &ForkEntry) {
+fn render_fork_fields(entry: &ForkEntry, setup_executed: bool) {
     println!();
-    println!("  {:<14}{}", "Network:", entry.network);
-    println!("  {:<14}{}", "Chain ID:", entry.chain_id);
-    if !entry.fork_url.is_empty() {
-        println!("  {:<14}{}", "Fork URL:", entry.fork_url);
+    for line in fork_field_lines(entry, setup_executed) {
+        println!("{line}");
+    }
+}
+
+fn fork_field_lines(entry: &ForkEntry, setup_executed: bool) -> Vec<String> {
+    let mut lines = vec![
+        format!("  {:<14}{}", "Network:", entry.network),
+        format!("  {:<14}{}", "Chain ID:", entry.chain_id),
+    ];
+
+    // Go surfaces the local fork endpoint here. Rust only knows that value
+    // once `dev anvil start` has filled in the runtime entry.
+    if !entry.rpc_url.is_empty() {
+        lines.push(format!("  {:<14}{}", "Fork URL:", entry.rpc_url));
     }
     if entry.anvil_pid != 0 {
-        println!("  {:<14}{}", "Anvil PID:", entry.anvil_pid);
+        lines.push(format!("  {:<14}{}", "Anvil PID:", entry.anvil_pid));
     }
-    if !entry.env_var_name.is_empty() {
-        let env_value = if !entry.rpc_url.is_empty() { &entry.rpc_url } else { &entry.fork_url };
-        println!("  {:<14}{}={}", "Env Override:", entry.env_var_name, env_value);
+    if !entry.env_var_name.is_empty() && !entry.rpc_url.is_empty() {
+        lines.push(format!("  {:<14}{}={}", "Env Override:", entry.env_var_name, entry.rpc_url));
     }
     if !entry.log_file.is_empty() {
-        println!("  {:<14}{}", "Logs:", entry.log_file);
+        lines.push(format!("  {:<14}{}", "Logs:", entry.log_file));
     }
+    if setup_executed {
+        lines.push(format!("  {:<14}{}", "Setup:", "executed successfully"));
+    }
+
+    lines
+}
+
+async fn execute_fork_setup_if_configured(
+    project_root: &Path,
+    network: &str,
+    rpc_url: &str,
+    chain_id: u64,
+) -> anyhow::Result<bool> {
+    let resolved = resolve_config(ResolveOpts {
+        project_root: project_root.to_path_buf(),
+        namespace: None,
+        network: Some(network.to_string()),
+        profile: None,
+        sender_overrides: HashMap::new(),
+    })
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let Some(script_path) = resolved.fork_setup.clone() else {
+        return Ok(false);
+    };
+
+    let resolved_senders =
+        resolve_all_senders(&resolved.senders).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut script_config =
+        build_script_config_with_senders(&resolved, &script_path, &resolved_senders)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    script_config.rpc_url(rpc_url).chain_id(chain_id).broadcast(true).non_interactive(true);
+
+    let script_args = script_config.into_script_args().map_err(|e| anyhow::anyhow!("{e}"))?;
+    let _foundry_shell = FoundryShellGuard::suppress();
+    let result = execute_script(script_args).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    if !result.success {
+        bail!("fork setup script '{}' did not complete successfully", script_path);
+    }
+
+    Ok(true)
 }
 
 // ── run_status ────────────────────────────────────────────────────────────────
@@ -1508,6 +1617,42 @@ mod tests {
 
         let primary = super::primary_tracked_anvil_entry(&store, "mainnet").unwrap();
         assert_eq!(primary.resolved_instance_name(), "alpha");
+    }
+
+    #[test]
+    fn fork_field_lines_omit_runtime_only_fields_for_placeholder_entry() {
+        let (_root, treb_dir) = make_treb_dir();
+        let mut entry = sample_entry(&treb_dir, "mainnet");
+        entry.env_var_name = "ETH_RPC_URL_MAINNET".into();
+
+        let lines = super::fork_field_lines(&entry, false);
+        let joined = lines.join("\n");
+
+        assert!(joined.contains("Network:"));
+        assert!(joined.contains("Chain ID:"));
+        assert!(!joined.contains("Fork URL:"));
+        assert!(!joined.contains("Env Override:"));
+        assert!(!joined.contains("https://eth.example.com"));
+    }
+
+    #[test]
+    fn fork_field_lines_use_local_runtime_fields_and_setup_marker() {
+        let (_root, treb_dir) = make_treb_dir();
+        let mut entry = sample_entry(&treb_dir, "mainnet");
+        entry.rpc_url = "http://127.0.0.1:8545".into();
+        entry.env_var_name = "ETH_RPC_URL_MAINNET".into();
+        entry.anvil_pid = 4321;
+        entry.log_file = "/tmp/anvil-mainnet.log".into();
+
+        let lines = super::fork_field_lines(&entry, true);
+        let joined = lines.join("\n");
+
+        assert!(joined.contains("Fork URL:     http://127.0.0.1:8545"));
+        assert!(joined.contains("Anvil PID:    4321"));
+        assert!(joined.contains("Env Override: ETH_RPC_URL_MAINNET=http://127.0.0.1:8545"));
+        assert!(joined.contains("Logs:         /tmp/anvil-mainnet.log"));
+        assert!(joined.contains("Setup:        executed successfully"));
+        assert!(!joined.contains("https://eth.example.com"));
     }
 
     // ── history filtering ─────────────────────────────────────────────────

@@ -11,6 +11,7 @@ use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
 use treb_registry::{DEPLOYMENTS_FILE, ForkStateStore, TRANSACTIONS_FILE};
 
 use framework::{
+    anvil_node::AnvilNode,
     context::TestContext,
     integration_test::{IntegrationTest, run_integration_test},
     normalizer::{LabelNormalizer, PathNormalizer, UptimeNormalizer},
@@ -574,6 +575,77 @@ fn seed_fork_restart_json_success(
     Ok(())
 }
 
+fn seed_fork_restart_success(
+    project_root: &std::path::Path,
+    rpc_url: &str,
+    port: u16,
+    fork_url: &str,
+) -> std::io::Result<()> {
+    let treb_dir = project_root.join(".treb");
+    let mut entry = sample_fork_entry(&treb_dir);
+    entry.rpc_url = rpc_url.to_string();
+    entry.port = port;
+    entry.fork_url = fork_url.to_string();
+    entry.anvil_pid = 4321;
+    entry.log_file = "/tmp/anvil-mainnet.log".to_string();
+
+    let snapshot_dir = std::path::PathBuf::from(&entry.snapshot_dir);
+    std::fs::create_dir_all(&snapshot_dir)?;
+    std::fs::write(treb_dir.join(DEPLOYMENTS_FILE), r#"{"Counter_1": {"address": "0xaaa"}}"#)?;
+    std::fs::write(snapshot_dir.join(DEPLOYMENTS_FILE), r#"{"Counter_1": {"address": "0xaaa"}}"#)?;
+
+    let mut store = ForkStateStore::new(&treb_dir);
+    store.insert_active_fork(entry).unwrap();
+    Ok(())
+}
+
+fn write_fork_setup_fixture(project_root: &std::path::Path) {
+    std::fs::write(
+        project_root.join("treb.toml"),
+        r#"
+[accounts.deployer]
+type = "private_key"
+private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+
+[namespace.default]
+profile = "default"
+
+[namespace.default.senders]
+deployer = "deployer"
+
+[fork]
+setup = "script/ForkSetup.s.sol"
+"#,
+    )
+    .unwrap();
+
+    std::fs::write(
+        project_root.join("script").join("ForkSetup.s.sol"),
+        r#"// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.13;
+
+interface Vm {
+    function startBroadcast() external;
+    function stopBroadcast() external;
+}
+
+address constant HEVM_ADDRESS = address(uint160(uint256(keccak256("hevm cheat code"))));
+Vm constant vm = Vm(HEVM_ADDRESS);
+
+contract SetupTarget {}
+
+contract ForkSetup {
+    function run() public {
+        vm.startBroadcast();
+        new SetupTarget();
+        vm.stopBroadcast();
+    }
+}
+"#,
+    )
+    .unwrap();
+}
+
 // ── fork enter: not initialized ─────────────────────────────────────────
 
 /// `treb fork enter --network mainnet` on an uninitialized project (no .treb/)
@@ -779,6 +851,52 @@ fn fork_restart_port_unreachable() {
         .test(&["fork", "restart", "--network", "mainnet"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── fork restart: success ────────────────────────────────────────────────
+
+/// `treb fork restart --network mainnet` should render the local fork endpoint
+/// and tracked runtime metadata when a forked Anvil instance is available.
+#[test]
+fn fork_restart_success() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let upstream = match runtime.block_on(AnvilNode::spawn()) {
+        Ok(node) => node,
+        Err(err) if err.to_string().contains("Operation not permitted") => return,
+        Err(err) => panic!("spawn upstream anvil: {err}"),
+    };
+    let local = match runtime.block_on(AnvilNode::spawn()) {
+        Ok(node) => node,
+        Err(err) if err.to_string().contains("Operation not permitted") => return,
+        Err(err) => panic!("spawn local anvil: {err}"),
+    };
+
+    let local_rpc_url = local.rpc_url().to_string();
+    let local_port = local.port();
+    let upstream_rpc_url = upstream.rpc_url().to_string();
+    let normalized_local_rpc_url = local_rpc_url.clone();
+    let setup_local_rpc_url = local_rpc_url.clone();
+    let setup_upstream_rpc_url = upstream_rpc_url.clone();
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("fork_restart_success")
+        .setup(&["init"])
+        .post_setup_hook(move |ctx| {
+            write_fork_setup_fixture(ctx.path());
+            seed_fork_restart_success(
+                ctx.path(),
+                &setup_local_rpc_url,
+                local_port,
+                &setup_upstream_rpc_url,
+            )
+            .unwrap();
+        })
+        .test(&["fork", "restart", "--network", "mainnet"])
+        .extra_normalizer(Box::new(path_normalizer))
+        .extra_normalizer(Box::new(LabelNormalizer::new(normalized_local_rpc_url)));
 
     run_integration_test(&test, &ctx);
 }

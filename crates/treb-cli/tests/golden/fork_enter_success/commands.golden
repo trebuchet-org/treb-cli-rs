@@ -3,8 +3,7 @@ Entered fork mode for network 'localhost'.
 
   Network:      localhost
   Chain ID:     1
-  Fork URL:     <LABEL>
-  Env Override: ETH_RPC_URL_LOCALHOST=<LABEL>
 
+Run 'treb dev anvil start --network localhost' to start a local Anvil node
 Run 'treb fork status' to check fork state
 Run 'treb fork exit' to stop fork and restore original state
