@@ -143,6 +143,51 @@ fn list_with_fork_badge() {
     run_integration_test(&test, &ctx);
 }
 
+/// Namespace discovery hint shows when filtering by non-existent namespace.
+#[test]
+fn list_namespace_discovery_hint() {
+    let ctx = TestContext::new("project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("list_namespace_discovery_hint")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))
+        .test(&["list", "--namespace", "staging"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// Tag display shows first tag as '(tag_name)' in deployment rows.
+#[test]
+fn list_with_tags() {
+    let ctx = TestContext::new("project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("list_with_tags")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))
+        .test(&["list", "--tag", "core"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// JSON output wraps deployments in {"deployments": [...]} object.
+#[test]
+fn list_json_wrapped() {
+    let ctx = TestContext::new("project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("list_json_wrapped")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))
+        .test(&["list", "--json", "--namespace", "nonexistent"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
 /// List without initialized project fails with error mentioning treb init.
 #[test]
 fn list_uninitialized() {
