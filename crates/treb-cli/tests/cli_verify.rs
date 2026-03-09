@@ -507,6 +507,14 @@ fn verify_all_uses_labeled_display_name_in_progress_and_summary() {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
 
+    assert!(
+        stderr.contains("Skipping 3 already verified deployed contracts:"),
+        "batch verify should print a skipped section for verified deployments: {stderr}"
+    );
+    assert!(
+        stderr.contains("⏭️ chain:42220/mainnet/FPMMFactory:v3.0.0 (already verified)"),
+        "batch verify should show skipped verified deployments: {stderr}"
+    );
     // Per-result line should contain the labeled display name in chain:CHAINID/NS/NAME format.
     assert!(
         stderr.contains("FPMM:v3.0.0"),
@@ -517,8 +525,31 @@ fn verify_all_uses_labeled_display_name_in_progress_and_summary() {
         "batch per-result should not fall back to the raw contract name: {stderr}"
     );
     // Summary line should appear.
+    assert!(stderr.contains("Verification complete:"), "batch should show summary line: {stderr}");
+}
+
+#[test]
+fn verify_all_batch_output_keeps_per_verifier_failures() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_single_labeled_batch_deployment(&tmp);
+
+    let output = treb()
+        .args(["--no-color", "verify", "--all", "--etherscan", "--sourcify"])
+        .env("NO_COLOR", "1")
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "batch verify should complete with handled failures");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
     assert!(
-        stderr.contains("Verification complete:"),
-        "batch should show summary line: {stderr}"
+        stderr.contains("✗ Etherscan Failed"),
+        "batch verify should name the failing etherscan attempt: {stderr}"
+    );
+    assert!(
+        stderr.contains("✗ Sourcify Failed"),
+        "batch verify should name the failing sourcify attempt: {stderr}"
     );
 }

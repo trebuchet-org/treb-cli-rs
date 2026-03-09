@@ -143,6 +143,61 @@ fn get_status_icon(status: &VerificationStatus) -> &'static str {
     }
 }
 
+fn ordered_verifier_names(
+    requested_verifiers: Option<&[String]>,
+    verifiers: &HashMap<String, VerifierStatus>,
+) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+
+    if let Some(requested) = requested_verifiers {
+        for name in requested {
+            let normalized = name.to_lowercase();
+            if verifiers.contains_key(&normalized) && !names.contains(&normalized) {
+                names.push(normalized);
+            }
+        }
+    }
+
+    let mut remaining: Vec<_> =
+        verifiers.keys().filter(|name| !names.contains(*name)).cloned().collect();
+    remaining.sort();
+    names.extend(remaining);
+
+    names
+}
+
+fn print_verifier_status_lines(
+    verifiers: &HashMap<String, VerifierStatus>,
+    requested_verifiers: Option<&[String]>,
+    indent: &str,
+) {
+    for name in ordered_verifier_names(requested_verifiers, verifiers) {
+        let v = &verifiers[&name];
+        let title = title_case(&name);
+        if v.status == "VERIFIED" {
+            eprintln!(
+                "{indent}{} {} {}",
+                styled(emoji::CHECK_MARK, color::VERIFIED),
+                title,
+                styled("Verified", color::VERIFIED),
+            );
+            if !v.url.is_empty() {
+                eprintln!("{indent}  {}", styled(&v.url, color::MUTED));
+            }
+        } else {
+            eprintln!(
+                "{indent}{} {} {}",
+                styled(emoji::CROSS_MARK, color::FAILED),
+                title,
+                styled("Failed", color::FAILED),
+            );
+            if !v.reason.is_empty() {
+                eprintln!("{indent}  {}", styled(&v.reason, color::MUTED));
+            }
+        }
+    }
+}
+
 /// Print the `Verification Status:` section with per-verifier results.
 fn print_verification_status(verifiers: &HashMap<String, VerifierStatus>) {
     if verifiers.is_empty() {
@@ -150,33 +205,7 @@ fn print_verification_status(verifiers: &HashMap<String, VerifierStatus>) {
     }
     eprintln!();
     eprintln!("  Verification Status:");
-    let mut names: Vec<_> = verifiers.keys().collect();
-    names.sort();
-    for name in names {
-        let v = &verifiers[name];
-        let title = title_case(name);
-        if v.status == "VERIFIED" {
-            eprintln!(
-                "    {} {} {}",
-                styled(emoji::CHECK_MARK, color::VERIFIED),
-                title,
-                styled("Verified", color::VERIFIED),
-            );
-            if !v.url.is_empty() {
-                eprintln!("      {}", styled(&v.url, color::MUTED));
-            }
-        } else {
-            eprintln!(
-                "    {} {} {}",
-                styled(emoji::CROSS_MARK, color::FAILED),
-                title,
-                styled("Failed", color::FAILED),
-            );
-            if !v.reason.is_empty() {
-                eprintln!("      {}", styled(&v.reason, color::MUTED));
-            }
-        }
-    }
+    print_verifier_status_lines(verifiers, None, "    ");
 }
 
 /// Run the verify command.
@@ -472,22 +501,20 @@ async fn run_batch(
 ) -> anyhow::Result<()> {
     let mut registry = Registry::open(cwd).context("failed to open registry")?;
 
-    // Collect candidate deployments as owned values to avoid borrow conflicts.
-    let candidate_deployments: Vec<_> = registry
-        .list_deployments()
-        .into_iter()
-        .filter(|d| force || d.verification.status != VerificationStatus::Verified)
-        .cloned()
-        .collect();
+    let all_deployments: Vec<_> = registry.list_deployments().into_iter().cloned().collect();
+    let (skipped_deployments, candidate_deployments): (Vec<_>, Vec<_>) = if force {
+        (Vec::new(), all_deployments)
+    } else {
+        all_deployments
+            .into_iter()
+            .partition(|d| d.verification.status == VerificationStatus::Verified)
+    };
 
     if candidate_deployments.is_empty() {
         if json {
             output::print_json(&Vec::<VerifyOutputJson>::new())?;
         } else if force {
-            eprintln!(
-                "{}",
-                styled("No deployed contracts found to verify.", color::WARNING),
-            );
+            eprintln!("{}", styled("No deployed contracts found to verify.", color::WARNING),);
         } else {
             eprintln!(
                 "{}",
@@ -517,10 +544,7 @@ async fn run_batch(
         if json {
             output::print_json(&Vec::<VerifyOutputJson>::new())?;
         } else if force {
-            eprintln!(
-                "{}",
-                styled("No deployed contracts found to verify.", color::WARNING),
-            );
+            eprintln!("{}", styled("No deployed contracts found to verify.", color::WARNING),);
         } else {
             eprintln!(
                 "{}",
@@ -537,8 +561,33 @@ async fn run_batch(
     let mut results: Vec<VerifyOutputJson> = Vec::new();
     let mut success_count: usize = 0;
 
-    // Print to-verify header.
     if !json {
+        if !skipped_deployments.is_empty() {
+            eprintln!(
+                "{}",
+                styled(
+                    &format!(
+                        "Skipping {} already verified deployed contract{}:",
+                        skipped_deployments.len(),
+                        if skipped_deployments.len() == 1 { "" } else { "s" },
+                    ),
+                    color::WARNING,
+                ),
+            );
+            for dep in &skipped_deployments {
+                let display_name = contract_display_name(&dep.contract_name, &dep.label);
+                eprintln!(
+                    "  {} chain:{}/{}/{} {}",
+                    styled(emoji::FAST_FORWARD, color::WARNING),
+                    dep.chain_id,
+                    dep.namespace,
+                    display_name,
+                    styled("(already verified)", color::MUTED),
+                );
+            }
+            eprintln!();
+        }
+
         if force {
             eprintln!(
                 "{}",
@@ -668,29 +717,10 @@ async fn run_batch(
 
         // Print per-result output in Go-matching format.
         if !json {
-            let location =
-                format!("chain:{}/{}/{}", chain_id, namespace, display_name);
+            let location = format!("chain:{}/{}/{}", chain_id, namespace, display_name);
             let icon = get_status_icon(&pre_status);
             eprintln!("  {} {}", icon, location);
-
-            if agg_status == VerificationStatus::Verified {
-                eprintln!(
-                    "    {} {}",
-                    styled(emoji::CHECK_MARK, color::SUCCESS),
-                    styled("Verification completed", color::SUCCESS),
-                );
-            } else {
-                // Print per-error failure messages.
-                for v in attempted_verifiers.values() {
-                    if v.status == "FAILED" {
-                        eprintln!(
-                            "    {} {}",
-                            styled(emoji::CROSS_MARK, color::FAILED),
-                            styled(&v.reason, color::FAILED),
-                        );
-                    }
-                }
-            }
+            print_verifier_status_lines(&attempted_verifiers, Some(verifiers), "    ");
 
             // Blank line between results, not after last.
             if i + 1 < total {
