@@ -198,6 +198,30 @@ pub async fn run_deployment(tmp_path: std::path::PathBuf, rpc_url: String) {
 
 // ── JSON Assertion Helpers ──────────────────────────────────────────────────
 
+/// Run a treb subcommand in human (non-JSON) mode and return stdout as a String.
+///
+/// Panics if the command fails.
+pub async fn run_human(tmp_path: std::path::PathBuf, args: Vec<String>) -> String {
+    let output = tokio::task::spawn_blocking(move || {
+        treb()
+            .args(args.iter().map(|s| s.as_str()).collect::<Vec<_>>())
+            .current_dir(&tmp_path)
+            .output()
+            .unwrap()
+    })
+    .await
+    .unwrap();
+
+    assert!(
+        output.status.success(),
+        "treb command failed (exit {:?}):\nstderr: {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    String::from_utf8(output.stdout).expect("stdout must be valid UTF-8")
+}
+
 /// Run a treb subcommand with `--json` and return the parsed JSON value.
 ///
 /// Panics if the command fails or stdout is not valid JSON.

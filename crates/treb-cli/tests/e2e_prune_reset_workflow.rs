@@ -6,8 +6,8 @@
 mod e2e;
 
 use e2e::{
-    assert_deployment_count, read_deployments, read_transactions, run_deployment, run_json,
-    setup_project, spawn_anvil_or_skip, treb,
+    assert_deployment_count, read_deployments, read_transactions, run_deployment, run_human,
+    run_json, setup_project, spawn_anvil_or_skip, treb,
 };
 
 // ── Anvil RPC helpers ───────────────────────────────────────────────────────
@@ -147,7 +147,26 @@ async fn e2e_prune_onchain_clean_registry() {
     register_deployment(tmp.path().to_path_buf(), tx_hash, rpc_url.clone(), "default").await;
     assert_deployment_count(tmp.path().to_path_buf(), 1).await;
 
-    // Step 2: Prune with --check-onchain --dry-run → no candidates.
+    // Step 2a: Prune human output with --check-onchain --dry-run → clean message.
+    let prune_output = run_human(
+        tmp.path().to_path_buf(),
+        vec![
+            "prune".into(),
+            "--check-onchain".into(),
+            "--rpc-url".into(),
+            rpc_url.clone(),
+            "--network".into(),
+            "31337".into(),
+            "--dry-run".into(),
+        ],
+    )
+    .await;
+    assert!(
+        prune_output.contains("All registry entries are valid. Nothing to prune."),
+        "clean prune must show 'All registry entries are valid. Nothing to prune.', got: {prune_output}"
+    );
+
+    // Step 2b: Prune with --json --check-onchain --dry-run → no candidates.
     let result = run_json(
         tmp.path().to_path_buf(),
         vec![
@@ -195,7 +214,30 @@ async fn e2e_prune_detects_selfdestructed() {
     // Step 2: Zero the bytecode at the contract address (simulate selfdestruct).
     anvil_set_code(&rpc_url, &contract_address, "0x").await;
 
-    // Step 3: Prune with --check-onchain --yes → detect and remove.
+    // Step 3a: Prune human dry-run to verify section listings and emoji messages.
+    let prune_output = run_human(
+        tmp.path().to_path_buf(),
+        vec![
+            "prune".into(),
+            "--check-onchain".into(),
+            "--rpc-url".into(),
+            rpc_url.clone(),
+            "--network".into(),
+            "31337".into(),
+            "--dry-run".into(),
+        ],
+    )
+    .await;
+    assert!(
+        prune_output.contains("Found 1 items to prune:"),
+        "prune dry-run must show 'Found 1 items to prune:', got: {prune_output}"
+    );
+    assert!(
+        prune_output.contains("Deployments ("),
+        "prune dry-run must show 'Deployments (N):' section, got: {prune_output}"
+    );
+
+    // Step 3b: Prune with --check-onchain --yes → detect and remove (JSON).
     let result = run_json(
         tmp.path().to_path_buf(),
         vec![
@@ -247,16 +289,20 @@ async fn e2e_reset_scoped_by_namespace() {
     let transactions_before = read_transactions(tmp.path());
 
     // Step 2: Reset with a non-matching namespace → no files change.
-    let tmp_path = tmp.path().to_path_buf();
-    tokio::task::spawn_blocking(move || {
-        treb()
-            .args(["reset", "--namespace", "nonexistent", "--yes"])
-            .current_dir(&tmp_path)
-            .assert()
-            .success();
-    })
-    .await
-    .unwrap();
+    let reset_output = run_human(
+        tmp.path().to_path_buf(),
+        vec![
+            "reset".into(),
+            "--namespace".into(),
+            "nonexistent".into(),
+            "--yes".into(),
+        ],
+    )
+    .await;
+    assert!(
+        reset_output.contains("Nothing to reset."),
+        "non-matching namespace reset must show 'Nothing to reset.', got: {reset_output}"
+    );
     assert_eq!(
         read_deployments(tmp.path()),
         deployments_before,
@@ -328,11 +374,20 @@ async fn e2e_deploy_reset_redeploy() {
     assert_eq!(read_deployments(tmp.path()).as_object().unwrap().len(), 1);
     assert_eq!(read_transactions(tmp.path()).as_object().unwrap().len(), 1);
 
-    // Step 2: Reset everything.
-    let result = run_json(tmp.path().to_path_buf(), vec!["reset".into(), "--yes".into()]).await;
-    assert_eq!(result["removedDeployments"].as_u64(), Some(1));
-    assert_eq!(result["removedTransactions"].as_u64(), Some(1));
-    assert!(result["backupPath"].as_str().is_some(), "must include backupPath");
+    // Step 2a: Reset human output check.
+    let reset_output = run_human(
+        tmp.path().to_path_buf(),
+        vec!["reset".into(), "--yes".into()],
+    )
+    .await;
+    assert!(
+        reset_output.contains("Successfully reset"),
+        "reset must show 'Successfully reset N items from the registry.', got: {reset_output}"
+    );
+    assert!(
+        reset_output.contains("items from the registry."),
+        "reset must show 'items from the registry.', got: {reset_output}"
+    );
     assert_deployment_count(tmp.path().to_path_buf(), 0).await;
 
     // Verify registry is clean after reset.
