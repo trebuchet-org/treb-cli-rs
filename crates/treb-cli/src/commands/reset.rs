@@ -11,11 +11,10 @@ use std::{
 
 use anyhow::{Context, bail};
 use clap::Args;
-use owo_colors::{OwoColorize, Style};
 use serde::Serialize;
 use treb_registry::{REGISTRY_DIR, Registry, snapshot_registry};
 
-use crate::{output, ui::color};
+use crate::output;
 
 // ── Args ─────────────────────────────────────────────────────────────────────
 
@@ -40,11 +39,6 @@ pub struct ResetArgs {
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
-}
-
-/// Apply a color style when color is enabled, plain text otherwise.
-fn styled(text: &str, style: Style) -> String {
-    if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
 }
 
 // ── run ───────────────────────────────────────────────────────────────────────
@@ -161,42 +155,49 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
 
     if total == 0 {
         if !args.json {
-            println!("{}", styled("Nothing to reset.", color::SUCCESS));
+            println!(
+                "Nothing to reset. No registry entries found for the current namespace and network."
+            );
         }
         return Ok(());
     }
 
-    // Scanning stage.
+    // Summary header with aligned per-type counts.
+    let ns = args.namespace.as_deref().unwrap_or("default");
+    let net = args.network.as_deref().unwrap_or("31337");
+
     if !args.json {
-        output::print_stage("\u{1f50d}", "Scanning registry...");
-        output::print_warning_banner(
-            "\u{26a0}\u{fe0f}",
-            &format!(
-                "Warning: About to remove {} deployment(s), {} transaction(s), {} safe transaction(s), \
-                 {} governor proposal(s). A backup will be created first.",
-                deployments_to_remove.len(),
-                transactions_to_remove.len(),
-                safe_txs_to_remove.len(),
-                governor_proposals_to_remove.len(),
-            ),
+        println!(
+            "Found {} items to reset for namespace '{}' on network '{}' (chain {}):\n",
+            total, ns, net, net,
         );
+        if !deployments_to_remove.is_empty() {
+            println!("  Deployments:        {}", deployments_to_remove.len());
+        }
+        if !transactions_to_remove.is_empty() {
+            println!("  Transactions:       {}", transactions_to_remove.len());
+        }
+        if !safe_txs_to_remove.is_empty() {
+            println!("  Safe Transactions:  {}", safe_txs_to_remove.len());
+        }
+        if !governor_proposals_to_remove.is_empty() {
+            println!("  Governor Proposals: {}", governor_proposals_to_remove.len());
+        }
     }
 
     // Confirm.
     if !args.yes {
-        let message = format!("Remove {} total entry(s)?", total,);
+        let message =
+            format!("Are you sure you want to reset the registry for namespace '{ns}' on network '{net}'? This cannot be undone.");
         if !crate::ui::prompt::confirm(&message, false) {
             if !args.json {
-                println!("{}", styled("Cancelled.", color::MUTED));
+                println!("Reset cancelled.");
             }
             return Ok(());
         }
     }
 
-    // Backup.
-    if !args.json {
-        output::print_stage("\u{1f4be}", "Creating backup...");
-    }
+    // Backup (created internally, path not displayed).
     let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
     let registry_dir = cwd.join(REGISTRY_DIR);
     let backup_dir = registry_dir.join(format!("backups/reset-{ts}"));
@@ -217,11 +218,6 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
         let _ = registry.remove_governor_proposal(id);
     }
 
-    // Completion stage.
-    if !args.json {
-        output::print_stage("\u{2705}", "Reset complete");
-    }
-
     if args.json {
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
@@ -240,21 +236,7 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
             backup_path: backup_dir.display().to_string(),
         })?;
     } else {
-        println!("{}", styled("Reset complete.", color::SUCCESS));
-        println!(
-            "{}",
-            styled(
-                &format!(
-                    "Removed {} deployment(s), {} transaction(s), {} safe transaction(s), {} governor proposal(s).",
-                    deployments_to_remove.len(),
-                    transactions_to_remove.len(),
-                    safe_txs_to_remove.len(),
-                    governor_proposals_to_remove.len(),
-                ),
-                color::SUCCESS,
-            )
-        );
-        println!("Backup created at: {}", backup_dir.display());
+        println!("Successfully reset {} items from the registry.", total);
     }
 
     Ok(())
