@@ -468,7 +468,7 @@ fn compose_json_debug_does_not_emit_human_debug_line() {
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
     assert_eq!(json["success"], true);
-    assert_eq!(json["totals"]["deployments"], 4);
+    assert_eq!(json["totals"]["deployments"], 0);
     assert_eq!(json["totals"]["skipped"], 2);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -587,11 +587,17 @@ fn compose_setup_failure_uses_component_failed_renderer() {
     assert_eq!(output.status.code(), Some(1));
 
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(stderr.contains("[1/1] Starting missing"), "missing step-start line: {stderr}");
     assert!(
         stderr.contains(
             "❌ Failed: invalid --env value 'BADENV': expected KEY=VALUE format (missing '=')"
         ),
         "missing per-component failure line: {stderr}"
+    );
+    assert_eq!(
+        stderr.matches("1. missing → script/NonExistent.s.sol").count(),
+        1,
+        "execution plan should be the only place that renders the numbered step header: {stderr}"
     );
     let separator = "═".repeat(70);
     assert!(
@@ -610,6 +616,65 @@ fn compose_setup_failure_uses_component_failed_renderer() {
     assert!(
         !stderr.lines().any(|l| l.starts_with("Error: invalid --env value")),
         "setup error should be rendered through the component failure path, not as a top-level error: {stderr}"
+    );
+}
+
+#[test]
+fn compose_resume_failure_shows_resume_banner_and_step_start() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join("script")).unwrap();
+    fs::write(tmp.path().join("foundry.toml"), COMPOSE_EXEC_FOUNDRY_TOML).unwrap();
+
+    treb().arg("init").current_dir(tmp.path()).assert().success();
+
+    let compose_path = tmp.path().join("resume.yaml");
+    fs::write(
+        &compose_path,
+        concat!(
+            "group: resume\n",
+            "components:\n",
+            "  done:\n",
+            "    script: script/AlreadyDone.s.sol\n",
+            "  missing:\n",
+            "    script: script/NonExistent.s.sol\n",
+        ),
+    )
+    .unwrap();
+
+    let compose_contents = fs::read_to_string(&compose_path).unwrap();
+    let mut hasher = DefaultHasher::new();
+    compose_contents.hash(&mut hasher);
+    let compose_hash = format!("{:016x}", hasher.finish());
+
+    fs::write(
+        tmp.path().join(".treb").join("compose-state.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "compose_hash": compose_hash,
+            "completed": ["done"],
+            "deployment_total": 2
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let output = treb()
+        .args(["compose", "resume.yaml", "--resume", "--network", "localhost", "--non-interactive"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("failed to run resumed compose failure");
+
+    assert_eq!(output.status.code(), Some(1));
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(
+        stderr.contains("📂 Resuming compose from step 2 of 2"),
+        "missing resume banner: {stderr}"
+    );
+    assert!(stderr.contains("[2/2] Starting missing"), "missing resumed step-start line: {stderr}");
+    assert_eq!(
+        stderr.matches("2. missing → script/NonExistent.s.sol").count(),
+        1,
+        "execution plan should be the only place that renders the numbered step header: {stderr}"
     );
 }
 

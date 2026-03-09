@@ -344,6 +344,14 @@ fn print_execution_plan(compose: &ComposeFile, plan: &[PlanEntry]) {
     eprintln!();
 }
 
+fn print_resume_banner(start_step: usize, total: usize) {
+    eprintln!("{} Resuming compose from step {} of {}", emoji::OPEN_FOLDER, start_step, total);
+}
+
+fn print_step_start(step: usize, total: usize, component: &str) {
+    eprintln!("\n[{step}/{total}] Starting {}", styled(component, color::CYAN));
+}
+
 fn should_prompt_for_broadcast_confirmation(
     broadcast: bool,
     dry_run: bool,
@@ -755,10 +763,16 @@ pub async fn run(
     let mut completed = skip_set.len();
     let mut component_results: Vec<ComponentResultEntry> = Vec::with_capacity(total);
     let mut failed_component: Option<String> = None;
+    let resume_step = order.iter().position(|name| !skip_set.contains(name)).map(|index| index + 1);
 
     if !json {
         let plan = build_plan(&compose, &order, &skip_set);
         print_execution_plan(&compose, &plan);
+        if resume {
+            if let Some(step) = resume_step {
+                print_resume_banner(step, total);
+            }
+        }
     }
 
     for (i, name) in order.iter().enumerate() {
@@ -791,12 +805,7 @@ pub async fn run(
         let component = &compose.components[name];
 
         if !json {
-            eprintln!(
-                "\n{}. {} → {}",
-                i + 1,
-                styled(name, color::CYAN),
-                styled(&component.script, color::GREEN),
-            );
+            print_step_start(i + 1, total, name);
         }
 
         let sig = component.sig.as_deref().unwrap_or("run()");
@@ -1037,8 +1046,7 @@ pub async fn run(
     }
 
     // ── Display results ──────────────────────────────────────────────
-    let mut totals = compute_totals(&component_results);
-    totals.deployments += resumed_deployments;
+    let totals = compute_totals(&component_results);
     let success = failed_component.is_none();
     let failure_error = failed_component.as_ref().map(|failed| {
         anyhow::anyhow!(
@@ -1050,10 +1058,19 @@ pub async fn run(
     });
 
     if !json {
+        let human_totals = ComposeTotals {
+            deployments: totals.deployments + resumed_deployments,
+            transactions: totals.transactions,
+            gas_used: totals.gas_used,
+            succeeded: totals.succeeded,
+            skipped: totals.skipped,
+            failed: totals.failed,
+            not_executed: totals.not_executed,
+        };
         display_compose_human(
             &compose.group,
             &component_results,
-            &totals,
+            &human_totals,
             completed,
             total,
             &failed_component,
