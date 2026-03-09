@@ -414,10 +414,6 @@ pub async fn run(
         pipeline.execute(&mut registry).await.context("pipeline execution failed")?
     };
 
-    if !json {
-        output::print_stage("\u{2705}", "Execution complete.");
-    }
-
     // ── Verbose post-execution output ────────────────────────────────────
     if verbose && !json {
         eprintln!();
@@ -455,7 +451,7 @@ pub async fn run(
     }
 
     // ── Display results ──────────────────────────────────────────────────
-    display_result(&result, json)?;
+    display_result(&result, json, network.as_deref(), &resolved.namespace)?;
 
     // ── Debug log output ────────────────────────────────────────────────
     if debug {
@@ -571,11 +567,16 @@ struct GovernorProposalJson {
 
 // ── Display logic ────────────────────────────────────────────────────────
 
-fn display_result(result: &PipelineResult, json: bool) -> anyhow::Result<()> {
+fn display_result(
+    result: &PipelineResult,
+    json: bool,
+    network: Option<&str>,
+    namespace: &str,
+) -> anyhow::Result<()> {
     if json {
         display_result_json(result)?;
     } else {
-        display_result_human(result);
+        display_result_human(result, network, namespace);
     }
     Ok(())
 }
@@ -651,16 +652,43 @@ fn format_governor_proposal_details(gp: &treb_core::types::GovernorProposal) -> 
     )
 }
 
-fn registry_update_section_message(result: &PipelineResult) -> Option<&'static str> {
-    if result.dry_run { None } else { Some("Registry update details pending.") }
-}
-
-fn print_registry_update_section(result: &PipelineResult) {
-    output::print_section_header(emoji::CHECK_MARK, "Registry Update", 50);
-    if let Some(message) = registry_update_section_message(result) {
-        println!("  {message}");
+fn print_registry_update_section(
+    result: &PipelineResult,
+    network: Option<&str>,
+    namespace: &str,
+) {
+    // Only show registry update when not dry-run and execution succeeded
+    if result.dry_run || !result.success {
+        return;
     }
-    println!();
+
+    let network_display = network.unwrap_or("unknown");
+
+    if !result.deployments.is_empty() {
+        // Green message when changes were made
+        let msg = format!(
+            "{} Updated registry for {} network in namespace {}",
+            emoji::CHECK_MARK,
+            network_display,
+            namespace,
+        );
+        if color::is_color_enabled() {
+            println!("\n{}", msg.style(color::GREEN));
+        } else {
+            println!("\n{msg}");
+        }
+    } else {
+        // Yellow message when no changes
+        let msg = format!(
+            "- No registry changes recorded for {} network in namespace {}",
+            network_display, namespace,
+        );
+        if color::is_color_enabled() {
+            println!("\n{}", msg.style(color::YELLOW));
+        } else {
+            println!("\n{msg}");
+        }
+    }
 }
 
 fn format_warning_section_header_with_style(title: &str, style_enabled: bool) -> String {
@@ -755,7 +783,7 @@ fn tx_sender_label(tx: &treb_forge::pipeline::RecordedTransaction) -> &str {
     tx.sender_name.as_deref().filter(|name| !name.is_empty()).unwrap_or(&tx.transaction.sender)
 }
 
-fn display_result_human(result: &PipelineResult) {
+fn display_result_human(result: &PipelineResult, network: Option<&str>, namespace: &str) {
     // ── Transactions ────────────────────────────────────────────────────
     output::print_section_header(emoji::REFRESH, "Transactions", 50);
     if result.transactions.is_empty() {
@@ -861,7 +889,7 @@ fn display_result_human(result: &PipelineResult) {
     }
 
     // ── Registry Update ────────────────────────────────────────────────
-    print_registry_update_section(result);
+    print_registry_update_section(result, network, namespace);
 
     // ── Governor Proposals ──────────────────────────────────────────────
     if !result.governor_proposals.is_empty() {
@@ -887,6 +915,17 @@ fn display_result_human(result: &PipelineResult) {
         }
         println!();
     }
+
+    // ── Success Message ───────────────────────────────────────────────
+    let success_msg = format!(
+        "{} Script execution completed successfully",
+        emoji::CHECK_MARK,
+    );
+    if color::is_color_enabled() {
+        println!("{}", success_msg.style(color::GREEN));
+    } else {
+        println!("{success_msg}");
+    }
 }
 
 #[cfg(test)]
@@ -910,21 +949,6 @@ mod tests {
             description: String::new(),
             executed_at: None,
             execution_tx_hash: String::new(),
-        }
-    }
-
-    fn sample_pipeline_result() -> PipelineResult {
-        PipelineResult {
-            deployments: Vec::new(),
-            transactions: Vec::new(),
-            collisions: Vec::new(),
-            skipped: Vec::new(),
-            dry_run: false,
-            success: true,
-            gas_used: 0,
-            event_count: 0,
-            console_logs: Vec::new(),
-            governor_proposals: Vec::new(),
         }
     }
 
@@ -1102,23 +1126,6 @@ mod tests {
         owo_colors::set_override(false);
     }
 
-    #[test]
-    fn registry_update_section_message_uses_placeholder_for_non_dry_run() {
-        let result = sample_pipeline_result();
-
-        assert_eq!(
-            registry_update_section_message(&result),
-            Some("Registry update details pending.")
-        );
-    }
-
-    #[test]
-    fn registry_update_section_message_omits_placeholder_for_dry_run() {
-        let mut result = sample_pipeline_result();
-        result.dry_run = true;
-
-        assert_eq!(registry_update_section_message(&result), None);
-    }
 
     #[test]
     fn format_tx_footer_includes_gas_when_present() {
