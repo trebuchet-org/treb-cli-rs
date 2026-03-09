@@ -167,7 +167,7 @@ fn list_with_tags() {
     let test = IntegrationTest::new("list_with_tags")
         .setup(&["init"])
         .post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))
-        .test(&["list", "--tag", "core"])
+        .test(&["list", "--tag", "v3-release"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
