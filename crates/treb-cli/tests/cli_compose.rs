@@ -531,9 +531,11 @@ fn compose_setup_failure_uses_component_failed_renderer() {
         stderr.contains("Error: compose failed: component 'missing' failed (0/1 completed)"),
         "unexpected top-level error: {stderr}"
     );
+    // The raw error should not appear as a top-level Error: line — it should only
+    // appear inside the component failure renderer (❌ Failed: ...) and summary bullet (• Error: ...).
     assert!(
-        !stderr.contains("Error: invalid --env value 'BADENV'"),
-        "setup error should be rendered through the component failure path: {stderr}"
+        !stderr.lines().any(|l| l.starts_with("Error: invalid --env value")),
+        "setup error should be rendered through the component failure path, not as a top-level error: {stderr}"
     );
 }
 

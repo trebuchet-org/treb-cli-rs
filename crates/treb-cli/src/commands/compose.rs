@@ -435,60 +435,54 @@ fn styled(text: &str, style: Style) -> String {
     if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
 }
 
-/// Display compose results in human-readable format.
-fn display_compose_human(group: &str, results: &[ComponentResultEntry], totals: &ComposeTotals) {
-    println!();
-    println!("Compose results: {}", group);
-    println!();
+/// Display compose summary in human-readable format (matches Go renderSummary).
+fn display_compose_human(
+    group: &str,
+    results: &[ComponentResultEntry],
+    totals: &ComposeTotals,
+    completed: usize,
+    total: usize,
+    failed_component: &Option<String>,
+) {
+    let separator = "═".repeat(70);
+    eprintln!("\n{separator}");
 
-    for r in results {
-        match r.status {
-            ComponentStatus::Success => {
-                let icon = styled("\u{2714}", color::SUCCESS); // ✔
-                let mut line = format!(
-                    "  {} {} — {} deployment{}, {} transaction{}",
-                    icon,
-                    r.component,
-                    r.deployments,
-                    if r.deployments == 1 { "" } else { "s" },
-                    r.transactions,
-                    if r.transactions == 1 { "" } else { "s" },
-                );
-                if r.gas_used > 0 {
-                    line.push_str(&format!(", {} gas", output::format_gas(r.gas_used)));
+    let success = failed_component.is_none();
+
+    if success {
+        eprintln!(
+            "{}",
+            styled(
+                &format!("{} Successfully orchestrated {} deployment", emoji::PARTY, group),
+                color::SUCCESS,
+            ),
+        );
+        eprintln!("\n{} Summary:", emoji::CHART);
+        eprintln!("  • Steps executed: {}/{}", completed, total);
+        eprintln!("  • Total deployments: {}", totals.deployments);
+    } else {
+        eprintln!(
+            "{}",
+            styled(
+                &format!("{} Orchestration failed", emoji::CROSS),
+                color::ERROR,
+            ),
+        );
+        eprintln!("\n{} Summary:", emoji::CHART);
+        if let Some(failed) = failed_component {
+            eprintln!("  • Failed at step: {}", failed);
+        }
+        // completed count excludes the failed step (Go behavior)
+        eprintln!("  • Steps completed: {}/{}", completed, total);
+        // Show the error message from the failed component
+        if let Some(failed) = failed_component {
+            if let Some(entry) = results.iter().find(|r| &r.component == failed) {
+                if let Some(ref err) = entry.error {
+                    eprintln!("  • Error: {}", err);
                 }
-                println!("{line}");
-            }
-            ComponentStatus::Skipped => {
-                let icon = styled("\u{23ed}", color::WARNING); // ⏭
-                println!("  {} {} {}", icon, r.component, styled("(skipped)", color::WARNING));
-            }
-            ComponentStatus::Failed => {
-                let icon = styled("\u{2718}", color::ERROR); // ✘
-                println!("  {} {} {}", icon, r.component, styled("(failed)", color::ERROR));
-                let msg = r.error.as_deref().unwrap_or("unknown error");
-                println!("    {}", styled(msg, color::MUTED));
-            }
-            ComponentStatus::NotExecuted => {
-                let icon = styled("\u{2014}", color::MUTED); // —
-                println!("  {} {} {}", icon, r.component, styled("(not executed)", color::MUTED));
             }
         }
     }
-
-    println!();
-    println!(
-        "Totals: {} deployment{}, {} transaction{}, {} gas | {} succeeded, {} skipped, {} failed, {} not executed",
-        totals.deployments,
-        if totals.deployments == 1 { "" } else { "s" },
-        totals.transactions,
-        if totals.transactions == 1 { "" } else { "s" },
-        output::format_gas(totals.gas_used),
-        totals.succeeded,
-        totals.skipped,
-        totals.failed,
-        totals.not_executed,
-    );
 }
 
 /// Display compose results as JSON.
@@ -1037,7 +1031,14 @@ pub async fn run(
     });
 
     if !json {
-        display_compose_human(&compose.group, &component_results, &totals);
+        display_compose_human(
+            &compose.group,
+            &component_results,
+            &totals,
+            completed,
+            total,
+            &failed_component,
+        );
 
         if let Some(ref dir) = debug_dir {
             eprintln!("Debug logs saved to {}", dir.display());
