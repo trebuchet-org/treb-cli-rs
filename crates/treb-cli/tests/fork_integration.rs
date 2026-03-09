@@ -12,6 +12,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use tempfile::TempDir;
+use treb_config::{LocalConfig, save_local_config};
 use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
 use treb_registry::{DEPLOYMENTS_FILE, FORK_STATE_FILE, ForkStateStore};
 
@@ -115,6 +116,35 @@ fn fork_status_json_outputs_valid_json() {
     assert_eq!(arr[0]["network"], "mainnet");
     assert_eq!(arr[0]["port"], 9999);
     assert_eq!(arr[0]["chainId"], 1);
+}
+
+/// `treb fork status` should fall back to the stored upstream fork URL when no
+/// local Anvil runtime exists yet, and should mark the configured network as
+/// current.
+#[test]
+fn fork_status_uses_session_fork_url_and_marks_current_network() {
+    let (root, treb_dir) = make_project();
+
+    let mut entry = sample_entry(&treb_dir, "mainnet");
+    entry.chain_id = 1;
+    entry.fork_url = "https://eth.example.com".into();
+
+    let mut store = ForkStateStore::new(&treb_dir);
+    store.insert_active_fork(entry).unwrap();
+
+    save_local_config(
+        root.path(),
+        &LocalConfig { namespace: "default".into(), network: "mainnet".into() },
+    )
+    .unwrap();
+
+    treb()
+        .args(["fork", "status"])
+        .current_dir(root.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("  mainnet (current)"))
+        .stdout(predicate::str::contains("Fork URL:     https://eth.example.com"));
 }
 
 // ── fork history with empty history ───────────────────────────────────────────

@@ -17,7 +17,7 @@ use foundry_common::{
 use owo_colors::{OwoColorize, Style};
 use serde::Serialize;
 use tokio::net::TcpStream;
-use treb_config::{ResolveOpts, resolve_config};
+use treb_config::{ResolveOpts, load_local_config, resolve_config};
 use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
 use treb_forge::{
     createx::createx_deployed_bytecode, execute_script, script::build_script_config_with_senders,
@@ -884,23 +884,26 @@ pub async fn run_status(json: bool) -> anyhow::Result<()> {
     println!("Active Forks");
     println!();
 
+    let current_network = load_local_config(&cwd)
+        .ok()
+        .and_then(|config| (!config.network.is_empty()).then_some(config.network));
+
     for network in &networks {
         let session = resolve_fork_session_entry(&store, network)
             .ok_or_else(|| anyhow::anyhow!("network '{}' is not in fork mode", network))?;
         let runtime = primary_tracked_anvil_entry(&store, network);
-        let rpc_url = runtime.map_or(session.rpc_url.as_str(), |entry| entry.rpc_url.as_str());
+        let rpc_url = status_fork_url(session, runtime);
         let chain_id = runtime.map_or(session.chain_id, |entry| entry.chain_id);
         let started_at = runtime.map_or(session.started_at, |entry| entry.started_at);
-        let snapshot_count =
-            runtime.map_or(session.snapshots.len(), |entry| entry.snapshots.len());
+        let snapshot_count = runtime.map_or(session.snapshots.len(), |entry| entry.snapshots.len());
         let running = network_is_running(runtime).await;
         let health_detail = if running { "running" } else { "stopped" };
-        let uptime = format_uptime(now - started_at);
+        let uptime = format_status_uptime(now - started_at);
         let deployment_count = count_fork_deployments_for_chain(&deployments, chain_id);
         let anvil_pid = runtime.map_or(session.anvil_pid, |entry| entry.anvil_pid);
         let log_file = runtime.map_or(session.log_file.as_str(), |entry| entry.log_file.as_str());
 
-        println!("  {network}");
+        println!("{}", status_entry_header(network, current_network.as_deref()));
         println!("    {:<14}{}", "Chain ID:", chain_id);
         if !rpc_url.is_empty() {
             println!("    {:<14}{}", "Fork URL:", rpc_url);
@@ -1128,6 +1131,31 @@ async fn network_is_running(entry: Option<&ForkEntry>) -> bool {
     match entry {
         Some(entry) => is_port_reachable(entry.port).await,
         None => false,
+    }
+}
+
+fn status_fork_url<'a>(session: &'a ForkEntry, runtime: Option<&'a ForkEntry>) -> &'a str {
+    runtime.filter(|entry| !entry.rpc_url.is_empty()).map_or_else(
+        || {
+            if !session.fork_url.is_empty() {
+                session.fork_url.as_str()
+            } else {
+                session.rpc_url.as_str()
+            }
+        },
+        |entry| entry.rpc_url.as_str(),
+    )
+}
+
+fn format_status_uptime(duration: chrono::Duration) -> String {
+    output::format_duration(duration.to_std().unwrap_or(Duration::ZERO))
+}
+
+fn status_entry_header(network: &str, current_network: Option<&str>) -> String {
+    if current_network == Some(network) {
+        format!("  {network} (current)")
+    } else {
+        format!("  {network}")
     }
 }
 
@@ -1654,6 +1682,43 @@ mod tests {
 
         let primary = super::primary_tracked_anvil_entry(&store, "mainnet").unwrap();
         assert_eq!(primary.resolved_instance_name(), "alpha");
+    }
+
+    #[test]
+    fn status_fork_url_uses_session_fork_url_without_runtime() {
+        let (_root, treb_dir) = make_treb_dir();
+        let session = sample_entry(&treb_dir, "mainnet");
+
+        assert_eq!(super::status_fork_url(&session, None), "https://eth.example.com");
+    }
+
+    #[test]
+    fn status_fork_url_prefers_runtime_rpc_url_when_available() {
+        let (_root, treb_dir) = make_treb_dir();
+        let session = sample_entry(&treb_dir, "mainnet");
+        let mut runtime = sample_named_entry(&treb_dir, "mainnet", "alpha");
+        runtime.rpc_url = "http://127.0.0.1:18545".into();
+        runtime.port = 18545;
+        runtime.log_file = "/tmp/anvil-alpha.log".into();
+
+        assert_eq!(super::status_fork_url(&session, Some(&runtime)), "http://127.0.0.1:18545");
+    }
+
+    #[test]
+    fn status_entry_header_marks_current_network() {
+        assert_eq!(super::status_entry_header("mainnet", Some("mainnet")), "  mainnet (current)");
+        assert_eq!(super::status_entry_header("sepolia", Some("mainnet")), "  sepolia");
+    }
+
+    #[test]
+    fn format_status_uptime_matches_go_duration_format() {
+        assert_eq!(super::format_status_uptime(chrono::Duration::seconds(45)), "45s");
+        assert_eq!(super::format_status_uptime(chrono::Duration::minutes(135)), "2h15m");
+    }
+
+    #[test]
+    fn format_status_uptime_handles_negative_duration() {
+        assert_eq!(super::format_status_uptime(chrono::Duration::seconds(-10)), "0s");
     }
 
     #[test]
