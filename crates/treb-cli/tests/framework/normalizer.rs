@@ -122,7 +122,7 @@ impl Normalizer for TimestampNormalizer {
 }
 
 /// Replaces version-related strings: v-prefixed semver, treb short version,
-/// and git commit suffixes in version strings.
+/// git commit suffixes in version strings, and version command build dates.
 pub struct VersionNormalizer;
 
 impl Normalizer for VersionNormalizer {
@@ -137,7 +137,15 @@ impl Normalizer for VersionNormalizer {
 
         // Git commit in version strings: -g6a2e70e
         let git_commit = Regex::new(r"-g[a-f0-9]{7,}").unwrap();
-        git_commit.replace_all(&result, "-g<COMMIT>").into_owned()
+        let result = git_commit.replace_all(&result, "-g<COMMIT>");
+
+        // Version JSON build date: "date": "2026-03-09"
+        let json_date = Regex::new(r#"("date":\s*")\d{4}-\d{2}-\d{2}(")"#).unwrap();
+        let result = json_date.replace_all(&result, "${1}<DATE>${2}");
+
+        // Human version output build date: "Date:  2026-03-09"
+        let human_date = Regex::new(r"(Date:\s+)\d{4}-\d{2}-\d{2}").unwrap();
+        human_date.replace_all(&result, "${1}<DATE>").into_owned()
     }
 }
 
@@ -548,6 +556,18 @@ mod tests {
     fn version_normalizer_no_match() {
         let n = VersionNormalizer;
         assert_eq!(n.normalize("no version here"), "no version here");
+    }
+
+    #[test]
+    fn version_normalizer_json_build_date() {
+        let n = VersionNormalizer;
+        assert_eq!(n.normalize(r#""date": "2026-03-09""#), r#""date": "<DATE>""#);
+    }
+
+    #[test]
+    fn version_normalizer_human_build_date() {
+        let n = VersionNormalizer;
+        assert_eq!(n.normalize("Date:  2026-03-09"), "Date:  <DATE>");
     }
 
     #[test]

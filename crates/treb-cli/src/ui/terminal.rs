@@ -1,5 +1,7 @@
 //! Terminal width detection and display width measurement utilities.
 
+use std::borrow::Cow;
+
 use console::Term;
 use unicode_width::UnicodeWidthStr;
 
@@ -16,8 +18,8 @@ pub fn terminal_width() -> usize {
 /// Handles standard SGR codes (`\x1b[...m`), 256-color codes (`\x1b[38;5;Nm`),
 /// and combined parameter codes (`\x1b[0;1;31m`).
 #[allow(dead_code)]
-pub fn strip_ansi_codes(s: &str) -> String {
-    console::strip_ansi_codes(s).into_owned()
+pub fn strip_ansi_codes(s: &str) -> Cow<'_, str> {
+    console::strip_ansi_codes(s)
 }
 
 /// Returns the display width of a string, stripping ANSI escape codes before measuring.
@@ -26,7 +28,7 @@ pub fn strip_ansi_codes(s: &str) -> String {
 #[allow(dead_code)]
 pub fn display_width(s: &str) -> usize {
     let stripped = strip_ansi_codes(s);
-    UnicodeWidthStr::width(stripped.as_str())
+    UnicodeWidthStr::width(stripped.as_ref())
 }
 
 #[cfg(test)]
@@ -51,6 +53,11 @@ mod tests {
     }
 
     #[test]
+    fn strip_ansi_no_codes_returns_borrowed() {
+        assert!(matches!(strip_ansi_codes("no codes"), Cow::Borrowed("no codes")));
+    }
+
+    #[test]
     fn strip_ansi_empty_string() {
         assert_eq!(strip_ansi_codes(""), "");
     }
@@ -70,15 +77,20 @@ mod tests {
 
     #[test]
     fn strip_ansi_mixed_plain_and_codes() {
-        assert_eq!(
-            strip_ansi_codes("pre\x1b[32m-mid-\x1b[0mpost"),
-            "pre-mid-post"
-        );
+        assert_eq!(strip_ansi_codes("pre\x1b[32m-mid-\x1b[0mpost"), "pre-mid-post");
     }
 
     #[test]
     fn strip_ansi_only_codes_no_text() {
         assert_eq!(strip_ansi_codes("\x1b[31m\x1b[0m"), "");
+    }
+
+    #[test]
+    fn strip_ansi_codes_returns_owned_when_modified() {
+        assert!(matches!(
+            strip_ansi_codes("\x1b[31mred\x1b[0m"),
+            Cow::Owned(ref text) if text == "red"
+        ));
     }
 
     // -- display_width tests --
