@@ -11,13 +11,22 @@ pub fn terminal_width() -> usize {
     Term::stdout().size_checked().map(|(_, cols)| cols as usize).unwrap_or(80)
 }
 
+/// Strips all ANSI escape sequences from a string, returning only the visible text.
+///
+/// Handles standard SGR codes (`\x1b[...m`), 256-color codes (`\x1b[38;5;Nm`),
+/// and combined parameter codes (`\x1b[0;1;31m`).
+#[allow(dead_code)]
+pub fn strip_ansi_codes(s: &str) -> String {
+    console::strip_ansi_codes(s).into_owned()
+}
+
 /// Returns the display width of a string, stripping ANSI escape codes before measuring.
 ///
 /// Uses unicode-width for accurate measurement of wide characters.
 #[allow(dead_code)]
 pub fn display_width(s: &str) -> usize {
-    let stripped = console::strip_ansi_codes(s);
-    UnicodeWidthStr::width(stripped.as_ref())
+    let stripped = strip_ansi_codes(s);
+    UnicodeWidthStr::width(stripped.as_str())
 }
 
 #[cfg(test)]
@@ -28,6 +37,51 @@ mod tests {
     fn terminal_width_returns_positive() {
         assert!(terminal_width() > 0);
     }
+
+    // -- strip_ansi_codes tests --
+
+    #[test]
+    fn strip_ansi_basic_sgr() {
+        assert_eq!(strip_ansi_codes("\x1b[31mred\x1b[0m"), "red");
+    }
+
+    #[test]
+    fn strip_ansi_no_codes() {
+        assert_eq!(strip_ansi_codes("no codes"), "no codes");
+    }
+
+    #[test]
+    fn strip_ansi_empty_string() {
+        assert_eq!(strip_ansi_codes(""), "");
+    }
+
+    #[test]
+    fn strip_ansi_nested_multiple_codes() {
+        assert_eq!(strip_ansi_codes("\x1b[1m\x1b[31mtext\x1b[0m"), "text");
+    }
+
+    #[test]
+    fn strip_ansi_multiple_parameters() {
+        // 256-color code
+        assert_eq!(strip_ansi_codes("\x1b[38;5;196mred256\x1b[0m"), "red256");
+        // Combined parameters
+        assert_eq!(strip_ansi_codes("\x1b[0;1;31mbold_red\x1b[0m"), "bold_red");
+    }
+
+    #[test]
+    fn strip_ansi_mixed_plain_and_codes() {
+        assert_eq!(
+            strip_ansi_codes("pre\x1b[32m-mid-\x1b[0mpost"),
+            "pre-mid-post"
+        );
+    }
+
+    #[test]
+    fn strip_ansi_only_codes_no_text() {
+        assert_eq!(strip_ansi_codes("\x1b[31m\x1b[0m"), "");
+    }
+
+    // -- display_width tests --
 
     #[test]
     fn display_width_plain_ascii() {
