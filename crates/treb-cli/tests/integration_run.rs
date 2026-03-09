@@ -6,6 +6,8 @@
 mod framework;
 mod helpers;
 
+use std::fs;
+
 use framework::{
     context::TestContext,
     integration_test::{IntegrationTest, run_integration_test},
@@ -21,6 +23,131 @@ async fn run_test_context() -> Option<TestContext> {
         Err(err) if err.to_string().contains("Operation not permitted") => None,
         Err(err) => panic!("failed to spawn anvil: {err}"),
     }
+}
+
+fn install_multi_operation_fixture(ctx: &TestContext) {
+    fs::write(
+        ctx.path().join("src/BatchCounterFactory.sol"),
+        r#"// SPDX-License-Identifier: MIT
+pragma solidity =0.8.30;
+
+import "./Counter.sol";
+
+contract BatchCounterFactory {
+    function deployPair() external returns (Counter first, Counter second) {
+        first = new Counter();
+        second = new Counter();
+    }
+}
+"#,
+    )
+    .expect("failed to write batch factory fixture");
+
+    fs::write(
+        ctx.path().join("script/DeployMulti.s.sol"),
+        r#"// SPDX-License-Identifier: MIT
+pragma solidity =0.8.30;
+
+import "forge-std/Script.sol";
+import "../src/BatchCounterFactory.sol";
+import "../src/Counter.sol";
+
+struct DeploymentDetails {
+    string artifact;
+    string label;
+    string entropy;
+    bytes32 salt;
+    bytes32 bytecodeHash;
+    bytes32 initCodeHash;
+    bytes constructorArgs;
+    string createStrategy;
+}
+
+struct TxDetails {
+    address to;
+    bytes data;
+    uint256 value;
+}
+
+struct SimTx {
+    bytes32 transactionId;
+    string senderId;
+    address sender;
+    bytes returnData;
+    TxDetails transaction;
+}
+
+contract DeployMultiScript is Script {
+    event ContractDeployed(
+        address indexed deployer,
+        address indexed location,
+        bytes32 indexed transactionId,
+        DeploymentDetails deployment
+    );
+
+    event TransactionSimulated(SimTx[] transactions);
+
+    function run() public {
+        BatchCounterFactory factory = new BatchCounterFactory();
+        bytes memory callData = abi.encodeCall(BatchCounterFactory.deployPair, ());
+
+        vm.startBroadcast();
+        (Counter first, Counter second) = factory.deployPair();
+
+        bytes32 txId = keccak256(
+            abi.encode(
+                block.chainid,
+                block.number,
+                address(factory),
+                address(first),
+                address(second)
+            )
+        );
+
+        emit ContractDeployed(
+            msg.sender,
+            address(first),
+            txId,
+            deploymentDetails("CounterA", address(first))
+        );
+        emit ContractDeployed(
+            msg.sender,
+            address(second),
+            txId,
+            deploymentDetails("CounterB", address(second))
+        );
+
+        SimTx[] memory txs = new SimTx[](1);
+        txs[0] = SimTx({
+            transactionId: txId,
+            senderId: "anvil",
+            sender: msg.sender,
+            returnData: bytes(""),
+            transaction: TxDetails({to: address(factory), data: callData, value: 0})
+        });
+        emit TransactionSimulated(txs);
+        vm.stopBroadcast();
+    }
+
+    function deploymentDetails(
+        string memory label,
+        address deployed
+    ) internal view returns (DeploymentDetails memory) {
+        return DeploymentDetails({
+            artifact: "Counter",
+            label: label,
+            entropy: "",
+            salt: bytes32(0),
+            bytecodeHash: keccak256(deployed.code),
+            initCodeHash: keccak256(type(Counter).creationCode),
+            constructorArgs: bytes(""),
+            createStrategy: "create"
+        });
+    }
+}
+"#,
+    )
+    .expect("failed to write multi-operation script fixture");
 }
 
 /// Basic deployment with broadcast against a live Anvil node.
@@ -173,6 +300,37 @@ async fn run_verbose() {
             "--broadcast",
             "--non-interactive",
             "--verbose",
+        ])
+        .output_artifact(".treb/deployments.json")
+        .output_artifact(".treb/transactions.json")
+        .extra_normalizer(Box::new(path_normalizer))
+        .extra_normalizer(Box::new(CompilerOutputNormalizer))
+        .extra_normalizer(Box::new(GasNormalizer))
+        .extra_normalizer(Box::new(BlockNumberNormalizer))
+        .extra_normalizer(Box::new(DurationNormalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// A single broadcasted call can hydrate multiple operations and should render all of them.
+#[tokio::test(flavor = "multi_thread")]
+async fn run_multi_operation() {
+    let Some(ctx) = run_test_context().await else {
+        return;
+    };
+
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("run_multi_operation")
+        .pre_setup_hook(install_multi_operation_fixture)
+        .setup(&["init"])
+        .test(&[
+            "run",
+            "script/DeployMulti.s.sol",
+            "--network",
+            "anvil-31337",
+            "--broadcast",
+            "--non-interactive",
         ])
         .output_artifact(".treb/deployments.json")
         .output_artifact(".treb/transactions.json")

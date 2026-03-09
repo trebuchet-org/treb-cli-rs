@@ -1,0 +1,19 @@
+=== cmd 0: [run script/DeployMulti.s.sol --network anvil-31337 --broadcast --non-interactive] ===
+No files changed, compilation skipped
+
+🔄 Transactions:
+──────────────────────────────────────────────────
+
+  simulated anvil → 0xd9003177dC465aAA89e20678675dca7FA5f5CAD5::CREATE(DEPLOY) | 0x143514cFa5E66eC945bB19A024627c8bdE524156::CREATE(DEPLOY)
+
+
+📦 Deployment Summary:
+──────────────────────────────────────────────────
+  Counter:CounterA at 0xd9003177dC465aAA89e20678675dca7FA5f5CAD5
+  Counter:CounterB at 0x143514cFa5E66eC945bB19A024627c8bdE524156
+
+
+✓ Updated registry for anvil-31337 network in namespace default
+✓ Script execution completed successfully
+🔨 Compiling and executing script/DeployMulti.s.sol...
+📡 Broadcasting...

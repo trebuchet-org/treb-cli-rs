@@ -6,10 +6,10 @@
 
 use std::{collections::HashMap, path::Path};
 
-use alloy_primitives::{Address, B256, TxKind, U256};
+use alloy_primitives::{Address, B256, U256};
 use alloy_signer::Signer;
-use foundry_cheatcodes::BroadcastableTransactions;
 use foundry_config::Config;
+use foundry_evm::traces::{CallKind, TraceKind, Traces};
 use treb_core::error::TrebError;
 use treb_registry::Registry;
 use treb_safe::{
@@ -20,7 +20,7 @@ use crate::{
     artifacts::ArtifactIndex,
     compiler::compile_project,
     events::{
-        GovernorProposalCreated, SafeTransactionQueued, TransactionSimulated,
+        ExtractedDeployment, GovernorProposalCreated, SafeTransactionQueued, TransactionSimulated,
         abi::SimulatedTransaction,
         decode_events,
         decoder::{ParsedEvent, TrebEvent},
@@ -145,8 +145,11 @@ impl RunPipeline {
             hydrate_transactions(&tx_events, &hydrated_deployments, &self.context);
         let safe_transactions = hydrate_safe_transactions(&safe_tx_events, &self.context);
         let governor_proposals = hydrate_governor_proposals(&governor_events, &self.context);
-        let mut transaction_metadata =
-            build_recorded_transaction_metadata(&tx_events, execution.transactions.as_ref());
+        let mut transaction_metadata = build_recorded_transaction_metadata(
+            &tx_events,
+            &extracted_deployments,
+            &execution.traces,
+        );
 
         // 9. Safe sender: populate safe_context and propose to Safe Service
         let is_safe_sender = self.context.deployer_sender.as_ref().is_some_and(|s| s.is_safe());
@@ -303,9 +306,10 @@ struct RecordedTransactionMetadata {
 }
 
 #[derive(Clone, Debug)]
-struct PendingBroadcastTransaction {
+struct PendingExecutionTrace {
     from: Address,
-    to: TxKind,
+    to: Address,
+    kind: CallKind,
     data: Vec<u8>,
     value: U256,
     gas_used: Option<u64>,
@@ -314,36 +318,57 @@ struct PendingBroadcastTransaction {
 
 fn build_recorded_transaction_metadata(
     tx_events: &[TransactionSimulated],
-    broadcastable_transactions: Option<&BroadcastableTransactions>,
+    extracted_deployments: &[ExtractedDeployment],
+    traces: &Traces,
 ) -> HashMap<String, RecordedTransactionMetadata> {
-    let mut pending_broadcasts = broadcastable_transactions
-        .into_iter()
-        .flat_map(|transactions| transactions.iter())
-        .map(|tx| PendingBroadcastTransaction {
-            from: tx.transaction.from().unwrap_or_default(),
-            to: tx.transaction.to().unwrap_or(TxKind::Create),
-            data: tx.transaction.input().map(|input| input.to_vec()).unwrap_or_default(),
-            value: tx.transaction.value().unwrap_or_default(),
-            gas_used: tx.transaction.gas().and_then(|gas| u64::try_from(gas).ok()),
+    let transaction_deployments = build_transaction_deployment_index(extracted_deployments);
+    let mut pending_traces = traces
+        .iter()
+        .filter(|(kind, _)| matches!(kind, TraceKind::Execution))
+        .flat_map(|(_, arena)| arena.nodes().iter())
+        .map(|node| PendingExecutionTrace {
+            from: node.trace.caller,
+            to: node.trace.address,
+            kind: node.trace.kind,
+            data: node.trace.data.to_vec(),
+            value: node.trace.value,
+            gas_used: Some(node.trace.gas_used).filter(|gas| *gas > 0),
             matched: false,
         })
         .collect::<Vec<_>>();
 
-    collect_recorded_transaction_metadata(tx_events, &mut pending_broadcasts)
+    collect_recorded_transaction_metadata(tx_events, &transaction_deployments, &mut pending_traces)
+}
+
+fn build_transaction_deployment_index(
+    extracted_deployments: &[ExtractedDeployment],
+) -> HashMap<String, Vec<Address>> {
+    let mut deployments = HashMap::new();
+    for deployment in extracted_deployments {
+        deployments
+            .entry(format!("tx-{:#x}", deployment.transaction_id))
+            .or_insert_with(Vec::new)
+            .push(deployment.address);
+    }
+    deployments
 }
 
 fn collect_recorded_transaction_metadata(
     tx_events: &[TransactionSimulated],
-    pending_broadcasts: &mut [PendingBroadcastTransaction],
+    transaction_deployments: &HashMap<String, Vec<Address>>,
+    pending_traces: &mut [PendingExecutionTrace],
 ) -> HashMap<String, RecordedTransactionMetadata> {
     tx_events
         .iter()
         .flat_map(|event| event.transactions.iter())
         .map(|sim_tx| {
             let tx_id = format!("tx-{:#x}", sim_tx.transactionId);
-            let gas_used = pending_broadcasts
+            let deployment_targets = transaction_deployments.get(&tx_id).map(Vec::as_slice);
+            let gas_used = pending_traces
                 .iter_mut()
-                .find(|candidate| matches_simulated_transaction(candidate, sim_tx))
+                .find(|candidate| {
+                    matches_simulated_transaction(candidate, sim_tx, deployment_targets)
+                })
                 .and_then(|candidate| {
                     candidate.matched = true;
                     candidate.gas_used
@@ -361,20 +386,31 @@ fn collect_recorded_transaction_metadata(
 }
 
 fn matches_simulated_transaction(
-    candidate: &PendingBroadcastTransaction,
+    candidate: &PendingExecutionTrace,
     sim_tx: &SimulatedTransaction,
+    deployment_targets: Option<&[Address]>,
 ) -> bool {
-    if candidate.matched || candidate.from != sim_tx.sender {
+    if candidate.matched
+        || candidate.from != sim_tx.sender
+        || candidate.value != sim_tx.transaction.value
+    {
         return false;
     }
 
     if sim_tx.transaction.to == Address::ZERO {
-        return candidate.to.is_create();
+        if !candidate.kind.is_any_create() {
+            return false;
+        }
+
+        return deployment_targets
+            .is_some_and(|targets| targets.contains(&candidate.to))
+            || (!sim_tx.transaction.data.is_empty()
+                && candidate.data == sim_tx.transaction.data.as_ref());
     }
 
-    candidate.to == TxKind::Call(sim_tx.transaction.to)
+    !candidate.kind.is_any_create()
+        && candidate.to == sim_tx.transaction.to
         && candidate.data == sim_tx.transaction.data.as_ref()
-        && candidate.value == sim_tx.transaction.value
 }
 
 // ---------------------------------------------------------------------------
@@ -515,8 +551,9 @@ async fn propose_safe_transactions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::abi;
+    use crate::events::{ExtractedDeployment, abi};
     use alloy_primitives::{Bytes, address, b256};
+    use treb_core::types::enums::DeploymentMethod;
 
     fn sample_sim_tx(to: Address, value: U256, data: &[u8], tx_id: B256) -> SimulatedTransaction {
         SimulatedTransaction {
@@ -525,6 +562,23 @@ mod tests {
             sender: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
             returnData: Bytes::new(),
             transaction: abi::Transaction { to, data: Bytes::from(data.to_vec()), value },
+        }
+    }
+
+    fn sample_extracted_deployment(tx_id: B256, address: Address) -> ExtractedDeployment {
+        ExtractedDeployment {
+            address,
+            deployer: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+            transaction_id: tx_id,
+            contract_name: "Counter".to_string(),
+            label: "Counter".to_string(),
+            strategy: DeploymentMethod::Create,
+            salt: B256::ZERO,
+            bytecode_hash: B256::ZERO,
+            init_code_hash: B256::ZERO,
+            constructor_args: Bytes::new(),
+            entropy: String::new(),
+            artifact_match: None,
         }
     }
 
@@ -713,16 +767,18 @@ mod tests {
             }],
         }];
 
-        let mut pending = vec![PendingBroadcastTransaction {
+        let mut pending = vec![PendingExecutionTrace {
             from: sender,
-            to: TxKind::Call(to),
+            to,
+            kind: CallKind::Call,
             data,
             value: U256::ZERO,
             gas_used: Some(123_456),
             matched: false,
         }];
 
-        let metadata = collect_recorded_transaction_metadata(&events, &mut pending);
+        let metadata =
+            collect_recorded_transaction_metadata(&events, &HashMap::new(), &mut pending);
         let tx_meta = metadata
             .get("tx-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
             .expect("metadata should exist");
@@ -733,40 +789,126 @@ mod tests {
     }
 
     #[test]
-    fn build_recorded_transaction_metadata_matches_create_transactions_by_kind() {
-        let tx_id = b256!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    fn build_recorded_transaction_metadata_matches_create_transactions_by_deployment_address() {
+        let tx_id_1 = b256!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        let tx_id_2 = b256!("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
         let sender = address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
+        let deployed_1 = address!("5FbDB2315678afecb367f032d93F642f64180aa3");
+        let deployed_2 = address!("e7f1725E7734CE288F8367e1Bb143E90bb3F0512");
 
         let events = vec![TransactionSimulated {
-            transactions: vec![SimulatedTransaction {
-                transactionId: tx_id,
-                senderId: "deployer".to_string(),
-                sender,
-                returnData: Bytes::new(),
-                transaction: abi::Transaction {
-                    to: Address::ZERO,
-                    data: Bytes::new(),
-                    value: U256::ZERO,
+            transactions: vec![
+                SimulatedTransaction {
+                    transactionId: tx_id_1,
+                    senderId: "deployer".to_string(),
+                    sender,
+                    returnData: Bytes::new(),
+                    transaction: abi::Transaction {
+                        to: Address::ZERO,
+                        data: Bytes::new(),
+                        value: U256::ZERO,
+                    },
                 },
-            }],
+                SimulatedTransaction {
+                    transactionId: tx_id_2,
+                    senderId: "deployer".to_string(),
+                    sender,
+                    returnData: Bytes::new(),
+                    transaction: abi::Transaction {
+                        to: Address::ZERO,
+                        data: Bytes::new(),
+                        value: U256::ZERO,
+                    },
+                },
+            ],
         }];
 
-        let mut pending = vec![PendingBroadcastTransaction {
-            from: sender,
-            to: TxKind::Create,
-            data: vec![1, 2, 3, 4],
-            value: U256::ZERO,
-            gas_used: Some(654_321),
-            matched: false,
-        }];
+        let deployments = HashMap::from([
+            (format!("tx-{:#x}", tx_id_1), vec![deployed_1]),
+            (format!("tx-{:#x}", tx_id_2), vec![deployed_2]),
+        ]);
+        let mut pending = vec![
+            PendingExecutionTrace {
+                from: sender,
+                to: deployed_2,
+                kind: CallKind::Create,
+                data: vec![1, 2, 3, 4],
+                value: U256::ZERO,
+                gas_used: Some(654_321),
+                matched: false,
+            },
+            PendingExecutionTrace {
+                from: sender,
+                to: deployed_1,
+                kind: CallKind::Create,
+                data: vec![4, 3, 2, 1],
+                value: U256::ZERO,
+                gas_used: Some(111_222),
+                matched: false,
+            },
+        ];
 
-        let metadata = collect_recorded_transaction_metadata(&events, &mut pending);
-        let tx_meta = metadata
+        let metadata = collect_recorded_transaction_metadata(&events, &deployments, &mut pending);
+        let tx_meta_1 = metadata
             .get("tx-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
             .expect("metadata should exist");
+        let tx_meta_2 = metadata
+            .get("tx-0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+            .expect("metadata should exist");
 
-        assert_eq!(tx_meta.sender_name.as_deref(), Some("deployer"));
-        assert_eq!(tx_meta.gas_used, Some(654_321));
-        assert!(pending[0].matched);
+        assert_eq!(tx_meta_1.sender_name.as_deref(), Some("deployer"));
+        assert_eq!(tx_meta_1.gas_used, Some(111_222));
+        assert_eq!(tx_meta_2.sender_name.as_deref(), Some("deployer"));
+        assert_eq!(tx_meta_2.gas_used, Some(654_321));
+        assert!(pending.iter().all(|candidate| candidate.matched));
+    }
+
+    #[test]
+    fn build_recorded_transaction_metadata_uses_execution_trace_gas() {
+        let tx_id = b256!("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
+        let deployed = address!("5FbDB2315678afecb367f032d93F642f64180aa3");
+        let events = vec![TransactionSimulated {
+            transactions: vec![sample_sim_tx(Address::ZERO, U256::ZERO, &[], tx_id)],
+        }];
+        let deployments = vec![sample_extracted_deployment(tx_id, deployed)];
+        let mut arena = foundry_evm::traces::CallTraceArena::default();
+        arena.nodes_mut()[0] = foundry_evm::traces::CallTraceNode {
+            parent: None,
+            children: Vec::new(),
+            idx: 0,
+            trace: foundry_evm::traces::CallTrace {
+                depth: 0,
+                success: true,
+                caller: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+                address: deployed,
+                maybe_precompile: None,
+                selfdestruct_address: None,
+                selfdestruct_refund_target: None,
+                selfdestruct_transferred_value: None,
+                kind: CallKind::Create,
+                value: U256::ZERO,
+                data: Bytes::from(vec![1, 2, 3, 4]),
+                output: Bytes::new(),
+                gas_used: 987_654,
+                gas_limit: 1_000_000,
+                status: None,
+                steps: Vec::new(),
+                decoded: None,
+            },
+            logs: Vec::new(),
+            ordering: Vec::new(),
+        };
+
+        let traces = vec![(
+            TraceKind::Execution,
+            foundry_evm::traces::SparsedTraceArena { arena, ignored: Default::default() },
+        )];
+
+        let metadata = build_recorded_transaction_metadata(&events, &deployments, &traces);
+        let tx_meta = metadata
+            .get("tx-0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+            .expect("metadata should exist");
+
+        assert_eq!(tx_meta.gas_used, Some(987_654));
     }
 }

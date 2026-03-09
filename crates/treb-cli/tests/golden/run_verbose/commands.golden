@@ -25,12 +25,3 @@ No files changed, compilation skipped
 ✓ Script execution completed successfully
 🔨 Compiling and executing script/Deploy.s.sol...
 📡 Broadcasting...
-
-            Events:  2 event(s) decoded
-           Console:  0 console.log line(s)
-       Deployments:  1 deployment(s)
-      Transactions:  1 transaction(s)
-Governor proposals:  0 governor proposal(s)
-           Skipped:  0 skipped
-
-  Registered Counter (0x5b73...0519)

@@ -554,42 +554,6 @@ pub async fn run(
         pipeline.execute(&mut registry).await.context("pipeline execution failed")?
     };
 
-    // ── Verbose post-execution output ────────────────────────────────────
-    if verbose && !json {
-        eprintln!();
-        // Event count summary
-        let event_str = format!("{} event(s) decoded", result.event_count);
-        let console_str = format!("{} console.log line(s)", result.console_logs.len());
-        let dep_str = format!("{} deployment(s)", result.deployments.len());
-        let tx_str = format!("{} transaction(s)", result.transactions.len());
-        let proposal_str = format!("{} governor proposal(s)", result.governor_proposals.len());
-        let skip_str = format!("{} skipped", result.skipped.len());
-        let summary_pairs: Vec<(&str, &str)> = vec![
-            ("Events", &event_str),
-            ("Console", &console_str),
-            ("Deployments", &dep_str),
-            ("Transactions", &tx_str),
-            ("Governor proposals", &proposal_str),
-            ("Skipped", &skip_str),
-        ];
-        output::eprint_kv(&summary_pairs);
-
-        // Per-deployment registry write confirmations
-        if !result.deployments.is_empty() {
-            eprintln!();
-            let action = if result.dry_run { "Would register" } else { "Registered" };
-            for rd in &result.deployments {
-                let d = &rd.deployment;
-                eprintln!(
-                    "  {} {} ({})",
-                    action,
-                    d.contract_name,
-                    output::truncate_address(&d.address),
-                );
-            }
-        }
-    }
-
     // ── Display results ──────────────────────────────────────────────────
     display_result(&result, json, resolved.network.as_deref(), &resolved.namespace)?;
 
@@ -885,17 +849,17 @@ fn format_tx_status(status: &TransactionStatus) -> String {
     if color::is_color_enabled() { format!("{}", label.style(style)) } else { label.to_string() }
 }
 
-/// Format a summary of the first operation for display after the `→` arrow.
-fn format_tx_operations(operations: &[Operation]) -> String {
-    if operations.is_empty() {
-        return String::new();
-    }
-    let op = &operations[0];
-    if op.method.is_empty() {
-        format!("{} {}", op.operation_type, op.target)
+fn format_tx_operation(operation: &Operation) -> String {
+    if operation.method.is_empty() {
+        format!("{} {}", operation.operation_type, operation.target)
     } else {
-        format!("{}::{}({})", op.target, op.method, op.operation_type)
+        format!("{}::{}({})", operation.target, operation.method, operation.operation_type)
     }
+}
+
+/// Format a summary of all operations for display after the `→` arrow.
+fn format_tx_operations(operations: &[Operation]) -> String {
+    operations.iter().map(format_tx_operation).collect::<Vec<_>>().join(" | ")
 }
 
 /// Build a pipe-separated gray footer line with hash, block number (only
@@ -1454,6 +1418,29 @@ mod tests {
         assert_eq!(
             format_skipped_deployment_line(&skipped),
             "  - Counter (0x1234...5678) — Deployment with ID 'production/1/Counter:v1' already exists"
+        );
+    }
+
+    #[test]
+    fn format_tx_operations_includes_all_operations() {
+        let operations = vec![
+            Operation {
+                operation_type: "DEPLOY".into(),
+                target: "0x0000000000000000000000000000000000001001".into(),
+                method: "CREATE".into(),
+                result: HashMap::new(),
+            },
+            Operation {
+                operation_type: "DEPLOY".into(),
+                target: "0x0000000000000000000000000000000000001002".into(),
+                method: "CREATE".into(),
+                result: HashMap::new(),
+            },
+        ];
+
+        assert_eq!(
+            format_tx_operations(&operations),
+            "0x0000000000000000000000000000000000001001::CREATE(DEPLOY) | 0x0000000000000000000000000000000000001002::CREATE(DEPLOY)"
         );
     }
 

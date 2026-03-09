@@ -27,10 +27,3 @@ No files changed, compilation skipped
 ✓ Script execution completed successfully
 🔨 Compiling and executing script/GovernorProposal.s.sol...
 🏛️ Creating governance proposal...
-
-            Events:  2 event(s) decoded
-           Console:  0 console.log line(s)
-       Deployments:  0 deployment(s)
-      Transactions:  1 transaction(s)
-Governor proposals:  1 governor proposal(s)
-           Skipped:  0 skipped

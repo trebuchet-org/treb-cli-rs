@@ -1,6 +1,9 @@
 //! Persistent store for deployments backed by `deployments.json`.
 
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::{BTreeMap, HashMap},
+    path::PathBuf,
+};
 
 use chrono::Utc;
 use treb_core::{TrebError, types::Deployment};
@@ -32,7 +35,9 @@ impl DeploymentStore {
 
     /// Atomically save all deployments to disk under a file lock.
     pub fn save(&self) -> Result<(), TrebError> {
-        with_file_lock(&self.path, || write_json_file(&self.path, &self.data))
+        let sorted: BTreeMap<String, Deployment> =
+            self.data.iter().map(|(id, deployment)| (id.clone(), deployment.clone())).collect();
+        with_file_lock(&self.path, || write_json_file(&self.path, &sorted))
     }
 
     /// Get a deployment by ID.
@@ -217,6 +222,21 @@ mod tests {
         assert_eq!(removed.id, "dep-1");
         assert!(store.get("dep-1").is_none());
         assert_eq!(store.count(), 0);
+    }
+
+    #[test]
+    fn save_writes_deployments_in_key_order() {
+        let dir = TempDir::new().unwrap();
+        let mut store = DeploymentStore::new(dir.path());
+
+        store.insert(make_deployment("dep-b", 0)).unwrap();
+        store.insert(make_deployment("dep-a", 1)).unwrap();
+
+        let raw = fs::read_to_string(dir.path().join(DEPLOYMENTS_FILE)).unwrap();
+        let dep_a_index = raw.find("\"dep-a\"").expect("dep-a key should exist");
+        let dep_b_index = raw.find("\"dep-b\"").expect("dep-b key should exist");
+
+        assert!(dep_a_index < dep_b_index, "deployments should be serialized in key order");
     }
 
     #[test]
