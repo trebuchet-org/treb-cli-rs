@@ -133,6 +133,17 @@ fn title_case(s: &str) -> String {
     }
 }
 
+/// Map a `VerificationStatus` to its Go-matching emoji icon for batch output.
+#[allow(dead_code)] // Used in batch output (P7-US-003).
+fn get_status_icon(status: &VerificationStatus) -> &'static str {
+    match status {
+        VerificationStatus::Verified => emoji::REFRESH,
+        VerificationStatus::Failed => emoji::WARNING,
+        VerificationStatus::Partial => emoji::REPEAT,
+        VerificationStatus::Unverified => emoji::HOURGLASS,
+    }
+}
+
 /// Print the `Verification Status:` section with per-verifier results.
 fn print_verification_status(verifiers: &HashMap<String, VerifierStatus>) {
     if verifiers.is_empty() {
@@ -296,7 +307,7 @@ pub async fn run(
     if !json {
         output::print_stage(
             "\u{1f50d}",
-            &format!("Verifying {} ({})", contract_name, output::truncate_address(&address)),
+            &format!("Verifying {} ({})", display_name, output::truncate_address(&address)),
         );
     }
 
@@ -709,7 +720,9 @@ mod tests {
 
     use treb_core::types::{VerificationStatus, VerifierStatus};
 
-    use super::{aggregate_status, resolve_api_key};
+    use crate::ui::emoji;
+
+    use super::{aggregate_status, get_status_icon, resolve_api_key};
 
     fn env_lock() -> MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -935,5 +948,27 @@ mod tests {
     fn resolve_api_key_unknown_verifier_returns_none() {
         let result = resolve_api_key("unknown", &None);
         assert_eq!(result, None);
+    }
+
+    // --- get_status_icon tests ---
+
+    #[test]
+    fn status_icon_verified_is_refresh() {
+        assert_eq!(get_status_icon(&VerificationStatus::Verified), emoji::REFRESH);
+    }
+
+    #[test]
+    fn status_icon_failed_is_warning() {
+        assert_eq!(get_status_icon(&VerificationStatus::Failed), emoji::WARNING);
+    }
+
+    #[test]
+    fn status_icon_partial_is_repeat() {
+        assert_eq!(get_status_icon(&VerificationStatus::Partial), emoji::REPEAT);
+    }
+
+    #[test]
+    fn status_icon_unverified_is_hourglass() {
+        assert_eq!(get_status_icon(&VerificationStatus::Unverified), emoji::HOURGLASS);
     }
 }
