@@ -79,7 +79,7 @@ pub async fn run(
 
 fn show_tags(registry: &Registry, deployment_id: &str, json: bool) -> anyhow::Result<()> {
     let dep = registry.get_deployment(deployment_id).unwrap();
-    let tags: Vec<String> = dep.tags.clone().unwrap_or_default();
+    let mut tags: Vec<String> = dep.tags.clone().unwrap_or_default();
 
     if json {
         output::print_json(&TagOutputJson {
@@ -88,13 +88,29 @@ fn show_tags(registry: &Registry, deployment_id: &str, json: bool) -> anyhow::Re
             tags,
             tag: None,
         })?;
-    } else if tags.is_empty() {
-        println!("No tags on '{deployment_id}'");
     } else {
-        println!("{}", styled(&format!("Tags for '{deployment_id}':"), color::STAGE));
-        for tag in &tags {
-            println!("  - {}", styled(tag, color::LABEL));
-        }
+        println!();
+        println!(
+            "{} {}",
+            styled("Deployment:", color::STAGE),
+            styled(deployment_id, color::STAGE),
+        );
+        println!(
+            "{} {}",
+            styled("Address:", color::SECTION_HEADER),
+            styled(&dep.address, color::SUCCESS),
+        );
+        tags.sort();
+        let tags_value = if tags.is_empty() {
+            styled("No tags", color::GRAY)
+        } else {
+            tags.iter()
+                .map(|t| styled(t, color::CYAN))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        println!("{} {tags_value}", styled("Tags:   ", color::SECTION_HEADER));
+        println!();
     }
 
     Ok(())
