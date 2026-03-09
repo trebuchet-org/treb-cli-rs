@@ -4,8 +4,10 @@ use std::{
     collections::{BTreeMap, HashSet},
     env,
     fmt::{self, Write as _},
+    path::Path,
 };
 
+use alloy_chains::Chain;
 use anyhow::{Context, bail};
 use treb_core::types::{Deployment, DeploymentType};
 use treb_registry::Registry;
@@ -46,8 +48,7 @@ pub fn filter_deployments<'a>(
             }
 
             if let Some(ref network) = filters.network {
-                // Match against chain_id (as string) — case-insensitive
-                if !d.chain_id.to_string().eq_ignore_ascii_case(network) {
+                if !network_matches(d.chain_id, network) {
                     return false;
                 }
             }
@@ -92,6 +93,14 @@ pub fn filter_deployments<'a>(
             true
         })
         .collect()
+}
+
+fn resolve_chain_id(network: &str) -> Option<u64> {
+    network.parse::<u64>().ok().or_else(|| network.parse::<Chain>().ok().map(|chain| chain.id()))
+}
+
+fn network_matches(chain_id: u64, network: &str) -> bool {
+    resolve_chain_id(network).is_some_and(|resolved_chain_id| resolved_chain_id == chain_id)
 }
 
 // ---------------------------------------------------------------------------
@@ -192,14 +201,27 @@ fn collect_implementation_keys(deployments: &[&Deployment]) -> HashSet<Implement
         .collect()
 }
 
-/// Build a map of other namespaces with their deployment counts, excluding the
-/// specified namespace. Used for the namespace discovery hint.
+/// Build a map of other namespaces with their deployment counts while
+/// preserving the active query context except for namespace. Used for the
+/// namespace discovery hint.
 fn build_other_namespaces(
     all_deployments: &[&Deployment],
+    filters: &DeploymentFilters,
     exclude_namespace: &str,
 ) -> BTreeMap<String, usize> {
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    for d in all_deployments {
+    let context_filters = DeploymentFilters {
+        network: filters.network.clone(),
+        namespace: None,
+        deployment_type: filters.deployment_type.clone(),
+        tag: filters.tag.clone(),
+        contract: filters.contract.clone(),
+        label: filters.label.clone(),
+        fork: filters.fork,
+        no_fork: filters.no_fork,
+    };
+
+    for d in filter_deployments(all_deployments, &context_filters) {
         if !d.namespace.eq_ignore_ascii_case(exclude_namespace) {
             *counts.entry(d.namespace.clone()).or_insert(0) += 1;
         }
@@ -209,11 +231,46 @@ fn build_other_namespaces(
 
 /// Collect deployment IDs from fork namespaces (namespace starts with "fork/").
 fn collect_fork_deployment_ids(deployments: &[&Deployment]) -> HashSet<String> {
-    deployments
-        .iter()
-        .filter(|d| d.namespace.starts_with("fork/"))
-        .map(|d| d.id.clone())
-        .collect()
+    deployments.iter().filter(|d| d.namespace.starts_with("fork/")).map(|d| d.id.clone()).collect()
+}
+
+fn resolve_network_names(
+    project_root: &Path,
+    deployments: &[&Deployment],
+    selected_network: Option<&str>,
+) -> BTreeMap<u64, String> {
+    let mut network_names = BTreeMap::new();
+
+    if let Ok(config) = treb_config::load_foundry_config(project_root) {
+        for name in treb_config::rpc_endpoints(&config).into_keys() {
+            if let Some(chain_id) = resolve_chain_id(&name) {
+                network_names.entry(chain_id).or_insert(name);
+            }
+        }
+    }
+
+    if let Some(network) = selected_network {
+        if network.parse::<u64>().is_err() {
+            if let Some(chain_id) = resolve_chain_id(network) {
+                network_names.insert(chain_id, network.to_string());
+            }
+        }
+    }
+
+    for &deployment in deployments {
+        if let Some(named_chain) = Chain::from_id(deployment.chain_id).named() {
+            network_names.entry(deployment.chain_id).or_insert_with(|| named_chain.to_string());
+        }
+    }
+
+    network_names
+}
+
+fn format_chain_header_label(chain_id: u64, network_names: &BTreeMap<u64, String>) -> String {
+    network_names
+        .get(&chain_id)
+        .map(|network_name| format!("{network_name} ({chain_id})"))
+        .unwrap_or_else(|| chain_id.to_string())
 }
 
 /// Format the namespace discovery hint shown when the current namespace has no
@@ -405,7 +462,7 @@ pub async fn run(
     // Build other_namespaces when filtered is empty and namespace filter is set
     let other_namespaces = if filtered.is_empty() {
         if let Some(ref ns) = filters.namespace {
-            build_other_namespaces(&all_deployments, ns)
+            build_other_namespaces(&all_deployments, &filters, ns)
         } else {
             BTreeMap::new()
         }
@@ -414,14 +471,10 @@ pub async fn run(
     };
 
     let fork_deployment_ids = collect_fork_deployment_ids(&all_deployments);
-    let network_names: BTreeMap<u64, String> = BTreeMap::new();
+    let network_names = resolve_network_names(&cwd, &filtered, filters.network.as_deref());
 
-    let result = ListResult {
-        deployments: filtered,
-        other_namespaces,
-        network_names,
-        fork_deployment_ids,
-    };
+    let result =
+        ListResult { deployments: filtered, other_namespaces, network_names, fork_deployment_ids };
 
     if json {
         output::print_json(&result.deployments)?;
@@ -447,7 +500,8 @@ pub async fn run(
             first = false;
             let mut ns_node = TreeNode::new(namespace.clone()).with_style(color::NAMESPACE);
             for (chain_id, type_groups) in chains {
-                let mut chain_node = TreeNode::new(chain_id.to_string()).with_style(color::CHAIN);
+                let chain_label = format_chain_header_label(*chain_id, &result.network_names);
+                let mut chain_node = TreeNode::new(chain_label).with_style(color::CHAIN);
                 for tg in type_groups {
                     let type_label = tg.category.to_string();
                     let type_style = tg.category.style();
@@ -478,6 +532,7 @@ mod tests {
         collections::HashMap,
         sync::{Mutex, MutexGuard, OnceLock},
     };
+    use tempfile::TempDir;
     use treb_core::types::{
         ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, ProxyInfo,
         VerificationInfo, VerificationStatus, VerifierStatus,
@@ -648,6 +703,17 @@ mod tests {
         let refs: Vec<&Deployment> = deployments.iter().collect();
         let mut filters = no_filters();
         filters.network = Some("11155111".into());
+        let result = filter_deployments(&refs, &filters);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].chain_id, 11155111);
+    }
+
+    #[test]
+    fn filter_by_named_network() {
+        let deployments = sample_deployments();
+        let refs: Vec<&Deployment> = deployments.iter().collect();
+        let mut filters = no_filters();
+        filters.network = Some("sepolia".into());
         let result = filter_deployments(&refs, &filters);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].chain_id, 11155111);
@@ -1163,7 +1229,7 @@ mod tests {
     fn build_other_namespaces_excludes_specified() {
         let deployments = sample_deployments();
         let refs: Vec<&Deployment> = deployments.iter().collect();
-        let other = build_other_namespaces(&refs, "mainnet");
+        let other = build_other_namespaces(&refs, &no_filters(), "mainnet");
 
         assert!(!other.contains_key("mainnet"));
         assert_eq!(other["testnet"], 1);
@@ -1175,7 +1241,7 @@ mod tests {
         let deployments =
             [make_deployment("ns/1/A", "ns", 1, "A", "", DeploymentType::Singleton, None)];
         let refs: Vec<&Deployment> = deployments.iter().collect();
-        let other = build_other_namespaces(&refs, "ns");
+        let other = build_other_namespaces(&refs, &no_filters(), "ns");
 
         assert!(other.is_empty());
     }
@@ -1184,7 +1250,7 @@ mod tests {
     fn build_other_namespaces_counts_per_namespace() {
         let deployments = sample_deployments();
         let refs: Vec<&Deployment> = deployments.iter().collect();
-        let other = build_other_namespaces(&refs, "nonexistent");
+        let other = build_other_namespaces(&refs, &no_filters(), "nonexistent");
 
         assert_eq!(other["mainnet"], 2);
         assert_eq!(other["testnet"], 1);
@@ -1195,10 +1261,87 @@ mod tests {
     fn build_other_namespaces_case_insensitive_exclude() {
         let deployments = sample_deployments();
         let refs: Vec<&Deployment> = deployments.iter().collect();
-        let other = build_other_namespaces(&refs, "MAINNET");
+        let other = build_other_namespaces(&refs, &no_filters(), "MAINNET");
 
         assert!(!other.contains_key("mainnet"));
         assert_eq!(other.len(), 2);
+    }
+
+    #[test]
+    fn build_other_namespaces_preserves_network_filter() {
+        let deployments = [
+            make_deployment("default/1/A", "default", 1, "A", "", DeploymentType::Singleton, None),
+            make_deployment(
+                "production/1/B",
+                "production",
+                1,
+                "B",
+                "",
+                DeploymentType::Singleton,
+                None,
+            ),
+            make_deployment(
+                "sandbox/11155111/C",
+                "sandbox",
+                11155111,
+                "C",
+                "",
+                DeploymentType::Singleton,
+                None,
+            ),
+            make_deployment(
+                "staging/11155111/D",
+                "staging",
+                11155111,
+                "D",
+                "",
+                DeploymentType::Singleton,
+                None,
+            ),
+        ];
+        let refs: Vec<&Deployment> = deployments.iter().collect();
+        let filters = DeploymentFilters {
+            network: Some("mainnet".into()),
+            namespace: Some("staging".into()),
+            deployment_type: None,
+            tag: None,
+            contract: None,
+            label: None,
+            fork: false,
+            no_fork: false,
+        };
+
+        let other = build_other_namespaces(&refs, &filters, "staging");
+
+        assert_eq!(other["default"], 1);
+        assert_eq!(other["production"], 1);
+        assert!(!other.contains_key("sandbox"));
+        assert!(!other.contains_key("staging"));
+    }
+
+    #[test]
+    fn resolve_network_names_uses_config_aliases_in_chain_labels() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("foundry.toml"),
+            "[profile.default]\n\n[rpc_endpoints]\nethlive = \"https://example.invalid\"\n",
+        )
+        .unwrap();
+        let deployments = [make_deployment(
+            "default/1/A",
+            "default",
+            1,
+            "A",
+            "",
+            DeploymentType::Singleton,
+            None,
+        )];
+        let refs: Vec<&Deployment> = deployments.iter().collect();
+
+        let network_names = resolve_network_names(tmp.path(), &refs, None);
+
+        assert_eq!(network_names.get(&1).map(String::as_str), Some("ethlive"));
+        assert_eq!(format_chain_header_label(1, &network_names), "ethlive (1)");
     }
 
     #[test]
@@ -1240,9 +1383,11 @@ mod tests {
         assert!(hint.contains("Other namespaces with deployments:"));
         assert!(hint.contains("  default             3 deployments"));
         assert!(hint.contains("  production          1 deployment\n"));
-        assert!(hint.contains(
-            "Use --namespace <name> or `treb config set namespace <name>` to switch."
-        ));
+        assert!(
+            hint.contains(
+                "Use --namespace <name> or `treb config set namespace <name>` to switch."
+            )
+        );
     }
 
     #[test]

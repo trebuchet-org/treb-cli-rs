@@ -1,11 +1,11 @@
 === cmd 0: [ls] ===
 fork/42220
-└─ 42220
+└─ celo (42220)
    └─ SINGLETONS
       └─ MockToken 0xDeaD...beeF UNVERIFIED [fork]
 
 mainnet
-└─ 42220
+└─ celo (42220)
    ├─ PROXIES
    │  └─ TransparentUpgradeableProxy:FPMMFactory 0x22A8...7F03 UNVERIFIED
    │     └─ Implementation 0x9595...79dF
