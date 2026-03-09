@@ -53,6 +53,9 @@ pub const CHART: &str = "📊";
 /// 📁 File location (config)
 pub const FOLDER: &str = "📁";
 
+/// 📂 Open folder / resume-from-state banner (compose)
+pub const OPEN_FOLDER: &str = "📂";
+
 /// 🎉 Celebration/success banner (init, compose)
 pub const PARTY: &str = "🎉";
 

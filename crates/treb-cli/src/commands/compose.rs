@@ -24,7 +24,7 @@ use treb_registry::Registry;
 
 use crate::{
     output,
-    ui::{color, interactive::is_non_interactive},
+    ui::{color, emoji, interactive::is_non_interactive},
 };
 
 // ── Compose file schema ──────────────────────────────────────────────────
@@ -137,6 +137,9 @@ pub struct ComposeState {
     pub compose_hash: String,
     /// Names of components that completed successfully.
     pub completed: Vec<String>,
+    /// Aggregate deployments created by previously completed components.
+    #[serde(default)]
+    pub deployment_total: usize,
 }
 
 /// Compute a hash of file contents for change detection.
@@ -269,38 +272,84 @@ fn build_plan(
         .collect()
 }
 
-/// Display the dry-run plan in human-readable format.
-fn print_dry_run_plan(compose: &ComposeFile, plan: &[PlanEntry]) {
-    eprintln!("\nOrchestrating {}", compose.group);
-    eprintln!("Execution plan: {} components\n", plan.len());
-    eprintln!("Execution Plan:");
+fn format_env_map(env: &HashMap<String, String>) -> String {
+    let mut entries: Vec<_> = env.iter().collect();
+    entries.sort_by_key(|(key, _)| *key);
+
+    let rendered =
+        entries.into_iter().map(|(key, value)| format!("{key:?}: {value:?}")).collect::<Vec<_>>();
+    format!("{{{}}}", rendered.join(", "))
+}
+
+fn format_execution_plan_header_lines(compose: &ComposeFile, plan_len: usize) -> [String; 3] {
+    let lines = [
+        format!("{} Orchestrating {}", emoji::TARGET, compose.group),
+        format!("{} Execution plan: {} components", emoji::CLIPBOARD, plan_len),
+        format!("{} Execution Plan:", emoji::CLIPBOARD),
+    ];
+
+    if color::is_color_enabled() { lines.map(|line| styled(&line, color::STAGE)) } else { lines }
+}
+
+/// Display the execution plan in human-readable format (matches Go `RenderExecutionPlan`).
+fn print_execution_plan(compose: &ComposeFile, plan: &[PlanEntry]) {
+    let [orchestration_header, plan_summary_header, plan_header] =
+        format_execution_plan_header_lines(compose, plan.len());
+
+    eprintln!("\n{orchestration_header}");
+    eprintln!("{plan_summary_header}\n");
+    eprintln!("{plan_header}");
     eprintln!("{}", "─".repeat(50));
     for entry in plan {
         if entry.skipped {
             eprint!(
                 "{}. {} → {}",
-                styled(&entry.step.to_string(), color::LABEL),
+                entry.step,
                 styled(&entry.component, color::WARNING),
-                styled(&entry.script, color::MUTED),
+                styled(&entry.script, color::GREEN),
             );
             if !entry.deps.is_empty() {
-                eprint!(" (depends on: [{}])", entry.deps.join(", "));
+                eprint!(
+                    " {}",
+                    styled(&format!("(depends on: [{}])", entry.deps.join(", ")), color::GRAY,),
+                );
             }
             eprint!(" {}", styled("(skipped)", color::WARNING));
         } else {
             eprint!(
                 "{}. {} → {}",
-                styled(&entry.step.to_string(), color::LABEL),
-                styled(&entry.component, color::LABEL),
-                styled(&entry.script, color::MUTED),
+                entry.step,
+                styled(&entry.component, color::CYAN),
+                styled(&entry.script, color::GREEN),
             );
             if !entry.deps.is_empty() {
-                eprint!(" (depends on: [{}])", entry.deps.join(", "));
+                eprint!(
+                    " {}",
+                    styled(&format!("(depends on: [{}])", entry.deps.join(", ")), color::GRAY,),
+                );
             }
         }
         eprintln!();
+        if let Some(env) =
+            compose.components.get(&entry.component).and_then(|component| component.env.as_ref())
+        {
+            if !env.is_empty() {
+                eprintln!(
+                    "   {}",
+                    styled(&format!("Env: {}", format_env_map(env)), color::WARNING)
+                );
+            }
+        }
     }
     eprintln!();
+}
+
+fn print_resume_banner(start_step: usize, total: usize) {
+    eprintln!("{} Resuming compose from step {} of {}", emoji::OPEN_FOLDER, start_step, total);
+}
+
+fn print_step_start(step: usize, total: usize, component: &str) {
+    eprintln!("\n[{step}/{total}] Starting {}", styled(component, color::CYAN));
 }
 
 fn should_prompt_for_broadcast_confirmation(
@@ -416,60 +465,48 @@ fn styled(text: &str, style: Style) -> String {
     if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
 }
 
-/// Display compose results in human-readable format.
-fn display_compose_human(group: &str, results: &[ComponentResultEntry], totals: &ComposeTotals) {
-    println!();
-    println!("Compose results: {}", group);
-    println!();
+/// Display compose summary in human-readable format (matches Go renderSummary).
+fn display_compose_human(
+    group: &str,
+    results: &[ComponentResultEntry],
+    totals: &ComposeTotals,
+    completed: usize,
+    total: usize,
+    failed_component: &Option<String>,
+) {
+    let separator = "═".repeat(70);
+    eprintln!("{separator}");
 
-    for r in results {
-        match r.status {
-            ComponentStatus::Success => {
-                let icon = styled("\u{2714}", color::SUCCESS); // ✔
-                let mut line = format!(
-                    "  {} {} — {} deployment{}, {} transaction{}",
-                    icon,
-                    r.component,
-                    r.deployments,
-                    if r.deployments == 1 { "" } else { "s" },
-                    r.transactions,
-                    if r.transactions == 1 { "" } else { "s" },
-                );
-                if r.gas_used > 0 {
-                    line.push_str(&format!(", {} gas", output::format_gas(r.gas_used)));
+    let success = failed_component.is_none();
+
+    if success {
+        eprintln!(
+            "{}",
+            styled(
+                &format!("{} Successfully orchestrated {} deployment", emoji::PARTY, group),
+                color::SUCCESS,
+            ),
+        );
+        eprintln!("\n{} Summary:", emoji::CHART);
+        eprintln!("  • Steps executed: {}/{}", completed, total);
+        eprintln!("  • Total deployments: {}", totals.deployments);
+    } else {
+        eprintln!("{}", styled(&format!("{} Orchestration failed", emoji::CROSS), color::ERROR,),);
+        eprintln!("\n{} Summary:", emoji::CHART);
+        if let Some(failed) = failed_component {
+            eprintln!("  • Failed at step: {}", failed);
+        }
+        // completed count excludes the failed step (Go behavior)
+        eprintln!("  • Steps completed: {}/{}", completed, total);
+        // Show the error message from the failed component
+        if let Some(failed) = failed_component {
+            if let Some(entry) = results.iter().find(|r| &r.component == failed) {
+                if let Some(ref err) = entry.error {
+                    eprintln!("  • Error: {}", err);
                 }
-                println!("{line}");
-            }
-            ComponentStatus::Skipped => {
-                let icon = styled("\u{23ed}", color::WARNING); // ⏭
-                println!("  {} {} {}", icon, r.component, styled("(skipped)", color::WARNING));
-            }
-            ComponentStatus::Failed => {
-                let icon = styled("\u{2718}", color::ERROR); // ✘
-                println!("  {} {} {}", icon, r.component, styled("(failed)", color::ERROR));
-                let msg = r.error.as_deref().unwrap_or("unknown error");
-                println!("    {}", styled(msg, color::MUTED));
-            }
-            ComponentStatus::NotExecuted => {
-                let icon = styled("\u{2014}", color::MUTED); // —
-                println!("  {} {} {}", icon, r.component, styled("(not executed)", color::MUTED));
             }
         }
     }
-
-    println!();
-    println!(
-        "Totals: {} deployment{}, {} transaction{}, {} gas | {} succeeded, {} skipped, {} failed, {} not executed",
-        totals.deployments,
-        if totals.deployments == 1 { "" } else { "s" },
-        totals.transactions,
-        if totals.transactions == 1 { "" } else { "s" },
-        output::format_gas(totals.gas_used),
-        totals.succeeded,
-        totals.skipped,
-        totals.failed,
-        totals.not_executed,
-    );
 }
 
 /// Display compose results as JSON.
@@ -520,20 +557,20 @@ pub async fn run(
         .with_context(|| format!("failed to read compose file: {}", file))?;
     let compose_hash = compute_file_hash(&compose_contents);
 
-    let skip_set: HashSet<String> = if resume {
+    let (skip_set, resumed_deployments): (HashSet<String>, usize) = if resume {
         if let Some(state) = load_compose_state()? {
             // Warn if compose file changed since the state was saved.
             if state.compose_hash != compose_hash && !json {
                 eprintln!("Warning: compose file has changed since the last run; resuming anyway");
             }
-            state.completed.into_iter().collect()
+            (state.completed.into_iter().collect(), state.deployment_total)
         } else {
-            HashSet::new()
+            (HashSet::new(), 0)
         }
     } else {
         // Fresh start: clear any existing state file.
         delete_compose_state();
-        HashSet::new()
+        (HashSet::new(), 0)
     };
 
     // ── Verbose resume context ────────────────────────────────────────
@@ -560,7 +597,7 @@ pub async fn run(
                 )
             );
             eprintln!();
-            print_dry_run_plan(&compose, &plan);
+            print_execution_plan(&compose, &plan);
         }
         return Ok(());
     }
@@ -707,6 +744,7 @@ pub async fn run(
     let mut state = ComposeState {
         compose_hash: compose_hash.clone(),
         completed: skip_set.iter().cloned().collect(),
+        deployment_total: resumed_deployments,
     };
 
     // ── Debug log directory ─────────────────────────────────────────
@@ -725,23 +763,21 @@ pub async fn run(
     let mut completed = skip_set.len();
     let mut component_results: Vec<ComponentResultEntry> = Vec::with_capacity(total);
     let mut failed_component: Option<String> = None;
+    let resume_step = order.iter().position(|name| !skip_set.contains(name)).map(|index| index + 1);
 
     if !json {
-        output::print_stage(
-            "\u{1f680}",
-            &format!("Orchestrating {} ({} components)", compose.group, total),
-        );
+        let plan = build_plan(&compose, &order, &skip_set);
+        print_execution_plan(&compose, &plan);
+        if resume {
+            if let Some(step) = resume_step {
+                print_resume_banner(step, total);
+            }
+        }
     }
 
     for (i, name) in order.iter().enumerate() {
         // Skip already-completed components (resume mode).
         if skip_set.contains(name) {
-            if !json {
-                output::print_stage(
-                    "\u{23ed}\u{fe0f}",
-                    &format!("[{}/{}] Skipping '{}' (already completed)", i + 1, total, name),
-                );
-            }
             component_results.push(ComponentResultEntry {
                 component: name.clone(),
                 status: ComponentStatus::Skipped,
@@ -769,127 +805,137 @@ pub async fn run(
         let component = &compose.components[name];
 
         if !json {
-            output::print_stage(
-                "\u{1f528}",
-                &format!("[{}/{}] Executing '{}'...", i + 1, total, name),
-            );
+            print_step_start(i + 1, total, name);
         }
 
-        // Re-inject global env vars (reset any previous component overrides).
-        super::run::inject_env_vars(&env_vars)?;
+        let sig = component.sig.as_deref().unwrap_or("run()");
+        let effective_verify = component.verify.unwrap_or(verify);
 
-        // Inject per-component env vars (override global for same keys).
-        if let Some(env_map) = &component.env {
-            for (key, value) in env_map {
-                // SAFETY: single-threaded CLI code; no concurrent env access.
-                unsafe { env::set_var(key, value) };
+        let step_result: anyhow::Result<_> = async {
+            // Re-inject global env vars (reset any previous component overrides).
+            super::run::inject_env_vars(&env_vars)?;
+
+            // Inject per-component env vars (override global for same keys).
+            if let Some(env_map) = &component.env {
+                for (key, value) in env_map {
+                    // SAFETY: single-threaded CLI code; no concurrent env access.
+                    unsafe { env::set_var(key, value) };
+                }
             }
-        }
 
-        // Config resolution with global flags.
-        let resolved = resolve_config(ResolveOpts {
-            project_root: cwd.clone(),
-            namespace: namespace.clone(),
-            network: network.clone(),
-            profile: profile.clone(),
-            sender_overrides: HashMap::new(),
-        })
-        .with_context(|| format!("failed to resolve config for component '{}'", name))?;
+            // Config resolution with global flags.
+            let resolved = resolve_config(ResolveOpts {
+                project_root: cwd.clone(),
+                namespace: namespace.clone(),
+                network: network.clone(),
+                profile: profile.clone(),
+                sender_overrides: HashMap::new(),
+            })
+            .with_context(|| format!("failed to resolve config for component '{}'", name))?;
 
-        let effective_rpc_url = rpc_url.clone().or_else(|| resolved.network.clone());
+            let effective_rpc_url = rpc_url.clone().or_else(|| resolved.network.clone());
 
-        // Sender resolution.
-        let resolved_senders = resolve_all_senders(&resolved.senders)
-            .await
-            .with_context(|| format!("failed to resolve senders for component '{}'", name))?;
+            // Sender resolution.
+            let resolved_senders = resolve_all_senders(&resolved.senders)
+                .await
+                .with_context(|| format!("failed to resolve senders for component '{}'", name))?;
 
-        // Build ScriptConfig.
-        let mut script_config =
-            build_script_config_with_senders(&resolved, &component.script, &resolved_senders)
-                .with_context(|| {
+            // Build ScriptConfig.
+            let mut script_config =
+                build_script_config_with_senders(&resolved, &component.script, &resolved_senders)
+                    .with_context(|| {
                     format!("failed to build script config for component '{}'", name)
                 })?;
 
-        let sig = component.sig.as_deref().unwrap_or("run()");
-        let args = component.args.clone().unwrap_or_default();
-        let effective_verify = component.verify.unwrap_or(verify);
+            let args = component.args.clone().unwrap_or_default();
 
-        script_config
-            .sig(sig)
-            .args(args)
-            .broadcast(broadcast)
-            .dry_run(false)
-            .slow(slow || resolved.slow)
-            .legacy(legacy)
-            .verify(effective_verify)
-            .non_interactive(true); // Already prompted above
+            script_config
+                .sig(sig)
+                .args(args)
+                .broadcast(broadcast)
+                .dry_run(false)
+                .slow(slow || resolved.slow)
+                .legacy(legacy)
+                .verify(effective_verify)
+                .non_interactive(true); // Already prompted above
 
-        if let Some(ref url) = effective_rpc_url {
-            script_config.rpc_url(url);
-        }
+            if let Some(ref url) = effective_rpc_url {
+                script_config.rpc_url(url);
+            }
 
-        // Verbose per-component context.
-        if verbose && !json {
-            let sig_display = sig.to_string();
-            let verify_display = effective_verify.to_string();
-            let rpc_display = effective_rpc_url.clone().unwrap_or_default();
-            let chain_id_str = if !rpc_display.is_empty() {
-                let resolved_url = super::run::resolve_rpc_url_for_chain_id(&rpc_display, &cwd);
-                if let Some(url) = resolved_url {
-                    let cid = super::run::fetch_chain_id(&url).await.unwrap_or(0);
-                    if cid > 0 { cid.to_string() } else { String::new() }
+            // Verbose per-component context.
+            if verbose && !json {
+                let sig_display = sig.to_string();
+                let verify_display = effective_verify.to_string();
+                let rpc_display = effective_rpc_url.clone().unwrap_or_default();
+                let chain_id_str = if !rpc_display.is_empty() {
+                    let resolved_url = super::run::resolve_rpc_url_for_chain_id(&rpc_display, &cwd);
+                    if let Some(url) = resolved_url {
+                        let cid = super::run::fetch_chain_id(&url).await.unwrap_or(0);
+                        if cid > 0 { cid.to_string() } else { String::new() }
+                    } else {
+                        String::new()
+                    }
                 } else {
                     String::new()
+                };
+
+                let mut kv_pairs: Vec<(&str, &str)> =
+                    vec![("Script", &component.script), ("Namespace", &resolved.namespace)];
+                if !rpc_display.is_empty() {
+                    kv_pairs.push(("RPC", &rpc_display));
                 }
-            } else {
-                String::new()
+                if !chain_id_str.is_empty() {
+                    kv_pairs.push(("Chain ID", &chain_id_str));
+                }
+                kv_pairs.push(("Sig", &sig_display));
+                kv_pairs.push(("Verify", &verify_display));
+                output::eprint_kv(&kv_pairs);
+                eprintln!();
+            }
+
+            // Build pipeline context.
+            let pipeline_config = PipelineConfig {
+                script_path: component.script.clone(),
+                dry_run: false,
+                namespace: resolved.namespace.clone(),
+                script_sig: sig.to_string(),
+                script_args: Vec::new(),
+                ..Default::default()
             };
 
-            let mut kv_pairs: Vec<(&str, &str)> =
-                vec![("Script", &component.script), ("Namespace", &resolved.namespace)];
-            if !rpc_display.is_empty() {
-                kv_pairs.push(("RPC", &rpc_display));
-            }
-            if !chain_id_str.is_empty() {
-                kv_pairs.push(("Chain ID", &chain_id_str));
-            }
-            kv_pairs.push(("Sig", &sig_display));
-            kv_pairs.push(("Verify", &verify_display));
-            output::eprint_kv(&kv_pairs);
-            eprintln!();
+            let git_commit = resolve_git_commit();
+
+            let pipeline_context = PipelineContext {
+                config: pipeline_config,
+                script_path: PathBuf::from(&component.script),
+                git_commit,
+                project_root: cwd.clone(),
+                deployer_sender: None,
+            };
+
+            // Execute pipeline.
+            let pipeline = RunPipeline::new(pipeline_context).with_script_config(script_config);
+            let result = pipeline.execute(&mut registry).await?;
+
+            Ok((result, resolved.namespace, effective_rpc_url))
         }
+        .await;
 
-        // Build pipeline context.
-        let pipeline_config = PipelineConfig {
-            script_path: component.script.clone(),
-            dry_run: false,
-            namespace: resolved.namespace.clone(),
-            script_sig: sig.to_string(),
-            script_args: Vec::new(),
-            ..Default::default()
-        };
-
-        let git_commit = resolve_git_commit();
-
-        let pipeline_context = PipelineContext {
-            config: pipeline_config,
-            script_path: PathBuf::from(&component.script),
-            git_commit,
-            project_root: cwd.clone(),
-            deployer_sender: None,
-        };
-
-        // Execute pipeline.
-        let pipeline = RunPipeline::new(pipeline_context).with_script_config(script_config);
-
-        match pipeline.execute(&mut registry).await {
-            Ok(result) => {
+        match step_result {
+            Ok((result, resolved_namespace, effective_rpc_url)) => {
                 completed += 1;
                 if !json {
-                    output::print_stage(
-                        "\u{2705}",
-                        &format!("[{}/{}] '{}' completed", i + 1, total, name),
+                    eprintln!(
+                        "{}",
+                        styled(
+                            &format!("{} Step completed successfully", emoji::CHECK_MARK),
+                            color::GREEN,
+                        ),
                     );
+                    if !result.deployments.is_empty() {
+                        eprintln!("  Created {} deployment(s)", result.deployments.len());
+                    }
                 }
 
                 // Verbose post-execution summary per component.
@@ -913,7 +959,7 @@ pub async fn run(
                     log.push_str("status: success\n");
                     log.push_str(&format!("script: {}\n", component.script));
                     log.push_str(&format!("sig: {}\n", sig));
-                    log.push_str(&format!("namespace: {}\n", resolved.namespace));
+                    log.push_str(&format!("namespace: {}\n", resolved_namespace));
                     if let Some(ref url) = effective_rpc_url {
                         log.push_str(&format!("rpc: {}\n", url));
                     }
@@ -959,14 +1005,15 @@ pub async fn run(
 
                 // Update state file after each successful component.
                 state.completed.push(name.clone());
+                state.deployment_total += result.deployments.len();
                 save_compose_state(&state)?;
             }
             Err(e) => {
                 let error_msg = format!("{}", e);
                 if !json {
                     eprintln!(
-                        "Component '{}' failed ({}/{} completed): {}",
-                        name, completed, total, error_msg
+                        "{}",
+                        styled(&format!("{} Failed: {}", emoji::CROSS, error_msg), color::RED,),
                     );
                 }
 
@@ -1011,12 +1058,23 @@ pub async fn run(
     });
 
     if !json {
-        if success {
-            output::print_stage("\u{2705}", "Orchestration complete.");
-        } else {
-            output::print_stage("\u{274c}", "Orchestration failed.");
-        }
-        display_compose_human(&compose.group, &component_results, &totals);
+        let human_totals = ComposeTotals {
+            deployments: totals.deployments + resumed_deployments,
+            transactions: totals.transactions,
+            gas_used: totals.gas_used,
+            succeeded: totals.succeeded,
+            skipped: totals.skipped,
+            failed: totals.failed,
+            not_executed: totals.not_executed,
+        };
+        display_compose_human(
+            &compose.group,
+            &component_results,
+            &human_totals,
+            completed,
+            total,
+            &failed_component,
+        );
 
         if let Some(ref dir) = debug_dir {
             eprintln!("Debug logs saved to {}", dir.display());
@@ -1045,6 +1103,51 @@ pub async fn run(
 mod tests {
     use super::*;
     use crate::commands::run as run_cmd;
+    use std::{
+        ffi::OsString,
+        sync::{LazyLock, Mutex, MutexGuard},
+    };
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+        ENV_LOCK.lock().unwrap()
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        old: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let old = std::env::var_os(key);
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, old }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let old = std::env::var_os(key);
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.old {
+                Some(value) => unsafe {
+                    std::env::set_var(self.key, value);
+                },
+                None => unsafe {
+                    std::env::remove_var(self.key);
+                },
+            }
+        }
+    }
 
     #[test]
     fn deserialize_minimal_compose_file() {
@@ -1504,6 +1607,32 @@ components:
         assert_eq!(arr[1]["deps"][0], "a");
     }
 
+    #[test]
+    fn execution_plan_headers_use_stage_style_when_color_enabled() {
+        let _lock = env_lock();
+        let _no_color = EnvVarGuard::unset("NO_COLOR");
+        let _term = EnvVarGuard::set("TERM", "xterm-256color");
+        owo_colors::set_override(true);
+        color::color_enabled(false);
+
+        let compose =
+            make_compose(vec![("registry", make_component("script/Registry.s.sol", None))]);
+        let headers = format_execution_plan_header_lines(&compose, 1);
+        let expected =
+            ["🎯 Orchestrating test", "📋 Execution plan: 1 components", "📋 Execution Plan:"];
+
+        for (header, plain_text) in headers.iter().zip(expected) {
+            assert!(
+                header.starts_with("\x1b["),
+                "header should be fully stage-styled, got: {header:?}"
+            );
+            assert_eq!(crate::ui::terminal::strip_ansi_codes(header), plain_text);
+        }
+
+        owo_colors::set_override(false);
+        color::color_enabled(true);
+    }
+
     // ── Env var and verify override tests ─────────────────────────────
 
     #[test]
@@ -1592,11 +1721,25 @@ components:
         let state = ComposeState {
             compose_hash: "abc123".to_string(),
             completed: vec!["libs".to_string(), "core".to_string()],
+            deployment_total: 3,
         };
         let json = serde_json::to_string_pretty(&state).unwrap();
         let parsed: ComposeState = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.compose_hash, "abc123");
         assert_eq!(parsed.completed, vec!["libs", "core"]);
+        assert_eq!(parsed.deployment_total, 3);
+    }
+
+    #[test]
+    fn compose_state_legacy_json_defaults_deployment_total_to_zero() {
+        let parsed: ComposeState = serde_json::from_str(
+            r#"{
+                "compose_hash": "abc123",
+                "completed": ["libs", "core"]
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(parsed.deployment_total, 0);
     }
 
     #[test]
@@ -1609,6 +1752,7 @@ components:
         let state = ComposeState {
             compose_hash: "test_hash".to_string(),
             completed: vec!["alpha".to_string(), "bravo".to_string()],
+            deployment_total: 5,
         };
 
         // Write state
@@ -1620,6 +1764,7 @@ components:
             serde_json::from_str(&std::fs::read_to_string(&state_file).unwrap()).unwrap();
         assert_eq!(loaded.compose_hash, "test_hash");
         assert_eq!(loaded.completed, vec!["alpha", "bravo"]);
+        assert_eq!(loaded.deployment_total, 5);
     }
 
     #[test]

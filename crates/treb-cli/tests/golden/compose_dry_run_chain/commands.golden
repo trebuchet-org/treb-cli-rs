@@ -2,10 +2,10 @@
 🚧 [DRY RUN] Showing execution plan only — no changes will be made.
 
 
-Orchestrating chain-deploy
-Execution plan: 3 components
+🎯 Orchestrating chain-deploy
+📋 Execution plan: 3 components
 
-Execution Plan:
+📋 Execution Plan:
 ──────────────────────────────────────────────────
 1. libs → script/DeployLibs.s.sol
 2. core → script/DeployCore.s.sol (depends on: [libs])
