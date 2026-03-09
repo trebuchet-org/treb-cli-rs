@@ -165,6 +165,28 @@ struct ForkRestartJson {
     snapshot_id: Option<String>,
 }
 
+#[derive(Default)]
+struct RevertCommandSummary {
+    snapshot_count: usize,
+    commands: BTreeSet<String>,
+}
+
+impl RevertCommandSummary {
+    fn record(&mut self, command: &str) {
+        self.snapshot_count += 1;
+        self.commands.insert(command.to_string());
+    }
+
+    fn renderable_command(&self) -> Option<&str> {
+        if self.snapshot_count == 0 || self.commands.len() != 1 {
+            return None;
+        }
+
+        let command = self.commands.iter().next()?;
+        if command.is_empty() { None } else { Some(command.as_str()) }
+    }
+}
+
 /// Restores Foundry's global shell after temporarily silencing it.
 ///
 /// Fork setup scripts should not add forge compilation/broadcast chatter to
@@ -428,7 +450,7 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
     // Track revert statistics for human output.
     let mut total_reverted: usize = 0;
     let mut total_remaining: usize = 0;
-    let mut reverted_command: Option<String> = None;
+    let mut reverted_commands = RevertCommandSummary::default();
 
     for net in &networks {
         let session = resolve_fork_session_entry(&store, net)
@@ -466,7 +488,7 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
             if let Some(last_snapshot) = entry.snapshots.last() {
                 // Track reverted command and counts for human output.
                 if !json && !all {
-                    reverted_command = Some(last_snapshot.command.clone());
+                    reverted_commands.record(&last_snapshot.command);
                 }
                 if !json {
                     total_reverted += 1;
@@ -572,17 +594,11 @@ pub async fn run_revert(network: String, all: bool, json: bool) -> anyhow::Resul
         }
     } else {
         // Print Go-matching revert output.
-        let message = if networks.len() > 1 {
-            "Reverted all active forks.".to_string()
-        } else {
-            format!("Reverted fork for network '{}'.", networks[0])
-        };
+        let message = revert_success_message(&networks, all);
         println!("{message}");
         println!();
-        if let Some(cmd) = &reverted_command {
-            if !cmd.is_empty() {
-                println!("  {:<12}{cmd}", "Reverted:");
-            }
+        if let Some(cmd) = reverted_commands.renderable_command() {
+            println!("  {:<12}{cmd}", "Reverted:");
         }
         println!("  {:<12}{total_reverted} snapshot(s)", "Reverted:");
         println!("  {:<12}{total_remaining} snapshot(s)", "Remaining:");
@@ -1165,6 +1181,14 @@ fn status_entry_header(network: &str, current_network: Option<&str>) -> String {
     }
 }
 
+fn revert_success_message(networks: &[String], all: bool) -> String {
+    if all {
+        "Reverted all active forks.".to_string()
+    } else {
+        format!("Reverted fork for network '{}'.", networks[0])
+    }
+}
+
 fn styled(text: &str, style: Style) -> String {
     if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
 }
@@ -1725,6 +1749,35 @@ mod tests {
     #[test]
     fn format_status_uptime_handles_negative_duration() {
         assert_eq!(super::format_status_uptime(chrono::Duration::seconds(-10)), "0s");
+    }
+
+    #[test]
+    fn revert_success_message_uses_all_flag_for_single_active_network() {
+        let networks = vec!["mainnet".to_string()];
+
+        assert_eq!(super::revert_success_message(&networks, true), "Reverted all active forks.");
+        assert_eq!(
+            super::revert_success_message(&networks, false),
+            "Reverted fork for network 'mainnet'."
+        );
+    }
+
+    #[test]
+    fn revert_command_summary_renders_shared_command() {
+        let mut summary = super::RevertCommandSummary::default();
+        summary.record("deploy");
+        summary.record("deploy");
+
+        assert_eq!(summary.renderable_command(), Some("deploy"));
+    }
+
+    #[test]
+    fn revert_command_summary_hides_mixed_commands() {
+        let mut summary = super::RevertCommandSummary::default();
+        summary.record("deploy");
+        summary.record("upgrade");
+
+        assert_eq!(summary.renderable_command(), None);
     }
 
     #[test]
