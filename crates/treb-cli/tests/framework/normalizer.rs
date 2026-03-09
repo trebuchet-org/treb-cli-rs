@@ -150,8 +150,8 @@ impl Normalizer for BuildDateNormalizer {
         let json_date = Regex::new(r#"("date":\s*")\d{4}-\d{2}-\d{2}(")"#).unwrap();
         let result = json_date.replace_all(input, "${1}<DATE>${2}");
 
-        // Human version output build date: "Date:  2026-03-09"
-        let human_date = Regex::new(r"(Date:\s+)\d{4}-\d{2}-\d{2}").unwrap();
+        // Human version output build date: "Date:  2026-03-09" or "built:  2026-03-09"
+        let human_date = Regex::new(r"((?:Date:|built:)\s+)\d{4}-\d{2}-\d{2}").unwrap();
         human_date.replace_all(&result, "${1}<DATE>").into_owned()
     }
 }
@@ -575,6 +575,12 @@ mod tests {
     fn build_date_normalizer_human_build_date() {
         let n = BuildDateNormalizer;
         assert_eq!(n.normalize("Date:  2026-03-09"), "Date:  <DATE>");
+    }
+
+    #[test]
+    fn build_date_normalizer_human_built_date() {
+        let n = BuildDateNormalizer;
+        assert_eq!(n.normalize("built:  2026-03-09"), "built:  <DATE>");
     }
 
     #[test]

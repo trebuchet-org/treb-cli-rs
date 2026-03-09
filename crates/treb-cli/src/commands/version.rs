@@ -42,11 +42,8 @@ pub async fn run(json: bool) -> anyhow::Result<()> {
         if has_commit || has_date {
             println!();
             if has_commit {
-                let short_commit = if info.commit.len() > 7 {
-                    &info.commit[..7]
-                } else {
-                    &info.commit
-                };
+                let short_commit =
+                    if info.commit.len() > 7 { &info.commit[..7] } else { &info.commit };
                 println!("commit: {short_commit}");
             }
             if has_date {
