@@ -515,79 +515,118 @@ pub async fn run(
             errors,
         })?;
     } else {
-        // Safe Transactions section
-        if synced_count > 0 {
-            println!("\nSafe Transactions:");
-            println!("  \u{2022} Checked: {synced_count}");
-            if newly_executed_count > 0 {
-                if color::is_color_enabled() {
-                    println!("  \u{2022} Executed: {}", newly_executed_count.style(color::GREEN));
-                } else {
-                    println!("  \u{2022} Executed: {newly_executed_count}");
-                }
-            }
-            if updated_count > 0 {
-                println!("  \u{2022} Transactions updated: {updated_count}");
-            }
-        } else {
-            println!("No pending Safe transactions found");
-        }
-
-        // Governor Proposals section
-        if gov_synced_count > 0 {
-            println!("\nGovernor Proposals:");
-            println!("  \u{2022} Checked: {gov_synced_count}");
-            if gov_newly_executed_count > 0 {
-                if color::is_color_enabled() {
-                    println!(
-                        "  \u{2022} Executed: {}",
-                        gov_newly_executed_count.style(color::GREEN)
-                    );
-                } else {
-                    println!("  \u{2022} Executed: {gov_newly_executed_count}");
-                }
-            }
-            if gov_updated_count > 0 {
-                println!("  \u{2022} Proposals updated: {gov_updated_count}");
-            }
-        }
-
-        // Cleanup section
-        let total_removed = removed_count + gov_removed_count;
-        if total_removed > 0 {
-            println!("\nCleanup:");
-            println!("  \u{2022} Entries removed: {total_removed}");
-        }
-
-        // Warnings section
-        if !errors.is_empty() {
-            if color::is_color_enabled() {
-                println!("\n{}", "Warnings:".style(color::WARNING));
-                for err in &errors {
-                    println!("  \u{2022} {}", err.style(color::WARNING));
-                }
-            } else {
-                println!("\nWarnings:");
-                for err in &errors {
-                    println!("  \u{2022} {err}");
-                }
-            }
-        }
-
-        // Footer
-        let footer_msg = if errors.is_empty() {
-            "Registry synced successfully"
-        } else {
-            "Registry sync completed with warnings"
-        };
-        if color::is_color_enabled() {
-            println!("\n{}", format!("{} {footer_msg}", emoji::CHECK_MARK).style(color::GREEN));
-        } else {
-            println!("\n{} {footer_msg}", emoji::CHECK_MARK);
-        }
+        print!(
+            "{}",
+            format_sync_human_output(
+                synced_count,
+                newly_executed_count,
+                updated_count,
+                removed_count,
+                gov_synced_count,
+                gov_newly_executed_count,
+                gov_updated_count,
+                gov_removed_count,
+                &errors,
+            )
+        );
     }
 
     Ok(())
+}
+
+/// Format sync human-readable output (sections, bullets, footer).
+#[allow(clippy::too_many_arguments)]
+fn format_sync_human_output(
+    synced_count: usize,
+    newly_executed_count: usize,
+    updated_count: usize,
+    removed_count: usize,
+    gov_synced_count: usize,
+    gov_newly_executed_count: usize,
+    gov_updated_count: usize,
+    gov_removed_count: usize,
+    errors: &[String],
+) -> String {
+    let mut out = String::new();
+
+    // Safe Transactions section
+    if synced_count > 0 {
+        out.push_str("\nSafe Transactions:\n");
+        out.push_str(&format!("  \u{2022} Checked: {synced_count}\n"));
+        if newly_executed_count > 0 {
+            if color::is_color_enabled() {
+                out.push_str(&format!(
+                    "  \u{2022} Executed: {}\n",
+                    newly_executed_count.style(color::GREEN)
+                ));
+            } else {
+                out.push_str(&format!("  \u{2022} Executed: {newly_executed_count}\n"));
+            }
+        }
+        if updated_count > 0 {
+            out.push_str(&format!("  \u{2022} Transactions updated: {updated_count}\n"));
+        }
+    } else {
+        out.push_str("No pending Safe transactions found\n");
+    }
+
+    // Governor Proposals section
+    if gov_synced_count > 0 {
+        out.push_str("\nGovernor Proposals:\n");
+        out.push_str(&format!("  \u{2022} Checked: {gov_synced_count}\n"));
+        if gov_newly_executed_count > 0 {
+            if color::is_color_enabled() {
+                out.push_str(&format!(
+                    "  \u{2022} Executed: {}\n",
+                    gov_newly_executed_count.style(color::GREEN)
+                ));
+            } else {
+                out.push_str(&format!("  \u{2022} Executed: {gov_newly_executed_count}\n"));
+            }
+        }
+        if gov_updated_count > 0 {
+            out.push_str(&format!("  \u{2022} Proposals updated: {gov_updated_count}\n"));
+        }
+    }
+
+    // Cleanup section
+    let total_removed = removed_count + gov_removed_count;
+    if total_removed > 0 {
+        out.push_str("\nCleanup:\n");
+        out.push_str(&format!("  \u{2022} Entries removed: {total_removed}\n"));
+    }
+
+    // Warnings section
+    if !errors.is_empty() {
+        if color::is_color_enabled() {
+            out.push_str(&format!("\n{}\n", "Warnings:".style(color::WARNING)));
+            for err in errors {
+                out.push_str(&format!("  \u{2022} {}\n", err.style(color::WARNING)));
+            }
+        } else {
+            out.push_str("\nWarnings:\n");
+            for err in errors {
+                out.push_str(&format!("  \u{2022} {err}\n"));
+            }
+        }
+    }
+
+    // Footer
+    let footer_msg = if errors.is_empty() {
+        "Registry synced successfully"
+    } else {
+        "Registry sync completed with warnings"
+    };
+    if color::is_color_enabled() {
+        out.push_str(&format!(
+            "\n{}\n",
+            format!("{} {footer_msg}", emoji::CHECK_MARK).style(color::GREEN)
+        ));
+    } else {
+        out.push_str(&format!("\n{} {footer_msg}\n", emoji::CHECK_MARK));
+    }
+
+    out
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────
@@ -963,5 +1002,88 @@ mainnet = "${TREB_SYNC_RPC_URL}"
             ProposalStatus::Pending
         );
         assert_eq!(reopened.get_transaction(tx_id).unwrap().status, TransactionStatus::Queued);
+    }
+
+    // ── Sync human output format tests (Go-matching) ────────────────────
+
+    #[test]
+    fn sync_human_output_no_safe_txs() {
+        color::color_enabled(true);
+        let result = format_sync_human_output(0, 0, 0, 0, 0, 0, 0, 0, &[]);
+        assert!(result.contains("No pending Safe transactions found"), "got: {result}");
+        assert!(result.contains("\u{2713} Registry synced successfully"), "got: {result}");
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn sync_human_output_safe_section_bullets() {
+        color::color_enabled(true);
+        let result = format_sync_human_output(5, 2, 3, 0, 0, 0, 0, 0, &[]);
+        assert!(result.contains("Safe Transactions:"), "got: {result}");
+        assert!(result.contains("  \u{2022} Checked: 5"), "got: {result}");
+        assert!(result.contains("  \u{2022} Executed: 2"), "got: {result}");
+        assert!(result.contains("  \u{2022} Transactions updated: 3"), "got: {result}");
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn sync_human_output_safe_hides_zero_executed() {
+        color::color_enabled(true);
+        let result = format_sync_human_output(3, 0, 1, 0, 0, 0, 0, 0, &[]);
+        assert!(result.contains("  \u{2022} Checked: 3"), "got: {result}");
+        assert!(!result.contains("Executed:"), "got: {result}");
+        assert!(result.contains("  \u{2022} Transactions updated: 1"), "got: {result}");
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn sync_human_output_governor_section_bullets() {
+        color::color_enabled(true);
+        let result = format_sync_human_output(0, 0, 0, 0, 4, 1, 2, 0, &[]);
+        assert!(result.contains("Governor Proposals:"), "got: {result}");
+        assert!(result.contains("  \u{2022} Checked: 4"), "got: {result}");
+        assert!(result.contains("  \u{2022} Executed: 1"), "got: {result}");
+        assert!(result.contains("  \u{2022} Proposals updated: 2"), "got: {result}");
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn sync_human_output_cleanup_section() {
+        color::color_enabled(true);
+        let result = format_sync_human_output(0, 0, 0, 2, 0, 0, 0, 3, &[]);
+        assert!(result.contains("Cleanup:"), "got: {result}");
+        assert!(result.contains("  \u{2022} Entries removed: 5"), "got: {result}");
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn sync_human_output_cleanup_hidden_when_zero() {
+        color::color_enabled(true);
+        let result = format_sync_human_output(1, 0, 0, 0, 0, 0, 0, 0, &[]);
+        assert!(!result.contains("Cleanup:"), "got: {result}");
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn sync_human_output_warnings_section() {
+        color::color_enabled(true);
+        let errors = vec!["unsupported chain 999".into()];
+        let result = format_sync_human_output(1, 0, 0, 0, 0, 0, 0, 0, &errors);
+        assert!(result.contains("Warnings:"), "got: {result}");
+        assert!(result.contains("  \u{2022} unsupported chain 999"), "got: {result}");
+        assert!(
+            result.contains("\u{2713} Registry sync completed with warnings"),
+            "got: {result}"
+        );
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn sync_human_output_footer_success_when_no_errors() {
+        color::color_enabled(true);
+        let result = format_sync_human_output(1, 0, 0, 0, 0, 0, 0, 0, &[]);
+        assert!(result.contains("\u{2713} Registry synced successfully"), "got: {result}");
+        assert!(!result.contains("with warnings"), "got: {result}");
+        owo_colors::set_override(true);
     }
 }

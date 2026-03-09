@@ -77,9 +77,27 @@ pub async fn run(
     }
 }
 
+fn format_show_tags(deployment_id: &str, address: &str, tags: &[String]) -> String {
+    let mut sorted = tags.to_vec();
+    sorted.sort();
+    let tags_value = if sorted.is_empty() {
+        styled("No tags", color::GRAY)
+    } else {
+        sorted.iter().map(|t| styled(t, color::CYAN)).collect::<Vec<_>>().join(", ")
+    };
+    format!(
+        "\n{dep_label} {dep_id}\n{addr_label} {addr}\n{tags_label} {tags_value}\n",
+        dep_label = styled("Deployment:", color::STAGE),
+        dep_id = styled(deployment_id, color::STAGE),
+        addr_label = styled("Address:", color::SECTION_HEADER),
+        addr = styled(address, color::SUCCESS),
+        tags_label = styled("Tags:   ", color::SECTION_HEADER),
+    )
+}
+
 fn show_tags(registry: &Registry, deployment_id: &str, json: bool) -> anyhow::Result<()> {
     let dep = registry.get_deployment(deployment_id).unwrap();
-    let mut tags: Vec<String> = dep.tags.clone().unwrap_or_default();
+    let tags: Vec<String> = dep.tags.clone().unwrap_or_default();
 
     if json {
         output::print_json(&TagOutputJson {
@@ -89,24 +107,21 @@ fn show_tags(registry: &Registry, deployment_id: &str, json: bool) -> anyhow::Re
             tag: None,
         })?;
     } else {
-        println!();
-        println!("{} {}", styled("Deployment:", color::STAGE), styled(deployment_id, color::STAGE),);
-        println!(
-            "{} {}",
-            styled("Address:", color::SECTION_HEADER),
-            styled(&dep.address, color::SUCCESS),
-        );
-        tags.sort();
-        let tags_value = if tags.is_empty() {
-            styled("No tags", color::GRAY)
-        } else {
-            tags.iter().map(|t| styled(t, color::CYAN)).collect::<Vec<_>>().join(", ")
-        };
-        println!("{} {tags_value}", styled("Tags:   ", color::SECTION_HEADER));
-        println!();
+        print!("{}", format_show_tags(deployment_id, &dep.address, &tags));
     }
 
     Ok(())
+}
+
+fn format_add_tag(tag: &str, deployment_id: &str, tags: &[String]) -> String {
+    let mut sorted = tags.to_vec();
+    sorted.sort();
+    let tags_display =
+        sorted.iter().map(|t| styled(t, color::CYAN)).collect::<Vec<_>>().join(", ");
+    format!(
+        "{}\n\nCurrent tags: {tags_display}",
+        styled(&format!("\u{2705} Added tag '{tag}' to {deployment_id}"), color::GREEN),
+    )
 }
 
 fn add_tag(
@@ -136,18 +151,24 @@ fn add_tag(
             tag: Some(tag.to_string()),
         })?;
     } else {
-        println!(
-            "{}",
-            styled(&format!("\u{2705} Added tag '{tag}' to {deployment_id}"), color::GREEN,)
-        );
-        tags.sort();
-        let tags_display =
-            tags.iter().map(|t| styled(t, color::CYAN)).collect::<Vec<_>>().join(", ");
-        println!();
-        println!("Current tags: {tags_display}");
+        println!("{}", format_add_tag(tag, deployment_id, &tags));
     }
 
     Ok(())
+}
+
+fn format_remove_tag(tag: &str, deployment_id: &str, remaining_tags: &[String]) -> String {
+    let mut sorted = remaining_tags.to_vec();
+    sorted.sort();
+    let tags_value = if sorted.is_empty() {
+        styled("No tags", color::GRAY)
+    } else {
+        sorted.iter().map(|t| styled(t, color::CYAN)).collect::<Vec<_>>().join(", ")
+    };
+    format!(
+        "{}\n\nRemaining tags: {tags_value}",
+        styled(&format!("\u{2705} Removed tag {tag} from {deployment_id}"), color::GREEN),
+    )
 }
 
 fn remove_tag(
@@ -169,7 +190,7 @@ fn remove_tag(
     dep.tags = if tags.is_empty() { None } else { Some(tags.clone()) };
     registry.update_deployment(dep)?;
 
-    let mut final_tags = tags;
+    let final_tags = tags;
 
     if json {
         output::print_json(&TagOutputJson {
@@ -179,18 +200,7 @@ fn remove_tag(
             tag: Some(tag.to_string()),
         })?;
     } else {
-        println!(
-            "{}",
-            styled(&format!("\u{2705} Removed tag {tag} from {deployment_id}"), color::GREEN,)
-        );
-        final_tags.sort();
-        let tags_value = if final_tags.is_empty() {
-            styled("No tags", color::GRAY)
-        } else {
-            final_tags.iter().map(|t| styled(t, color::CYAN)).collect::<Vec<_>>().join(", ")
-        };
-        println!();
-        println!("Remaining tags: {tags_value}");
+        println!("{}", format_remove_tag(tag, deployment_id, &final_tags));
     }
 
     Ok(())
@@ -366,5 +376,117 @@ mod tests {
         let result =
             super::remove_tag(&mut registry, "mainnet/42220/Counter:v1.0.0", "v1.0.0", true);
         assert!(result.is_ok());
+    }
+
+    // ── Format function tests (Go-matching output) ──────────────────────
+
+    use crate::ui::color;
+
+    #[test]
+    fn format_show_tags_deployment_header_and_address() {
+        color::color_enabled(true);
+        let result = super::format_show_tags(
+            "mainnet/42220/Counter:v1.0.0",
+            "0x42eDa75c4AC3fCf6eA20D091Ad1Ff79e9c52833D",
+            &["stable".into(), "v1.0.0".into()],
+        );
+        assert!(result.contains("Deployment: mainnet/42220/Counter:v1.0.0"), "got: {result}");
+        assert!(
+            result.contains("Address: 0x42eDa75c4AC3fCf6eA20D091Ad1Ff79e9c52833D"),
+            "got: {result}"
+        );
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn format_show_tags_sorted_comma_separated() {
+        color::color_enabled(true);
+        let result = super::format_show_tags(
+            "mainnet/42220/Counter:v1.0.0",
+            "0xAddr",
+            &["stable".into(), "beta".into(), "alpha".into()],
+        );
+        // Tags should be sorted alphabetically and comma-separated
+        assert!(result.contains("Tags:    alpha, beta, stable"), "got: {result}");
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn format_show_tags_empty_shows_no_tags() {
+        color::color_enabled(true);
+        let result = super::format_show_tags("mainnet/42220/Counter:v1.0.0", "0xAddr", &[]);
+        assert!(result.contains("Tags:    No tags"), "got: {result}");
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn format_show_tags_blank_lines() {
+        color::color_enabled(true);
+        let result = super::format_show_tags("x", "0xAddr", &[]);
+        assert!(result.starts_with('\n'), "should start with blank line, got: {result}");
+        assert!(result.ends_with('\n'), "should end with blank line, got: {result}");
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn format_add_tag_success_line() {
+        color::color_enabled(true);
+        let result = super::format_add_tag(
+            "v2.0.0",
+            "mainnet/42220/Counter:v1.0.0",
+            &["v1.0.0".into(), "v2.0.0".into()],
+        );
+        assert!(
+            result.contains("\u{2705} Added tag 'v2.0.0' to mainnet/42220/Counter:v1.0.0"),
+            "got: {result}"
+        );
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn format_add_tag_current_tags_sorted() {
+        color::color_enabled(true);
+        let result = super::format_add_tag(
+            "v2.0.0",
+            "mainnet/42220/Counter:v1.0.0",
+            &["v2.0.0".into(), "stable".into(), "alpha".into()],
+        );
+        assert!(result.contains("Current tags: alpha, stable, v2.0.0"), "got: {result}");
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn format_remove_tag_success_line() {
+        color::color_enabled(true);
+        let result = super::format_remove_tag(
+            "v1.0.0",
+            "mainnet/42220/Counter:v1.0.0",
+            &["stable".into()],
+        );
+        assert!(
+            result.contains("\u{2705} Removed tag v1.0.0 from mainnet/42220/Counter:v1.0.0"),
+            "got: {result}"
+        );
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn format_remove_tag_remaining_tags_sorted() {
+        color::color_enabled(true);
+        let result = super::format_remove_tag(
+            "v1.0.0",
+            "mainnet/42220/Counter:v1.0.0",
+            &["stable".into(), "beta".into()],
+        );
+        assert!(result.contains("Remaining tags: beta, stable"), "got: {result}");
+        owo_colors::set_override(true);
+    }
+
+    #[test]
+    fn format_remove_tag_no_remaining_shows_no_tags() {
+        color::color_enabled(true);
+        let result = super::format_remove_tag("v1.0.0", "mainnet/42220/Counter:v1.0.0", &[]);
+        assert!(result.contains("Remaining tags: No tags"), "got: {result}");
+        owo_colors::set_override(true);
     }
 }
