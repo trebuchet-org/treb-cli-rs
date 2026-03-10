@@ -4,6 +4,7 @@
 - When a dual-form fork subcommand also supports `--all`, put the positional arg, `--network`, and `--all` in the same ArgGroup in both clap definitions, then normalize them in the command dispatcher so the bypass path and conflict errors stay consistent.
 - Golden tests that can early-return before exercising their fixture will not rewrite `commands.golden` under `UPDATE_GOLDEN=1`; if only the recorded argv changed, refresh that snapshot from a runnable environment or patch the header manually so the stored command matches the test case.
 - For fork argument parsing coverage that only needs binary-level success/error assertions, add focused `TestContext::run(...)` checks in `crates/treb-cli/tests/integration_fork.rs` and reuse its loopback `spawn_json_rpc_server()` helper instead of creating new golden snapshots or spinning up full Anvil instances.
+- For fork alias parity coverage in `crates/treb-cli/tests/cli_compatibility_aliases.rs`, run each command form against separate identically seeded temp projects and reuse one multi-request loopback JSON-RPC server when live RPC is required; that keeps raw stdout/stderr byte-identical without snapshot normalization.
 
 Started: Tue Mar 10 10:14:21 PM CET 2026
 ---
@@ -42,4 +43,13 @@ Started: Tue Mar 10 10:14:21 PM CET 2026
   - Patterns discovered (e.g., "this codebase uses X for Y"): `crates/treb-cli/tests/integration_fork.rs` is the right place for fork subprocess assertions that care about parser/runtime behavior more than formatted output snapshots.
   - Gotchas encountered (e.g., "don't forget to update Z when changing W"): missing/conflicting fork network arguments are rejected by clap before command dispatch, so subprocess tests should assert on clap stderr text rather than the later resolver helpers.
   - Useful context (e.g., "the evaluation panel is in component X"): the local `spawn_json_rpc_server()` fixture is enough for `fork enter` argument tests because the command only needs `eth_chainId`; no full Anvil process is required.
+---
+## 2026-03-10 23:05:01 CET - P7-US-005
+- Added fork alias-compatibility tests covering `fork enter`, `fork exit`, `fork revert`, `fork restart`, `fork history`, and `fork diff`, plus explicit `--url` versus `--rpc-url` byte-for-byte output parity.
+- Seeded deterministic fork fixtures directly in `cli_compatibility_aliases.rs` and used a reusable loopback JSON-RPC server so live-RPC subcommands can be compared without snapshot normalizers or Anvil.
+- Files changed: `CLAUDE.md`, `crates/treb-cli/tests/cli_compatibility_aliases.rs`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y"): `cli_compatibility_aliases.rs` is the right place to pin byte-for-byte stdout/stderr parity after parser/runtime behavior is already covered elsewhere.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W"): fork parity tests cannot reuse one workdir for both invocations because commands mutate fork state; clone the setup into separate temp projects and compare the raw subprocess outputs instead.
+  - Useful context (e.g., "the evaluation panel is in component X"): a single nonblocking loopback JSON-RPC fixture can satisfy `eth_chainId`, `evm_revert`, `evm_snapshot`, `anvil_reset`, and `anvil_setCode` across both runs, which keeps the tests fast and deterministic.
 ---

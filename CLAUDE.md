@@ -50,6 +50,8 @@ treb — deployment orchestration CLI for Foundry projects. Rust workspace with 
 
 **CLI alias compatibility coverage**: When a rename keeps backward-compatible spellings or shorthand forms, add or extend `crates/treb-cli/tests/cli_compatibility_aliases.rs` with byte-for-byte stdout comparisons across the canonical and legacy invocations. For registry-backed commands, seed a temp config project and compare raw stdout/stderr there instead of relying only on parser tests. Keep the feature-specific suites for richer behavior, but pin alias parity in one focused binary-level test file.
 
+**Fork alias parity fixtures**: For fork compatibility checks in `cli_compatibility_aliases.rs`, run each invocation against its own identically seeded temp project and share a multi-request loopback JSON-RPC server when the command needs live RPC. That keeps stdout/stderr byte-stable without snapshot normalizers or Anvil.
+
 **Test framework** (`crates/treb-cli/tests/framework/`):
 - `TrebRunner` — subprocess CLI execution
 - `TestContext` — high-level harness with anvil + workdir
