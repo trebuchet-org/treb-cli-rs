@@ -1,6 +1,7 @@
 # Ralph Progress Log
 ## Codebase Patterns
 - Registry store files should use `read_versioned_file()` for backward-compatible reads and `write_versioned_file()` for locked atomic writes to the `{"_format":"treb-v1","entries":...}` wrapper format.
+- Registry-only changes should be validated with `cargo check -p treb-registry` and `cargo test -p treb-registry` before running broader workspace checks.
 
 Started: Tue Mar 10 09:50:03 AM CET 2026
 ---
@@ -12,4 +13,12 @@ Started: Tue Mar 10 09:50:03 AM CET 2026
   - Registry store versioning belongs in the shared I/O layer so individual stores can migrate with mechanical helper swaps.
   - `write_versioned_file()` should own the `with_file_lock()` call; later store migrations should not wrap it in an extra lock.
   - `read_versioned_file()` accepts both wrapped and legacy bare JSON, which is the compatibility path for upgrading existing registry files.
+---
+## 2026-03-10 10:01:20 CET - P1-US-001
+- Verified the existing `VersionedStore<T>` / `read_versioned_file()` / `write_versioned_file()` implementation already on this branch and restored the PRD status for `P1-US-001`.
+- Re-ran targeted registry validation: `cargo check -p treb-registry` and `cargo test -p treb-registry` both passed.
+- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - The Ralph state for the active phase is stored under `.ralph/current/` via a symlink to `.ralph/state/<phase>/`, so PRD/progress edits should be treated as the phase state of record.
+  - For registry-only stories, the fastest useful validation loop is `cargo check -p treb-registry` plus `cargo test -p treb-registry` before wider workspace checks become necessary.
 ---

@@ -1,7 +1,7 @@
 {
   "project": "treb-cli-rs",
   "branchName": "feat/M3-P01-remove-registry-meta-and-migration-system",
-  "description": "Remove the speculative registry.json metadata file and migration system, replacing them with a lightweight _format field wrapper on all store files for future-proof versioning without migration complexity",
+  "description": "Remove registry metadata (registry.json) and migration system, replace with lightweight _format versioning in all store files for Go CLI coexistence",
   "userStories": [
     {
       "id": "P1-US-001",
@@ -13,7 +13,7 @@
         "read_versioned_file<T>() deserializes a bare-map file correctly (backward compat)",
         "read_versioned_file<T>() returns T::default() when the file does not exist",
         "write_versioned_file<T>() uses the same atomic write + file lock pattern as existing write_json_file",
-        "STORE_FORMAT constant is \"treb-v1\" and exported from treb-registry",
+        "STORE_FORMAT constant is \"treb-v1\"",
         "Typecheck passes (cargo check -p treb-registry)"
       ],
       "priority": 1,
@@ -25,8 +25,8 @@
       "title": "Update DeploymentStore to Use Versioned Format",
       "description": "As a user with an existing deployment registry, I want the deployment store to transparently upgrade to the versioned format on save, so that my existing deployments.json continues to work without manual intervention.",
       "acceptanceCriteria": [
-        "Loading a bare {\"id\": {...}} deployments.json succeeds (backward compat)",
-        "Loading a wrapped {\"_format\": \"treb-v1\", \"entries\": {\"id\": {...}}} deployments.json succeeds",
+        "Loading a bare {\"id\": {...}, ...} deployments.json succeeds (backward compat)",
+        "Loading a wrapped {\"_format\": \"treb-v1\", \"entries\": {\"id\": {...}, ...}} deployments.json succeeds",
         "Saving always writes the wrapped format with \"_format\": \"treb-v1\"",
         "All existing DeploymentStore tests pass",
         "Typecheck passes (cargo check -p treb-registry)"
@@ -49,7 +49,7 @@
       ],
       "priority": 3,
       "passes": false,
-      "notes": "LookupStore wraps LookupIndex (with byName, byAddress, byTag maps) rather than a keyed HashMap. The versioned wrapper wraps LookupIndex directly as the entries value."
+      "notes": ""
     },
     {
       "id": "P1-US-004",
@@ -64,7 +64,7 @@
       ],
       "priority": 4,
       "passes": false,
-      "notes": "Three stores updated with the same mechanical change: replace read_json_file_or_default/write_json_file with read_versioned_file/write_versioned_file."
+      "notes": ""
     },
     {
       "id": "P1-US-005",
@@ -80,7 +80,7 @@
       ],
       "priority": 5,
       "passes": false,
-      "notes": "ForkStateStore has composite data shape ({forks: HashMap, history: Vec}). The versioned wrapper wraps the full ForkStateData. Snapshot read/write should also use versioned helpers."
+      "notes": ""
     },
     {
       "id": "P1-US-006",
@@ -94,7 +94,7 @@
         "RegistryMeta type no longer exists",
         "REGISTRY_FILE and REGISTRY_VERSION constants no longer exist",
         "MigrationReport and run_migrations are no longer exported",
-        "All registry crate tests pass after updating tests that checked for registry.json creation or version validation",
+        "All registry crate tests pass (update tests that checked for registry.json creation or version validation)",
         "Typecheck passes (cargo check -p treb-registry)"
       ],
       "priority": 6,
@@ -111,7 +111,7 @@
         "treb migrate --help no longer mentions registry subcommand",
         "All golden test .expected files for registry migration are removed",
         "Integration tests for registry migration are removed",
-        "New tests verify bare-map-to-versioned round-trip for at least one store and _format field is present in saved output",
+        "New tests verify: bare-map-to-versioned round-trip for at least one store, and _format field is present in saved output",
         "All tests pass (cargo test --workspace --all-targets)",
         "Clippy passes (cargo clippy --workspace --all-targets)"
       ],
