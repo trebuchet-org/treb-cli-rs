@@ -578,10 +578,10 @@ async fn run_batch(
             "Select deployments to verify",
             non_interactive,
         )
-            .map_err(|e| anyhow::anyhow!("{e}"))?
-            .into_iter()
-            .map(|d| d.id.clone())
-            .collect()
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+        .into_iter()
+        .map(|d| d.id.clone())
+        .collect()
     };
 
     if candidate_ids.is_empty() {

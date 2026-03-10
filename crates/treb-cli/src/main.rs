@@ -974,7 +974,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         }
         Commands::Prune(args) => commands::prune::run(args, non_interactive).await?,
         Commands::Reset(args) => commands::reset::run(args, non_interactive).await?,
-        Commands::Migrate { subcommand } => commands::migrate::run(subcommand).await?,
+        Commands::Migrate { subcommand } => {
+            commands::migrate::run(subcommand, non_interactive).await?
+        }
         Commands::Fork { subcommand } => commands::fork::run(subcommand).await?,
         Commands::Dev { subcommand } => commands::dev::run(subcommand).await?,
         Commands::Completion { shell } | Commands::CompletionCompat { shell } => {
@@ -1010,6 +1012,7 @@ async fn run_gen_deploy_command(args: GenDeployArgs) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::migrate::MigrateSubcommand;
 
     #[test]
     fn gen_deploy_nested_command_sets_json_flag() {
@@ -1158,6 +1161,17 @@ mod tests {
         match cli.command {
             Commands::List { .. } => {}
             _ => panic!("expected list command"),
+        }
+    }
+
+    #[test]
+    fn non_interactive_is_accepted_before_migrate_subcommand() {
+        let cli = parse_cli_from(["treb", "--non-interactive", "migrate", "config"]).unwrap();
+        assert!(cli.non_interactive);
+
+        match cli.command {
+            Commands::Migrate { subcommand: MigrateSubcommand::Config { .. } } => {}
+            _ => panic!("expected migrate config command"),
         }
     }
 
