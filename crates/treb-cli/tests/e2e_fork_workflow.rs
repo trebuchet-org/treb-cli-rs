@@ -123,15 +123,18 @@ async fn e2e_fork_enter_deploy_diff_revert_exit() {
     )
     .await;
     assert_eq!(diff["network"].as_str(), Some("anvil-31337"));
-    assert_eq!(diff["clean"].as_bool(), Some(false), "diff must not be clean after deployment");
-    let changes = diff["changes"].as_array().expect("changes must be an array");
+    assert_eq!(
+        diff["hasChanges"].as_bool(),
+        Some(true),
+        "diff must have changes after deployment"
+    );
+    let new_deps = diff["newDeployments"].as_array().expect("newDeployments must be an array");
     assert!(
-        changes.iter().any(|c| {
-            c["change"].as_str() == Some("added")
-                && c["file"].as_str() == Some("deployments")
-                && c["key"].as_str() == Some(dep_id.as_str())
+        new_deps.iter().any(|d| {
+            d["changeType"].as_str() == Some("added")
+                && d["id"].as_str() == Some(dep_id.as_str())
         }),
-        "diff must show the fork-only deployment as added"
+        "diff must show the fork-only deployment as added in newDeployments"
     );
 
     // Step 7: fork revert → restores from snapshot (deployment removed)

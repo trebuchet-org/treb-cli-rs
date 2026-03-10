@@ -164,6 +164,29 @@ struct ForkRestartJson {
     snapshot_id: Option<String>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ForkDiffResultJson {
+    has_changes: bool,
+    modified_deployments: Vec<ForkDiffEntryJson>,
+    network: String,
+    new_deployments: Vec<ForkDiffEntryJson>,
+    new_transaction_count: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ForkDiffEntryJson {
+    #[serde(skip_serializing_if = "String::is_empty")]
+    address: String,
+    change_type: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    contract_name: String,
+    id: String,
+    #[serde(rename = "type")]
+    deployment_type: String,
+}
+
 #[derive(Default)]
 struct RevertCommandSummary {
     snapshot_count: usize,
@@ -1000,7 +1023,6 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
 
     // Files to diff.
     let diff_files = [DEPLOYMENTS_FILE, TRANSACTIONS_FILE];
-    let mut changes: Vec<serde_json::Value> = Vec::new();
 
     // Structured data for human output (deployment details + transaction count).
     struct DiffEntry {
@@ -1011,6 +1033,11 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
     let mut new_deployments: Vec<DiffEntry> = Vec::new();
     let mut modified_deployments: Vec<DiffEntry> = Vec::new();
     let mut new_transactions: usize = 0;
+
+    // Structured data for JSON output (Go-matching schema).
+    let mut new_deployments_json: Vec<ForkDiffEntryJson> = Vec::new();
+    let mut modified_deployments_json: Vec<ForkDiffEntryJson> = Vec::new();
+    let mut has_changes = false;
 
     for &file_name in &diff_files {
         let current_path = treb_dir.join(file_name);
@@ -1040,11 +1067,34 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
                 _ => continue, // unchanged
             };
 
-            changes.push(serde_json::json!({
-                "change": change_type,
-                "file":   file_label,
-                "key":    key,
-            }));
+            has_changes = true;
+
+            // Collect deployment entries for JSON output.
+            if is_deployments {
+                // Use current data for added/modified, snapshot data for removed.
+                let data = in_current.or(in_snapshot).unwrap();
+                let contract_name = data
+                    .get("contractName")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let address =
+                    data.get("address").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let dtype =
+                    data.get("type").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let json_entry = ForkDiffEntryJson {
+                    address: address.clone(),
+                    change_type: change_type.to_string(),
+                    contract_name: contract_name.clone(),
+                    id: key.clone(),
+                    deployment_type: dtype.clone(),
+                };
+                if change_type == "added" {
+                    new_deployments_json.push(json_entry);
+                } else {
+                    modified_deployments_json.push(json_entry);
+                }
+            }
 
             // Collect structured data for human output sections.
             if is_deployments && (change_type == "added" || change_type == "modified") {
@@ -1069,11 +1119,14 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
     }
 
     if json {
-        output::print_json(&serde_json::json!({
-            "network": network,
-            "changes": changes,
-            "clean":   changes.is_empty(),
-        }))?;
+        let result = ForkDiffResultJson {
+            has_changes,
+            modified_deployments: modified_deployments_json,
+            network: network.clone(),
+            new_deployments: new_deployments_json,
+            new_transaction_count: new_transactions,
+        };
+        output::print_json(&result)?;
         return Ok(());
     }
 
