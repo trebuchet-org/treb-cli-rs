@@ -3,6 +3,7 @@
 - When adding or changing `treb` subcommand flags, keep the clap derive parser in `crates/treb-cli/src/main.rs` and the completion/help builder in `crates/treb-cli/build.rs` in lockstep, then pin the surface with focused `parse_cli_from(...)` tests in `src/main.rs`.
 - For namespace/network-scoped deployment commands, define a dedicated `*Scope` helper that builds `DeploymentFilters`, pre-filters `Registry::list_deployments()`, uses `resolve_deployment_in_scope()` for direct queries, and reuses the same filtered slice for queryless interactive selection and empty-state/error messages.
 - For new `treb verify` runtime flags, thread the option through both the single and batch paths in `crates/treb-cli/src/commands/verify.rs`, and add unit coverage in `crates/treb-verify/src/lib.rs` because `build_verify_args()` owns the final forge verification input mapping.
+- For `treb verify` diagnostics, emit the Foundry command through `treb_verify::format_verify_command()` so single and batch flows stay in sync on the exact `forge verify-contract` stderr surface.
 
 Started: Tue Mar 10 11:17:39 PM CET 2026
 ---
@@ -35,4 +36,14 @@ Started: Tue Mar 10 11:17:39 PM CET 2026
   - Patterns discovered (e.g., "this codebase uses X for Y"): verify runtime flags should terminate in `treb_verify::build_verify_args()` tests, because that crate is the single translation layer into Foundry's `VerifyArgs`.
   - Gotchas encountered (e.g., "don't forget to update Z when changing W"): adding a new verify option requires threading it through both single and batch verification loops; updating only one path compiles easily but leaves behavior inconsistent.
   - Useful context (e.g., "the evaluation panel is in component X"): `--contract-path` follows Foundry's `path[:name]` shape, with missing `:name` falling back to the deployment's recorded `contract_name`.
+---
+## 2026-03-10 23:52:58 CET - P8-US-004
+- Added `--debug` to `treb verify`, mirrored it in `crates/treb-cli/build.rs`, and pinned parsing in `crates/treb-cli/src/main.rs`.
+- Threaded `debug` through the single and batch verify execution paths so each verifier attempt can emit the underlying `forge verify-contract` command before execution.
+- Added `treb_verify::format_verify_command()` plus unit coverage in `crates/treb-verify/src/lib.rs` to keep the debug stderr surface deterministic and shared across verify flows.
+- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `CLAUDE.md`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/build.rs`, `crates/treb-cli/src/commands/verify.rs`, `crates/treb-verify/src/lib.rs`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y"): verify diagnostics are easiest to keep consistent when the Foundry command formatter lives in `treb-verify`, alongside `build_verify_args()`.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W"): debug output needs to sit immediately before `verify_args.run().await` in both loops; adding it only once misses multi-verifier batch attempts.
+  - Useful context (e.g., "the evaluation panel is in component X"): the formatter only needs to render the subset of `VerifyArgs` that treb actually sets, which keeps debug output stable without depending on Foundry internals.
 ---

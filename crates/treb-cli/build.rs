@@ -229,6 +229,12 @@ fn build_verify() -> ClapCommand {
                 .long("contract-path")
                 .help("Contract path override (e.g. ./src/Counter.sol:Counter)"),
         )
+        .arg(
+            Arg::new("debug")
+                .long("debug")
+                .action(ArgAction::SetTrue)
+                .help("Print the forge verify command before execution"),
+        )
         .arg(Arg::new("verifier-api-key").long("verifier-api-key").help("Verifier API key"))
         .arg(
             Arg::new("force")

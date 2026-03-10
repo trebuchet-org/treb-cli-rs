@@ -229,6 +229,9 @@ enum Commands {
         /// Contract path override (e.g. ./src/Counter.sol:Counter)
         #[arg(long)]
         contract_path: Option<String>,
+        /// Print the forge verify command before execution
+        #[arg(long)]
+        debug: bool,
         /// Verifier API key
         #[arg(long)]
         verifier_api_key: Option<String>,
@@ -882,6 +885,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             sourcify,
             verifier_url,
             contract_path,
+            debug,
             verifier_api_key,
             force,
             watch,
@@ -914,6 +918,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 &verifiers,
                 verifier_url,
                 contract_path,
+                debug,
                 verifier_api_key,
                 force,
                 watch,
@@ -1415,6 +1420,19 @@ mod tests {
             Commands::Verify { deployment, contract_path, .. } => {
                 assert_eq!(deployment.as_deref(), Some("CounterProxy"));
                 assert_eq!(contract_path.as_deref(), Some("./src/Counter.sol:Counter"));
+            }
+            _ => panic!("expected verify command"),
+        }
+    }
+
+    #[test]
+    fn verify_debug_flag_parses() {
+        let cli = parse_cli_from(["treb", "verify", "Counter", "--debug"]).unwrap();
+
+        match cli.command {
+            Commands::Verify { deployment, debug, .. } => {
+                assert_eq!(deployment.as_deref(), Some("Counter"));
+                assert!(debug);
             }
             _ => panic!("expected verify command"),
         }

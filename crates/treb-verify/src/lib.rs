@@ -13,6 +13,7 @@ pub struct VerifyOpts {
     pub verifier: String,
     pub verifier_url: Option<String>,
     pub contract_path: Option<String>,
+    pub debug: bool,
     pub verifier_api_key: Option<String>,
     pub etherscan_api_key: Option<String>,
     pub rpc_url: Option<String>,
@@ -97,6 +98,56 @@ pub fn build_verify_args(deployment: &Deployment, opts: &VerifyOpts) -> Result<V
     })
 }
 
+/// Render the subset of `forge verify-contract` arguments that treb controls.
+pub fn format_verify_command(args: &VerifyArgs) -> String {
+    let mut command =
+        vec!["forge".to_string(), "verify-contract".to_string(), args.address.to_string()];
+
+    if let Some(contract) = &args.contract {
+        push_flag_value(&mut command, "--contract", contract.to_string());
+    }
+    if let Some(constructor_args) =
+        args.constructor_args.as_deref().filter(|value| !value.is_empty())
+    {
+        push_flag_value(&mut command, "--constructor-args", constructor_args);
+    }
+    if let Some(compiler_version) = &args.compiler_version {
+        push_flag_value(&mut command, "--compiler-version", compiler_version.as_str());
+    }
+    if args.force {
+        command.push("--force".to_string());
+    }
+    if args.skip_is_verified_check {
+        command.push("--skip-is-verified-check".to_string());
+    }
+    if args.watch {
+        command.push("--watch".to_string());
+    }
+    if let Some(root) = &args.root {
+        push_flag_value(&mut command, "--root", root.display().to_string());
+    }
+    if let Some(api_key) = &args.etherscan.key {
+        push_flag_value(&mut command, "--etherscan-api-key", api_key.as_str());
+    }
+    if let Some(chain) = args.etherscan.chain {
+        push_flag_value(&mut command, "--chain", chain.to_string());
+    }
+    if let Some(rpc_url) = &args.rpc.url {
+        push_flag_value(&mut command, "--rpc-url", rpc_url.as_str());
+    }
+    push_flag_value(&mut command, "--retries", args.retry.retries.to_string());
+    push_flag_value(&mut command, "--delay", args.retry.delay.to_string());
+    push_flag_value(&mut command, "--verifier", args.verifier.verifier.to_string());
+    if let Some(api_key) = &args.verifier.verifier_api_key {
+        push_flag_value(&mut command, "--verifier-api-key", api_key.as_str());
+    }
+    if let Some(verifier_url) = &args.verifier.verifier_url {
+        push_flag_value(&mut command, "--verifier-url", verifier_url.as_str());
+    }
+
+    shell_join(&command)
+}
+
 /// Parse artifact path to extract source path for ContractInfo.
 ///
 /// Artifact path format: `out/<source_relative>/<ContractName>.json`
@@ -127,6 +178,27 @@ fn parse_contract_path_override(contract_path: &str, default_contract_name: &str
     };
 
     ContractInfo { path: Some(path), name }
+}
+
+fn push_flag_value(command: &mut Vec<String>, flag: &str, value: impl Into<String>) {
+    command.push(flag.to_string());
+    command.push(value.into());
+}
+
+fn shell_join(args: &[String]) -> String {
+    args.iter().map(|arg| shell_quote(arg)).collect::<Vec<_>>().join(" ")
+}
+
+fn shell_quote(arg: &str) -> String {
+    if !arg.is_empty()
+        && arg
+            .bytes()
+            .all(|byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'/' | b':' | b'.' | b'_' | b'-' | b'='))
+    {
+        return arg.to_string();
+    }
+
+    format!("'{}'", arg.replace('\'', r#"'"'"'"#))
 }
 
 /// Build an explorer URL for a verified contract based on the chain and verifier.
@@ -204,6 +276,7 @@ mod tests {
             verifier: "etherscan".into(),
             verifier_url: None,
             contract_path: None,
+            debug: false,
             verifier_api_key: None,
             etherscan_api_key: None,
             rpc_url: None,
@@ -399,6 +472,56 @@ mod tests {
         let args = build_verify_args(&d, &opts).unwrap();
         assert_eq!(args.verifier.verifier_api_key, Some("my-api-key".into()));
         assert_eq!(args.verifier.verifier_url, Some("https://custom-api.example.com".into()));
+    }
+
+    #[test]
+    fn formats_verify_command_with_treb_managed_flags() {
+        let d = make_deployment();
+        let opts = VerifyOpts {
+            contract_path: Some("./src/My Counter.sol:Counter".into()),
+            verifier: "blockscout".into(),
+            verifier_api_key: Some("my-api-key".into()),
+            verifier_url: Some("https://example.com/api".into()),
+            etherscan_api_key: Some("etherscan-key".into()),
+            rpc_url: Some("https://rpc.example.com".into()),
+            force: true,
+            watch: true,
+            retries: 10,
+            delay: 15,
+            ..default_opts()
+        };
+
+        let args = build_verify_args(&d, &opts).unwrap();
+        let command = format_verify_command(&args);
+
+        assert!(command.starts_with(&format!("forge verify-contract {}", args.address)));
+        assert!(command.contains("--contract './src/My Counter.sol:Counter'"));
+        assert!(command.contains("--compiler-version 0.8.24"));
+        assert!(command.contains("--force"));
+        assert!(command.contains("--skip-is-verified-check"));
+        assert!(command.contains("--watch"));
+        assert!(command.contains("--root /tmp/test-project"));
+        assert!(command.contains("--etherscan-api-key etherscan-key"));
+        assert!(command.contains("--chain"));
+        assert!(command.contains("--rpc-url https://rpc.example.com"));
+        assert!(command.contains("--retries 10"));
+        assert!(command.contains("--delay 15"));
+        assert!(command.contains("--verifier blockscout"));
+        assert!(command.contains("--verifier-api-key my-api-key"));
+        assert!(command.contains("--verifier-url https://example.com/api"));
+    }
+
+    #[test]
+    fn formats_verify_command_omits_unset_optional_flags() {
+        let d = make_deployment();
+
+        let args = build_verify_args(&d, &default_opts()).unwrap();
+        let command = format_verify_command(&args);
+
+        assert!(!command.contains("--rpc-url"));
+        assert!(!command.contains("--watch"));
+        assert!(!command.contains("--verifier-url"));
+        assert!(!command.contains("--etherscan-api-key"));
     }
 
     #[test]

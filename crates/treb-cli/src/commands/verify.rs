@@ -334,6 +334,7 @@ pub async fn run(
     verifiers: &[String],
     verifier_url: Option<String>,
     contract_path: Option<String>,
+    debug: bool,
     verifier_api_key: Option<String>,
     force: bool,
     watch: bool,
@@ -380,6 +381,7 @@ pub async fn run(
             verifiers,
             verifier_url,
             contract_path,
+            debug,
             verifier_api_key,
             force,
             watch,
@@ -476,6 +478,7 @@ pub async fn run(
             verifier: verifier.clone(),
             verifier_url: verifier_url.clone(),
             contract_path: contract_path.clone(),
+            debug,
             verifier_api_key: resolved_key.clone(),
             etherscan_api_key: resolved_key,
             rpc_url: None,
@@ -503,6 +506,9 @@ pub async fn run(
             }
         };
 
+        if opts.debug {
+            eprintln!("[debug] {}", treb_verify::format_verify_command(&verify_args));
+        }
         let result = verify_args.run().await;
         let explorer_url = treb_verify::explorer_url(chain_id, &address, verifier);
 
@@ -621,6 +627,7 @@ async fn run_batch(
     verifiers: &[String],
     verifier_url: Option<String>,
     contract_path: Option<String>,
+    debug: bool,
     verifier_api_key: Option<String>,
     force: bool,
     watch: bool,
@@ -730,6 +737,7 @@ async fn run_batch(
                 verifier: verifier.clone(),
                 verifier_url: verifier_url.clone(),
                 contract_path: contract_path.clone(),
+                debug,
                 verifier_api_key: resolved_key.clone(),
                 etherscan_api_key: resolved_key,
                 rpc_url: None,
@@ -759,6 +767,9 @@ async fn run_batch(
                 }
             };
 
+            if opts.debug {
+                eprintln!("[debug] {}", treb_verify::format_verify_command(&verify_args));
+            }
             let result = verify_args.run().await;
             let explorer_url = treb_verify::explorer_url(chain_id, &address, verifier);
 
