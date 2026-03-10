@@ -226,6 +226,9 @@ enum Commands {
         /// Verifier API URL override
         #[arg(long, visible_alias = "blockscout-verifier-url")]
         verifier_url: Option<String>,
+        /// Contract path override (e.g. ./src/Counter.sol:Counter)
+        #[arg(long)]
+        contract_path: Option<String>,
         /// Verifier API key
         #[arg(long)]
         verifier_api_key: Option<String>,
@@ -878,6 +881,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             blockscout,
             sourcify,
             verifier_url,
+            contract_path,
             verifier_api_key,
             force,
             watch,
@@ -909,6 +913,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 all,
                 &verifiers,
                 verifier_url,
+                contract_path,
                 verifier_api_key,
                 force,
                 watch,
@@ -1390,6 +1395,26 @@ mod tests {
                 assert_eq!(deployment.as_deref(), Some("Counter"));
                 assert_eq!(namespace.as_deref(), Some("staging"));
                 assert_eq!(network, None);
+            }
+            _ => panic!("expected verify command"),
+        }
+    }
+
+    #[test]
+    fn verify_contract_path_flag_parses() {
+        let cli = parse_cli_from([
+            "treb",
+            "verify",
+            "CounterProxy",
+            "--contract-path",
+            "./src/Counter.sol:Counter",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Verify { deployment, contract_path, .. } => {
+                assert_eq!(deployment.as_deref(), Some("CounterProxy"));
+                assert_eq!(contract_path.as_deref(), Some("./src/Counter.sol:Counter"));
             }
             _ => panic!("expected verify command"),
         }

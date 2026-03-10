@@ -12,6 +12,7 @@ use treb_core::types::deployment::Deployment;
 pub struct VerifyOpts {
     pub verifier: String,
     pub verifier_url: Option<String>,
+    pub contract_path: Option<String>,
     pub verifier_api_key: Option<String>,
     pub etherscan_api_key: Option<String>,
     pub rpc_url: Option<String>,
@@ -27,7 +28,11 @@ pub fn build_verify_args(deployment: &Deployment, opts: &VerifyOpts) -> Result<V
     let address = Address::from_str(&deployment.address)
         .map_err(|e| anyhow::anyhow!("invalid address '{}': {e}", deployment.address))?;
 
-    let contract_info = parse_contract_info(&deployment.artifact.path, &deployment.contract_name);
+    let contract_info = contract_info_from_opts(
+        opts.contract_path.as_deref(),
+        &deployment.artifact.path,
+        &deployment.contract_name,
+    );
 
     let constructor_args = if deployment.deployment_strategy.constructor_args.is_empty() {
         None
@@ -104,6 +109,26 @@ fn parse_contract_info(artifact_path: &str, contract_name: &str) -> ContractInfo
     ContractInfo { path, name: contract_name.to_string() }
 }
 
+fn contract_info_from_opts(
+    contract_path: Option<&str>,
+    artifact_path: &str,
+    contract_name: &str,
+) -> ContractInfo {
+    match contract_path {
+        Some(path_override) => parse_contract_path_override(path_override, contract_name),
+        None => parse_contract_info(artifact_path, contract_name),
+    }
+}
+
+fn parse_contract_path_override(contract_path: &str, default_contract_name: &str) -> ContractInfo {
+    let (path, name) = match contract_path.split_once(':') {
+        Some((path, name)) => (path.to_string(), name.to_string()),
+        None => (contract_path.to_string(), default_contract_name.to_string()),
+    };
+
+    ContractInfo { path: Some(path), name }
+}
+
 /// Build an explorer URL for a verified contract based on the chain and verifier.
 ///
 /// Returns `None` if the chain is not recognized (e.g. a custom chain ID with
@@ -178,6 +203,7 @@ mod tests {
         VerifyOpts {
             verifier: "etherscan".into(),
             verifier_url: None,
+            contract_path: None,
             verifier_api_key: None,
             etherscan_api_key: None,
             rpc_url: None,
@@ -215,6 +241,43 @@ mod tests {
         let contract = args.contract.unwrap();
         assert_eq!(contract.name, "MyToken");
         assert_eq!(contract.path, Some("src/tokens/MyToken.sol".into()));
+    }
+
+    #[test]
+    fn contract_path_override_replaces_artifact_contract_info() {
+        let mut d = make_deployment();
+        d.contract_name = "CounterProxy".into();
+        let opts = VerifyOpts {
+            contract_path: Some("./src/Counter.sol:Counter".into()),
+            ..default_opts()
+        };
+
+        let args = build_verify_args(&d, &opts).unwrap();
+        let contract = args.contract.unwrap();
+        assert_eq!(contract.name, "Counter");
+        assert_eq!(contract.path, Some("./src/Counter.sol".into()));
+    }
+
+    #[test]
+    fn contract_path_without_colon_uses_deployment_contract_name() {
+        let mut d = make_deployment();
+        d.contract_name = "CounterProxy".into();
+        let opts = VerifyOpts { contract_path: Some("./src/Counter.sol".into()), ..default_opts() };
+
+        let args = build_verify_args(&d, &opts).unwrap();
+        let contract = args.contract.unwrap();
+        assert_eq!(contract.name, "CounterProxy");
+        assert_eq!(contract.path, Some("./src/Counter.sol".into()));
+    }
+
+    #[test]
+    fn falls_back_to_artifact_contract_info_when_contract_path_missing() {
+        let d = make_deployment();
+
+        let args = build_verify_args(&d, &default_opts()).unwrap();
+        let contract = args.contract.unwrap();
+        assert_eq!(contract.name, "Counter");
+        assert_eq!(contract.path, Some("Counter.sol".into()));
     }
 
     #[test]

@@ -2,6 +2,7 @@
 ## Codebase Patterns
 - When adding or changing `treb` subcommand flags, keep the clap derive parser in `crates/treb-cli/src/main.rs` and the completion/help builder in `crates/treb-cli/build.rs` in lockstep, then pin the surface with focused `parse_cli_from(...)` tests in `src/main.rs`.
 - For namespace/network-scoped deployment commands, define a dedicated `*Scope` helper that builds `DeploymentFilters`, pre-filters `Registry::list_deployments()`, uses `resolve_deployment_in_scope()` for direct queries, and reuses the same filtered slice for queryless interactive selection and empty-state/error messages.
+- For new `treb verify` runtime flags, thread the option through both the single and batch paths in `crates/treb-cli/src/commands/verify.rs`, and add unit coverage in `crates/treb-verify/src/lib.rs` because `build_verify_args()` owns the final forge verification input mapping.
 
 Started: Tue Mar 10 11:17:39 PM CET 2026
 ---
@@ -24,4 +25,14 @@ Started: Tue Mar 10 11:17:39 PM CET 2026
   - Patterns discovered (e.g., "this codebase uses X for Y"): scoped deployment commands in `treb-cli` are cleanest when they centralize namespace/network formatting and filter construction in a small scope struct instead of duplicating message logic across single and batch paths.
   - Gotchas encountered (e.g., "don't forget to update Z when changing W"): queryless scoped flows need the filtered deployment slice before calling selector helpers; otherwise non-interactive runs can surface generic TTY errors instead of the scoped "no deployments found" message.
   - Useful context (e.g., "the evaluation panel is in component X"): verify batch mode auto-verifies all scoped candidates in non-interactive environments, so invalid-address fixtures are a cheap way to prove scope-limited registry updates without any network dependency.
+---
+## 2026-03-10 23:41:42 CET - P8-US-003
+- Added `--contract-path` to `treb verify`, mirrored it in `crates/treb-cli/build.rs`, and pinned parsing in `crates/treb-cli/src/main.rs`.
+- Threaded `contract_path` through both the single and batch verify flows so every verifier build uses the same override-capable `VerifyOpts`.
+- Updated `crates/treb-verify/src/lib.rs` to prefer `--contract-path` over artifact-derived contract info, including the no-colon fallback to the deployment contract name.
+- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `CLAUDE.md`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/build.rs`, `crates/treb-cli/src/commands/verify.rs`, `crates/treb-verify/src/lib.rs`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y"): verify runtime flags should terminate in `treb_verify::build_verify_args()` tests, because that crate is the single translation layer into Foundry's `VerifyArgs`.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W"): adding a new verify option requires threading it through both single and batch verification loops; updating only one path compiles easily but leaves behavior inconsistent.
+  - Useful context (e.g., "the evaluation panel is in component X"): `--contract-path` follows Foundry's `path[:name]` shape, with missing `:name` falling back to the deployment's recorded `contract_name`.
 ---

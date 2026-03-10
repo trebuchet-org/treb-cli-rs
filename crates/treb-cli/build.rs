@@ -224,6 +224,11 @@ fn build_verify() -> ClapCommand {
                 .visible_alias("blockscout-verifier-url")
                 .help("Verifier API URL override"),
         )
+        .arg(
+            Arg::new("contract-path")
+                .long("contract-path")
+                .help("Contract path override (e.g. ./src/Counter.sol:Counter)"),
+        )
         .arg(Arg::new("verifier-api-key").long("verifier-api-key").help("Verifier API key"))
         .arg(
             Arg::new("force")
