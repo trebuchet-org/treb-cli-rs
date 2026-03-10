@@ -1,9 +1,9 @@
 //! Registry facade — single entry point for all registry operations.
 //!
 //! Ties together deployment, transaction, and safe-transaction stores with the
-//! lookup index and registry metadata. Provides migration detection on open.
+//! lookup index.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use treb_core::{
     TrebError,
@@ -11,33 +11,11 @@ use treb_core::{
 };
 
 use crate::{
-    REGISTRY_DIR, REGISTRY_FILE, REGISTRY_VERSION,
-    io::{read_json_file, write_json_file},
+    REGISTRY_DIR,
     lookup::LookupStore,
     store::{DeploymentStore, GovernorProposalStore, SafeTransactionStore, TransactionStore},
-    types::{LookupIndex, RegistryMeta},
+    types::LookupIndex,
 };
-
-// ── MetaStore (internal) ─────────────────────────────────────────────────
-
-/// Internal store for `registry.json` metadata.
-struct MetaStore {
-    path: PathBuf,
-}
-
-impl MetaStore {
-    fn new(registry_dir: &Path) -> Self {
-        Self { path: registry_dir.join(REGISTRY_FILE) }
-    }
-
-    fn load(&self) -> Result<RegistryMeta, TrebError> {
-        read_json_file(&self.path)
-    }
-
-    fn save(&self, meta: &RegistryMeta) -> Result<(), TrebError> {
-        write_json_file(&self.path, meta)
-    }
-}
 
 // ── Registry ─────────────────────────────────────────────────────────────
 
@@ -57,25 +35,11 @@ pub struct Registry {
 impl Registry {
     /// Open an existing registry at `<project_root>/.treb/`.
     ///
-    /// Reads `registry.json` and checks the version. Returns an error if the
-    /// registry version is greater than [`REGISTRY_VERSION`] (i.e. written by a
-    /// newer tool). Returns `Ok` even if the `.treb/` directory doesn't exist
-    /// (stores will simply be empty).
+    /// Ignores unrelated files in `.treb/`, including a Go-created
+    /// `registry.json`. Returns `Ok` even if the `.treb/` directory doesn't
+    /// exist (stores will simply be empty).
     pub fn open(project_root: &Path) -> Result<Self, TrebError> {
         let registry_dir = project_root.join(REGISTRY_DIR);
-        let meta_store = MetaStore::new(&registry_dir);
-
-        // Check version if registry.json exists.
-        let meta_path = registry_dir.join(REGISTRY_FILE);
-        if meta_path.exists() {
-            let meta = meta_store.load()?;
-            if meta.version > REGISTRY_VERSION {
-                return Err(TrebError::Registry(format!(
-                    "registry version {} is newer than supported version {}; please upgrade treb",
-                    meta.version, REGISTRY_VERSION
-                )));
-            }
-        }
 
         let mut deployments = DeploymentStore::new(&registry_dir);
         let mut transactions = TransactionStore::new(&registry_dir);
@@ -94,17 +58,11 @@ impl Registry {
 
     /// Initialise a new registry at `<project_root>/.treb/`.
     ///
-    /// Creates the directory and `registry.json` if they don't already exist.
-    /// Then delegates to [`open`](Self::open).
+    /// Creates the directory if it doesn't already exist, then delegates to
+    /// [`open`](Self::open).
     pub fn init(project_root: &Path) -> Result<Self, TrebError> {
         let registry_dir = project_root.join(REGISTRY_DIR);
         std::fs::create_dir_all(&registry_dir)?;
-
-        let meta_store = MetaStore::new(&registry_dir);
-        if !meta_store.path.exists() {
-            let meta = RegistryMeta::new();
-            meta_store.save(&meta)?;
-        }
 
         Self::open(project_root)
     }
@@ -274,9 +232,11 @@ mod tests {
     use chrono::Utc;
     use tempfile::TempDir;
     use treb_core::types::{
-        ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, TransactionStatus,
-        VerificationInfo, VerificationStatus,
+        ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, ProposalStatus,
+        TransactionStatus, VerificationInfo, VerificationStatus,
     };
+
+    use crate::io::{VersionedStore, write_json_file};
 
     // ── Test helpers ─────────────────────────────────────────────────────
 
@@ -365,18 +325,39 @@ mod tests {
         }
     }
 
+    fn make_governor_proposal(id: &str, proposed_at_offset_secs: i64) -> GovernorProposal {
+        let base = chrono::DateTime::parse_from_rfc3339("2026-03-02T19:30:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let ts = base + chrono::Duration::seconds(proposed_at_offset_secs);
+        GovernorProposal {
+            proposal_id: id.to_string(),
+            governor_address: "0xGovernor".to_string(),
+            timelock_address: String::new(),
+            chain_id: 1,
+            status: ProposalStatus::Pending,
+            transaction_ids: vec![],
+            proposed_by: "0xProposer".to_string(),
+            proposed_at: ts,
+            description: String::new(),
+            executed_at: None,
+            execution_tx_hash: String::new(),
+        }
+    }
+
     // ── Integration tests ────────────────────────────────────────────────
 
     #[test]
-    fn init_creates_registry_dir_and_meta() {
+    fn init_creates_registry_dir_without_registry_json() {
         let dir = TempDir::new().unwrap();
         let _registry = Registry::init(dir.path()).unwrap();
 
-        let meta_path = dir.path().join(REGISTRY_DIR).join(REGISTRY_FILE);
-        assert!(meta_path.exists(), "registry.json should be created");
-
-        let meta: RegistryMeta = crate::io::read_json_file(&meta_path).unwrap();
-        assert_eq!(meta.version, REGISTRY_VERSION);
+        let registry_dir = dir.path().join(REGISTRY_DIR);
+        assert!(registry_dir.exists(), ".treb should be created");
+        assert!(
+            !registry_dir.join("registry.json").exists(),
+            "registry.json should not be created by init"
+        );
     }
 
     #[test]
@@ -390,25 +371,48 @@ mod tests {
     }
 
     #[test]
-    fn newer_version_registry_returns_descriptive_error() {
+    fn open_ignores_existing_registry_json() {
         let dir = TempDir::new().unwrap();
         let registry_dir = dir.path().join(REGISTRY_DIR);
         fs::create_dir_all(&registry_dir).unwrap();
 
-        let future_version = REGISTRY_VERSION + 1;
-        let mut meta = RegistryMeta::new();
-        meta.version = future_version;
-        write_json_file(&registry_dir.join(REGISTRY_FILE), &meta).unwrap();
+        fs::write(
+            registry_dir.join("registry.json"),
+            r#"{"42220":{"mainnet":{"Registry":"0x1234567890123456789012345678901234567890"}}}"#,
+        )
+        .unwrap();
 
-        let result = Registry::open(dir.path());
-        let msg = match result {
-            Err(e) => e.to_string(),
-            Ok(_) => panic!("expected error for version {future_version} registry"),
-        };
-        assert!(
-            msg.contains("newer than supported"),
-            "expected descriptive version error, got: {msg}"
-        );
+        let registry = Registry::open(dir.path()).unwrap();
+        assert_eq!(registry.deployment_count(), 0);
+        assert_eq!(registry.transaction_count(), 0);
+        assert_eq!(registry.safe_transaction_count(), 0);
+    }
+
+    #[test]
+    fn open_reads_legacy_safe_and_governor_store_filenames() {
+        let dir = TempDir::new().unwrap();
+        let registry_dir = dir.path().join(REGISTRY_DIR);
+        fs::create_dir_all(&registry_dir).unwrap();
+
+        let mut safe_txs = HashMap::new();
+        safe_txs.insert("0xlegacy".to_string(), make_safe_transaction("0xlegacy", 10));
+        write_json_file(&registry_dir.join("safe_txs.json"), &VersionedStore::new(safe_txs))
+            .unwrap();
+
+        let mut governor_proposals = HashMap::new();
+        governor_proposals.insert("prop-1".to_string(), make_governor_proposal("prop-1", 20));
+        write_json_file(
+            &registry_dir.join("governor_proposals.json"),
+            &VersionedStore::new(governor_proposals),
+        )
+        .unwrap();
+
+        let registry = Registry::open(dir.path()).unwrap();
+
+        assert_eq!(registry.safe_transaction_count(), 1);
+        assert_eq!(registry.governor_proposal_count(), 1);
+        assert!(registry.get_safe_transaction("0xlegacy").is_some());
+        assert!(registry.get_governor_proposal("prop-1").is_some());
     }
 
     #[test]
@@ -521,15 +525,36 @@ mod tests {
 
         let saved_deps_raw = fs::read_to_string(treb_dir.join(crate::DEPLOYMENTS_FILE)).unwrap();
         let saved_deps: serde_json::Value = serde_json::from_str(&saved_deps_raw).unwrap();
-        assert_eq!(saved_deps, deployments_value, "deployments golden file round-trip");
+        assert_eq!(
+            saved_deps,
+            serde_json::json!({
+                "_format": crate::STORE_FORMAT,
+                "entries": deployments_value,
+            }),
+            "deployments golden file round-trip"
+        );
 
         let saved_txs_raw = fs::read_to_string(treb_dir.join(crate::TRANSACTIONS_FILE)).unwrap();
         let saved_txs: serde_json::Value = serde_json::from_str(&saved_txs_raw).unwrap();
-        assert_eq!(saved_txs, transactions_value, "transactions golden file round-trip");
+        assert_eq!(
+            saved_txs,
+            serde_json::json!({
+                "_format": crate::STORE_FORMAT,
+                "entries": transactions_value,
+            }),
+            "transactions golden file round-trip"
+        );
 
         let saved_stxs_raw = fs::read_to_string(treb_dir.join(crate::SAFE_TXS_FILE)).unwrap();
         let saved_stxs: serde_json::Value = serde_json::from_str(&saved_stxs_raw).unwrap();
-        assert_eq!(saved_stxs, safe_txs_value, "safe transactions golden file round-trip");
+        assert_eq!(
+            saved_stxs,
+            serde_json::json!({
+                "_format": crate::STORE_FORMAT,
+                "entries": safe_txs_value,
+            }),
+            "safe transactions golden file round-trip"
+        );
     }
 
     #[test]

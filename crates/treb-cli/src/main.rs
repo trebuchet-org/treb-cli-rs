@@ -543,7 +543,6 @@ fn fork_subcommand_json_flag(subcommand: &commands::fork::ForkSubcommand) -> boo
 fn migrate_subcommand_json_flag(subcommand: &commands::migrate::MigrateSubcommand) -> bool {
     match subcommand {
         commands::migrate::MigrateSubcommand::Config { json, .. } => *json,
-        commands::migrate::MigrateSubcommand::Registry { .. } => false,
     }
 }
 

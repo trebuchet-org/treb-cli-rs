@@ -10,7 +10,7 @@ use treb_core::{TrebError, types::Deployment};
 
 use crate::{
     DEPLOYMENTS_FILE,
-    io::{read_json_file_or_default, with_file_lock, write_json_file},
+    io::{read_versioned_file, write_versioned_file},
 };
 
 /// CRUD store for deployments, persisted as a `HashMap<String, Deployment>` in
@@ -29,7 +29,7 @@ impl DeploymentStore {
 
     /// Load deployments from disk, replacing any in-memory data.
     pub fn load(&mut self) -> Result<(), TrebError> {
-        self.data = read_json_file_or_default(&self.path)?;
+        self.data = read_versioned_file(&self.path)?;
         Ok(())
     }
 
@@ -37,7 +37,7 @@ impl DeploymentStore {
     pub fn save(&self) -> Result<(), TrebError> {
         let sorted: BTreeMap<String, Deployment> =
             self.data.iter().map(|(id, deployment)| (id.clone(), deployment.clone())).collect();
-        with_file_lock(&self.path, || write_json_file(&self.path, &sorted))
+        write_versioned_file(&self.path, &sorted)
     }
 
     /// Get a deployment by ID.
@@ -104,6 +104,11 @@ mod tests {
     use treb_core::types::{
         ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, VerificationInfo,
         VerificationStatus,
+    };
+
+    use crate::{
+        STORE_FORMAT,
+        io::{VersionedStore, read_json_file, write_json_file},
     };
 
     /// Helper to create a minimal deployment with the given ID and created_at offset in seconds.
@@ -233,10 +238,48 @@ mod tests {
         store.insert(make_deployment("dep-a", 1)).unwrap();
 
         let raw = fs::read_to_string(dir.path().join(DEPLOYMENTS_FILE)).unwrap();
+        assert!(raw.contains("\"_format\": \"treb-v1\""));
+        assert!(raw.contains("\"entries\": {"));
         let dep_a_index = raw.find("\"dep-a\"").expect("dep-a key should exist");
         let dep_b_index = raw.find("\"dep-b\"").expect("dep-b key should exist");
 
         assert!(dep_a_index < dep_b_index, "deployments should be serialized in key order");
+    }
+
+    #[test]
+    fn load_reads_legacy_bare_map() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(DEPLOYMENTS_FILE);
+        let mut deployments = BTreeMap::new();
+        deployments.insert("dep-1".to_string(), make_deployment("dep-1", 0));
+        deployments.insert("dep-2".to_string(), make_deployment("dep-2", 1));
+
+        write_json_file(&path, &deployments).unwrap();
+
+        let mut store = DeploymentStore::new(dir.path());
+        store.load().unwrap();
+
+        assert_eq!(store.count(), 2);
+        assert_eq!(store.get("dep-1").unwrap().id, "dep-1");
+        assert_eq!(store.get("dep-2").unwrap().id, "dep-2");
+    }
+
+    #[test]
+    fn load_reads_wrapped_format() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(DEPLOYMENTS_FILE);
+        let mut deployments = BTreeMap::new();
+        deployments.insert("dep-1".to_string(), make_deployment("dep-1", 0));
+        deployments.insert("dep-2".to_string(), make_deployment("dep-2", 1));
+
+        write_json_file(&path, &VersionedStore::new(deployments)).unwrap();
+
+        let mut store = DeploymentStore::new(dir.path());
+        store.load().unwrap();
+
+        assert_eq!(store.count(), 2);
+        assert_eq!(store.get("dep-1").unwrap().id, "dep-1");
+        assert_eq!(store.get("dep-2").unwrap().id, "dep-2");
     }
 
     #[test]
@@ -290,8 +333,24 @@ mod tests {
         let saved_value: serde_json::Value = serde_json::from_str(&saved_raw).unwrap();
 
         assert_eq!(
-            saved_value, fixture_value,
-            "golden file round-trip: saved JSON must equal fixture"
+            saved_value,
+            serde_json::json!({
+                "_format": STORE_FORMAT,
+                "entries": fixture_value,
+            }),
+            "golden file round-trip: saved JSON must wrap fixture entries"
         );
+    }
+
+    #[test]
+    fn save_writes_wrapped_format() {
+        let dir = TempDir::new().unwrap();
+        let mut store = DeploymentStore::new(dir.path());
+
+        store.insert(make_deployment("dep-1", 0)).unwrap();
+
+        let saved: serde_json::Value = read_json_file(&dir.path().join(DEPLOYMENTS_FILE)).unwrap();
+        assert_eq!(saved["_format"], STORE_FORMAT);
+        assert!(saved["entries"].get("dep-1").is_some());
     }
 }

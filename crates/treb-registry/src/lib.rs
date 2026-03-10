@@ -1,22 +1,23 @@
 //! Registry system for treb — JSON-backed deployment registry with CRUD
-//! operations, lookup index, atomic file I/O, and migration detection.
+//! operations, lookup index, and atomic file I/O.
+
+use std::path::{Path, PathBuf};
 
 pub mod io;
 pub mod lookup;
-pub mod migrations;
 pub mod registry;
 pub mod store;
 pub mod types;
 
 // Re-export registry types at crate root for convenience.
+pub use io::{VersionedStore, read_versioned_file, write_versioned_file};
 pub use lookup::LookupStore;
-pub use migrations::{MigrationReport, run_migrations};
 pub use registry::Registry;
 pub use store::{
     DeploymentStore, ForkStateStore, GovernorProposalStore, SafeTransactionStore, TransactionStore,
     fork_state::{remove_snapshot, restore_registry, snapshot_registry},
 };
-pub use types::{LookupIndex, RegistryMeta};
+pub use types::LookupIndex;
 
 // ── File-name constants ────────────────────────────────────────────────────
 
@@ -35,20 +36,26 @@ pub const GOVERNOR_PROPOSALS_FILE: &str = "governor-txs.json";
 /// File storing the lookup index.
 pub const LOOKUP_FILE: &str = "lookup.json";
 
-/// File storing the registry metadata.
-///
-/// Note: The Go CLI uses the same filename to store a `SolidityRegistry` map
-/// (`{chainId: {namespace: {name: address}}}`), which tracks on-chain
-/// registry contract addresses. Rust stores `RegistryMeta` (version and
-/// timestamps) instead. See [`RegistryMeta`] for the full compatibility
-/// analysis and chosen resolution.
-pub const REGISTRY_FILE: &str = "registry.json";
-
 /// Directory name for the registry inside the project root.
 pub const REGISTRY_DIR: &str = ".treb";
 
 /// File storing fork-mode state (active forks, history).
 pub const FORK_STATE_FILE: &str = "fork.json";
 
-/// Current registry format version.
-pub const REGISTRY_VERSION: u32 = 2;
+/// Current on-disk wrapper format for registry store files.
+pub const STORE_FORMAT: &str = "treb-v1";
+
+const LEGACY_SAFE_TXS_FILE: &str = "safe_txs.json";
+const LEGACY_GOVERNOR_PROPOSALS_FILE: &str = "governor_proposals.json";
+const LEGACY_FORK_STATE_FILE: &str = "fork-state.json";
+
+pub(crate) fn legacy_registry_store_path(path: &Path) -> Option<PathBuf> {
+    let legacy_name = match path.file_name()?.to_str()? {
+        SAFE_TXS_FILE => LEGACY_SAFE_TXS_FILE,
+        GOVERNOR_PROPOSALS_FILE => LEGACY_GOVERNOR_PROPOSALS_FILE,
+        FORK_STATE_FILE => LEGACY_FORK_STATE_FILE,
+        _ => return None,
+    };
+
+    Some(path.with_file_name(legacy_name))
+}

@@ -1,13 +1,17 @@
 //! Lookup index: build, persist, and query deployment lookups by name,
 //! address, or tag.
 
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::{BTreeMap, HashMap},
+    path::PathBuf,
+};
 
+use serde::Serialize;
 use treb_core::{TrebError, types::Deployment};
 
 use crate::{
     LOOKUP_FILE,
-    io::{read_json_file_or_default, with_file_lock, write_json_file},
+    io::{read_versioned_file, write_versioned_file},
     types::LookupIndex,
 };
 
@@ -38,7 +42,52 @@ pub fn build_lookup_index(deployments: &HashMap<String, Deployment>) -> LookupIn
         }
     }
 
+    normalize_lookup_index(&mut index);
     index
+}
+
+fn normalize_lookup_index(index: &mut LookupIndex) {
+    for ids in index.by_name.values_mut() {
+        ids.sort();
+    }
+    for ids in index.by_tag.values_mut() {
+        ids.sort();
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedLookupIndex {
+    by_name: BTreeMap<String, Vec<String>>,
+    by_address: BTreeMap<String, String>,
+    by_tag: BTreeMap<String, Vec<String>>,
+}
+
+impl From<&LookupIndex> for PersistedLookupIndex {
+    fn from(index: &LookupIndex) -> Self {
+        let by_name = index
+            .by_name
+            .iter()
+            .map(|(key, ids)| {
+                let mut ids = ids.clone();
+                ids.sort();
+                (key.clone(), ids)
+            })
+            .collect();
+        let by_address =
+            index.by_address.iter().map(|(key, id)| (key.clone(), id.clone())).collect();
+        let by_tag = index
+            .by_tag
+            .iter()
+            .map(|(key, ids)| {
+                let mut ids = ids.clone();
+                ids.sort();
+                (key.clone(), ids)
+            })
+            .collect();
+
+        Self { by_name, by_address, by_tag }
+    }
 }
 
 // ── Query methods on LookupIndex ─────────────────────────────────────────
@@ -76,12 +125,15 @@ impl LookupStore {
     /// Load the lookup index from disk, returning a default (empty) index if
     /// the file does not exist.
     pub fn load(&self) -> Result<LookupIndex, TrebError> {
-        read_json_file_or_default(&self.path)
+        let mut index = read_versioned_file(&self.path)?;
+        normalize_lookup_index(&mut index);
+        Ok(index)
     }
 
     /// Atomically save the lookup index to disk under a file lock.
     pub fn save(&self, index: &LookupIndex) -> Result<(), TrebError> {
-        with_file_lock(&self.path, || write_json_file(&self.path, index))
+        let persisted = PersistedLookupIndex::from(index);
+        write_versioned_file(&self.path, &persisted)
     }
 
     /// Rebuild the lookup index from the given deployments, save it to disk,
@@ -107,6 +159,11 @@ mod tests {
     use treb_core::types::{
         ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, VerificationInfo,
         VerificationStatus,
+    };
+
+    use crate::{
+        STORE_FORMAT,
+        io::{VersionedStore, read_json_file, write_json_file},
     };
 
     /// Helper to create a minimal deployment with configurable fields for
@@ -154,6 +211,15 @@ mod tests {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    fn sample_lookup_index() -> LookupIndex {
+        let mut index = LookupIndex::default();
+        index.by_name.insert("factory".to_string(), vec!["dep-2".to_string(), "dep-1".to_string()]);
+        index.by_address.insert("0xbbb".to_string(), "dep-2".to_string());
+        index.by_address.insert("0xaaa".to_string(), "dep-1".to_string());
+        index.by_tag.insert("core".to_string(), vec!["dep-2".to_string(), "dep-1".to_string()]);
+        index
     }
 
     #[test]
@@ -268,6 +334,52 @@ mod tests {
     }
 
     #[test]
+    fn load_reads_legacy_bare_lookup_index() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(LOOKUP_FILE);
+        let bare = sample_lookup_index();
+        write_json_file(&path, &bare).unwrap();
+
+        let store = LookupStore::new(dir.path());
+        let loaded = store.load().unwrap();
+
+        let mut expected = sample_lookup_index();
+        normalize_lookup_index(&mut expected);
+        assert_eq!(loaded, expected);
+    }
+
+    #[test]
+    fn load_reads_wrapped_lookup_index() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(LOOKUP_FILE);
+        let wrapped = VersionedStore::new(sample_lookup_index());
+        write_json_file(&path, &wrapped).unwrap();
+
+        let store = LookupStore::new(dir.path());
+        let loaded = store.load().unwrap();
+
+        let mut expected = sample_lookup_index();
+        normalize_lookup_index(&mut expected);
+        assert_eq!(loaded, expected);
+    }
+
+    #[test]
+    fn save_writes_wrapped_format() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(LOOKUP_FILE);
+        let store = LookupStore::new(dir.path());
+
+        store.save(&sample_lookup_index()).unwrap();
+
+        let saved: serde_json::Value = read_json_file(&path).unwrap();
+        assert_eq!(saved["_format"], STORE_FORMAT);
+        assert_eq!(saved["entries"]["byName"]["factory"], serde_json::json!(["dep-1", "dep-2"]));
+        assert_eq!(saved["entries"]["byAddress"]["0xaaa"], "dep-1");
+        assert_eq!(saved["entries"]["byAddress"]["0xbbb"], "dep-2");
+        assert_eq!(saved["entries"]["byTag"]["core"], serde_json::json!(["dep-1", "dep-2"]));
+    }
+
+    #[test]
     fn rebuild_save_reload_round_trip() {
         let dir = TempDir::new().unwrap();
         let store = LookupStore::new(dir.path());
@@ -289,6 +401,32 @@ mod tests {
         assert_eq!(loaded.by_name.len(), 2);
         assert_eq!(loaded.by_address.len(), 2);
         assert_eq!(loaded.by_tag.len(), 1);
+    }
+
+    #[test]
+    fn rebuild_writes_wrapped_format() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(LOOKUP_FILE);
+        let store = LookupStore::new(dir.path());
+
+        let mut deployments = HashMap::new();
+        deployments.insert(
+            "dep-2".to_string(),
+            make_deployment("dep-2", "Factory", "0xBBB", Some(vec!["core".into()])),
+        );
+        deployments.insert(
+            "dep-1".to_string(),
+            make_deployment("dep-1", "Factory", "0xAAA", Some(vec!["core".into()])),
+        );
+
+        store.rebuild(&deployments).unwrap();
+
+        let saved: serde_json::Value = read_json_file(&path).unwrap();
+        assert_eq!(saved["_format"], STORE_FORMAT);
+        assert_eq!(saved["entries"]["byName"]["factory"], serde_json::json!(["dep-1", "dep-2"]));
+        assert_eq!(saved["entries"]["byTag"]["core"], serde_json::json!(["dep-1", "dep-2"]));
+        assert_eq!(saved["entries"]["byAddress"]["0xaaa"], "dep-1");
+        assert_eq!(saved["entries"]["byAddress"]["0xbbb"], "dep-2");
     }
 
     #[test]

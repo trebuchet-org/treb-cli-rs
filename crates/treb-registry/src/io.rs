@@ -3,9 +3,24 @@
 use std::{fs, io::Write, path::Path};
 
 use fs2::FileExt;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tempfile::NamedTempFile;
 use treb_core::error::TrebError;
+
+/// Versioned wrapper used for persisted registry store files.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VersionedStore<T> {
+    #[serde(rename = "_format")]
+    pub format: String,
+    pub entries: T,
+}
+
+impl<T> VersionedStore<T> {
+    /// Wrap `entries` with the current store format marker.
+    pub fn new(entries: T) -> Self {
+        Self { format: crate::STORE_FORMAT.to_string(), entries }
+    }
+}
 
 /// Read and deserialize a JSON file into `T`.
 ///
@@ -26,6 +41,48 @@ pub fn read_json_file_or_default<T: DeserializeOwned + Default>(
         return Ok(T::default());
     }
     read_json_file(path)
+}
+
+/// Read a versioned store file, accepting both wrapped and legacy bare JSON.
+///
+/// Returns `T::default()` when the file does not exist or a wrapped payload is
+/// incompatible/corrupt.
+pub fn read_versioned_file<T: DeserializeOwned + Default>(path: &Path) -> Result<T, TrebError> {
+    if !path.exists() {
+        return Ok(T::default());
+    }
+
+    let value: serde_json::Value = read_json_file(path)?;
+    let looks_wrapped = value
+        .as_object()
+        .is_some_and(|object| object.contains_key("_format") && object.contains_key("entries"));
+
+    if looks_wrapped {
+        return match serde_json::from_value::<VersionedStore<T>>(value) {
+            Ok(wrapped) => Ok(wrapped.entries),
+            Err(_) => Ok(T::default()),
+        };
+    }
+
+    deserialize_value(path, value)
+}
+
+/// Read a versioned store file, falling back to the legacy filename when the
+/// current filename does not exist yet.
+pub fn read_versioned_file_compat<T: DeserializeOwned + Default>(
+    path: &Path,
+) -> Result<T, TrebError> {
+    if path.exists() {
+        return read_versioned_file(path);
+    }
+
+    if let Some(legacy_path) = crate::legacy_registry_store_path(path) {
+        if legacy_path.exists() {
+            return read_versioned_file(&legacy_path);
+        }
+    }
+
+    Ok(T::default())
 }
 
 /// Atomically write `value` as 2-space-indented JSON with a trailing newline.
@@ -51,6 +108,15 @@ pub fn write_json_file<T: Serialize>(path: &Path, value: &T) -> Result<(), TrebE
     })?;
 
     Ok(())
+}
+
+/// Atomically write `entries` under the versioned store wrapper while holding
+/// the store's advisory file lock.
+pub fn write_versioned_file<T: Serialize>(path: &Path, entries: &T) -> Result<(), TrebError> {
+    with_file_lock(path, || {
+        let wrapped = VersionedStore::new(entries);
+        write_json_file(path, &wrapped)
+    })
 }
 
 /// RAII guard that releases an exclusive advisory lock on drop.
@@ -87,6 +153,14 @@ where
     let _guard = FileLockGuard { file };
 
     f()
+}
+
+fn deserialize_value<T: DeserializeOwned>(
+    path: &Path,
+    value: serde_json::Value,
+) -> Result<T, TrebError> {
+    serde_json::from_value(value)
+        .map_err(|e| TrebError::Registry(format!("failed to parse {}: {e}", path.display())))
 }
 
 #[cfg(test)]
@@ -150,6 +224,23 @@ mod tests {
     }
 
     #[test]
+    fn versioned_store_serializes_with_format_and_entries() {
+        let wrapped = VersionedStore::new(Sample { name: "hello".into(), count: 42 });
+
+        let json = serde_json::to_value(&wrapped).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "_format": crate::STORE_FORMAT,
+                "entries": {
+                    "name": "hello",
+                    "count": 42
+                }
+            })
+        );
+    }
+
+    #[test]
     fn invalid_json_returns_descriptive_error() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("bad.json");
@@ -178,6 +269,112 @@ mod tests {
         write_json_file(&path, &map).unwrap();
         let loaded: HashMap<String, Vec<u32>> = read_json_file(&path).unwrap();
         assert_eq!(loaded, map);
+    }
+
+    #[test]
+    fn read_versioned_file_reads_wrapped_json() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("wrapped.json");
+
+        let mut map: HashMap<String, Vec<u32>> = HashMap::new();
+        map.insert("primes".into(), vec![2, 3, 5, 7, 11]);
+
+        write_json_file(&path, &VersionedStore::new(map.clone())).unwrap();
+
+        let loaded: HashMap<String, Vec<u32>> = read_versioned_file(&path).unwrap();
+        assert_eq!(loaded, map);
+    }
+
+    #[test]
+    fn read_versioned_file_ignores_unknown_wrapped_format() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("wrapped-unknown-format.json");
+
+        let mut map: HashMap<String, Vec<u32>> = HashMap::new();
+        map.insert("primes".into(), vec![2, 3, 5, 7, 11]);
+
+        write_json_file(
+            &path,
+            &serde_json::json!({
+                "_format": "treb-v999",
+                "entries": map,
+            }),
+        )
+        .unwrap();
+
+        let loaded: HashMap<String, Vec<u32>> = read_versioned_file(&path).unwrap();
+        assert_eq!(loaded["primes"], vec![2, 3, 5, 7, 11]);
+    }
+
+    #[test]
+    fn read_versioned_file_returns_default_for_incompatible_wrapped_payload() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("wrapped-incompatible.json");
+
+        write_json_file(
+            &path,
+            &serde_json::json!({
+                "_format": "treb-v999",
+                "entries": [1, 2, 3],
+            }),
+        )
+        .unwrap();
+
+        let loaded: HashMap<String, Vec<u32>> = read_versioned_file(&path).unwrap();
+        assert!(loaded.is_empty());
+    }
+
+    #[test]
+    fn read_versioned_file_reads_bare_map_json() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("bare.json");
+
+        let mut map: HashMap<String, Vec<u32>> = HashMap::new();
+        map.insert("fibs".into(), vec![1, 1, 2, 3, 5]);
+
+        write_json_file(&path, &map).unwrap();
+
+        let loaded: HashMap<String, Vec<u32>> = read_versioned_file(&path).unwrap();
+        assert_eq!(loaded, map);
+    }
+
+    #[test]
+    fn read_versioned_file_reads_bare_map_with_format_key() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("bare-with-format-key.json");
+
+        let mut map: HashMap<String, Vec<u32>> = HashMap::new();
+        map.insert("_format".into(), vec![1, 2, 3]);
+        map.insert("fibs".into(), vec![1, 1, 2, 3, 5]);
+
+        write_json_file(&path, &map).unwrap();
+
+        let loaded: HashMap<String, Vec<u32>> = read_versioned_file(&path).unwrap();
+        assert_eq!(loaded, map);
+    }
+
+    #[test]
+    fn read_versioned_file_missing_returns_default() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("missing-versioned.json");
+
+        let loaded: HashMap<String, Vec<u32>> = read_versioned_file(&path).unwrap();
+        assert!(loaded.is_empty());
+    }
+
+    #[test]
+    fn write_versioned_file_writes_wrapped_json() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("versioned.json");
+
+        let mut map: HashMap<String, Vec<u32>> = HashMap::new();
+        map.insert("evens".into(), vec![2, 4, 6]);
+
+        write_versioned_file(&path, &map).unwrap();
+
+        let json: serde_json::Value = read_json_file(&path).unwrap();
+        assert_eq!(json["_format"], crate::STORE_FORMAT);
+        assert_eq!(json["entries"]["evens"], serde_json::json!([2, 4, 6]));
     }
 
     #[test]
@@ -213,6 +410,41 @@ mod tests {
         assert!(
             waited.as_millis() >= 50,
             "thread 2 should have blocked waiting for lock, only waited {waited:?}"
+        );
+    }
+
+    #[test]
+    fn write_versioned_file_waits_for_existing_lock() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("versioned-lock.json");
+
+        let barrier = Arc::new(Barrier::new(2));
+        let path_clone = path.clone();
+        let barrier_clone = Arc::clone(&barrier);
+
+        let t1 = thread::spawn(move || {
+            with_file_lock(&path_clone, || {
+                barrier_clone.wait();
+                thread::sleep(std::time::Duration::from_millis(200));
+                Ok(())
+            })
+            .unwrap();
+        });
+
+        barrier.wait();
+        thread::sleep(std::time::Duration::from_millis(20));
+
+        let start = Instant::now();
+        let mut map: HashMap<String, Vec<u32>> = HashMap::new();
+        map.insert("held".into(), vec![1]);
+        write_versioned_file(&path, &map).unwrap();
+        let waited = start.elapsed();
+
+        t1.join().unwrap();
+
+        assert!(
+            waited.as_millis() >= 50,
+            "write_versioned_file should wait for the same advisory lock, only waited {waited:?}"
         );
     }
 }

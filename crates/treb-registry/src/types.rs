@@ -1,46 +1,8 @@
-//! Registry-specific types: metadata and lookup index.
+//! Registry-specific types.
 
 use std::collections::HashMap;
 
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-
-/// Metadata stored in `registry.json` at the root of the `.treb/` directory.
-///
-/// # Schema compatibility with Go CLI
-///
-/// The Go CLI writes a `SolidityRegistry` map to `registry.json` with the
-/// shape `{chainId: {namespace: {name: address}}}`, tracking on-chain
-/// registry contract addresses. Rust does not use on-chain registries and
-/// instead stores versioning metadata (`version`, `createdAt`, `updatedAt`).
-///
-/// Resolution: these schemas serve different purposes and the Go CLI does
-/// not read Rust's `registry.json` for its own operation (and vice versa).
-/// Both CLIs tolerate unknown keys via serde's default behavior, so the
-/// files can coexist if a project switches between CLIs. If future
-/// interop requires it, the `SolidityRegistry` map can be added as an
-/// optional field here or written to a separate file.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RegistryMeta {
-    pub version: u32,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-impl RegistryMeta {
-    /// Create a new `RegistryMeta` at the current [`REGISTRY_VERSION`](crate::REGISTRY_VERSION).
-    pub fn new() -> Self {
-        let now = Utc::now();
-        Self { version: crate::REGISTRY_VERSION, created_at: now, updated_at: now }
-    }
-}
-
-impl Default for RegistryMeta {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 /// In-memory secondary indexes for fast deployment lookups by name, address,
 /// or tag.
@@ -61,42 +23,6 @@ pub struct LookupIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn registry_meta_new_sets_current_version() {
-        let meta = RegistryMeta::new();
-        assert_eq!(meta.version, crate::REGISTRY_VERSION);
-    }
-
-    #[test]
-    fn registry_meta_new_sets_timestamps() {
-        let before = Utc::now();
-        let meta = RegistryMeta::new();
-        let after = Utc::now();
-
-        assert!(meta.created_at >= before && meta.created_at <= after);
-        assert!(meta.updated_at >= before && meta.updated_at <= after);
-    }
-
-    #[test]
-    fn registry_meta_serde_round_trip() {
-        let meta = RegistryMeta::new();
-        let json = serde_json::to_string_pretty(&meta).unwrap();
-        let deserialized: RegistryMeta = serde_json::from_str(&json).unwrap();
-        assert_eq!(meta, deserialized);
-    }
-
-    #[test]
-    fn registry_meta_camel_case_fields() {
-        let meta = RegistryMeta::new();
-        let json = serde_json::to_value(&meta).unwrap();
-        let obj = json.as_object().unwrap();
-        assert!(obj.contains_key("version"));
-        assert!(obj.contains_key("createdAt"));
-        assert!(obj.contains_key("updatedAt"));
-        assert!(!obj.contains_key("created_at"));
-        assert!(!obj.contains_key("updated_at"));
-    }
 
     #[test]
     fn lookup_index_default_is_empty() {

@@ -434,19 +434,32 @@ fn migrate_config_already_v2_outputs_message_and_no_file_changes() {
     assert!(backups.is_empty(), "no backup should be created for already-v2 config");
 }
 
-// ── treb migrate registry ─────────────────────────────────────────────────────
+// ── treb migrate ──────────────────────────────────────────────────────────────
 
 #[test]
-fn migrate_registry_dry_run_on_current_version_outputs_up_to_date() {
+fn migrate_help_does_not_list_registry_subcommand() {
+    let output =
+        treb().args(["migrate", "--help"]).output().expect("failed to run treb migrate --help");
+
+    assert!(output.status.success(), "migrate --help should succeed");
+
+    let stdout = String::from_utf8(output.stdout).expect("help output should be utf-8");
+    assert!(stdout.contains("config"), "migrate help should list the config subcommand: {stdout}");
+    assert!(
+        !stdout.contains("registry"),
+        "migrate help should not mention the removed registry subcommand: {stdout}"
+    );
+}
+
+#[test]
+fn migrate_registry_subcommand_is_rejected() {
     let tmp = tempfile::tempdir().unwrap();
     fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
-    // Initialize registry at the current version.
-    let _registry = treb_registry::Registry::init(tmp.path()).unwrap();
 
     treb()
-        .args(["migrate", "registry", "--dry-run"])
+        .args(["migrate", "registry"])
         .current_dir(tmp.path())
         .assert()
-        .success()
-        .stderr(predicate::str::contains("up to date"));
+        .failure()
+        .stderr(predicate::str::contains("unrecognized subcommand 'registry'"));
 }

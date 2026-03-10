@@ -12,10 +12,10 @@ use super::{
     normalizer::{Normalizer, NormalizerChain},
 };
 
-/// Default output artifacts to compare (matches Go's convention).
+/// Default output artifacts to compare for registry-store golden tests.
 /// These are bare filenames; the framework prepends `.treb/` when resolving paths.
 pub const DEFAULT_OUTPUT_ARTIFACTS: &[&str] =
-    &["deployments.json", "registry.json", "safe-txs.json", "governor-txs.json"];
+    &["deployments.json", "safe-txs.json", "governor-txs.json"];
 
 /// Callback that operates on a [`TestContext`] during test execution.
 type Hook = Box<dyn Fn(&TestContext)>;

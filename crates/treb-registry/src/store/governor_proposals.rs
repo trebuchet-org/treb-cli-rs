@@ -1,12 +1,15 @@
 //! Persistent store for governor proposals backed by `governor-txs.json`.
 
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::{BTreeMap, HashMap},
+    path::PathBuf,
+};
 
 use treb_core::{TrebError, types::GovernorProposal};
 
 use crate::{
     GOVERNOR_PROPOSALS_FILE,
-    io::{read_json_file_or_default, with_file_lock, write_json_file},
+    io::{read_versioned_file_compat, write_versioned_file},
 };
 
 /// CRUD store for governor proposals, persisted as a
@@ -26,13 +29,15 @@ impl GovernorProposalStore {
 
     /// Load governor proposals from disk, replacing any in-memory data.
     pub fn load(&mut self) -> Result<(), TrebError> {
-        self.data = read_json_file_or_default(&self.path)?;
+        self.data = read_versioned_file_compat(&self.path)?;
         Ok(())
     }
 
     /// Atomically save all governor proposals to disk under a file lock.
     pub fn save(&self) -> Result<(), TrebError> {
-        with_file_lock(&self.path, || write_json_file(&self.path, &self.data))
+        let sorted: BTreeMap<String, GovernorProposal> =
+            self.data.iter().map(|(id, proposal)| (id.clone(), proposal.clone())).collect();
+        write_versioned_file(&self.path, &sorted)
     }
 
     /// Get a governor proposal by its `proposal_id`.
@@ -93,6 +98,11 @@ mod tests {
     use chrono::Utc;
     use tempfile::TempDir;
     use treb_core::types::ProposalStatus;
+
+    use crate::{
+        STORE_FORMAT,
+        io::{VersionedStore, read_json_file, write_json_file},
+    };
 
     /// Helper to create a minimal governor proposal with the given ID and
     /// proposed_at offset in seconds.
@@ -214,6 +224,42 @@ mod tests {
     }
 
     #[test]
+    fn load_reads_legacy_bare_map() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(GOVERNOR_PROPOSALS_FILE);
+        let mut proposals = BTreeMap::new();
+        proposals.insert("prop-1".to_string(), make_governor_proposal("prop-1", 0));
+        proposals.insert("prop-2".to_string(), make_governor_proposal("prop-2", 1));
+
+        write_json_file(&path, &proposals).unwrap();
+
+        let mut store = GovernorProposalStore::new(dir.path());
+        store.load().unwrap();
+
+        assert_eq!(store.count(), 2);
+        assert_eq!(store.get("prop-1").unwrap().proposal_id, "prop-1");
+        assert_eq!(store.get("prop-2").unwrap().proposal_id, "prop-2");
+    }
+
+    #[test]
+    fn load_reads_wrapped_format() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(GOVERNOR_PROPOSALS_FILE);
+        let mut proposals = BTreeMap::new();
+        proposals.insert("prop-1".to_string(), make_governor_proposal("prop-1", 0));
+        proposals.insert("prop-2".to_string(), make_governor_proposal("prop-2", 1));
+
+        write_json_file(&path, &VersionedStore::new(proposals)).unwrap();
+
+        let mut store = GovernorProposalStore::new(dir.path());
+        store.load().unwrap();
+
+        assert_eq!(store.count(), 2);
+        assert_eq!(store.get("prop-1").unwrap().proposal_id, "prop-1");
+        assert_eq!(store.get("prop-2").unwrap().proposal_id, "prop-2");
+    }
+
+    #[test]
     fn round_trip_persistence() {
         let dir = TempDir::new().unwrap();
 
@@ -231,6 +277,19 @@ mod tests {
         assert_eq!(store2.count(), 2);
         assert!(store2.get("prop-1").is_some());
         assert!(store2.get("prop-2").is_some());
+    }
+
+    #[test]
+    fn save_writes_wrapped_format() {
+        let dir = TempDir::new().unwrap();
+        let mut store = GovernorProposalStore::new(dir.path());
+
+        store.insert(make_governor_proposal("prop-1", 10)).unwrap();
+
+        let saved: serde_json::Value =
+            read_json_file(&dir.path().join(GOVERNOR_PROPOSALS_FILE)).unwrap();
+        assert_eq!(saved["_format"], STORE_FORMAT);
+        assert!(saved["entries"].get("prop-1").is_some());
     }
 
     #[test]

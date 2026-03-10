@@ -155,7 +155,7 @@ async fn e2e_registry_consistency_after_tag() {
 }
 
 /// After a full reset, all registry files must be empty/reset with valid
-/// structure (empty objects/maps, valid metadata).
+/// structure (empty objects/maps, no synthesized metadata file).
 #[tokio::test(flavor = "multi_thread")]
 async fn e2e_registry_consistency_after_reset() {
     let Some(anvil) = spawn_anvil_or_skip().await else {
@@ -190,11 +190,10 @@ async fn e2e_registry_consistency_after_reset() {
     assert!(by_address.is_empty(), "byAddress must be empty after reset");
     assert!(by_tag.is_empty(), "byTag must be empty after reset");
 
-    // Registry metadata must still be valid
-    let registry = read_registry_file(tmp.path(), "registry.json");
-    assert!(registry["version"].is_u64(), "registry.json must retain version");
-    assert!(registry["createdAt"].is_string(), "registry.json must retain createdAt");
-    assert!(registry["updatedAt"].is_string(), "registry.json must retain updatedAt");
+    assert!(
+        !tmp.path().join(".treb/registry.json").exists(),
+        "reset must not recreate registry.json metadata"
+    );
 
     // Consistency check passes trivially on empty registry
     assert_registry_consistent(tmp.path());

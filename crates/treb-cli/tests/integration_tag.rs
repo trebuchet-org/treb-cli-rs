@@ -3,22 +3,25 @@
 mod framework;
 mod helpers;
 
+use std::fs;
+
 use framework::{
     context::TestContext,
     integration_test::{IntegrationTest, run_integration_test},
     normalizer::PathNormalizer,
 };
+use treb_registry::{STORE_FORMAT, read_versioned_file, write_versioned_file};
 
 /// Seed the registry and pre-add a "v3-release" tag to the FPMM:v3.0.0 deployment.
 /// Used by remove and duplicate-add tests that need a tag already present.
 fn seed_registry_with_tag(project_root: &std::path::Path) {
     helpers::seed_registry(project_root);
     let dep_path = project_root.join(".treb/deployments.json");
-    let data = std::fs::read_to_string(&dep_path).unwrap();
-    let mut map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&data).unwrap();
+    let mut map: serde_json::Map<String, serde_json::Value> =
+        read_versioned_file(&dep_path).unwrap();
     let dep = map.get_mut("mainnet/42220/FPMM:v3.0.0").unwrap();
     dep.as_object_mut().unwrap().insert("tags".to_string(), serde_json::json!(["v3-release"]));
-    std::fs::write(&dep_path, serde_json::to_string_pretty(&map).unwrap()).unwrap();
+    write_versioned_file(&dep_path, &map).unwrap();
 }
 
 /// Show tags on a deployment with no tags displays "No tags".
@@ -66,9 +69,8 @@ fn tag_add() {
             // deployments.json uses HashMap so key order is non-deterministic;
             // writing just the tags avoids golden file flakiness.
             let deployments_path = ctx.path().join(".treb/deployments.json");
-            let data = std::fs::read_to_string(&deployments_path).unwrap();
             let map: serde_json::Map<String, serde_json::Value> =
-                serde_json::from_str(&data).unwrap();
+                read_versioned_file(&deployments_path).unwrap();
             let dep = map.get("mainnet/42220/FPMM:v3.0.0").unwrap();
             let tags = dep.get("tags").unwrap();
             let artifact = serde_json::json!({
@@ -82,6 +84,38 @@ fn tag_add() {
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
+}
+
+/// A mutating write upgrades legacy bare deployments.json into the wrapped store format.
+#[test]
+fn tag_add_upgrades_legacy_deployments_file_to_versioned_format() {
+    let ctx = TestContext::new("project");
+    ctx.run(["init"]).success();
+    helpers::seed_registry(ctx.path());
+
+    let deployments_path = ctx.path().join(".treb/deployments.json");
+    let before = fs::read_to_string(&deployments_path).expect("read legacy deployments fixture");
+    assert!(
+        !before.contains("\"_format\""),
+        "seeded fixture should start as the legacy bare-map format"
+    );
+
+    ctx.run(["tag", "--add", "v3-release", "mainnet/42220/FPMM:v3.0.0"]).success();
+
+    let after = fs::read_to_string(&deployments_path).expect("read upgraded deployments file");
+    let json: serde_json::Value =
+        serde_json::from_str(&after).expect("upgraded deployments file should be valid json");
+
+    assert_eq!(json["_format"], STORE_FORMAT);
+
+    let entries = json["entries"].as_object().expect("wrapped deployments should contain entries");
+    let deployment = entries
+        .get("mainnet/42220/FPMM:v3.0.0")
+        .and_then(serde_json::Value::as_object)
+        .expect("upgraded deployments should preserve the tagged deployment");
+
+    assert_eq!(deployment.get("contractName"), Some(&serde_json::json!("FPMM")));
+    assert_eq!(deployment.get("tags"), Some(&serde_json::json!(["v3-release"])));
 }
 
 /// Adding a tag with --json produces valid JSON with action and tag fields.

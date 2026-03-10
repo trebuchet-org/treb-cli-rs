@@ -1,0 +1,123 @@
+{
+  "project": "treb-cli-rs",
+  "branchName": "feat/M3-P01-remove-registry-meta-and-migration-system",
+  "description": "Remove registry metadata (registry.json) and migration system, replace with lightweight _format versioning in all store files for Go CLI coexistence",
+  "userStories": [
+    {
+      "id": "P1-US-001",
+      "title": "Add VersionedStore Wrapper Type and Versioned I/O Helpers",
+      "description": "As a developer working on the registry crate, I want a generic VersionedStore<T> wrapper type and corresponding read/write helpers, so that all stores can adopt the {\"_format\": \"treb-v1\", \"entries\": {...}} format consistently.",
+      "acceptanceCriteria": [
+        "VersionedStore<T> serializes to {\"_format\": \"treb-v1\", \"entries\": {...}}",
+        "read_versioned_file<T>() deserializes a wrapped-format file correctly",
+        "read_versioned_file<T>() deserializes a bare-map file correctly (backward compat)",
+        "read_versioned_file<T>() returns T::default() when the file does not exist",
+        "write_versioned_file<T>() uses the same atomic write + file lock pattern as existing write_json_file",
+        "STORE_FORMAT constant is \"treb-v1\"",
+        "Typecheck passes (cargo check -p treb-registry)"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "P1-US-002",
+      "title": "Update DeploymentStore to Use Versioned Format",
+      "description": "As a user with an existing deployment registry, I want the deployment store to transparently upgrade to the versioned format on save, so that my existing deployments.json continues to work without manual intervention.",
+      "acceptanceCriteria": [
+        "Loading a bare {\"id\": {...}, ...} deployments.json succeeds (backward compat)",
+        "Loading a wrapped {\"_format\": \"treb-v1\", \"entries\": {\"id\": {...}, ...}} deployments.json succeeds",
+        "Saving always writes the wrapped format with \"_format\": \"treb-v1\"",
+        "All existing DeploymentStore tests pass",
+        "Typecheck passes (cargo check -p treb-registry)"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "P1-US-003",
+      "title": "Update LookupStore to Use Versioned Format",
+      "description": "As a developer maintaining the registry, I want the lookup store to use the versioned format, so that lookup.json is consistent with other store files.",
+      "acceptanceCriteria": [
+        "Loading a bare {\"byName\": {...}, \"byAddress\": {...}, \"byTag\": {...}} lookup.json succeeds",
+        "Loading a wrapped {\"_format\": \"treb-v1\", \"entries\": {\"byName\": {...}, ...}} lookup.json succeeds",
+        "Saving always writes the wrapped format",
+        "rebuild() writes the wrapped format",
+        "Existing LookupStore tests pass",
+        "Typecheck passes (cargo check -p treb-registry)"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "P1-US-004",
+      "title": "Update TransactionStore, SafeTransactionStore, and GovernorProposalStore to Use Versioned Format",
+      "description": "As a user with existing transaction records, I want all transaction-related stores to transparently upgrade to the versioned format, so that transactions.json, safe-txs.json, and governor-txs.json are consistently formatted.",
+      "acceptanceCriteria": [
+        "Each store loads bare map format (backward compat)",
+        "Each store loads wrapped format",
+        "Each store saves in wrapped format with \"_format\": \"treb-v1\"",
+        "All existing tests for TransactionStore, SafeTransactionStore, and GovernorProposalStore pass",
+        "Typecheck passes (cargo check -p treb-registry)"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "P1-US-005",
+      "title": "Update ForkStateStore to Use Versioned Format",
+      "description": "As a user with active fork sessions, I want the fork state store to use the versioned format, so that fork.json is consistent with other stores and existing fork state is preserved.",
+      "acceptanceCriteria": [
+        "Loading a bare map fork.json succeeds (backward compat)",
+        "Loading a wrapped fork.json succeeds",
+        "Saving always writes the wrapped format",
+        "Fork snapshot/restore operations work correctly with versioned files",
+        "All existing ForkStateStore tests pass",
+        "Typecheck passes (cargo check -p treb-registry)"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "P1-US-006",
+      "title": "Remove RegistryMeta, MetaStore, Migrations Module, and Constants",
+      "description": "As a developer simplifying the registry crate, I want to remove all registry metadata and migration code, so that the crate no longer creates or depends on registry.json and has no migration complexity.",
+      "acceptanceCriteria": [
+        "registry.json is not created by Registry::init()",
+        "Registry::open() does not read or check registry.json",
+        "Registry::open() works in a directory that contains a Go-created registry.json (simply ignores it)",
+        "migrations.rs file is deleted",
+        "RegistryMeta type no longer exists",
+        "REGISTRY_FILE and REGISTRY_VERSION constants no longer exist",
+        "MigrationReport and run_migrations are no longer exported",
+        "All registry crate tests pass (update tests that checked for registry.json creation or version validation)",
+        "Typecheck passes (cargo check -p treb-registry)"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "P1-US-007",
+      "title": "Remove treb migrate registry CLI Subcommand and Update Tests",
+      "description": "As a CLI user, I want the treb migrate registry subcommand removed, so that the CLI surface reflects the simplified registry architecture.",
+      "acceptanceCriteria": [
+        "treb migrate registry is no longer a valid command",
+        "treb migrate config continues to work unchanged",
+        "treb migrate --help no longer mentions registry subcommand",
+        "All golden test .expected files for registry migration are removed",
+        "Integration tests for registry migration are removed",
+        "New tests verify: bare-map-to-versioned round-trip for at least one store, and _format field is present in saved output",
+        "All tests pass (cargo test --workspace --all-targets)",
+        "Clippy passes (cargo clippy --workspace --all-targets)"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}
