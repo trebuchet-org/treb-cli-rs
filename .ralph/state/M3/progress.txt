@@ -1,0 +1,15 @@
+# Ralph Progress Log
+## Codebase Patterns
+- Registry store files should use `read_versioned_file()` for backward-compatible reads and `write_versioned_file()` for locked atomic writes to the `{"_format":"treb-v1","entries":...}` wrapper format.
+
+Started: Tue Mar 10 09:50:03 AM CET 2026
+---
+## 2026-03-10 09:53:46 CET - P1-US-001
+- Added `STORE_FORMAT`, generic `VersionedStore<T>`, and shared `read_versioned_file()` / `write_versioned_file()` helpers in `treb-registry`.
+- Added registry I/O tests covering wrapped serialization, wrapped and bare-map reads, missing-file defaults, wrapped writes, and advisory lock behavior; updated root guidance in `CLAUDE.md`.
+- Files changed: `crates/treb-registry/src/io.rs`, `crates/treb-registry/src/lib.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Registry store versioning belongs in the shared I/O layer so individual stores can migrate with mechanical helper swaps.
+  - `write_versioned_file()` should own the `with_file_lock()` call; later store migrations should not wrap it in an extra lock.
+  - `read_versioned_file()` accepts both wrapped and legacy bare JSON, which is the compatibility path for upgrading existing registry files.
+---

@@ -9,6 +9,7 @@ pub mod store;
 pub mod types;
 
 // Re-export registry types at crate root for convenience.
+pub use io::{VersionedStore, read_versioned_file, write_versioned_file};
 pub use lookup::LookupStore;
 pub use migrations::{MigrationReport, run_migrations};
 pub use registry::Registry;
@@ -49,6 +50,9 @@ pub const REGISTRY_DIR: &str = ".treb";
 
 /// File storing fork-mode state (active forks, history).
 pub const FORK_STATE_FILE: &str = "fork.json";
+
+/// Current on-disk wrapper format for registry store files.
+pub const STORE_FORMAT: &str = "treb-v1";
 
 /// Current registry format version.
 pub const REGISTRY_VERSION: u32 = 2;
