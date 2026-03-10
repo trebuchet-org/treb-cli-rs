@@ -3,6 +3,7 @@
 - Nested map registry stores should sort both outer and inner maps into `BTreeMap`s before `write_versioned_file()` so bare JSON output stays deterministic.
 - Top-level CLI commands must stay in sync across `crates/treb-cli/src/main.rs`, `crates/treb-cli/build.rs`, and any manually maintained root-help goldens because clap parsing, shell completions, and grouped help are wired separately.
 - Addressbook subcommands should reuse `resolve_effective_chain_id()` in `crates/treb-cli/src/commands/addressbook.rs` so numeric chain IDs, Alloy named chains, and config defaults resolve consistently across `set`, `remove`, and `list`.
+- Default CLI subcommands implemented through `normalize_cli_args()` should insert after parent-scoped flags like `-n/-s` and before subcommand-only flags like `--json`, while still leaving `--help` unnormalized.
 
 Started: Wed Mar 11 12:14:13 AM CET 2026
 ---
@@ -32,4 +33,13 @@ Started: Wed Mar 11 12:14:13 AM CET 2026
   - Patterns discovered: addressbook subcommands should keep using `resolve_effective_chain_id()` in `crates/treb-cli/src/commands/addressbook.rs` so `--network` and config defaults resolve identically across set/remove/list.
   - Gotchas encountered: the registry store returns a generic missing-entry error, so the command layer needs to translate that into the subcommand’s exact user-facing wording.
   - Useful context: `cargo test -p treb-cli addressbook` is a fast focused check for the addressbook command module and parser coverage while broader integration coverage is still pending in later stories.
+---
+## 2026-03-11 00:55:13 CET - P9-US-004
+- Implemented `treb addressbook list` with `ls` alias and `--json`, wired bare `treb addressbook` / `treb ab` to normalize to `list`, and added sorted human output plus the empty-state message for the current chain scope.
+- Mirrored the list alias and JSON flag into `crates/treb-cli/build.rs`, taught `Commands::json_flag()` about `addressbook list --json`, and added parser coverage for bare-command normalization, `ab ls --json`, and `--help` staying unnormalized.
+- Files changed: `CLAUDE.md`, `crates/treb-cli/build.rs`, `crates/treb-cli/src/commands/addressbook.rs`, `crates/treb-cli/src/main.rs`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: default-subcommand argv normalization needs to skip over parent command scope flags before inserting the synthetic subcommand so list-only flags like `--json` still bind to the intended child command.
+  - Gotchas encountered: `Commands::json_flag()` needs explicit coverage for nested subcommands, otherwise JSON parse/runtime errors keep rendering as human stderr even when the subcommand accepts `--json`.
+  - Useful context: full validation for clap-facing command work is practical here with `cargo check --workspace`, `cargo clippy --workspace --all-targets`, and `cargo test -p treb-cli`.
 ---

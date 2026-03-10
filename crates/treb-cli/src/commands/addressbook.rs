@@ -5,8 +5,12 @@ use std::{collections::HashMap, env};
 use alloy_chains::Chain;
 use anyhow::{Context, bail};
 use clap::Subcommand;
+use owo_colors::{OwoColorize, Style};
+use serde::Serialize;
 use treb_config::{ResolveOpts, resolve_config};
 use treb_registry::Registry;
+
+use crate::{output, ui::color};
 
 const FOUNDRY_TOML: &str = "foundry.toml";
 const TREB_DIR: &str = ".treb";
@@ -26,7 +30,12 @@ pub enum AddressbookSubcommand {
         name: String,
     },
     /// List addressbook entries for the current chain
-    List,
+    #[command(alias = "ls")]
+    List {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 pub async fn run(
@@ -37,7 +46,7 @@ pub async fn run(
     match subcommand {
         AddressbookSubcommand::Set { name, address } => run_set(namespace, network, name, address),
         AddressbookSubcommand::Remove { name } => run_remove(namespace, network, name),
-        AddressbookSubcommand::List => bail!("addressbook list is not implemented yet"),
+        AddressbookSubcommand::List { json } => run_list(namespace, network, json),
     }
 }
 
@@ -84,6 +93,37 @@ fn run_remove(
     Ok(())
 }
 
+fn run_list(namespace: Option<String>, network: Option<String>, json: bool) -> anyhow::Result<()> {
+    let cwd = env::current_dir().context("failed to determine current directory")?;
+    ensure_initialized(&cwd)?;
+
+    let chain_id = resolve_effective_chain_id(&cwd, namespace, network)
+        .context("failed to resolve chain ID")?;
+
+    let registry = Registry::open(&cwd).context("failed to open registry")?;
+    let entries = registry.list_addressbook_entries(&chain_id.to_string());
+
+    if json {
+        let json_entries: Vec<AddressbookEntryJson> = entries
+            .into_iter()
+            .map(|(name, address)| AddressbookEntryJson { name, address })
+            .collect();
+        output::print_json(&json_entries)?;
+        return Ok(());
+    }
+
+    if entries.is_empty() {
+        println!("No addressbook entries found");
+        return Ok(());
+    }
+
+    for (name, address) in entries {
+        print_entry(&name, &address);
+    }
+
+    Ok(())
+}
+
 fn map_remove_entry_error(name: &str, chain_id: u64, err: impl std::fmt::Display) -> anyhow::Error {
     let message = err.to_string();
     if message.contains("addressbook entry not found") {
@@ -91,6 +131,17 @@ fn map_remove_entry_error(name: &str, chain_id: u64, err: impl std::fmt::Display
     } else {
         anyhow::anyhow!("{message}")
     }
+}
+
+fn print_entry(name: &str, address: &str) {
+    let padded_name = format!("{name:<24}");
+    let rendered_name = if color::is_color_enabled() {
+        padded_name.style(Style::new().yellow().bold()).to_string()
+    } else {
+        padded_name
+    };
+
+    println!("{rendered_name} {address}");
 }
 
 fn ensure_initialized(cwd: &std::path::Path) -> anyhow::Result<()> {
@@ -157,6 +208,12 @@ fn validate_address(address: &str) -> anyhow::Result<()> {
     }
 }
 
+#[derive(Serialize)]
+struct AddressbookEntryJson {
+    name: String,
+    address: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,5 +242,34 @@ mod tests {
         );
 
         assert_eq!(err.to_string(), "addressbook entry 'Treasury' not found on chain 1");
+    }
+
+    #[test]
+    fn list_json_output_preserves_sorted_entries() {
+        let json_entries = vec![
+            AddressbookEntryJson {
+                name: "Alpha".to_string(),
+                address: "0x1111111111111111111111111111111111111111".to_string(),
+            },
+            AddressbookEntryJson {
+                name: "Zulu".to_string(),
+                address: "0x9999999999999999999999999999999999999999".to_string(),
+            },
+        ];
+
+        let value = serde_json::to_value(&json_entries).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!([
+                {
+                    "name": "Alpha",
+                    "address": "0x1111111111111111111111111111111111111111"
+                },
+                {
+                    "name": "Zulu",
+                    "address": "0x9999999999999999999999999999999999999999"
+                }
+            ])
+        );
     }
 }

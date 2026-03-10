@@ -290,7 +290,12 @@ fn build_addressbook() -> ClapCommand {
                 .arg(Arg::new("name").required(true).help("Entry name")),
         )
         .subcommand(
-            ClapCommand::new("list").about("List addressbook entries for the current chain"),
+            ClapCommand::new("list")
+                .about("List addressbook entries for the current chain")
+                .alias("ls")
+                .arg(
+                    Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"),
+                ),
         )
 }
 

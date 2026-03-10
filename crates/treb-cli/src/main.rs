@@ -576,7 +576,10 @@ impl Commands {
             | Commands::Version { json, .. }
             | Commands::Networks { json, .. }
             | Commands::Compose { json, .. } => *json,
-            Commands::Addressbook { .. } => false,
+            Commands::Addressbook { subcommand, .. } => matches!(
+                subcommand,
+                commands::addressbook::AddressbookSubcommand::List { json: true }
+            ),
             Commands::Gen { subcommand } => gen_subcommand_json_flag(subcommand),
             Commands::GenDeployCompat(args) => args.json,
             Commands::Config { subcommand } => {
@@ -739,6 +742,9 @@ where
     if let Some(index) = config_show_insertion_index(&args) {
         args.insert(index, OsString::from("show"));
     }
+    if let Some(index) = addressbook_list_insertion_index(&args) {
+        args.insert(index, OsString::from("list"));
+    }
 
     args
 }
@@ -775,6 +781,63 @@ fn config_show_insertion_index(args: &[OsString]) -> Option<usize> {
     }
 
     (!rest.iter().any(|arg| !arg.to_string_lossy().starts_with('-'))).then_some(config_index + 1)
+}
+
+fn addressbook_list_insertion_index(args: &[OsString]) -> Option<usize> {
+    let mut command_index = 1;
+    while let Some(arg) = args.get(command_index) {
+        if arg == OsStr::new("--") {
+            return None;
+        }
+
+        if matches!(arg.to_str(), Some("-h" | "--help" | "-V" | "--version")) {
+            return None;
+        }
+
+        if !arg.to_string_lossy().starts_with('-') {
+            break;
+        }
+
+        command_index += 1;
+    }
+
+    let command = args.get(command_index)?.as_os_str();
+    if command != OsStr::new("addressbook") && command != OsStr::new("ab") {
+        return None;
+    }
+
+    let mut index = command_index + 1;
+    while let Some(arg) = args.get(index) {
+        match arg.to_str() {
+            Some("-h" | "--help" | "set" | "remove" | "list" | "ls" | "help") => return None,
+            Some("--network" | "-n" | "--namespace" | "-s") => {
+                args.get(index + 1)?;
+                index += 2;
+            }
+            Some(flag) if flag.starts_with("--network=") || flag.starts_with("--namespace=") => {
+                index += 1;
+            }
+            Some(flag)
+                if short_flag_has_inline_value(flag, 'n')
+                    || short_flag_has_inline_value(flag, 's') =>
+            {
+                index += 1;
+            }
+            Some("--") => return None,
+            Some(flag) if flag.starts_with('-') => return Some(index),
+            Some(_) => return None,
+            None => return Some(index),
+        }
+    }
+
+    Some(index)
+}
+
+fn short_flag_has_inline_value(flag: &str, short: char) -> bool {
+    let mut chars = flag.chars();
+    matches!(chars.next(), Some('-'))
+        && matches!(chars.next(), Some(ch) if ch == short)
+        && chars.next().is_some()
 }
 
 fn parse_cli_from<I, T>(args: I) -> Result<Cli, clap::Error>
@@ -1368,6 +1431,47 @@ mod tests {
                 }
             }
             _ => panic!("expected addressbook command"),
+        }
+    }
+
+    #[test]
+    fn addressbook_defaults_to_list() {
+        let cli = parse_cli_from(["treb", "addressbook"]).unwrap();
+
+        match cli.command {
+            Commands::Addressbook { namespace, network, subcommand } => {
+                assert!(namespace.is_none());
+                assert!(network.is_none());
+                match subcommand {
+                    commands::addressbook::AddressbookSubcommand::List { json } => {
+                        assert!(!json);
+                    }
+                    _ => panic!("expected addressbook list subcommand"),
+                }
+            }
+            _ => panic!("expected addressbook command"),
+        }
+    }
+
+    #[test]
+    fn addressbook_ls_alias_parses_with_json() {
+        let cli = parse_cli_from(["treb", "ab", "ls", "--json"]).unwrap();
+        assert!(cli.command.json_flag());
+
+        match cli.command {
+            Commands::Addressbook { subcommand, .. } => match subcommand {
+                commands::addressbook::AddressbookSubcommand::List { json } => assert!(json),
+                _ => panic!("expected addressbook list subcommand"),
+            },
+            _ => panic!("expected addressbook command"),
+        }
+    }
+
+    #[test]
+    fn addressbook_help_does_not_normalize_to_list() {
+        match parse_cli_from(["treb", "addressbook", "--help"]) {
+            Ok(_) => panic!("expected addressbook --help to return clap help output"),
+            Err(err) => assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp),
         }
     }
 
