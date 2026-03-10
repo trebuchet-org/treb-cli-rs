@@ -32,7 +32,7 @@ fn build_cli() -> ClapCommand {
         .subcommand(build_migrate())
         .subcommand(build_fork())
         .subcommand(build_dev())
-        .subcommand(build_completions_cmd())
+        .subcommand(build_completion_cmd())
 }
 
 fn build_run() -> ClapCommand {
@@ -556,10 +556,15 @@ fn build_dev() -> ClapCommand {
     )
 }
 
-fn build_completions_cmd() -> ClapCommand {
-    ClapCommand::new("completions").about("Generate shell completion scripts").arg(
-        Arg::new("shell").required(true).help("Shell type (bash, zsh, fish, elvish, powershell)"),
-    )
+fn build_completion_cmd() -> ClapCommand {
+    ClapCommand::new("completion")
+        .alias("completions")
+        .about("Generate shell completion scripts")
+        .arg(
+            Arg::new("shell")
+                .required(true)
+                .help("Shell type (bash, zsh, fish, elvish, powershell)"),
+        )
 }
 
 fn workspace_foundry_version() -> Option<String> {

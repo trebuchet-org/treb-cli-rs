@@ -3,6 +3,7 @@ Started: Tue Mar 10 03:36:50 PM CET 2026
 ## Codebase Patterns
 - When changing CLI command names or nesting in `crates/treb-cli/src/main.rs`, also update `build_grouped_help()` there and `crates/treb-cli/build.rs`; root help and generated shell completions are maintained separately from the derive parser.
 - When renaming a CLI command that has golden coverage, update both the `crates/treb-cli/tests/integration_*.rs` command argv and the matching `crates/treb-cli/tests/golden/*/commands.golden` header, because the harness snapshots the invoked argv verbatim.
+- For spelling-only CLI renames that need backward compatibility, keep the canonical subcommand name in `src/main.rs` and add the old spelling as a hidden clap alias there and in `build.rs`; that preserves parsing, root help, and generated shell completions without a second runtime handler.
 
 ---
 ## 2026-03-10 15:51:18 CET - P4-US-001
@@ -23,4 +24,13 @@ Started: Tue Mar 10 03:36:50 PM CET 2026
   - Patterns discovered: command argv for golden integration tests live in two places, the Rust test builders and the `commands.golden` snapshot headers.
   - Gotchas encountered: updating only the executable test args or only the golden headers leaves `integration_gen_deploy` failing even when the command itself still works.
   - Useful context: `cli_gen_deploy.rs` is the higher-level binary integration suite, while `integration_gen_deploy.rs` is the golden harness that feeds `tests/golden/gen_deploy_*`.
+---
+## 2026-03-10 16:12:48 CET - P4-US-003
+- Renamed the canonical shell completion command to `treb completion`, updated the grouped root help entry and command examples, and kept `treb completions` working as a hidden backward-compatible alias through the same clap command.
+- Mirrored the hidden alias in `crates/treb-cli/build.rs` so generated shell completion scripts stay in sync with the runtime parser, then expanded `crates/treb-cli/tests/cli_completions.rs` and `src/main.rs` unit coverage to assert both spellings and the singular help label.
+- Files changed: `crates/treb-cli/src/main.rs`, `crates/treb-cli/build.rs`, `crates/treb-cli/tests/cli_completions.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: a spelling-only CLI rename can stay on one runtime code path by making the new name canonical and attaching the old spelling as a hidden clap alias.
+  - Gotchas encountered: if that hidden alias is added only in `src/main.rs`, generated shell completions drift because `crates/treb-cli/build.rs` maintains a separate command tree.
+  - Useful context: `cli_completions.rs` is the fast binary-level integration suite for shell completion behavior, while `src/main.rs` unit tests are the right place to pin parser aliases and grouped-help labels.
 ---

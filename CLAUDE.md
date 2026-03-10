@@ -95,6 +95,7 @@ cargo clippy --workspace --all-targets        # lint
 - **Color**: Respects `NO_COLOR` env and `TERM=dumb`; per-command override via `--no-color`; palette in `ui/color.rs`
 - **JSON output**: `--json` flag on read commands; deterministic via recursive key sorting in `print_json()`
 - **CLI command tree sync**: When renaming or nesting commands in `crates/treb-cli/src/main.rs`, update both `build_grouped_help()` there and `crates/treb-cli/build.rs`; grouped root help and generated shell completions are maintained separately from the derive parser
+- **CLI backward-compat aliases**: For spelling-only command renames, prefer keeping the new canonical subcommand in `crates/treb-cli/src/main.rs` with a hidden `alias`, then mirror that alias in `crates/treb-cli/build.rs` so generated shell completions still accept the legacy spelling
 - **Non-interactive**: Detected via: `--non-interactive` flag, `TREB_NON_INTERACTIVE=1`, `CI=true`, stdin not TTY, stdout not TTY
 - **Store pattern**: Each registry store has PathBuf + HashMap + load/save with fs2 file lock + CRUD + sorted list
 - **Versioned store files**: Registry store JSON is now written as bare JSON, but `read_versioned_file()` and `read_versioned_file_compat()` must continue to accept legacy wrapped `{"_format":"treb-v1","entries":...}` payloads for backward compatibility

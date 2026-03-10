@@ -451,11 +451,11 @@ enum Commands {
     /// all treb commands and flags.
     ///
     /// Examples:
-    ///   treb completions bash >> ~/.bashrc
-    ///   treb completions zsh > ~/.zsh/completions/_treb
-    ///   treb completions fish > ~/.config/fish/completions/treb.fish
-    #[command(verbatim_doc_comment)]
-    Completions {
+    ///   treb completion bash >> ~/.bashrc
+    ///   treb completion zsh > ~/.zsh/completions/_treb
+    ///   treb completion fish > ~/.config/fish/completions/treb.fish
+    #[command(verbatim_doc_comment, alias = "completions")]
+    Completion {
         /// Shell type: bash, zsh, fish, elvish, or powershell
         shell: String,
     },
@@ -538,7 +538,7 @@ impl Commands {
             Commands::Fork { subcommand } => fork_subcommand_json_flag(subcommand),
             Commands::Dev { subcommand } => dev_subcommand_json_flag(subcommand),
             Commands::Migrate { subcommand } => migrate_subcommand_json_flag(subcommand),
-            Commands::Init { .. } | Commands::Completions { .. } => false,
+            Commands::Init { .. } | Commands::Completion { .. } => false,
         }
     }
 }
@@ -646,7 +646,7 @@ fn build_grouped_help(cmd: &clap::Command) -> String {
         &["sync", "tag", "register", "dev", "networks", "prune", "reset", "config", "migrate"],
     );
     s.push('\n');
-    write_group(&mut s, cmd, "Additional Commands:", &["version", "completions", "help"]);
+    write_group(&mut s, cmd, "Additional Commands:", &["version", "completion", "help"]);
 
     // Remove trailing newline so the template controls spacing
     if s.ends_with('\n') {
@@ -904,7 +904,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Commands::Migrate { subcommand } => commands::migrate::run(subcommand).await?,
         Commands::Fork { subcommand } => commands::fork::run(subcommand).await?,
         Commands::Dev { subcommand } => commands::dev::run(subcommand).await?,
-        Commands::Completions { shell } => {
+        Commands::Completion { shell } => {
             use clap_complete::{Shell, generate};
             use std::{io, str::FromStr};
 
@@ -977,5 +977,27 @@ mod tests {
         let help = build_grouped_help(&Cli::command());
         assert!(help.contains("  gen"));
         assert!(!help.contains("gen-deploy"));
+    }
+
+    #[test]
+    fn completion_command_aliases_parse() {
+        let cli = Cli::try_parse_from(["treb", "completion", "bash"]).unwrap();
+        match cli.command {
+            Commands::Completion { shell } => assert_eq!(shell, "bash"),
+            _ => panic!("expected completion command"),
+        }
+
+        let compat = Cli::try_parse_from(["treb", "completions", "zsh"]).unwrap();
+        match compat.command {
+            Commands::Completion { shell } => assert_eq!(shell, "zsh"),
+            _ => panic!("expected completions alias to resolve to completion"),
+        }
+    }
+
+    #[test]
+    fn grouped_help_lists_completion_not_completions() {
+        let help = build_grouped_help(&Cli::command());
+        assert!(help.contains("  completion"));
+        assert!(!help.contains("completions"));
     }
 }
