@@ -667,6 +667,24 @@ pub async fn run_anvil_logs(
         );
     }
 
+    // Print Go-matching header: cyan bold clipboard emoji + instance name + optional follow hint.
+    let follow_hint = if follow { " (Ctrl+C to exit)" } else { "" };
+    println!(
+        "{} {}",
+        styled(emoji::CLIPBOARD, color::STAGE),
+        styled(
+            &format!("Showing anvil '{instance_name}' logs{follow_hint}:"),
+            color::STAGE,
+        ),
+    );
+    let display_path = human_display_path(&cwd, &log_path);
+    println!(
+        "   {} {}",
+        styled("Log file:", color::GRAY),
+        styled(&display_path.display().to_string(), color::GRAY),
+    );
+    println!();
+
     if follow {
         stream_log_file(&log_path).await
     } else {
