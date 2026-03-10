@@ -65,7 +65,7 @@
         "cargo test -p treb-cli passes (all golden comparisons match)"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

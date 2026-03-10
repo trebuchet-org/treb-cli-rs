@@ -2,6 +2,7 @@
 - For CLI flag changes in `crates/treb-cli`, keep the derive parser in `src/main.rs`, the shell completion builder in `build.rs`, and a focused `parse_cli_from(...)` regression test in sync.
 - For scoped deployment queries in CLI commands, filter `Registry::list_deployments()` with `commands::list::filter_deployments()` and resolve the user query with `commands::resolve::resolve_deployment_in_scope()` so namespace/network/fork filters affect ambiguity resolution consistently.
 - For scoped commands that support interactive deployment selection, pass the filtered deployment slice into `fuzzy_select_deployment_id()` too; otherwise the prompt can offer out-of-scope deployments even when typed queries are scoped correctly.
+- For clap help changes that are specific to one command, add or refresh a dedicated `help_<command>` golden in `crates/treb-cli/tests/integration_help.rs`; root `treb --help` snapshots do not catch all subcommand help drift.
 
 # Ralph Progress Log
 Started: Tue Mar 10 09:09:42 PM CET 2026
@@ -41,4 +42,16 @@ Started: Tue Mar 10 09:09:42 PM CET 2026
     `cargo test -p treb-cli cli_tag` only applies a name filter; use `cargo test -p treb-cli --test cli_tag` when you need to execute that integration test file directly.
   - Useful context (e.g., "the evaluation panel is in component X")
     A standalone `crates/treb-cli/tests/cli_tag.rs` binary test file is enough for focused tag-scope coverage without introducing new golden snapshots.
+---
+## 2026-03-10 21:52:10 CET - P6-US-004
+- Added dedicated `show --help` golden coverage so the new `--namespace`, `--network`, and `--no-fork` options are snapshot-tested directly.
+- Refreshed help-test documentation to note that command-specific clap help changes need their own `help_<command>` golden, even when root help does not change.
+- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `CLAUDE.md`, `crates/treb-cli/tests/integration_help.rs`, `crates/treb-cli/tests/golden/help_show/commands.golden`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    Subcommand help output is covered through `crates/treb-cli/tests/integration_help.rs`, with one golden directory per command-specific help case.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    Root `treb --help` can remain stable while clap-generated subcommand help changes, so snapshotting only `help_root` is not enough for new per-command flags.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    `UPDATE_GOLDEN=1 cargo test -p treb-cli --test integration_help help_show` is sufficient to create or refresh a single help snapshot without broader golden churn.
 ---

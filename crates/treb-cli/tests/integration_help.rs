@@ -51,3 +51,12 @@ fn help_list() {
 
     run_integration_test(&test, &ctx);
 }
+
+/// `show --help` should document deployment query scoping flags.
+#[test]
+fn help_show() {
+    let ctx = TestContext::new("minimal-project");
+    let test = IntegrationTest::new("help_show").test(&["show", "--help"]);
+
+    run_integration_test(&test, &ctx);
+}
