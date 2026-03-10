@@ -63,7 +63,7 @@
         "Typecheck passes (cargo check -p treb-registry)"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

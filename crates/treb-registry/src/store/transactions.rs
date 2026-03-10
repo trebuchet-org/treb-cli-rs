@@ -1,12 +1,15 @@
 //! Persistent store for transactions backed by `transactions.json`.
 
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::{BTreeMap, HashMap},
+    path::PathBuf,
+};
 
 use treb_core::{TrebError, types::Transaction};
 
 use crate::{
     TRANSACTIONS_FILE,
-    io::{read_json_file_or_default, with_file_lock, write_json_file},
+    io::{read_versioned_file, write_versioned_file},
 };
 
 /// CRUD store for transactions, persisted as a `HashMap<String, Transaction>` in
@@ -25,13 +28,15 @@ impl TransactionStore {
 
     /// Load transactions from disk, replacing any in-memory data.
     pub fn load(&mut self) -> Result<(), TrebError> {
-        self.data = read_json_file_or_default(&self.path)?;
+        self.data = read_versioned_file(&self.path)?;
         Ok(())
     }
 
     /// Atomically save all transactions to disk under a file lock.
     pub fn save(&self) -> Result<(), TrebError> {
-        with_file_lock(&self.path, || write_json_file(&self.path, &self.data))
+        let sorted: BTreeMap<String, Transaction> =
+            self.data.iter().map(|(id, transaction)| (id.clone(), transaction.clone())).collect();
+        write_versioned_file(&self.path, &sorted)
     }
 
     /// Get a transaction by ID.
@@ -91,6 +96,11 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
     use treb_core::types::TransactionStatus;
+
+    use crate::{
+        STORE_FORMAT,
+        io::{VersionedStore, read_json_file, write_json_file},
+    };
 
     /// Helper to create a minimal transaction with the given ID and created_at offset in seconds.
     fn make_transaction(id: &str, created_at_offset_secs: i64) -> Transaction {
@@ -211,6 +221,42 @@ mod tests {
     }
 
     #[test]
+    fn load_reads_legacy_bare_map() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(TRANSACTIONS_FILE);
+        let mut transactions = BTreeMap::new();
+        transactions.insert("tx-1".to_string(), make_transaction("tx-1", 0));
+        transactions.insert("tx-2".to_string(), make_transaction("tx-2", 1));
+
+        write_json_file(&path, &transactions).unwrap();
+
+        let mut store = TransactionStore::new(dir.path());
+        store.load().unwrap();
+
+        assert_eq!(store.count(), 2);
+        assert_eq!(store.get("tx-1").unwrap().id, "tx-1");
+        assert_eq!(store.get("tx-2").unwrap().id, "tx-2");
+    }
+
+    #[test]
+    fn load_reads_wrapped_format() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(TRANSACTIONS_FILE);
+        let mut transactions = BTreeMap::new();
+        transactions.insert("tx-1".to_string(), make_transaction("tx-1", 0));
+        transactions.insert("tx-2".to_string(), make_transaction("tx-2", 1));
+
+        write_json_file(&path, &VersionedStore::new(transactions)).unwrap();
+
+        let mut store = TransactionStore::new(dir.path());
+        store.load().unwrap();
+
+        assert_eq!(store.count(), 2);
+        assert_eq!(store.get("tx-1").unwrap().id, "tx-1");
+        assert_eq!(store.get("tx-2").unwrap().id, "tx-2");
+    }
+
+    #[test]
     fn golden_file_round_trip() {
         let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../treb-core/tests/fixtures/transactions_map.json");
@@ -234,8 +280,24 @@ mod tests {
         let saved_value: serde_json::Value = serde_json::from_str(&saved_raw).unwrap();
 
         assert_eq!(
-            saved_value, fixture_value,
-            "golden file round-trip: saved JSON must equal fixture"
+            saved_value,
+            serde_json::json!({
+                "_format": STORE_FORMAT,
+                "entries": fixture_value,
+            }),
+            "golden file round-trip: saved JSON must wrap fixture entries"
         );
+    }
+
+    #[test]
+    fn save_writes_wrapped_format() {
+        let dir = TempDir::new().unwrap();
+        let mut store = TransactionStore::new(dir.path());
+
+        store.insert(make_transaction("tx-1", 0)).unwrap();
+
+        let saved: serde_json::Value = read_json_file(&dir.path().join(TRANSACTIONS_FILE)).unwrap();
+        assert_eq!(saved["_format"], STORE_FORMAT);
+        assert!(saved["entries"].get("tx-1").is_some());
     }
 }

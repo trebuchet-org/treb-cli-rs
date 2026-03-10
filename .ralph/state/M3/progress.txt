@@ -42,3 +42,12 @@ Started: Tue Mar 10 09:50:03 AM CET 2026
   - Normalizing lookup vectors in both `build_lookup_index()` and `LookupStore::load()` keeps rebuild/save/load round-trips stable even when legacy files or callers provide unsorted lists.
   - For versioned-lookup tests, asserting through `serde_json::Value` is enough to verify the wrapper shape without depending on serialized key order strings.
 ---
+## 2026-03-10 11:04:22 CET - P1-US-004
+- Updated `TransactionStore`, `SafeTransactionStore`, and `GovernorProposalStore` to load through `read_versioned_file()` and save through `write_versioned_file()`, sorting each in-memory `HashMap` into a `BTreeMap` before persistence so wrapped JSON stays deterministic.
+- Added bare-map load, wrapped-format load, and wrapped-on-save tests for all three stores; updated the registry golden integration test to expect wrapped `transactions.json` and `safe-txs.json`.
+- Files changed: `crates/treb-registry/src/store/transactions.rs`, `crates/treb-registry/src/store/safe_transactions.rs`, `crates/treb-registry/src/store/governor_proposals.rs`, `crates/treb-registry/src/registry.rs`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Transaction-family store migration follows the same mechanical pattern as deployments: `read_versioned_file()` on load, `write_versioned_file()` on save, and no extra `with_file_lock()` wrapper.
+  - Bare fixture files can remain the source of truth for transaction and safe-transaction tests; assert against wrapped saved output instead of rewriting the fixtures.
+  - Registry integration expectations can remain mixed during the migration, but each store file’s assertion must flip to the wrapped `{"_format":"treb-v1","entries":...}` shape as soon as that store migrates.
+---

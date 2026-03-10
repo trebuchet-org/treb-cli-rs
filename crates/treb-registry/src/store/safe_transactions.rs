@@ -1,12 +1,15 @@
 //! Persistent store for safe transactions backed by `safe-txs.json`.
 
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::{BTreeMap, HashMap},
+    path::PathBuf,
+};
 
 use treb_core::{TrebError, types::SafeTransaction};
 
 use crate::{
     SAFE_TXS_FILE,
-    io::{read_json_file_or_default, with_file_lock, write_json_file},
+    io::{read_versioned_file, write_versioned_file},
 };
 
 /// CRUD store for safe transactions, persisted as a
@@ -26,13 +29,15 @@ impl SafeTransactionStore {
 
     /// Load safe transactions from disk, replacing any in-memory data.
     pub fn load(&mut self) -> Result<(), TrebError> {
-        self.data = read_json_file_or_default(&self.path)?;
+        self.data = read_versioned_file(&self.path)?;
         Ok(())
     }
 
     /// Atomically save all safe transactions to disk under a file lock.
     pub fn save(&self) -> Result<(), TrebError> {
-        with_file_lock(&self.path, || write_json_file(&self.path, &self.data))
+        let sorted: BTreeMap<String, SafeTransaction> =
+            self.data.iter().map(|(hash, tx)| (hash.clone(), tx.clone())).collect();
+        write_versioned_file(&self.path, &sorted)
     }
 
     /// Get a safe transaction by its `safe_tx_hash`.
@@ -94,6 +99,11 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
     use treb_core::types::TransactionStatus;
+
+    use crate::{
+        STORE_FORMAT,
+        io::{VersionedStore, read_json_file, write_json_file},
+    };
 
     /// Helper to create a minimal safe transaction with the given hash and
     /// proposed_at offset in seconds.
@@ -215,6 +225,42 @@ mod tests {
     }
 
     #[test]
+    fn load_reads_legacy_bare_map() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(SAFE_TXS_FILE);
+        let mut safe_txs = BTreeMap::new();
+        safe_txs.insert("0xhash-1".to_string(), make_safe_transaction("0xhash-1", 0));
+        safe_txs.insert("0xhash-2".to_string(), make_safe_transaction("0xhash-2", 1));
+
+        write_json_file(&path, &safe_txs).unwrap();
+
+        let mut store = SafeTransactionStore::new(dir.path());
+        store.load().unwrap();
+
+        assert_eq!(store.count(), 2);
+        assert_eq!(store.get("0xhash-1").unwrap().safe_tx_hash, "0xhash-1");
+        assert_eq!(store.get("0xhash-2").unwrap().safe_tx_hash, "0xhash-2");
+    }
+
+    #[test]
+    fn load_reads_wrapped_format() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(SAFE_TXS_FILE);
+        let mut safe_txs = BTreeMap::new();
+        safe_txs.insert("0xhash-1".to_string(), make_safe_transaction("0xhash-1", 0));
+        safe_txs.insert("0xhash-2".to_string(), make_safe_transaction("0xhash-2", 1));
+
+        write_json_file(&path, &VersionedStore::new(safe_txs)).unwrap();
+
+        let mut store = SafeTransactionStore::new(dir.path());
+        store.load().unwrap();
+
+        assert_eq!(store.count(), 2);
+        assert_eq!(store.get("0xhash-1").unwrap().safe_tx_hash, "0xhash-1");
+        assert_eq!(store.get("0xhash-2").unwrap().safe_tx_hash, "0xhash-2");
+    }
+
+    #[test]
     fn golden_file_round_trip() {
         let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../treb-core/tests/fixtures/safe_txs_map.json");
@@ -238,8 +284,24 @@ mod tests {
         let saved_value: serde_json::Value = serde_json::from_str(&saved_raw).unwrap();
 
         assert_eq!(
-            saved_value, fixture_value,
-            "golden file round-trip: saved JSON must equal fixture"
+            saved_value,
+            serde_json::json!({
+                "_format": STORE_FORMAT,
+                "entries": fixture_value,
+            }),
+            "golden file round-trip: saved JSON must wrap fixture entries"
         );
+    }
+
+    #[test]
+    fn save_writes_wrapped_format() {
+        let dir = TempDir::new().unwrap();
+        let mut store = SafeTransactionStore::new(dir.path());
+
+        store.insert(make_safe_transaction("0xhash-1", 0)).unwrap();
+
+        let saved: serde_json::Value = read_json_file(&dir.path().join(SAFE_TXS_FILE)).unwrap();
+        assert_eq!(saved["_format"], STORE_FORMAT);
+        assert!(saved["entries"].get("0xhash-1").is_some());
     }
 }
