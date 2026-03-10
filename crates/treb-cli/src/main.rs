@@ -209,16 +209,16 @@ enum Commands {
         #[arg(long, default_value = "etherscan")]
         verifier: String,
         /// Verify on Etherscan
-        #[arg(long)]
+        #[arg(long, short = 'e')]
         etherscan: bool,
         /// Verify on Blockscout
-        #[arg(long)]
+        #[arg(long, short = 'b')]
         blockscout: bool,
         /// Verify on Sourcify
-        #[arg(long)]
+        #[arg(long, short = 's')]
         sourcify: bool,
         /// Verifier API URL override
-        #[arg(long)]
+        #[arg(long, visible_alias = "blockscout-verifier-url")]
         verifier_url: Option<String>,
         /// Verifier API key
         #[arg(long)]
@@ -1289,6 +1289,86 @@ mod tests {
 
         assert!(help.contains("-n, --network"), "unexpected help output: {help}");
         assert!(help.contains("-s, --namespace"), "unexpected help output: {help}");
+    }
+
+    #[test]
+    fn verify_etherscan_short_flag_parses() {
+        let cli = parse_cli_from(["treb", "verify", "Counter", "-e"]).unwrap();
+
+        match cli.command {
+            Commands::Verify { deployment, etherscan, blockscout, sourcify, .. } => {
+                assert_eq!(deployment.as_deref(), Some("Counter"));
+                assert!(etherscan);
+                assert!(!blockscout);
+                assert!(!sourcify);
+            }
+            _ => panic!("expected verify command"),
+        }
+    }
+
+    #[test]
+    fn verify_blockscout_short_flag_parses() {
+        let cli = parse_cli_from(["treb", "verify", "Counter", "-b"]).unwrap();
+
+        match cli.command {
+            Commands::Verify { deployment, etherscan, blockscout, sourcify, .. } => {
+                assert_eq!(deployment.as_deref(), Some("Counter"));
+                assert!(!etherscan);
+                assert!(blockscout);
+                assert!(!sourcify);
+            }
+            _ => panic!("expected verify command"),
+        }
+    }
+
+    #[test]
+    fn verify_sourcify_short_flag_parses() {
+        let cli = parse_cli_from(["treb", "verify", "Counter", "-s"]).unwrap();
+
+        match cli.command {
+            Commands::Verify { deployment, etherscan, blockscout, sourcify, .. } => {
+                assert_eq!(deployment.as_deref(), Some("Counter"));
+                assert!(!etherscan);
+                assert!(!blockscout);
+                assert!(sourcify);
+            }
+            _ => panic!("expected verify command"),
+        }
+    }
+
+    #[test]
+    fn verify_combined_short_flags_parse() {
+        let cli = parse_cli_from(["treb", "verify", "Counter", "-ebs"]).unwrap();
+
+        match cli.command {
+            Commands::Verify { deployment, etherscan, blockscout, sourcify, .. } => {
+                assert_eq!(deployment.as_deref(), Some("Counter"));
+                assert!(etherscan);
+                assert!(blockscout);
+                assert!(sourcify);
+            }
+            _ => panic!("expected verify command"),
+        }
+    }
+
+    #[test]
+    fn verify_blockscout_verifier_url_alias_parses() {
+        let cli = parse_cli_from([
+            "treb",
+            "verify",
+            "Counter",
+            "--blockscout-verifier-url",
+            "https://example.com/api",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Verify { deployment, verifier_url, .. } => {
+                assert_eq!(deployment.as_deref(), Some("Counter"));
+                assert_eq!(verifier_url.as_deref(), Some("https://example.com/api"));
+            }
+            _ => panic!("expected verify command"),
+        }
     }
 
     #[test]

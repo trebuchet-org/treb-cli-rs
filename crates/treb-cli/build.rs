@@ -195,7 +195,33 @@ fn build_verify() -> ClapCommand {
                 .default_value("etherscan")
                 .help("Verification provider"),
         )
-        .arg(Arg::new("verifier-url").long("verifier-url").help("Verifier API URL override"))
+        .arg(
+            Arg::new("etherscan")
+                .long("etherscan")
+                .short('e')
+                .action(ArgAction::SetTrue)
+                .help("Verify on Etherscan"),
+        )
+        .arg(
+            Arg::new("blockscout")
+                .long("blockscout")
+                .short('b')
+                .action(ArgAction::SetTrue)
+                .help("Verify on Blockscout"),
+        )
+        .arg(
+            Arg::new("sourcify")
+                .long("sourcify")
+                .short('s')
+                .action(ArgAction::SetTrue)
+                .help("Verify on Sourcify"),
+        )
+        .arg(
+            Arg::new("verifier-url")
+                .long("verifier-url")
+                .visible_alias("blockscout-verifier-url")
+                .help("Verifier API URL override"),
+        )
         .arg(Arg::new("verifier-api-key").long("verifier-api-key").help("Verifier API key"))
         .arg(
             Arg::new("force")
