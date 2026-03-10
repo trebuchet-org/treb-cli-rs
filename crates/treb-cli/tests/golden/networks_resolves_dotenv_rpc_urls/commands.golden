@@ -1,8 +1,14 @@
-=== cmd 0: [networks --json] ===
+=== cmd 0: [networks] ===
+🌐 Available Networks:
+
+  ✅ test - Chain ID: 31337
+
+=== cmd 1: [networks --json] ===
 [
   {
+    "chainId": 31337,
     "name": "test",
-    "rpcUrl": "http://127.0.0.1:8545",
-    "status": "unreachable"
+    "rpcUrl": "http://127.0.0.1:<PORT>",
+    "status": "ok"
   }
 ]

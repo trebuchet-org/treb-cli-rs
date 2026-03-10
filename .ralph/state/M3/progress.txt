@@ -5,6 +5,7 @@ Started: Tue Mar 10 02:02:08 PM CET 2026
 - Raw `foundry.toml` sender tables should reuse `trebfile::expand_sender_config_env_vars()` after TOML deserialization so `SenderConfig` field expansion matches `treb.toml`.
 - CLI commands that read `foundry.toml` directly instead of going through `treb_config::resolve_config()` must call `treb_config::load_dotenv(project_root)` first so `.env`-backed RPC and sender values are available before config parsing.
 - `treb config show` sender output is Go-style plain text, not `comfy_table`: keep rows sorted by role and preserve `--json` output when adjusting that command.
+- CLI golden tests that need a resolved RPC endpoint can use a tiny loopback JSON-RPC server plus an `extra_normalizer` for `http://127.0.0.1:<port>` instead of relying on fixed ports or Anvil.
 ---
 ## 2026-03-10 14:08 CET - P3-US-001
 - Implemented `${VAR}` expansion for `foundry.toml` RPC endpoints by reusing `expand_env_vars()` inside `treb_config::rpc_endpoints()`.
@@ -42,4 +43,13 @@ Started: Tue Mar 10 02:02:08 PM CET 2026
   - `config show` human output should stay as plain aligned rows rather than reintroducing `comfy_table`, because the branch is matching the Go CLI’s config display format.
   - The sender formatter should sort roles before rendering and omit placeholder text for missing addresses; JSON tests still guard the unchanged machine-readable path.
   - `cargo check -p treb-cli` and `cargo test -p treb-cli` pass for this story.
+---
+## 2026-03-10 14:55 CET - P3-US-005
+- Updated the `networks_resolves_dotenv_rpc_urls` golden scenario to stand up a deterministic local JSON-RPC endpoint, verify human output prints `Chain ID: 31337`, and verify `networks --json` includes `chainId` for the resolved endpoint.
+- Added a reusable test-only RPC URL normalizer so the dynamic loopback port does not churn golden files, and documented that pattern in `CLAUDE.md`.
+- Files changed: `crates/treb-cli/tests/integration_networks.rs`, `crates/treb-cli/tests/golden/networks_resolves_dotenv_rpc_urls/commands.golden`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - `treb-cli` JSON goldens use `output::print_json()`, which sorts object keys deterministically; snapshot expectations should match that sorted key order.
+  - A lightweight loopback JSON-RPC server is enough to cover resolved `eth_chainId` behavior in `networks` tests without depending on Anvil startup.
+  - `cargo test -p treb-cli` passes for this story.
 ---

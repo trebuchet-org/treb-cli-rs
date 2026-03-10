@@ -77,7 +77,7 @@
         "All golden tests pass with cargo test -p treb-cli"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
