@@ -1,6 +1,7 @@
 ## Codebase Patterns
 - For CLI flag changes in `crates/treb-cli`, keep the derive parser in `src/main.rs`, the shell completion builder in `build.rs`, and a focused `parse_cli_from(...)` regression test in sync.
 - For scoped deployment queries in CLI commands, filter `Registry::list_deployments()` with `commands::list::filter_deployments()` and resolve the user query with `commands::resolve::resolve_deployment_in_scope()` so namespace/network/fork filters affect ambiguity resolution consistently.
+- For scoped commands that support interactive deployment selection, pass the filtered deployment slice into `fuzzy_select_deployment_id()` too; otherwise the prompt can offer out-of-scope deployments even when typed queries are scoped correctly.
 
 # Ralph Progress Log
 Started: Tue Mar 10 09:09:42 PM CET 2026
@@ -28,4 +29,16 @@ Started: Tue Mar 10 09:09:42 PM CET 2026
     `resolve_deployment()` resolves against the whole registry, so scoped commands need `resolve_deployment_in_scope()` or they will stay ambiguous even when filters should narrow the result to one deployment.
   - Useful context (e.g., "the evaluation panel is in component X")
     Focused binary tests in `crates/treb-cli/tests/cli_list_show.rs` are sufficient to cover `show` runtime filtering without touching golden snapshots because the existing clap/help surface for `show` was already in place.
+---
+## 2026-03-10 21:42:55 CET - P6-US-003
+- Wired `treb tag` runtime handling to honor `--namespace` and `--network` for direct query resolution and interactive deployment selection, and added scoped no-match error context.
+- Added focused CLI tests covering scoped tag show, scoped tag add with combined namespace/network flags, and scoped tag remove behavior against ambiguous deployments.
+- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `CLAUDE.md`, `crates/treb-cli/src/commands/tag.rs`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/tests/cli_tag.rs`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    Scoped deployment commands should reuse `DeploymentFilters` plus `resolve_deployment_in_scope()` for both typed queries and interactive selection so all entry paths share the same candidate set.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    `cargo test -p treb-cli cli_tag` only applies a name filter; use `cargo test -p treb-cli --test cli_tag` when you need to execute that integration test file directly.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    A standalone `crates/treb-cli/tests/cli_tag.rs` binary test file is enough for focused tag-scope coverage without introducing new golden snapshots.
 ---

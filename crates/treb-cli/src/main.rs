@@ -909,8 +909,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             )
             .await?
         }
-        Commands::Tag { deployment, add, remove, json, .. } => {
-            commands::tag::run(deployment, add, remove, json, non_interactive).await?
+        Commands::Tag { deployment, add, remove, network, namespace, json } => {
+            commands::tag::run(deployment, add, remove, network, namespace, json, non_interactive)
+                .await?
         }
         Commands::Register {
             tx_hash,

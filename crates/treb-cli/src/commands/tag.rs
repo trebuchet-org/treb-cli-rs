@@ -1,6 +1,6 @@
 //! `treb tag` command implementation.
 
-use std::env;
+use std::{env, fmt::Write as _};
 
 use anyhow::{Context, bail};
 use owo_colors::{OwoColorize, Style};
@@ -8,7 +8,10 @@ use serde::Serialize;
 use treb_registry::Registry;
 
 use crate::{
-    commands::resolve::resolve_deployment,
+    commands::{
+        list::{DeploymentFilters, filter_deployments},
+        resolve::resolve_deployment_in_scope,
+    },
     output,
     ui::{color, selector::fuzzy_select_deployment_id},
 };
@@ -33,6 +36,8 @@ pub async fn run(
     deployment_query: Option<String>,
     add: Option<String>,
     remove: Option<String>,
+    network: Option<String>,
+    namespace: Option<String>,
     json: bool,
     non_interactive: bool,
 ) -> anyhow::Result<()> {
@@ -55,18 +60,28 @@ pub async fn run(
 
     let mut registry = Registry::open(&cwd).context("failed to open registry")?;
     let lookup = registry.load_lookup_index().context("failed to load lookup index")?;
+    let all_deployments = registry.list_deployments();
+    let scope = TagScope { namespace, network };
+    let filters = scope.as_deployment_filters();
+    let filtered_deployments = filter_deployments(&all_deployments, &filters);
 
     let query = match deployment_query {
         Some(q) => q,
         None => {
-            let deployments: Vec<_> = registry.list_deployments().into_iter().cloned().collect();
+            if filtered_deployments.is_empty() {
+                bail!("{}", scope.no_deployments_message());
+            }
+
+            let deployments: Vec<_> =
+                filtered_deployments.iter().map(|deployment| (*deployment).clone()).collect();
             fuzzy_select_deployment_id(&deployments, non_interactive)
                 .map_err(|e| anyhow::anyhow!("{e}"))?
                 .ok_or_else(|| anyhow::anyhow!("no deployment selected"))?
         }
     };
 
-    let resolved = resolve_deployment(&query, &registry, &lookup)?;
+    let resolved = resolve_deployment_in_scope(&query, &registry, &lookup, &filtered_deployments)
+        .map_err(|err| scope.decorate_resolution_error(&query, err))?;
     let deployment_id = resolved.id.clone();
 
     match (add, remove) {
@@ -75,6 +90,64 @@ pub async fn run(
         (None, None) => show_tags(&registry, &deployment_id, json),
         // clap's conflicts_with prevents this, but handle it defensively
         (Some(_), Some(_)) => bail!("--add and --remove cannot be used together"),
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct TagScope {
+    namespace: Option<String>,
+    network: Option<String>,
+}
+
+impl TagScope {
+    fn as_deployment_filters(&self) -> DeploymentFilters {
+        DeploymentFilters {
+            network: self.network.clone(),
+            namespace: self.namespace.clone(),
+            deployment_type: None,
+            tag: None,
+            contract: None,
+            label: None,
+            fork: false,
+            no_fork: false,
+        }
+    }
+
+    fn context_suffix(&self) -> String {
+        let mut context = String::new();
+
+        if let Some(namespace) = &self.namespace {
+            let _ = write!(context, " in namespace '{namespace}'");
+        }
+
+        if let Some(network) = &self.network {
+            let _ = write!(context, " on network '{network}'");
+        }
+
+        context
+    }
+
+    fn no_deployments_message(&self) -> String {
+        format!(
+            "no deployments found{}\n\nRun `treb list` to see available deployments.",
+            self.context_suffix()
+        )
+    }
+
+    fn decorate_resolution_error(&self, query: &str, err: anyhow::Error) -> anyhow::Error {
+        if self.context_suffix().is_empty() {
+            return err;
+        }
+
+        let message = err.to_string();
+        if message.starts_with("no deployment found") {
+            anyhow::anyhow!(
+                "no deployment found matching '{query}'{}\n\nRun `treb list` to see available deployments.",
+                self.context_suffix()
+            )
+        } else {
+            err
+        }
     }
 }
 
