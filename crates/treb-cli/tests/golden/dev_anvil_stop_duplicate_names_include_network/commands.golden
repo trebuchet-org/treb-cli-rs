@@ -1,0 +1,3 @@
+=== cmd 0: [dev anvil stop --name alpha] ===
+✅ Stopped anvil node 'alpha' for network 'mainnet'
+✅ Stopped anvil node 'alpha' for network 'sepolia'

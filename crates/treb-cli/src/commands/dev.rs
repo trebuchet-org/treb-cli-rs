@@ -1,6 +1,7 @@
 //! `treb dev` subcommands — manage local Anvil development nodes.
 
 use std::{
+    collections::HashMap,
     env, fs,
     path::{Path, PathBuf},
 };
@@ -8,12 +9,20 @@ use std::{
 use anyhow::{Context, bail};
 use chrono::Utc;
 use clap::Subcommand;
+use owo_colors::{OwoColorize, Style};
 use tokio::net::TcpStream;
 use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
 use treb_forge::{anvil::AnvilConfig, createx::deploy_createx};
 use treb_registry::ForkStateStore;
 
+use crate::ui::{color, emoji};
+
 const TREB_DIR: &str = ".treb";
+
+/// Apply a color style when color is enabled, plain text otherwise.
+fn styled(text: &str, style: Style) -> String {
+    if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
+}
 
 // ── Subcommand enums ─────────────────────────────────────────────────────────
 
@@ -167,15 +176,43 @@ async fn run_anvil_start_with_entry(
     let actual_port = anvil.port();
     let chain_id = anvil.chain_id();
 
-    println!("Anvil node started at {rpc_url}");
-
-    // Deploy CreateX factory.
-    deploy_createx(&anvil).await.map_err(|e| anyhow::anyhow!("{e}"))?;
-    println!("CreateX factory deployed at 0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed");
-
-    // Write PID file.
+    // Compute paths early for styled output.
     let pid_file_path = pid_file_path(&treb_dir, &instance_name);
     let log_file_path = log_file_path(&treb_dir, &instance_name);
+    let display_log_file_path = human_display_path(&cwd, &log_file_path);
+
+    deploy_createx(&anvil).await.with_context(|| {
+        format!("failed to deploy CreateX for Anvil instance '{}' at {}", instance_name, rpc_url)
+    })?;
+
+    // Print styled start output (matches Go CLI format).
+    println!(
+        "{}",
+        styled(
+            &format!("{} Anvil node '{}' started successfully", emoji::CHECK, instance_name),
+            color::GREEN,
+        )
+    );
+    println!(
+        "{}",
+        styled(
+            &format!("{} Logs: {}", emoji::CLIPBOARD, display_log_file_path.display()),
+            color::YELLOW,
+        )
+    );
+    println!("{}", styled(&format!("{} RPC URL: {}", emoji::GLOBE, rpc_url), color::BLUE));
+    println!(
+        "{}",
+        styled(
+            &format!(
+                "{} CreateX factory deployed at 0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed",
+                emoji::CHECK
+            ),
+            color::GREEN,
+        )
+    );
+
+    // Write PID file.
     let pid = std::process::id();
     fs::create_dir_all(&treb_dir).ok();
     fs::write(&pid_file_path, pid.to_string())
@@ -203,14 +240,19 @@ async fn run_anvil_start_with_entry(
             }
             Err(e) => {
                 // Non-fatal: revert will just skip the EVM revert step.
-                println!("Warning: could not take initial EVM snapshot: {e}");
+                println!(
+                    "{}",
+                    styled(
+                        &format!(
+                            "{}  Warning: could not take initial EVM snapshot: {e}",
+                            emoji::WARNING
+                        ),
+                        color::YELLOW,
+                    )
+                );
             }
         }
-
-        println!("Fork state updated for network '{net}' (port {actual_port}).");
     }
-
-    println!("Press Ctrl+C (or send SIGTERM) to stop.");
 
     // Block until SIGINT or SIGTERM.
     shutdown_signal.wait().await;
@@ -288,6 +330,9 @@ pub async fn run_anvil_stop(network: Option<String>, name: Option<String>) -> an
     };
 
     let mut removed = Vec::new();
+    let instance_name_counts = tracked_instance_name_counts(
+        targets.iter().map(|(_, instance_name, _)| instance_name.as_str()),
+    );
     for (net, instance_name, port) in &targets {
         if !is_port_reachable(*port).await {
             if instance_name == net {
@@ -307,10 +352,26 @@ pub async fn run_anvil_stop(network: Option<String>, name: Option<String>) -> an
                 .ok();
             removed.push((net.clone(), instance_name.clone()));
         } else if instance_name == net {
-            println!("Network '{net}' is still reachable at port {port}; skipping.");
+            println!(
+                "{}",
+                styled(
+                    &format!(
+                        "{}  Network '{net}' is still reachable at port {port}; skipping.",
+                        emoji::WARNING
+                    ),
+                    color::YELLOW,
+                )
+            );
         } else {
             println!(
-                "Instance '{instance_name}' for network '{net}' is still reachable at port {port}; skipping."
+                "{}",
+                styled(
+                    &format!(
+                        "{}  Instance '{instance_name}' for network '{net}' is still reachable at port {port}; skipping.",
+                        emoji::WARNING
+                    ),
+                    color::YELLOW,
+                )
             );
         }
     }
@@ -318,19 +379,31 @@ pub async fn run_anvil_stop(network: Option<String>, name: Option<String>) -> an
     if removed.is_empty() {
         if network.is_some() && name.is_none() && targets.is_empty() {
             let net = network.as_deref().unwrap_or_default();
-            println!("Network '{net}' has no tracked Anvil instance; nothing to remove.");
+            println!(
+                "{}",
+                styled(
+                    &format!("Network '{net}' has no tracked Anvil instance; nothing to remove."),
+                    color::YELLOW,
+                )
+            );
             return Ok(());
         }
-        println!("No stale fork state entries found.");
+        println!("{}", styled("No stale fork state entries found.", color::YELLOW));
     } else {
         for (net, instance_name) in &removed {
-            if instance_name == net {
-                println!("Removed stale fork state entry for network '{net}'.");
+            let show_network =
+                instance_name_counts.get(instance_name).copied().unwrap_or_default() > 1;
+            let message = if show_network {
+                format!(
+                    "{} Stopped anvil node '{}' for network '{}'",
+                    emoji::CHECK,
+                    instance_name,
+                    net
+                )
             } else {
-                println!(
-                    "Removed stale fork state entry for instance '{instance_name}' on network '{net}'."
-                );
-            }
+                format!("{} Stopped anvil node '{}'", emoji::CHECK, instance_name)
+            };
+            println!("{}", styled(&message, color::GREEN));
         }
     }
 
@@ -390,7 +463,6 @@ pub async fn run_anvil_restart(
 
     // Try to stop the old instance if it's still running.
     if entry_port != 0 && is_port_reachable(entry_port).await {
-        println!("Stopping existing instance on port {}...", entry_port);
         try_kill_pid_file(&entry_pid_file);
 
         // Wait for port to become available.
@@ -404,7 +476,6 @@ pub async fn run_anvil_restart(
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
-        println!("Old instance stopped.");
     }
 
     // Record restart history.
@@ -459,6 +530,8 @@ pub async fn run_anvil_status(
             .collect()
     };
     sort_tracked_anvil_entries(&mut forks);
+    let instance_name_counts =
+        tracked_instance_name_counts(forks.iter().map(|entry| entry.resolved_instance_name()));
 
     let now = Utc::now();
 
@@ -488,49 +561,87 @@ pub async fn run_anvil_status(
         return Ok(());
     }
 
-    let mut table = crate::output::build_table(&[
-        "Network",
-        "Instance",
-        "RPC URL",
-        "Port",
-        "Chain ID",
-        "Fork Block",
-        "Started At",
-        "Uptime",
-        "Status",
-    ]);
+    let cwd = env::current_dir().unwrap_or_default();
 
-    for entry in &forks {
+    for (i, entry) in forks.iter().enumerate() {
+        let instance_name = entry.resolved_instance_name();
         let running = is_port_reachable(entry.port).await;
-        let status_text = if running { "running" } else { "stopped" };
-        let uptime = format_uptime(now - entry.started_at);
-        let fork_block =
-            entry.fork_block_number.map(|b| b.to_string()).unwrap_or_else(|| "latest".into());
-
-        let status_cell = if crate::ui::color::is_color_enabled() {
-            if running {
-                comfy_table::Cell::new(status_text).fg(comfy_table::Color::Green)
-            } else {
-                comfy_table::Cell::new(status_text).fg(comfy_table::Color::Red)
-            }
+        let show_network = instance_name_counts.get(instance_name).copied().unwrap_or_default() > 1;
+        let header = if show_network {
+            format!("Anvil Status ('{instance_name}' on '{}'):", entry.network)
         } else {
-            comfy_table::Cell::new(status_text)
+            format!("Anvil Status ('{instance_name}'):")
         };
 
-        table.add_row(vec![
-            comfy_table::Cell::new(&entry.network),
-            comfy_table::Cell::new(entry.resolved_instance_name()),
-            comfy_table::Cell::new(&entry.rpc_url),
-            comfy_table::Cell::new(entry.port),
-            comfy_table::Cell::new(entry.chain_id),
-            comfy_table::Cell::new(&fork_block),
-            comfy_table::Cell::new(entry.started_at.format("%Y-%m-%d %H:%M:%S UTC")),
-            comfy_table::Cell::new(&uptime),
-            status_cell,
-        ]);
+        // Cyan bold header: 📊 Anvil Status ('NAME'):
+        println!("{} {}", emoji::CHART, styled(&header, color::STAGE),);
+
+        if running {
+            // Green status with PID
+            println!(
+                "  Status: {} {}",
+                emoji::GREEN_CIRCLE,
+                styled(&format!("Running (PID {})", entry.anvil_pid), color::GREEN),
+            );
+            // Blue RPC URL
+            println!("  RPC URL: {}", styled(&entry.rpc_url, color::BLUE),);
+            // Yellow log file
+            let log_path = if entry.log_file.is_empty() {
+                log_file_path(&treb_dir, instance_name).display().to_string()
+            } else {
+                entry.log_file.clone()
+            };
+            let display_log = human_display_path(&cwd, Path::new(&log_path));
+            println!("  Log file: {}", styled(&display_log.display().to_string(), color::YELLOW),);
+            // RPC health check
+            let rpc_healthy = check_rpc_health(&entry.rpc_url).await;
+            if rpc_healthy {
+                println!("  RPC Health: {} {}", emoji::CHECK, styled("Responding", color::GREEN),);
+            } else {
+                println!("  RPC Health: {} {}", emoji::CROSS, styled("Not responding", color::RED),);
+            }
+            // CreateX status check
+            let createx_deployed = check_createx_deployed(&entry.rpc_url).await;
+            if createx_deployed {
+                println!(
+                    "  CreateX Status: {} {}",
+                    emoji::CHECK,
+                    styled("Deployed at 0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed", color::GREEN),
+                );
+            } else {
+                println!(
+                    "  CreateX Status: {} {}",
+                    emoji::CROSS,
+                    styled("Not deployed", color::RED),
+                );
+            }
+        } else {
+            // Red status
+            println!("  Status: {} {}", emoji::RED_CIRCLE, styled("Not running", color::RED),);
+            // Gray PID file
+            let pid_path = if entry.pid_file.is_empty() {
+                pid_file_path(&treb_dir, instance_name).display().to_string()
+            } else {
+                entry.pid_file.clone()
+            };
+            let display_pid = human_display_path(&cwd, Path::new(&pid_path));
+            println!("  PID file: {}", styled(&display_pid.display().to_string(), color::GRAY),);
+            // Gray log file
+            let log_path = if entry.log_file.is_empty() {
+                log_file_path(&treb_dir, instance_name).display().to_string()
+            } else {
+                entry.log_file.clone()
+            };
+            let display_log = human_display_path(&cwd, Path::new(&log_path));
+            println!("  Log file: {}", styled(&display_log.display().to_string(), color::GRAY),);
+        }
+
+        // Blank line between instances (but not after the last one)
+        if i < forks.len() - 1 {
+            println!();
+        }
     }
 
-    crate::output::print_table(&table);
     Ok(())
 }
 
@@ -563,6 +674,13 @@ pub async fn run_anvil_logs(
         );
     }
 
+    // Print Go-matching header for both `logs` and `logs --follow`.
+    let display_path = human_display_path(&cwd, &log_path);
+    let (header_line, log_file_line) = anvil_logs_header_lines(&instance_name, display_path);
+    println!("{} {}", styled(emoji::CLIPBOARD, color::STAGE), styled(&header_line, color::STAGE),);
+    println!("{}", styled(&log_file_line, color::GRAY));
+    println!();
+
     if follow {
         stream_log_file(&log_path).await
     } else {
@@ -571,6 +689,13 @@ pub async fn run_anvil_logs(
         print!("{contents}");
         Ok(())
     }
+}
+
+fn anvil_logs_header_lines(instance_name: &str, display_path: &Path) -> (String, String) {
+    (
+        format!("Showing anvil '{instance_name}' logs (Ctrl+C to exit):"),
+        format!("Log file: {}", display_path.display()),
+    )
 }
 
 /// Resolve the log file path for an instance, checking fork state first then falling
@@ -702,6 +827,16 @@ fn sort_tracked_anvil_entries(entries: &mut Vec<&ForkEntry>) {
     });
 }
 
+fn tracked_instance_name_counts<'a>(
+    instance_names: impl IntoIterator<Item = &'a str>,
+) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for instance_name in instance_names {
+        *counts.entry(instance_name.to_string()).or_insert(0) += 1;
+    }
+    counts
+}
+
 fn resolve_named_anvil_entries<'a>(
     store: &'a ForkStateStore,
     network: Option<&str>,
@@ -769,6 +904,10 @@ pub(crate) fn log_file_path(treb_dir: &Path, instance_name: &str) -> PathBuf {
     treb_dir.join(format!("anvil-{instance_name}.log"))
 }
 
+fn human_display_path<'a>(cwd: &Path, path: &'a Path) -> &'a Path {
+    path.strip_prefix(cwd).unwrap_or(path)
+}
+
 /// Attempt to stop a process by reading its PID from a file and sending SIGTERM.
 fn try_kill_pid_file(pid_file: &str) {
     if pid_file.is_empty() {
@@ -793,6 +932,55 @@ pub(crate) async fn is_port_reachable(port: u16) -> bool {
     }
     let addr = format!("127.0.0.1:{port}");
     TcpStream::connect(&addr).await.is_ok()
+}
+
+/// Check whether an Anvil RPC endpoint is healthy by sending an `eth_chainId` request.
+///
+/// Returns `true` if the endpoint responds with a valid JSON-RPC result.
+async fn check_rpc_health(rpc_url: &str) -> bool {
+    use std::time::Duration;
+    let Ok(client) = reqwest::Client::builder().timeout(Duration::from_secs(5)).build() else {
+        return false;
+    };
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "eth_chainId",
+        "params": [],
+        "id": 1
+    });
+    let Ok(resp) = client.post(rpc_url).json(&body).send().await else {
+        return false;
+    };
+    let Ok(json) = resp.json::<serde_json::Value>().await else {
+        return false;
+    };
+    json.get("result").is_some()
+}
+
+/// Check whether the CreateX factory is deployed at the canonical address.
+///
+/// Sends an `eth_getCode` request; returns `true` if the result is non-empty bytecode.
+async fn check_createx_deployed(rpc_url: &str) -> bool {
+    use std::time::Duration;
+    let Ok(client) = reqwest::Client::builder().timeout(Duration::from_secs(5)).build() else {
+        return false;
+    };
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "eth_getCode",
+        "params": ["0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed", "latest"],
+        "id": 1
+    });
+    let Ok(resp) = client.post(rpc_url).json(&body).send().await else {
+        return false;
+    };
+    let Ok(json) = resp.json::<serde_json::Value>().await else {
+        return false;
+    };
+    match json.get("result").and_then(|r| r.as_str()) {
+        Some(code) => code != "0x" && !code.is_empty(),
+        None => false,
+    }
 }
 
 /// Take an EVM snapshot via HTTP JSON-RPC and return the snapshot ID hex string.
@@ -1290,6 +1478,15 @@ mod tests {
         assert_eq!(resolve_instance_name(Some("my-node"), Some("mainnet")), "my-node");
     }
 
+    #[test]
+    fn anvil_logs_header_lines_match_go_format() {
+        let (header, log_file) =
+            anvil_logs_header_lines("mainnet", Path::new(".treb/anvil-mainnet.log"));
+
+        assert_eq!(header, "Showing anvil 'mainnet' logs (Ctrl+C to exit):");
+        assert_eq!(log_file, "Log file: .treb/anvil-mainnet.log");
+    }
+
     // ── pid/log file path tests ──────────────────────────────────────────
 
     #[test]
@@ -1302,6 +1499,22 @@ mod tests {
     fn log_file_path_uses_instance_name() {
         let path = log_file_path(Path::new(".treb"), "mainnet");
         assert_eq!(path, Path::new(".treb/anvil-mainnet.log"));
+    }
+
+    #[test]
+    fn human_display_path_strips_current_directory_prefix() {
+        let cwd = Path::new("/workspace/treb-cli-rs");
+        let path = cwd.join(".treb/anvil-mainnet.log");
+
+        assert_eq!(human_display_path(cwd, &path), Path::new(".treb/anvil-mainnet.log"));
+    }
+
+    #[test]
+    fn human_display_path_falls_back_when_path_is_outside_cwd() {
+        let cwd = Path::new("/workspace/treb-cli-rs");
+        let path = Path::new("/tmp/anvil-mainnet.log");
+
+        assert_eq!(human_display_path(cwd, path), path);
     }
 
     // ── helpers ───────────────────────────────────────────────────────────

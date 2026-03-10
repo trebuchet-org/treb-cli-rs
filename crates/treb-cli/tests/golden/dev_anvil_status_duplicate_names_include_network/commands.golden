@@ -1,0 +1,10 @@
+=== cmd 0: [dev anvil status --name alpha] ===
+📊 Anvil Status ('alpha' on 'mainnet'):
+  Status: 🔴 Not running
+  PID file: .treb/anvil-alpha.pid
+  Log file: .treb/anvil-alpha.log
+
+📊 Anvil Status ('alpha' on 'sepolia'):
+  Status: 🔴 Not running
+  PID file: .treb/anvil-alpha.pid
+  Log file: .treb/anvil-alpha.log
