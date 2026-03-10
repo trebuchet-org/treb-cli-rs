@@ -66,7 +66,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Tag command network/namespace fields are accepted by the parser but may be unused until Phase 6 wires filtering logic."
     },
     {

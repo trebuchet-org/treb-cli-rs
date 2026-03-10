@@ -3,6 +3,7 @@
 - When a clap flag becomes global in `crates/treb-cli/src/main.rs`, mirror it in `crates/treb-cli/build.rs` and refresh the affected `tests/golden/help_*` snapshots because the option propagates into root and subcommand help.
 - When a command relies on `ui::selector` or destructive prompt-skipping logic, pass `Cli.non_interactive` all the way down; `is_non_interactive(false)` only honors env/TTY fallbacks and silently ignores the parsed global flag.
 - `crates/treb-cli/src/ui/interactive.rs` treats `TREB_NON_INTERACTIVE=1|true` as opt-in, while `CI` remains a separate `true`-only switch; keep those env semantics distinct when refactoring prompt detection.
+- When adding subcommand short flags in `crates/treb-cli/src/main.rs`, mirror them in `crates/treb-cli/build.rs`; fast regression coverage can live in `src/main.rs` via `parse_cli_from(...)` and targeted subcommand help assertions without introducing new golden snapshots.
 
 Started: Tue Mar 10 05:21:40 PM CET 2026
 ---
@@ -40,4 +41,16 @@ Started: Tue Mar 10 05:21:40 PM CET 2026
   - `TREB_NON_INTERACTIVE` and `CI` do not share identical truth tables: only the former accepts `"1"`, while both env vars stay case-insensitive for `"true"`.
   - Useful context (e.g., "the evaluation panel is in component X")
   - `cargo test -p treb-cli` already exercises `integration_non_interactive.rs`, so a detector-only change still gets end-to-end regression coverage even when the story only requires unit-test updates.
+---
+## 2026-03-10 20:48:17 CET - P5-US-004
+- Added `-n`/`-s` short flags to `list` in the derive parser and completion builder, and added parser-only `network`/`namespace` options with the same short flags to `tag` so clap accepts the Go-compatible shorthand without changing tag runtime behavior yet.
+- Files changed: `crates/treb-cli/src/main.rs`, `crates/treb-cli/build.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+  - Subcommand shorthand flags need to be kept in sync across both the derive-based CLI in `crates/treb-cli/src/main.rs` and the completion tree in `crates/treb-cli/build.rs`.
+  - Targeted clap regression coverage is cheap in `crates/treb-cli/src/main.rs` tests: `parse_cli_from(...)` can pin aliases and short-flag parsing, and `find_subcommand_mut(...).write_long_help(...)` can assert the exact help row without snapshot churn.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+  - `tag` can accept parser-only filter fields for compatibility while its handler keeps ignoring them; the match arm in `run()` needs `..` once new clap fields are added.
+  - Useful context (e.g., "the evaluation panel is in component X")
+  - Existing `tests/cli_completions.rs` coverage is enough to catch builder/runtime drift for command metadata, so parser-surface stories do not always need new golden fixtures.
 ---

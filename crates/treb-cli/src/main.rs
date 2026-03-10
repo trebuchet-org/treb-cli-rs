@@ -116,10 +116,10 @@ enum Commands {
     #[command(alias = "ls")]
     List {
         /// Network name or chain ID
-        #[arg(long)]
+        #[arg(long, short = 'n')]
         network: Option<String>,
         /// Deployment namespace
-        #[arg(long)]
+        #[arg(long, short = 's')]
         namespace: Option<String>,
         /// Filter by deployment type (SINGLETON, PROXY, LIBRARY)
         #[arg(long, value_name = "TYPE")]
@@ -247,6 +247,12 @@ enum Commands {
         /// Remove a tag from the deployment
         #[arg(long, conflicts_with = "add")]
         remove: Option<String>,
+        /// Network name or chain ID
+        #[arg(long, short = 'n')]
+        network: Option<String>,
+        /// Deployment namespace
+        #[arg(long, short = 's')]
+        namespace: Option<String>,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -893,7 +899,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             )
             .await?
         }
-        Commands::Tag { deployment, add, remove, json } => {
+        Commands::Tag { deployment, add, remove, json, .. } => {
             commands::tag::run(deployment, add, remove, json, non_interactive).await?
         }
         Commands::Register {
@@ -1173,6 +1179,67 @@ mod tests {
             Commands::Migrate { subcommand: MigrateSubcommand::Config { .. } } => {}
             _ => panic!("expected migrate config command"),
         }
+    }
+
+    #[test]
+    fn list_network_short_flag_parses() {
+        let cli = parse_cli_from(["treb", "list", "-n", "mainnet"]).unwrap();
+
+        match cli.command {
+            Commands::List { network, .. } => assert_eq!(network.as_deref(), Some("mainnet")),
+            _ => panic!("expected list command"),
+        }
+    }
+
+    #[test]
+    fn list_namespace_short_flag_parses() {
+        let cli = parse_cli_from(["treb", "list", "-s", "production"]).unwrap();
+
+        match cli.command {
+            Commands::List { namespace, .. } => {
+                assert_eq!(namespace.as_deref(), Some("production"))
+            }
+            _ => panic!("expected list command"),
+        }
+    }
+
+    #[test]
+    fn list_alias_accepts_short_flags() {
+        let cli = parse_cli_from(["treb", "ls", "-n", "mainnet", "-s", "production"]).unwrap();
+
+        match cli.command {
+            Commands::List { network, namespace, .. } => {
+                assert_eq!(network.as_deref(), Some("mainnet"));
+                assert_eq!(namespace.as_deref(), Some("production"));
+            }
+            _ => panic!("expected list command"),
+        }
+    }
+
+    #[test]
+    fn tag_short_flags_parse_without_wiring_behavior() {
+        let cli = parse_cli_from(["treb", "tag", "Counter", "-n", "mainnet", "-s", "production"])
+            .unwrap();
+
+        match cli.command {
+            Commands::Tag { deployment, network, namespace, .. } => {
+                assert_eq!(deployment.as_deref(), Some("Counter"));
+                assert_eq!(network.as_deref(), Some("mainnet"));
+                assert_eq!(namespace.as_deref(), Some("production"));
+            }
+            _ => panic!("expected tag command"),
+        }
+    }
+
+    #[test]
+    fn list_help_includes_short_flags_for_network_and_namespace() {
+        let mut cmd = Cli::command();
+        let mut buffer = Vec::new();
+        cmd.find_subcommand_mut("list").unwrap().write_long_help(&mut buffer).unwrap();
+        let help = String::from_utf8(buffer).unwrap();
+
+        assert!(help.contains("-n, --network"), "unexpected help output: {help}");
+        assert!(help.contains("-s, --namespace"), "unexpected help output: {help}");
     }
 
     #[test]

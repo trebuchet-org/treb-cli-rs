@@ -104,8 +104,13 @@ fn build_list() -> ClapCommand {
     ClapCommand::new("list")
         .about("List deployments in the registry")
         .alias("ls")
-        .arg(Arg::new("network").long("network").help("Filter by network name or chain ID"))
-        .arg(Arg::new("namespace").long("namespace").help("Filter by namespace"))
+        .arg(
+            Arg::new("network")
+                .long("network")
+                .short('n')
+                .help("Filter by network name or chain ID"),
+        )
+        .arg(Arg::new("namespace").long("namespace").short('s').help("Filter by namespace"))
         .arg(
             Arg::new("type")
                 .long("type")
@@ -214,6 +219,8 @@ fn build_tag() -> ClapCommand {
         .arg(Arg::new("deployment").help("Deployment identifier; omit to select interactively"))
         .arg(Arg::new("add").long("add").help("Add a tag to the deployment"))
         .arg(Arg::new("remove").long("remove").help("Remove a tag from the deployment"))
+        .arg(Arg::new("network").long("network").short('n').help("Network name or chain ID"))
+        .arg(Arg::new("namespace").long("namespace").short('s').help("Deployment namespace"))
         .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
 }
 
