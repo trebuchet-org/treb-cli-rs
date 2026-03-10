@@ -266,22 +266,16 @@ fn deployment_labels(
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RegisterOutputJson {
-    success: bool,
-    tx_hash: String,
-    chain_id: u64,
-    mode: String,
     deployments: Vec<RegisteredDeploymentJson>,
-    transaction_id: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RegisteredDeploymentJson {
-    id: String,
-    contract_name: String,
     address: String,
-    namespace: String,
-    chain_id: u64,
+    contract_name: String,
+    deployment_id: String,
+    label: String,
 }
 
 /// Apply a color style when color is enabled, plain text otherwise.
@@ -378,8 +372,6 @@ pub async fn run(
     }
 
     let mut creations;
-    let mode;
-
     let trace_result = rpc_call(
         &client,
         &effective_rpc_url,
@@ -392,7 +384,6 @@ pub async fn run(
 
     match trace_result {
         Ok(trace) => {
-            mode = "trace";
             creations = extract_creations_from_trace(&trace);
             proxy_patterns = detect_proxy_patterns(&trace);
 
@@ -409,7 +400,6 @@ pub async fn run(
             }
         }
         Err(_) => {
-            mode = "receipt";
             if !json {
                 eprintln!(
                     "{}",
@@ -515,7 +505,7 @@ pub async fn run(
             namespace: effective_namespace.clone(),
             chain_id,
             contract_name: name.clone(),
-            label: dep_label,
+            label: dep_label.clone(),
             address: creation.address.clone(),
             deployment_type: effective_dep_type,
             transaction_id: tx_id.clone(),
@@ -557,18 +547,17 @@ pub async fn run(
 
         registered.push((
             RegisteredDeploymentJson {
-                id: deployment_id,
-                contract_name: name,
                 address: creation.address.clone(),
-                namespace: effective_namespace.clone(),
-                chain_id,
+                contract_name: name,
+                deployment_id,
+                label: dep_label,
             },
             creation.create_type.clone(),
         ));
     }
 
     // ── Create transaction record ───────────────────────────────────────
-    let deployment_ids: Vec<String> = registered.iter().map(|(d, _)| d.id.clone()).collect();
+    let deployment_ids: Vec<String> = registered.iter().map(|(d, _)| d.deployment_id.clone()).collect();
 
     let operations: Vec<Operation> = registered
         .iter()
@@ -606,12 +595,7 @@ pub async fn run(
 
     if json {
         output::print_json(&RegisterOutputJson {
-            success: true,
-            tx_hash: tx_hash.to_string(),
-            chain_id,
-            mode: mode.to_string(),
             deployments: dep_jsons,
-            transaction_id: tx_id,
         })?;
     } else {
         let n = dep_jsons.len();
@@ -620,7 +604,7 @@ pub async fn run(
 
         for (i, (dep, label)) in dep_jsons.iter().zip(dep_labels.iter()).enumerate() {
             println!("  Deployment {}:", i + 1);
-            println!("    Deployment ID: {}", dep.id);
+            println!("    Deployment ID: {}", dep.deployment_id);
             println!("    Address: {}", dep.address);
             println!("    Contract: {}", dep.contract_name);
             if let Some(label) = label {
