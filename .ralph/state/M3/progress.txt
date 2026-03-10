@@ -1,6 +1,7 @@
 # Ralph Progress Log
 ## Codebase Patterns
 - When a clap command supports both positional and flag forms for the same input, mirror the conflicts/required-group wiring in `crates/treb-cli/src/**` and `crates/treb-cli/build.rs`, and set `value_name` on renamed flag fields so usage/errors show the user-facing placeholder instead of the internal field id.
+- When a dual-form fork subcommand also supports `--all`, put the positional arg, `--network`, and `--all` in the same ArgGroup in both clap definitions, then normalize them in the command dispatcher so the bypass path and conflict errors stay consistent.
 
 Started: Tue Mar 10 10:14:21 PM CET 2026
 ---
@@ -12,4 +13,13 @@ Started: Tue Mar 10 10:14:21 PM CET 2026
   - Patterns discovered (e.g., "this codebase uses X for Y"): fork clap surfaces are defined twice, in the derive parser and in `crates/treb-cli/build.rs`, so positional/alias changes must be mirrored in both places.
   - Gotchas encountered (e.g., "don't forget to update Z when changing W"): when the clap field name differs from the displayed long flag, missing `value_name` leaks the internal field id into usage and conflict errors.
   - Useful context (e.g., "the evaluation panel is in component X"): `crates/treb-cli/src/commands/fork.rs` already has local parser tests for subcommand shapes, while `crates/treb-cli/tests/fork_integration.rs` is the lightest place to verify persisted fork state against a live RPC.
+---
+## 2026-03-10 22:39:44 CET - P7-US-002
+- Implemented positional `<NETWORK>` parsing for `fork exit`, `fork revert`, `fork restart`, `fork history`, and `fork diff` while preserving `--network`, and wired `fork exit --all` / `fork revert --all` through the same exclusivity rules.
+- Added resolver helpers plus parser coverage for positional, flag, `--all`, and conflicting network forms, and mirrored the updated clap surface in shell-completion generation.
+- Files changed: `CLAUDE.md`, `crates/treb-cli/build.rs`, `crates/treb-cli/src/commands/fork.rs`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y"): fork subcommands that accept both positional and `--network` forms are normalized in `commands::fork::run(...)`, which is the right place to keep handler signatures stable while clap evolves.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W"): if a dual-form subcommand also has `--all`, the positional arg, long flag, and `--all` must share one ArgGroup in both parser definitions or the derive parser and generated completions drift.
+  - Useful context (e.g., "the evaluation panel is in component X"): the fast coverage for fork argument-shape work lives in the `commands::fork::tests` parser block, so story-level validation does not need to wait on the heavier golden suites unless help text changes.
 ---

@@ -74,10 +74,19 @@ pub enum ForkSubcommand {
     ///
     /// If no network is specified, uses the currently configured network. Use
     /// --all to exit all active forks.
+    #[command(group(
+        ArgGroup::new("exit_network")
+            .args(["network", "network_flag", "all"])
+            .required(true)
+            .multiple(false)
+    ))]
     Exit {
         /// Network name or chain ID
-        #[arg(long)]
-        network: String,
+        #[arg(value_name = "NETWORK")]
+        network: Option<String>,
+        /// Network name or chain ID
+        #[arg(long = "network", value_name = "NETWORK")]
+        network_flag: Option<String>,
         /// Exit all active forks
         #[arg(long)]
         all: bool,
@@ -92,10 +101,19 @@ pub enum ForkSubcommand {
     ///
     /// Use --all to revert all runs and restore to the initial fork state. If no
     /// network is specified, uses the currently configured network.
+    #[command(group(
+        ArgGroup::new("revert_network")
+            .args(["network", "network_flag", "all"])
+            .required(true)
+            .multiple(false)
+    ))]
     Revert {
         /// Network name or chain ID
-        #[arg(long)]
-        network: String,
+        #[arg(value_name = "NETWORK")]
+        network: Option<String>,
+        /// Network name or chain ID
+        #[arg(long = "network", value_name = "NETWORK")]
+        network_flag: Option<String>,
         /// Revert all active forks
         #[arg(long)]
         all: bool,
@@ -113,10 +131,19 @@ pub enum ForkSubcommand {
     /// 5. Take a new initial snapshot
     ///
     /// If no network is specified, uses the currently configured network.
+    #[command(group(
+        ArgGroup::new("restart_network")
+            .args(["network", "network_flag"])
+            .required(true)
+            .multiple(false)
+    ))]
     Restart {
         /// Network name or chain ID
-        #[arg(long)]
-        network: String,
+        #[arg(value_name = "NETWORK")]
+        network: Option<String>,
+        /// Network name or chain ID
+        #[arg(long = "network", value_name = "NETWORK")]
+        network_flag: Option<String>,
         /// Fork block number to reset to (uses latest if omitted)
         #[arg(long)]
         fork_block_number: Option<u64>,
@@ -139,10 +166,19 @@ pub enum ForkSubcommand {
     /// points.
     ///
     /// If no network is specified, uses the currently configured network.
+    #[command(group(
+        ArgGroup::new("history_network")
+            .args(["network", "network_flag"])
+            .required(false)
+            .multiple(false)
+    ))]
     History {
         /// Network name or chain ID
-        #[arg(long)]
+        #[arg(value_name = "NETWORK")]
         network: Option<String>,
+        /// Network name or chain ID
+        #[arg(long = "network", value_name = "NETWORK")]
+        network_flag: Option<String>,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -153,10 +189,19 @@ pub enum ForkSubcommand {
     /// deployments were added or changed during fork mode.
     ///
     /// If no network is specified, uses the currently configured network.
+    #[command(group(
+        ArgGroup::new("diff_network")
+            .args(["network", "network_flag"])
+            .required(true)
+            .multiple(false)
+    ))]
     Diff {
         /// Network name or chain ID
-        #[arg(long)]
-        network: String,
+        #[arg(value_name = "NETWORK")]
+        network: Option<String>,
+        /// Network name or chain ID
+        #[arg(long = "network", value_name = "NETWORK")]
+        network_flag: Option<String>,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -299,14 +344,27 @@ pub async fn run(subcommand: ForkSubcommand) -> anyhow::Result<()> {
             let network = resolve_enter_network(network, network_flag)?;
             run_enter(network, rpc_url, fork_block_number, json).await
         }
-        ForkSubcommand::Exit { network, all, json } => run_exit(network, all, json).await,
-        ForkSubcommand::Revert { network, all, json } => run_revert(network, all, json).await,
-        ForkSubcommand::Restart { network, fork_block_number, json } => {
+        ForkSubcommand::Exit { network, network_flag, all, json } => {
+            let network = resolve_network_or_all("exit", network, network_flag, all)?;
+            run_exit(network, all, json).await
+        }
+        ForkSubcommand::Revert { network, network_flag, all, json } => {
+            let network = resolve_network_or_all("revert", network, network_flag, all)?;
+            run_revert(network, all, json).await
+        }
+        ForkSubcommand::Restart { network, network_flag, fork_block_number, json } => {
+            let network = resolve_required_network("restart", network, network_flag)?;
             run_restart(network, fork_block_number, json).await
         }
         ForkSubcommand::Status { json } => run_status(json).await,
-        ForkSubcommand::History { network, json } => run_history(network, json).await,
-        ForkSubcommand::Diff { network, json } => run_diff(network, json).await,
+        ForkSubcommand::History { network, network_flag, json } => {
+            let network = resolve_optional_network("history", network, network_flag)?;
+            run_history(network, json).await
+        }
+        ForkSubcommand::Diff { network, network_flag, json } => {
+            let network = resolve_required_network("diff", network, network_flag)?;
+            run_diff(network, json).await
+        }
     }
 }
 
@@ -323,6 +381,52 @@ fn resolve_enter_network(
         (Some(network), None) | (None, Some(network)) => Ok(network),
         (None, None) => bail!(
             "missing network; pass `fork enter <NETWORK>` or `fork enter --network <NETWORK>`"
+        ),
+    }
+}
+
+fn resolve_required_network(
+    command: &str,
+    positional_network: Option<String>,
+    flag_network: Option<String>,
+) -> anyhow::Result<String> {
+    resolve_optional_network(command, positional_network, flag_network)?.ok_or_else(|| {
+        anyhow::anyhow!(
+            "missing network; pass `fork {command} <NETWORK>` or `fork {command} --network <NETWORK>`"
+        )
+    })
+}
+
+fn resolve_optional_network(
+    command: &str,
+    positional_network: Option<String>,
+    flag_network: Option<String>,
+) -> anyhow::Result<Option<String>> {
+    match (positional_network, flag_network) {
+        (Some(_), Some(_)) => {
+            bail!(
+                "network specified twice; use either `fork {command} <NETWORK>` or `fork {command} --network <NETWORK>`"
+            )
+        }
+        (Some(network), None) | (None, Some(network)) => Ok(Some(network)),
+        (None, None) => Ok(None),
+    }
+}
+
+fn resolve_network_or_all(
+    command: &str,
+    positional_network: Option<String>,
+    flag_network: Option<String>,
+    all: bool,
+) -> anyhow::Result<String> {
+    match resolve_optional_network(command, positional_network, flag_network)? {
+        Some(_) if all => bail!(
+            "network conflicts with --all; use either `fork {command} <NETWORK>`, `fork {command} --network <NETWORK>`, or `fork {command} --all`"
+        ),
+        Some(network) => Ok(network),
+        None if all => Ok(String::new()),
+        None => bail!(
+            "missing network; pass `fork {command} <NETWORK>` or `fork {command} --network <NETWORK>`, or use `fork {command} --all`"
         ),
     }
 }
@@ -1760,11 +1864,12 @@ mod tests {
     }
 
     #[test]
-    fn parse_exit() {
+    fn parse_exit_network_flag() {
         let sub = parse_fork(&["exit", "--network", "sepolia"]).unwrap();
         match sub {
-            ForkSubcommand::Exit { network, all, json } => {
-                assert_eq!(network, "sepolia");
+            ForkSubcommand::Exit { network, network_flag, all, json } => {
+                assert!(network.is_none());
+                assert_eq!(network_flag.as_deref(), Some("sepolia"));
                 assert!(!all);
                 assert!(!json);
             }
@@ -1782,11 +1887,107 @@ mod tests {
     }
 
     #[test]
+    fn parse_exit_network_positional() {
+        let sub = parse_fork(&["exit", "sepolia"]).unwrap();
+        match sub {
+            ForkSubcommand::Exit { network, network_flag, all, json } => {
+                assert_eq!(network.as_deref(), Some("sepolia"));
+                assert!(network_flag.is_none());
+                assert!(!all);
+                assert!(!json);
+            }
+            _ => panic!("expected Exit"),
+        }
+    }
+
+    #[test]
+    fn parse_exit_all_without_network() {
+        let sub = parse_fork(&["exit", "--all"]).unwrap();
+        match sub {
+            ForkSubcommand::Exit { network, network_flag, all, json } => {
+                assert!(network.is_none());
+                assert!(network_flag.is_none());
+                assert!(all);
+                assert!(!json);
+            }
+            _ => panic!("expected Exit"),
+        }
+    }
+
+    #[test]
+    fn parse_exit_rejects_conflicting_network_forms() {
+        let err = parse_fork(&["exit", "sepolia", "--network", "mainnet"])
+            .expect_err("expected conflict");
+        assert!(err.to_string().contains("cannot be used with"));
+    }
+
+    #[test]
+    fn parse_revert_network_positional() {
+        let sub = parse_fork(&["revert", "mainnet"]).unwrap();
+        match sub {
+            ForkSubcommand::Revert { network, network_flag, all, json } => {
+                assert_eq!(network.as_deref(), Some("mainnet"));
+                assert!(network_flag.is_none());
+                assert!(!all);
+                assert!(!json);
+            }
+            _ => panic!("expected Revert"),
+        }
+    }
+
+    #[test]
+    fn parse_revert_all_without_network() {
+        let sub = parse_fork(&["revert", "--all"]).unwrap();
+        match sub {
+            ForkSubcommand::Revert { network, network_flag, all, json } => {
+                assert!(network.is_none());
+                assert!(network_flag.is_none());
+                assert!(all);
+                assert!(!json);
+            }
+            _ => panic!("expected Revert"),
+        }
+    }
+
+    #[test]
+    fn parse_restart_network_positional() {
+        let sub = parse_fork(&["restart", "mainnet"]).unwrap();
+        match sub {
+            ForkSubcommand::Restart {
+                network,
+                network_flag,
+                fork_block_number,
+                json,
+            } => {
+                assert_eq!(network.as_deref(), Some("mainnet"));
+                assert!(network_flag.is_none());
+                assert!(fork_block_number.is_none());
+                assert!(!json);
+            }
+            _ => panic!("expected Restart"),
+        }
+    }
+
+    #[test]
     fn parse_history_with_filter() {
         let sub = parse_fork(&["history", "--network", "mainnet"]).unwrap();
         match sub {
-            ForkSubcommand::History { network, json } => {
+            ForkSubcommand::History { network, network_flag, json } => {
+                assert!(network.is_none());
+                assert_eq!(network_flag.as_deref(), Some("mainnet"));
+                assert!(!json);
+            }
+            _ => panic!("expected History"),
+        }
+    }
+
+    #[test]
+    fn parse_history_with_positional_filter() {
+        let sub = parse_fork(&["history", "mainnet"]).unwrap();
+        match sub {
+            ForkSubcommand::History { network, network_flag, json } => {
                 assert_eq!(network.as_deref(), Some("mainnet"));
+                assert!(network_flag.is_none());
                 assert!(!json);
             }
             _ => panic!("expected History"),
@@ -1795,10 +1996,11 @@ mod tests {
 
     #[test]
     fn parse_diff_with_json() {
-        let sub = parse_fork(&["diff", "--network", "mainnet", "--json"]).unwrap();
+        let sub = parse_fork(&["diff", "mainnet", "--json"]).unwrap();
         match sub {
-            ForkSubcommand::Diff { network, json } => {
-                assert_eq!(network, "mainnet");
+            ForkSubcommand::Diff { network, network_flag, json } => {
+                assert_eq!(network.as_deref(), Some("mainnet"));
+                assert!(network_flag.is_none());
                 assert!(json);
             }
             _ => panic!("expected Diff"),

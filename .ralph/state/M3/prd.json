@@ -37,7 +37,7 @@
         "`cargo clippy -p treb-cli --all-targets` passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
