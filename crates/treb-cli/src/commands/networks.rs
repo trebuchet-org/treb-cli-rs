@@ -72,6 +72,34 @@ fn has_unresolved_env_vars(url: &str) -> bool {
     false
 }
 
+/// Returns true if the URL contains a `${VAR}` placeholder whose environment
+/// variable is not set.
+fn has_missing_braced_env_vars(url: &str) -> bool {
+    let mut chars = url.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '$' && chars.peek() == Some(&'{') {
+            chars.next(); // consume '{'
+            let mut var_name = String::new();
+            let mut closed = false;
+
+            for next in chars.by_ref() {
+                if next == '}' {
+                    closed = true;
+                    break;
+                }
+                var_name.push(next);
+            }
+
+            if !closed || std::env::var(&var_name).is_err() {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 pub async fn run(json: bool) -> anyhow::Result<()> {
     let cwd = std::env::current_dir()?;
 
@@ -85,9 +113,8 @@ pub async fn run(json: bool) -> anyhow::Result<()> {
 
     treb_config::load_dotenv(&cwd);
     let config = treb_config::load_foundry_config(&cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let endpoints = treb_config::rpc_endpoints(&config);
 
-    if endpoints.is_empty() {
+    if config.rpc_endpoints.is_empty() {
         if json {
             output::print_json(&Vec::<NetworkInfo>::new())?;
         } else {
@@ -97,31 +124,40 @@ pub async fn run(json: bool) -> anyhow::Result<()> {
     }
 
     // Sort endpoints alphabetically by name
-    let mut names: Vec<&String> = endpoints.keys().collect();
-    names.sort();
+    let mut endpoint_entries: Vec<(String, String, String, bool)> = config
+        .rpc_endpoints
+        .iter()
+        .map(|(name, endpoint)| {
+            let raw_url = endpoint.endpoint.to_string();
+            let expanded_url = treb_config::expand_env_vars(&raw_url);
+            let unresolved =
+                has_missing_braced_env_vars(&raw_url) || has_unresolved_env_vars(&expanded_url);
+
+            (name.clone(), raw_url, expanded_url, unresolved)
+        })
+        .collect();
+    endpoint_entries.sort_by(|a, b| a.0.cmp(&b.0));
 
     let client = reqwest::Client::builder().timeout(Duration::from_secs(5)).build()?;
 
     // Resolve chain IDs concurrently
-    let mut results: Vec<NetworkInfo> = Vec::with_capacity(names.len());
+    let mut results: Vec<NetworkInfo> = Vec::with_capacity(endpoint_entries.len());
     let mut futures = Vec::new();
 
-    for name in &names {
-        let url = endpoints[*name].clone();
-        let name = (*name).clone();
+    for (name, raw_url, expanded_url, unresolved) in endpoint_entries {
         let client = client.clone();
 
         futures.push(tokio::spawn(async move {
-            if has_unresolved_env_vars(&url) {
+            if unresolved {
                 NetworkInfo {
                     name,
-                    rpc_url: url,
+                    rpc_url: raw_url,
                     chain_id: None,
                     status: "unresolved env var".to_string(),
                 }
             } else {
-                let (chain_id, status) = resolve_chain_id(&client, &url).await;
-                NetworkInfo { name, rpc_url: url, chain_id, status }
+                let (chain_id, status) = resolve_chain_id(&client, &expanded_url).await;
+                NetworkInfo { name, rpc_url: expanded_url, chain_id, status }
             }
         }));
     }
