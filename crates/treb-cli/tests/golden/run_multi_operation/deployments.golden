@@ -1,61 +1,58 @@
 {
-  "_format": "treb-v1",
-  "entries": {
-    "default/31337/Counter:CounterA": {
-      "id": "default/31337/Counter:CounterA",
-      "namespace": "default",
-      "chainId": 31337,
-      "contractName": "Counter",
-      "label": "CounterA",
-      "address": "0xd9003177dC465aAA89e20678675dca7FA5f5CAD5",
-      "type": "SINGLETON",
-      "transactionId": "tx-<ID>",
-      "deploymentStrategy": {
-        "method": "CREATE",
-        "initCodeHash": "0x6b4b0d70f62210e7956a96f3bb74f24ec0326d67968691426354cc51d99c27fd"
-      },
-      "proxyInfo": null,
-      "artifact": {
-        "path": "<PROJECT_ROOT>/src/Counter.sol",
-        "compilerVersion": "",
-        "bytecodeHash": "0xc977a8cd8e35b34034d62c150d567937cbb522a6d77fdf133a1a4753b2dd27a6",
-        "scriptPath": "script/DeployMulti.s.sol",
-        "gitCommit": ""
-      },
-      "verification": {
-        "status": "UNVERIFIED"
-      },
-      "tags": null,
-      "createdAt": "<TIMESTAMP>",
-      "updatedAt": "<TIMESTAMP>"
+  "default/31337/Counter:CounterA": {
+    "id": "default/31337/Counter:CounterA",
+    "namespace": "default",
+    "chainId": 31337,
+    "contractName": "Counter",
+    "label": "CounterA",
+    "address": "0xd9003177dC465aAA89e20678675dca7FA5f5CAD5",
+    "type": "SINGLETON",
+    "transactionId": "tx-<ID>",
+    "deploymentStrategy": {
+      "method": "CREATE",
+      "initCodeHash": "0x6b4b0d70f62210e7956a96f3bb74f24ec0326d67968691426354cc51d99c27fd"
     },
-    "default/31337/Counter:CounterB": {
-      "id": "default/31337/Counter:CounterB",
-      "namespace": "default",
-      "chainId": 31337,
-      "contractName": "Counter",
-      "label": "CounterB",
-      "address": "0x143514cFa5E66eC945bB19A024627c8bdE524156",
-      "type": "SINGLETON",
-      "transactionId": "tx-<ID>",
-      "deploymentStrategy": {
-        "method": "CREATE",
-        "initCodeHash": "0x6b4b0d70f62210e7956a96f3bb74f24ec0326d67968691426354cc51d99c27fd"
-      },
-      "proxyInfo": null,
-      "artifact": {
-        "path": "<PROJECT_ROOT>/src/Counter.sol",
-        "compilerVersion": "",
-        "bytecodeHash": "0xc977a8cd8e35b34034d62c150d567937cbb522a6d77fdf133a1a4753b2dd27a6",
-        "scriptPath": "script/DeployMulti.s.sol",
-        "gitCommit": ""
-      },
-      "verification": {
-        "status": "UNVERIFIED"
-      },
-      "tags": null,
-      "createdAt": "<TIMESTAMP>",
-      "updatedAt": "<TIMESTAMP>"
-    }
+    "proxyInfo": null,
+    "artifact": {
+      "path": "<PROJECT_ROOT>/src/Counter.sol",
+      "compilerVersion": "",
+      "bytecodeHash": "0xc977a8cd8e35b34034d62c150d567937cbb522a6d77fdf133a1a4753b2dd27a6",
+      "scriptPath": "script/DeployMulti.s.sol",
+      "gitCommit": ""
+    },
+    "verification": {
+      "status": "UNVERIFIED"
+    },
+    "tags": null,
+    "createdAt": "<TIMESTAMP>",
+    "updatedAt": "<TIMESTAMP>"
+  },
+  "default/31337/Counter:CounterB": {
+    "id": "default/31337/Counter:CounterB",
+    "namespace": "default",
+    "chainId": 31337,
+    "contractName": "Counter",
+    "label": "CounterB",
+    "address": "0x143514cFa5E66eC945bB19A024627c8bdE524156",
+    "type": "SINGLETON",
+    "transactionId": "tx-<ID>",
+    "deploymentStrategy": {
+      "method": "CREATE",
+      "initCodeHash": "0x6b4b0d70f62210e7956a96f3bb74f24ec0326d67968691426354cc51d99c27fd"
+    },
+    "proxyInfo": null,
+    "artifact": {
+      "path": "<PROJECT_ROOT>/src/Counter.sol",
+      "compilerVersion": "",
+      "bytecodeHash": "0xc977a8cd8e35b34034d62c150d567937cbb522a6d77fdf133a1a4753b2dd27a6",
+      "scriptPath": "script/DeployMulti.s.sol",
+      "gitCommit": ""
+    },
+    "verification": {
+      "status": "UNVERIFIED"
+    },
+    "tags": null,
+    "createdAt": "<TIMESTAMP>",
+    "updatedAt": "<TIMESTAMP>"
   }
 }
