@@ -577,10 +577,7 @@ pub async fn run_anvil_status(
                 styled(&format!("Running (PID {})", entry.anvil_pid), color::GREEN),
             );
             // Blue RPC URL
-            println!(
-                "  RPC URL: {}",
-                styled(&entry.rpc_url, color::BLUE),
-            );
+            println!("  RPC URL: {}", styled(&entry.rpc_url, color::BLUE),);
             // Yellow log file
             let log_path = if entry.log_file.is_empty() {
                 log_file_path(&treb_dir, instance_name).display().to_string()
@@ -588,24 +585,13 @@ pub async fn run_anvil_status(
                 entry.log_file.clone()
             };
             let display_log = human_display_path(&cwd, Path::new(&log_path));
-            println!(
-                "  Log file: {}",
-                styled(&display_log.display().to_string(), color::YELLOW),
-            );
+            println!("  Log file: {}", styled(&display_log.display().to_string(), color::YELLOW),);
             // RPC health check
             let rpc_healthy = check_rpc_health(&entry.rpc_url).await;
             if rpc_healthy {
-                println!(
-                    "  RPC Health: {} {}",
-                    emoji::CHECK,
-                    styled("Responding", color::GREEN),
-                );
+                println!("  RPC Health: {} {}", emoji::CHECK, styled("Responding", color::GREEN),);
             } else {
-                println!(
-                    "  RPC Health: {} {}",
-                    emoji::CROSS,
-                    styled("Not responding", color::RED),
-                );
+                println!("  RPC Health: {} {}", emoji::CROSS, styled("Not responding", color::RED),);
             }
             // CreateX status check
             let createx_deployed = check_createx_deployed(&entry.rpc_url).await;
@@ -624,11 +610,7 @@ pub async fn run_anvil_status(
             }
         } else {
             // Red status
-            println!(
-                "  Status: {} {}",
-                emoji::RED_CIRCLE,
-                styled("Not running", color::RED),
-            );
+            println!("  Status: {} {}", emoji::RED_CIRCLE, styled("Not running", color::RED),);
             // Gray PID file
             let pid_path = if entry.pid_file.is_empty() {
                 pid_file_path(&treb_dir, instance_name).display().to_string()
@@ -636,10 +618,7 @@ pub async fn run_anvil_status(
                 entry.pid_file.clone()
             };
             let display_pid = human_display_path(&cwd, Path::new(&pid_path));
-            println!(
-                "  PID file: {}",
-                styled(&display_pid.display().to_string(), color::GRAY),
-            );
+            println!("  PID file: {}", styled(&display_pid.display().to_string(), color::GRAY),);
             // Gray log file
             let log_path = if entry.log_file.is_empty() {
                 log_file_path(&treb_dir, instance_name).display().to_string()
@@ -647,10 +626,7 @@ pub async fn run_anvil_status(
                 entry.log_file.clone()
             };
             let display_log = human_display_path(&cwd, Path::new(&log_path));
-            println!(
-                "  Log file: {}",
-                styled(&display_log.display().to_string(), color::GRAY),
-            );
+            println!("  Log file: {}", styled(&display_log.display().to_string(), color::GRAY),);
         }
 
         // Blank line between instances (but not after the last one)
