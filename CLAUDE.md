@@ -49,7 +49,7 @@ treb — deployment orchestration CLI for Foundry projects. Rust workspace with 
 
 **Shared E2E helpers** (`crates/treb-cli/tests/e2e/mod.rs`): Reusable helpers for multi-command workflow tests, including `setup_project()`, `run_deployment()`, `run_json()`, and `spawn_anvil_or_skip()`.
 
-**Registry compat test seeding**: `crates/treb-cli/tests/helpers/mod.rs::seed_registry()` writes the legacy bare `deployments_map.json` fixture into `.treb/deployments.json`; use a mutating CLI command such as `tag --add` when you need to verify that a write path upgrades legacy store files to the wrapped `{"_format":"treb-v1","entries":...}` shape.
+**Registry compat test seeding**: `crates/treb-cli/tests/helpers/mod.rs::seed_registry()` writes the legacy bare `deployments_map.json` fixture into `.treb/deployments.json`; use a mutating CLI command such as `tag --add` when you need to verify that a write path preserves Go-compatible bare JSON output instead of reintroducing the legacy wrapper.
 
 **Go registry compat fixtures**: `crates/treb-registry/tests/fixtures/go-compat/` stores bare `map[string]T` JSON for cross-CLI registry tests. Prefer subsets from `/home/sol/projects/mento-deployments-v2/.treb/`; the current local snapshot does not include populated deployment tags or `executedAt` on safe transactions, so keep those edge cases explicit when refreshing the fixture set.
 
@@ -86,8 +86,8 @@ cargo clippy --workspace --all-targets        # lint
 - **JSON output**: `--json` flag on read commands; deterministic via recursive key sorting in `print_json()`
 - **Non-interactive**: Detected via: `--non-interactive` flag, `TREB_NON_INTERACTIVE=1`, `CI=true`, stdin not TTY, stdout not TTY
 - **Store pattern**: Each registry store has PathBuf + HashMap + load/save with fs2 file lock + CRUD + sorted list
-- **Versioned store files**: Registry store JSON can be wrapped as `{"_format":"treb-v1","entries":...}`; use `read_versioned_file()` for backward-compatible reads and `write_versioned_file()` for locked atomic writes
-- **Deterministic store writes**: Map-backed registry stores should sort into a `BTreeMap` before `write_versioned_file()` so wrapped JSON remains stable for tests and diffs
+- **Versioned store files**: Registry store JSON is now written as bare JSON, but `read_versioned_file()` and `read_versioned_file_compat()` must continue to accept legacy wrapped `{"_format":"treb-v1","entries":...}` payloads for backward compatibility
+- **Deterministic store writes**: Map-backed registry stores should sort into a `BTreeMap` before `write_versioned_file()` so bare JSON remains stable for tests and diffs
 - **Fork state persistence**: `ForkStateStore` should serialize the `forks` map through a sorted persistence view before `write_versioned_file()`, but keep `history` in insertion order because newest entries are stored first
 - **Secondary index ordering**: When a persisted registry index stores `Vec<String>` ID lists inside maps, sort those vectors before saving or returning rebuilt data so lookup file round-trips stay deterministic
 - **Registry metadata file**: Rust registry code should not create or read `.treb/registry.json`; that filename is reserved for Go/Solidity registry data, so tests should assert only on actual store files plus `config.local.json`

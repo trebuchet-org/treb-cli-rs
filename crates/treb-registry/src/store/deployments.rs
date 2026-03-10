@@ -106,10 +106,7 @@ mod tests {
         VerificationStatus,
     };
 
-    use crate::{
-        STORE_FORMAT,
-        io::{VersionedStore, read_json_file, write_json_file},
-    };
+    use crate::io::{VersionedStore, read_json_file, write_json_file};
 
     /// Helper to create a minimal deployment with the given ID and created_at offset in seconds.
     fn make_deployment(id: &str, created_at_offset_secs: i64) -> Deployment {
@@ -238,8 +235,8 @@ mod tests {
         store.insert(make_deployment("dep-a", 1)).unwrap();
 
         let raw = fs::read_to_string(dir.path().join(DEPLOYMENTS_FILE)).unwrap();
-        assert!(raw.contains("\"_format\": \"treb-v1\""));
-        assert!(raw.contains("\"entries\": {"));
+        assert!(!raw.contains("\"_format\""));
+        assert!(!raw.contains("\"entries\""));
         let dep_a_index = raw.find("\"dep-a\"").expect("dep-a key should exist");
         let dep_b_index = raw.find("\"dep-b\"").expect("dep-b key should exist");
 
@@ -333,24 +330,21 @@ mod tests {
         let saved_value: serde_json::Value = serde_json::from_str(&saved_raw).unwrap();
 
         assert_eq!(
-            saved_value,
-            serde_json::json!({
-                "_format": STORE_FORMAT,
-                "entries": fixture_value,
-            }),
-            "golden file round-trip: saved JSON must wrap fixture entries"
+            saved_value, fixture_value,
+            "golden file round-trip: saved JSON must preserve fixture entries as bare JSON"
         );
     }
 
     #[test]
-    fn save_writes_wrapped_format() {
+    fn save_writes_bare_format() {
         let dir = TempDir::new().unwrap();
         let mut store = DeploymentStore::new(dir.path());
 
         store.insert(make_deployment("dep-1", 0)).unwrap();
 
         let saved: serde_json::Value = read_json_file(&dir.path().join(DEPLOYMENTS_FILE)).unwrap();
-        assert_eq!(saved["_format"], STORE_FORMAT);
-        assert!(saved["entries"].get("dep-1").is_some());
+        assert!(saved.get("_format").is_none());
+        assert!(saved.get("entries").is_none());
+        assert!(saved.get("dep-1").is_some());
     }
 }

@@ -97,10 +97,7 @@ mod tests {
     use tempfile::TempDir;
     use treb_core::types::TransactionStatus;
 
-    use crate::{
-        STORE_FORMAT,
-        io::{VersionedStore, read_json_file, write_json_file},
-    };
+    use crate::io::{VersionedStore, read_json_file, write_json_file};
 
     /// Helper to create a minimal transaction with the given ID and created_at offset in seconds.
     fn make_transaction(id: &str, created_at_offset_secs: i64) -> Transaction {
@@ -280,24 +277,21 @@ mod tests {
         let saved_value: serde_json::Value = serde_json::from_str(&saved_raw).unwrap();
 
         assert_eq!(
-            saved_value,
-            serde_json::json!({
-                "_format": STORE_FORMAT,
-                "entries": fixture_value,
-            }),
-            "golden file round-trip: saved JSON must wrap fixture entries"
+            saved_value, fixture_value,
+            "golden file round-trip: saved JSON must preserve fixture entries as bare JSON"
         );
     }
 
     #[test]
-    fn save_writes_wrapped_format() {
+    fn save_writes_bare_format() {
         let dir = TempDir::new().unwrap();
         let mut store = TransactionStore::new(dir.path());
 
         store.insert(make_transaction("tx-1", 0)).unwrap();
 
         let saved: serde_json::Value = read_json_file(&dir.path().join(TRANSACTIONS_FILE)).unwrap();
-        assert_eq!(saved["_format"], STORE_FORMAT);
-        assert!(saved["entries"].get("tx-1").is_some());
+        assert!(saved.get("_format").is_none());
+        assert!(saved.get("entries").is_none());
+        assert!(saved.get("tx-1").is_some());
     }
 }

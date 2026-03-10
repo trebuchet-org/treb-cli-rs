@@ -99,10 +99,7 @@ mod tests {
     use tempfile::TempDir;
     use treb_core::types::ProposalStatus;
 
-    use crate::{
-        STORE_FORMAT,
-        io::{VersionedStore, read_json_file, write_json_file},
-    };
+    use crate::io::{VersionedStore, read_json_file, write_json_file};
 
     /// Helper to create a minimal governor proposal with the given ID and
     /// proposed_at offset in seconds.
@@ -280,7 +277,7 @@ mod tests {
     }
 
     #[test]
-    fn save_writes_wrapped_format() {
+    fn save_writes_bare_format() {
         let dir = TempDir::new().unwrap();
         let mut store = GovernorProposalStore::new(dir.path());
 
@@ -288,8 +285,9 @@ mod tests {
 
         let saved: serde_json::Value =
             read_json_file(&dir.path().join(GOVERNOR_PROPOSALS_FILE)).unwrap();
-        assert_eq!(saved["_format"], STORE_FORMAT);
-        assert!(saved["entries"].get("prop-1").is_some());
+        assert!(saved.get("_format").is_none());
+        assert!(saved.get("entries").is_none());
+        assert!(saved.get("prop-1").is_some());
     }
 
     #[test]

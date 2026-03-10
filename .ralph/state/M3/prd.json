@@ -51,7 +51,7 @@
         "cargo clippy -p treb-registry passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
