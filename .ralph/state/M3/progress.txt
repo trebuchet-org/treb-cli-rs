@@ -2,6 +2,7 @@
 Started: Tue Mar 10 12:34:35 PM CET 2026
 ## Codebase Patterns
 - Go registry compatibility fixtures belong in `crates/treb-registry/tests/fixtures/go-compat/` as bare JSON maps; prefer production slices from `/home/sol/projects/mento-deployments-v2/.treb/` and call out any extra edge-case coverage when the live snapshot does not exercise it.
+- For `treb-registry` cross-CLI store tests, seed a temp registry dir with the raw fixture bytes under the real store filename and call `Store::load()` so the compatibility coverage exercises the actual read path; compare offset timestamps after converting them to `DateTime<Utc>`.
 ---
 ## 2026-03-10 12:56 CET - P2-US-001
 - Added bare Go-compat fixture maps for deployments (11 entries), transactions (10 entries), and safe transactions (8 entries) under `crates/treb-registry/tests/fixtures/go-compat/`.
@@ -10,4 +11,14 @@ Started: Tue Mar 10 12:34:35 PM CET 2026
   - Current `mento-deployments-v2/.treb/` data covers CREATE/CREATE2/CREATE3, LIBRARY/PROXY/SINGLETON, safeContext, and offset timestamps, but it does not include populated deployment tags or `executedAt` on safe transactions.
   - Tagged deployment coverage comes from the existing Go-generated `crates/treb-core/tests/fixtures/deployments_map.json` entry, and `executedAt` coverage uses a production-derived safe transaction augmented to match Go's `sync_registry` write shape.
   - `cargo check -p treb-registry` passes with the new fixture set.
+---
+## 2026-03-10 13:17 CET - P2-US-002
+- Added fixture-driven store-load compatibility tests for deployments, transactions, and safe transactions in `crates/treb-registry/tests/go_compat_deserialize.rs`, each seeding the raw Go JSON into a temp registry dir and verifying the real `Store::load()` path.
+- Verified fixture counts and spot-checked representative entries across all three stores, including proxy metadata, safe context, operation payloads, queued vs executed safe transactions, and timezone-offset timestamps parsed into UTC.
+- Files changed: `crates/treb-registry/tests/go_compat_deserialize.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - The current go-compat fixture set is 13 deployments, 10 transactions, and 8 safe transactions; use explicit count assertions so fixture drift is visible in tests.
+  - Store-level compatibility coverage should copy fixture bytes to the actual registry filename and call `load()` instead of deserializing the map directly, otherwise the read-path compatibility logic is not exercised.
+  - Offset timestamps from the Go registry round-trip cleanly through `chrono` once normalized to `DateTime<Utc>`, so UTC comparisons are the stable assertion style here.
+  - `cargo test -p treb-registry` and `cargo clippy -p treb-registry --all-targets -- -D warnings` pass for this story.
 ---
