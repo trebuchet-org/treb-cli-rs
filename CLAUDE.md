@@ -55,6 +55,8 @@ treb — deployment orchestration CLI for Foundry projects. Rust workspace with 
 
 **CLI RPC golden tests**: When a golden test needs a resolved RPC endpoint, prefer a tiny loopback JSON-RPC listener plus an `extra_normalizer` that rewrites `http://127.0.0.1:<port>` instead of depending on a fixed port or a full Anvil instance.
 
+**CLI config dotenv tests**: For `config show` coverage that needs `${VAR}` sender resolution, overwrite the fixture `treb.toml` and `.env` in a `pre_setup_hook` and snapshot the human output; `treb_config::resolve_config()` already loads `.env` / `.env.local`, so the test should not inject process env separately.
+
 **Go registry compat fixtures**: `crates/treb-registry/tests/fixtures/go-compat/` stores bare `map[string]T` JSON for cross-CLI registry tests. Prefer subsets from `/home/sol/projects/mento-deployments-v2/.treb/`; the current local snapshot does not include populated deployment tags or `executedAt` on safe transactions, so keep those edge cases explicit when refreshing the fixture set.
 
 **Go registry store-load tests**: For `treb-registry` compatibility coverage, seed a temp registry directory with the raw go-compat fixture under the real store filename (`deployments.json`, `transactions.json`, `safe-txs.json`) and call `Store::load()`; compare offset timestamps as `DateTime<Utc>` values rather than raw strings.

@@ -93,7 +93,7 @@
         "cargo clippy --workspace --all-targets passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]

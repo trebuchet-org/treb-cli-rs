@@ -6,6 +6,7 @@ Started: Tue Mar 10 02:02:08 PM CET 2026
 - CLI commands that read `foundry.toml` directly instead of going through `treb_config::resolve_config()` must call `treb_config::load_dotenv(project_root)` first so `.env`-backed RPC and sender values are available before config parsing.
 - `treb config show` sender output is Go-style plain text, not `comfy_table`: keep rows sorted by role and preserve `--json` output when adjusting that command.
 - CLI golden tests that need a resolved RPC endpoint can use a tiny loopback JSON-RPC server plus an `extra_normalizer` for `http://127.0.0.1:<port>` instead of relying on fixed ports or Anvil.
+- `config show` integration tests can cover dotenv-backed sender resolution by overwriting fixture `treb.toml` and `.env` in a `pre_setup_hook`; `treb_config::resolve_config()` already loads dotenv files, so process env injection is unnecessary.
 ---
 ## 2026-03-10 14:08 CET - P3-US-001
 - Implemented `${VAR}` expansion for `foundry.toml` RPC endpoints by reusing `expand_env_vars()` inside `treb_config::rpc_endpoints()`.
@@ -52,4 +53,13 @@ Started: Tue Mar 10 02:02:08 PM CET 2026
   - `treb-cli` JSON goldens use `output::print_json()`, which sorts object keys deterministically; snapshot expectations should match that sorted key order.
   - A lightweight loopback JSON-RPC server is enough to cover resolved `eth_chainId` behavior in `networks` tests without depending on Anvil startup.
   - `cargo test -p treb-cli` passes for this story.
+---
+## 2026-03-10 15:08 CET - P3-US-006
+- Added a `config show` golden integration scenario that seeds `.env`, overwrites `treb.toml` with `address = "${TEST_ADDR}"`, and snapshots the resolved sender address in human output.
+- Documented the reusable dotenv-backed `config show` test pattern in `CLAUDE.md` and cleaned up the sender row sort helper to satisfy workspace clippy.
+- Files changed: `crates/treb-cli/tests/integration_config.rs`, `crates/treb-cli/tests/golden/config_show_resolves_dotenv_sender_address/commands.golden`, `crates/treb-cli/src/commands/config.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - `config show` already resolves `.env` / `.env.local` through `treb_config::resolve_config()`, so end-to-end sender env-var coverage belongs in integration tests rather than new command plumbing.
+  - The `project` fixture can be repurposed for config env-resolution coverage by overwriting `treb.toml` in a `pre_setup_hook` before `treb init`.
+  - `cargo test -p treb-cli` and `cargo clippy --workspace --all-targets` pass for this story.
 ---

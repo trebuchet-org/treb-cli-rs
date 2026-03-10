@@ -190,7 +190,7 @@ fn format_sender_rows(senders: &HashMap<String, SenderConfig>) -> String {
             )
         })
         .collect();
-    rows.sort_by(|(left, ..), (right, ..)| left.cmp(right));
+    rows.sort_by_key(|(role, ..)| *role);
 
     let role_width = rows.iter().map(|(role, ..)| role.len()).max().unwrap_or(0);
     let type_width = rows.iter().map(|(_, type_str, _)| type_str.len()).max().unwrap_or(0);
