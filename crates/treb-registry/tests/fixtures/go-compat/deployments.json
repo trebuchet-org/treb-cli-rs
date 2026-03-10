@@ -371,5 +371,80 @@
     "tags": null,
     "createdAt": "2025-09-02T15:24:35.582445+02:00",
     "updatedAt": "2025-09-02T15:24:35.596546+02:00"
+  },
+  "monad-mainnet/143/StableTokenSpoke:v3.0.0": {
+    "id": "monad-mainnet/143/StableTokenSpoke:v3.0.0",
+    "namespace": "monad-mainnet",
+    "chainId": 143,
+    "contractName": "StableTokenSpoke",
+    "label": "v3.0.0",
+    "address": "0xa8caCd5d58F98Ee303fb54EF101AA4e277777E91",
+    "type": "SINGLETON",
+    "transactionId": "tx-0x023519cd78d56b04b16e769aa400d31b99d084bda0046c8b986e7d19f4857b3b",
+    "deploymentStrategy": {
+      "method": "CREATE3",
+      "salt": "0x2738f38fde510743e0c589415e0598c4cee6eaa700092283bc17e77012f33826",
+      "initCodeHash": "0x48b51ce81c76737acd2fc96bbd654fbbf37ee0af58fd563a6dc2129d25c79be4",
+      "factory": "0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed",
+      "constructorArgs": "0x0000000000000000000000000000000000000000000000000000000000000001",
+      "entropy": "monad-mainnet/StableTokenSpoke:v3.0.0"
+    },
+    "proxyInfo": null,
+    "artifact": {
+      "path": "lib/mento-core/contracts/tokens/StableTokenSpoke.sol",
+      "compilerVersion": "0.8.24+commit.e11b9ed9",
+      "bytecodeHash": "0x724e2776eafaf9281bc13eb65321fb1f9e9bfc29f0bdd5347e8d3e445d8ed94e",
+      "scriptPath": "script/deploy/v3/DeployStableTokenSpoke.s.sol",
+      "gitCommit": "7a5fe76a60d89b8b85db279145a78a461fab6dc2"
+    },
+    "verification": {
+      "status": "VERIFIED",
+      "etherscanUrl": "https://api.etherscan.io/v2/api?chainid=143/address/0xa8caCd5d58F98Ee303fb54EF101AA4e277777E91#code",
+      "verifiers": {
+        "etherscan": {
+          "status": "verified",
+          "url": "https://api.etherscan.io/v2/api?chainid=143/address/0xa8caCd5d58F98Ee303fb54EF101AA4e277777E91#code"
+        },
+        "sourcify": {
+          "status": "verified",
+          "url": "https://sourcify.dev/#/lookup/0xa8caCd5d58F98Ee303fb54EF101AA4e277777E91"
+        }
+      }
+    },
+    "tags": null,
+    "createdAt": "2026-02-20T17:32:53.297549+01:00",
+    "updatedAt": "2026-02-20T17:37:43.041147+01:00"
+  },
+  "virtual/8453/ConstantProductPricingModule:v2.6.5": {
+    "id": "virtual/8453/ConstantProductPricingModule:v2.6.5",
+    "namespace": "virtual",
+    "chainId": 8453,
+    "contractName": "ConstantProductPricingModule",
+    "label": "v2.6.5",
+    "address": "0xD46FFe35B7DDA71218910d081A6333cb642c910C",
+    "type": "SINGLETON",
+    "transactionId": "tx-0x8dc40ce8864918f795c1dc9821097ee33ca383ad71f69d27197bdf0074988187",
+    "deploymentStrategy": {
+      "method": "CREATE3",
+      "salt": "0x32cb58b145d3f7e28c45ce4b2cc31fa94248b23f00bcad20e2ece1f3c65ebf90",
+      "initCodeHash": "0xd29d23cc9da52e7c1a7a24687875908f15a4a6b1c68d40bb16d7ea1d4c37253b",
+      "factory": "0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed",
+      "constructorArgs": "0x",
+      "entropy": "virtual/ConstantProductPricingModule:v2.6.5"
+    },
+    "proxyInfo": null,
+    "artifact": {
+      "path": "lib/mento-core/contracts/swap/ConstantProductPricingModule.sol",
+      "compilerVersion": "0.5.17+commit.d19bba13",
+      "bytecodeHash": "0xd29d23cc9da52e7c1a7a24687875908f15a4a6b1c68d40bb16d7ea1d4c37253b",
+      "scriptPath": "script/deploy/DeployPricingModules.s.sol",
+      "gitCommit": "eb7c3cde9015b3da5c77e3c031cef0ac44685b6b"
+    },
+    "verification": {
+      "status": "UNVERIFIED"
+    },
+    "tags": null,
+    "createdAt": "2025-09-01T16:49:21.107545+02:00",
+    "updatedAt": "2025-09-01T16:49:21.130113+02:00"
   }
 }
