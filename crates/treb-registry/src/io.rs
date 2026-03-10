@@ -52,7 +52,9 @@ pub fn read_versioned_file<T: DeserializeOwned + Default>(path: &Path) -> Result
     }
 
     let value: serde_json::Value = read_json_file(path)?;
-    let looks_wrapped = value.as_object().is_some_and(|object| object.contains_key("_format"));
+    let looks_wrapped = value
+        .as_object()
+        .is_some_and(|object| object.contains_key("_format") && object.contains_key("entries"));
 
     if looks_wrapped {
         let wrapped: VersionedStore<T> = deserialize_value(path, value)?;
@@ -276,6 +278,21 @@ mod tests {
         let path = dir.path().join("bare.json");
 
         let mut map: HashMap<String, Vec<u32>> = HashMap::new();
+        map.insert("fibs".into(), vec![1, 1, 2, 3, 5]);
+
+        write_json_file(&path, &map).unwrap();
+
+        let loaded: HashMap<String, Vec<u32>> = read_versioned_file(&path).unwrap();
+        assert_eq!(loaded, map);
+    }
+
+    #[test]
+    fn read_versioned_file_reads_bare_map_with_format_key() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("bare-with-format-key.json");
+
+        let mut map: HashMap<String, Vec<u32>> = HashMap::new();
+        map.insert("_format".into(), vec![1, 2, 3]);
         map.insert("fibs".into(), vec![1, 1, 2, 3, 5]);
 
         write_json_file(&path, &map).unwrap();
