@@ -76,8 +76,7 @@ pub enum ForkSubcommand {
     /// --all to exit all active forks.
     #[command(group(
         ArgGroup::new("exit_network")
-            .args(["network", "network_flag", "all"])
-            .required(true)
+            .args(["network", "network_flag"])
             .multiple(false)
     ))]
     Exit {
@@ -103,8 +102,7 @@ pub enum ForkSubcommand {
     /// network is specified, uses the currently configured network.
     #[command(group(
         ArgGroup::new("revert_network")
-            .args(["network", "network_flag", "all"])
-            .required(true)
+            .args(["network", "network_flag"])
             .multiple(false)
     ))]
     Revert {
@@ -420,9 +418,7 @@ fn resolve_network_or_all(
     all: bool,
 ) -> anyhow::Result<String> {
     match resolve_optional_network(command, positional_network, flag_network)? {
-        Some(_) if all => bail!(
-            "network conflicts with --all; use either `fork {command} <NETWORK>`, `fork {command} --network <NETWORK>`, or `fork {command} --all`"
-        ),
+        Some(_) if all => Ok(String::new()),
         Some(network) => Ok(network),
         None if all => Ok(String::new()),
         None => bail!(
@@ -1915,6 +1911,20 @@ mod tests {
     }
 
     #[test]
+    fn parse_exit_all_accepts_legacy_network_flag() {
+        let sub = parse_fork(&["exit", "--network", "sepolia", "--all"]).unwrap();
+        match sub {
+            ForkSubcommand::Exit { network, network_flag, all, json } => {
+                assert!(network.is_none());
+                assert_eq!(network_flag.as_deref(), Some("sepolia"));
+                assert!(all);
+                assert!(!json);
+            }
+            _ => panic!("expected Exit"),
+        }
+    }
+
+    #[test]
     fn parse_exit_rejects_conflicting_network_forms() {
         let err = parse_fork(&["exit", "sepolia", "--network", "mainnet"])
             .expect_err("expected conflict");
@@ -1950,15 +1960,24 @@ mod tests {
     }
 
     #[test]
+    fn parse_revert_all_accepts_legacy_network_flag() {
+        let sub = parse_fork(&["revert", "--network", "mainnet", "--all"]).unwrap();
+        match sub {
+            ForkSubcommand::Revert { network, network_flag, all, json } => {
+                assert!(network.is_none());
+                assert_eq!(network_flag.as_deref(), Some("mainnet"));
+                assert!(all);
+                assert!(!json);
+            }
+            _ => panic!("expected Revert"),
+        }
+    }
+
+    #[test]
     fn parse_restart_network_positional() {
         let sub = parse_fork(&["restart", "mainnet"]).unwrap();
         match sub {
-            ForkSubcommand::Restart {
-                network,
-                network_flag,
-                fork_block_number,
-                json,
-            } => {
+            ForkSubcommand::Restart { network, network_flag, fork_block_number, json } => {
                 assert_eq!(network.as_deref(), Some("mainnet"));
                 assert!(network_flag.is_none());
                 assert!(fork_block_number.is_none());

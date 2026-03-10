@@ -523,10 +523,7 @@ fn build_fork() -> ClapCommand {
                         .help("Exit all active forks"),
                 )
                 .group(
-                    ArgGroup::new("exit-network")
-                        .args(["network", "network-flag", "all"])
-                        .required(true)
-                        .multiple(false),
+                    ArgGroup::new("exit-network").args(["network", "network-flag"]).multiple(false),
                 ),
         )
         .subcommand(
@@ -547,8 +544,7 @@ fn build_fork() -> ClapCommand {
                 )
                 .group(
                     ArgGroup::new("revert-network")
-                        .args(["network", "network-flag", "all"])
-                        .required(true)
+                        .args(["network", "network-flag"])
                         .multiple(false),
                 ),
         )

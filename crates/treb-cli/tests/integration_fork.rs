@@ -1190,6 +1190,24 @@ fn fork_exit_all_restores_earliest_snapshot_last() {
 }
 
 #[test]
+fn fork_exit_all_accepts_legacy_network_flag() {
+    let ctx = TestContext::new("minimal-project");
+
+    ctx.run(["init"]).success();
+    seed_fork_exit_all(ctx.path());
+
+    ctx.run(["fork", "exit", "--network", "mainnet", "--all"]).success();
+
+    let deployments =
+        std::fs::read_to_string(ctx.treb_dir().join(DEPLOYMENTS_FILE)).expect("read deployments");
+    assert_eq!(deployments, r#"{"phase":"before-mainnet"}"#);
+
+    let mut store = ForkStateStore::new(&ctx.treb_dir());
+    store.load().expect("load fork state after exit");
+    assert!(store.list_active_forks().is_empty(), "all fork entries should be removed");
+}
+
+#[test]
 fn fork_exit_all_json_is_always_an_array() {
     let ctx = TestContext::new("minimal-project");
 
@@ -1248,6 +1266,31 @@ fn fork_revert_json_no_active() {
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
+}
+
+#[test]
+fn fork_revert_all_accepts_legacy_network_flag() {
+    let port = match spawn_json_rpc_server(|request| match request["method"].as_str().unwrap() {
+        "evm_revert" => serde_json::json!(true),
+        "evm_snapshot" => serde_json::json!("0xrevert-new"),
+        other => panic!("unexpected JSON-RPC method for revert fixture: {other}"),
+    }) {
+        Ok(port) => port,
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return,
+        Err(err) => panic!("seed fork revert success: {err}"),
+    };
+    let ctx = TestContext::new("minimal-project");
+
+    ctx.run(["init"]).success();
+    seed_fork_revert_json_success(ctx.path(), port).expect("seed fork revert state");
+
+    ctx.run(["fork", "revert", "--network", "mainnet", "--all"]).success();
+
+    let mut store = ForkStateStore::new(&ctx.treb_dir());
+    store.load().expect("load fork state after revert");
+    let entry = store.get_active_fork("mainnet").expect("active mainnet fork");
+    assert_eq!(entry.snapshots.len(), 1, "revert should leave a fresh baseline snapshot");
+    assert_eq!(entry.snapshots[0].snapshot_id, "0xrevert-new");
 }
 
 // ── fork restart: JSON error (not forked) ───────────────────────────────
