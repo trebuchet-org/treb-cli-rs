@@ -44,7 +44,10 @@ fn styled(text: &str, style: Style) -> String {
 
 #[derive(Subcommand, Debug)]
 pub enum DevSubcommand {
-    /// Manage local Anvil development nodes
+    /// Manage local anvil node
+    ///
+    /// Manage a local anvil node for testing deployments with CreateX factory
+    /// automatically deployed.
     Anvil {
         #[command(subcommand)]
         subcommand: AnvilSubcommand,
@@ -53,7 +56,9 @@ pub enum DevSubcommand {
 
 #[derive(Subcommand, Debug)]
 pub enum AnvilSubcommand {
-    /// Start a local Anvil node in the foreground
+    /// Start local anvil node
+    ///
+    /// Start a local anvil node with CreateX factory deployed. Fails if already running.
     Start {
         /// Network name or chain ID
         #[arg(long)]
@@ -68,7 +73,9 @@ pub enum AnvilSubcommand {
         #[arg(long)]
         name: Option<String>,
     },
-    /// Clean up stale Anvil entries in fork state
+    /// Stop local anvil node
+    ///
+    /// Stop the local anvil node if running.
     Stop {
         /// Network name or chain ID
         #[arg(long)]
@@ -77,7 +84,9 @@ pub enum AnvilSubcommand {
         #[arg(long)]
         name: Option<String>,
     },
-    /// Restart an Anvil node — stops the existing instance and starts a fresh one
+    /// Restart local anvil node
+    ///
+    /// Restart the local anvil node with CreateX factory deployed.
     Restart {
         /// Network name or chain ID
         #[arg(long)]
@@ -92,7 +101,9 @@ pub enum AnvilSubcommand {
         #[arg(long)]
         fork_block_number: Option<u64>,
     },
-    /// Show Anvil node status
+    /// Show anvil status
+    ///
+    /// Show status of the local anvil node.
     Status {
         /// Output as JSON
         #[arg(long)]
@@ -104,7 +115,9 @@ pub enum AnvilSubcommand {
         #[arg(long)]
         name: Option<String>,
     },
-    /// Display Anvil log file contents
+    /// Show anvil logs
+    ///
+    /// Show logs from the local anvil node.
     Logs {
         /// Network name or chain ID
         #[arg(long)]
