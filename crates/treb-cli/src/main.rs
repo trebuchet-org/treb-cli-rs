@@ -538,25 +538,25 @@ fn build_grouped_command() -> clap::Command {
     let grouped_help = build_grouped_help(&cmd);
 
     // Hide all subcommands from default {subcommands} rendering
-    let names: Vec<String> =
-        cmd.get_subcommands().map(|s| s.get_name().to_string()).collect();
+    let names: Vec<String> = cmd.get_subcommands().map(|s| s.get_name().to_string()).collect();
     for name in &names {
         cmd = cmd.mut_subcommand(name, |s| s.hide(true));
     }
 
-    cmd.after_help(grouped_help)
-        .override_usage("treb [OPTIONS] <COMMAND>")
-        .help_template(
-            "{about-with-newline}\n\
+    cmd.after_help(grouped_help).override_usage("treb [OPTIONS] <COMMAND>").help_template(
+        "{about-with-newline}\n\
              {usage-heading} {usage}\
              {after-help}\n\
              \nOptions:\n\
              {options}\n\
              Use \"treb [command] --help\" for more information about a command.\n",
-        )
+    )
 }
 
 fn build_grouped_help(cmd: &clap::Command) -> String {
+    const BUILTIN_HELP_SUBCOMMAND_ABOUT: &str =
+        "Print this message or the help of the given subcommand(s)";
+
     let mut s = String::new();
 
     fn write_group(s: &mut String, cmd: &clap::Command, heading: &str, names: &[&str]) {
@@ -564,9 +564,10 @@ fn build_grouped_help(cmd: &clap::Command) -> String {
         s.push('\n');
         for name in names {
             if let Some(sub) = cmd.find_subcommand(name) {
-                let about =
-                    sub.get_about().map(|a| a.to_string()).unwrap_or_default();
+                let about = sub.get_about().map(|a| a.to_string()).unwrap_or_default();
                 s.push_str(&format!("  {name:<14}{about}\n"));
+            } else if *name == "help" && !cmd.is_disable_help_subcommand_set() {
+                s.push_str(&format!("  {name:<14}{BUILTIN_HELP_SUBCOMMAND_ABOUT}\n"));
             }
         }
     }
@@ -582,18 +583,10 @@ fn build_grouped_help(cmd: &clap::Command) -> String {
         &mut s,
         cmd,
         "Management Commands:",
-        &[
-            "sync", "tag", "register", "dev", "networks", "prune", "reset", "config",
-            "migrate",
-        ],
+        &["sync", "tag", "register", "dev", "networks", "prune", "reset", "config", "migrate"],
     );
     s.push('\n');
-    write_group(
-        &mut s,
-        cmd,
-        "Additional Commands:",
-        &["version", "completions"],
-    );
+    write_group(&mut s, cmd, "Additional Commands:", &["version", "completions", "help"]);
 
     // Remove trailing newline so the template controls spacing
     if s.ends_with('\n') {
@@ -619,9 +612,7 @@ async fn main() {
     let json_requested = argv_requests_flag("--json");
     let cmd = build_grouped_command();
     let cli = match cmd.try_get_matches() {
-        Ok(matches) => {
-            Cli::from_arg_matches(&matches).expect("bug: derive/builder arg mismatch")
-        }
+        Ok(matches) => Cli::from_arg_matches(&matches).expect("bug: derive/builder arg mismatch"),
         Err(err) => {
             if json_requested
                 && !matches!(
