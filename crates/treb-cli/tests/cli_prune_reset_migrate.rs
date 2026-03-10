@@ -434,93 +434,32 @@ fn migrate_config_already_v2_outputs_message_and_no_file_changes() {
     assert!(backups.is_empty(), "no backup should be created for already-v2 config");
 }
 
-// ── treb migrate registry ─────────────────────────────────────────────────────
+// ── treb migrate ──────────────────────────────────────────────────────────────
 
 #[test]
-fn migrate_registry_dry_run_reports_noop() {
-    let tmp = tempfile::tempdir().unwrap();
-    fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
-    let _registry = treb_registry::Registry::init(tmp.path()).unwrap();
+fn migrate_help_does_not_list_registry_subcommand() {
+    let output =
+        treb().args(["migrate", "--help"]).output().expect("failed to run treb migrate --help");
 
-    treb()
-        .args(["migrate", "registry", "--dry-run"])
-        .current_dir(tmp.path())
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("no migration step is required"));
-}
+    assert!(output.status.success(), "migrate --help should succeed");
 
-#[test]
-fn migrate_registry_dry_run_reports_legacy_files_without_renaming() {
-    let tmp = tempfile::tempdir().unwrap();
-    fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
-    let _registry = treb_registry::Registry::init(tmp.path()).unwrap();
-
-    fs::write(tmp.path().join(".treb/safe_txs.json"), "{}").unwrap();
-    fs::create_dir_all(tmp.path().join(".treb/snapshots/mainnet")).unwrap();
-    fs::write(tmp.path().join(".treb/snapshots/mainnet/governor_proposals.json"), "{}").unwrap();
-
-    treb()
-        .args(["migrate", "registry", "--dry-run"])
-        .current_dir(tmp.path())
-        .assert()
-        .success()
-        .stderr(
-            predicate::str::contains("would be renamed")
-                .and(predicate::str::contains(".treb/safe_txs.json -> .treb/safe-txs.json"))
-                .and(predicate::str::contains(
-                    ".treb/snapshots/mainnet/governor_proposals.json -> .treb/snapshots/mainnet/governor-txs.json",
-                )),
-        );
-
-    assert!(tmp.path().join(".treb/safe_txs.json").exists(), "dry-run must keep old file");
+    let stdout = String::from_utf8(output.stdout).expect("help output should be utf-8");
+    assert!(stdout.contains("config"), "migrate help should list the config subcommand: {stdout}");
     assert!(
-        !tmp.path().join(".treb/safe-txs.json").exists(),
-        "dry-run must not create renamed file"
-    );
-    assert!(
-        tmp.path().join(".treb/snapshots/mainnet/governor_proposals.json").exists(),
-        "dry-run must keep legacy snapshot file"
-    );
-    assert!(
-        !tmp.path().join(".treb/snapshots/mainnet/governor-txs.json").exists(),
-        "dry-run must not create renamed snapshot file"
+        !stdout.contains("registry"),
+        "migrate help should not mention the removed registry subcommand: {stdout}"
     );
 }
 
 #[test]
-fn migrate_registry_renames_legacy_files() {
+fn migrate_registry_subcommand_is_rejected() {
     let tmp = tempfile::tempdir().unwrap();
     fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
-    let _registry = treb_registry::Registry::init(tmp.path()).unwrap();
-
-    fs::write(tmp.path().join(".treb/safe_txs.json"), r#"{"safe":true}"#).unwrap();
-    fs::write(tmp.path().join(".treb/fork-state.json"), r#"{"forks":{}}"#).unwrap();
-    fs::create_dir_all(tmp.path().join(".treb/snapshots/mainnet")).unwrap();
-    fs::write(
-        tmp.path().join(".treb/snapshots/mainnet/governor_proposals.json"),
-        r#"{"proposal":true}"#,
-    )
-    .unwrap();
 
     treb()
         .args(["migrate", "registry"])
         .current_dir(tmp.path())
         .assert()
-        .success()
-        .stderr(predicate::str::contains("Renamed 3 legacy registry store files."));
-
-    assert_eq!(
-        fs::read_to_string(tmp.path().join(".treb/safe-txs.json")).unwrap(),
-        r#"{"safe":true}"#
-    );
-    assert_eq!(fs::read_to_string(tmp.path().join(".treb/fork.json")).unwrap(), r#"{"forks":{}}"#);
-    assert_eq!(
-        fs::read_to_string(tmp.path().join(".treb/snapshots/mainnet/governor-txs.json")).unwrap(),
-        r#"{"proposal":true}"#
-    );
-
-    assert!(!tmp.path().join(".treb/safe_txs.json").exists());
-    assert!(!tmp.path().join(".treb/fork-state.json").exists());
-    assert!(!tmp.path().join(".treb/snapshots/mainnet/governor_proposals.json").exists());
+        .failure()
+        .stderr(predicate::str::contains("unrecognized subcommand 'registry'"));
 }

@@ -1,7 +1,7 @@
 //! Golden-file integration tests for `treb migrate`.
 //!
 //! Tests exercise config migration (v1→v2 dry-run, v1→v2 with backup, already-v2
-//! detection) and registry migration (up-to-date, dry-run) paths.
+//! detection) paths.
 
 mod framework;
 mod helpers;
@@ -194,37 +194,6 @@ fn migrate_config_cleanup_foundry() {
         .output_artifact("foundry.toml")
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(EpochNormalizer));
-
-    run_integration_test(&test, &ctx);
-}
-
-// ── Registry migration tests ────────────────────────────────────────────
-
-/// Up-to-date registry prints "up to date" message.
-#[test]
-fn migrate_registry_up_to_date() {
-    let ctx = TestContext::new("minimal-project");
-    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
-
-    let test = IntegrationTest::new("migrate_registry_up_to_date")
-        .setup(&["init"])
-        .test(&["migrate", "registry"])
-        .extra_normalizer(Box::new(path_normalizer));
-
-    run_integration_test(&test, &ctx);
-}
-
-/// Dry-run on up-to-date registry prints "up to date" (same as non-dry-run
-/// since no migrations are pending).
-#[test]
-fn migrate_registry_dry_run_up_to_date() {
-    let ctx = TestContext::new("minimal-project");
-    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
-
-    let test = IntegrationTest::new("migrate_registry_dry_run_up_to_date")
-        .setup(&["init"])
-        .test(&["migrate", "registry", "--dry-run"])
-        .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
 }

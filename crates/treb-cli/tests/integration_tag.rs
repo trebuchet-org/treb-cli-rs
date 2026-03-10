@@ -3,12 +3,14 @@
 mod framework;
 mod helpers;
 
+use std::fs;
+
 use framework::{
     context::TestContext,
     integration_test::{IntegrationTest, run_integration_test},
     normalizer::PathNormalizer,
 };
-use treb_registry::{read_versioned_file, write_versioned_file};
+use treb_registry::{STORE_FORMAT, read_versioned_file, write_versioned_file};
 
 /// Seed the registry and pre-add a "v3-release" tag to the FPMM:v3.0.0 deployment.
 /// Used by remove and duplicate-add tests that need a tag already present.
@@ -82,6 +84,38 @@ fn tag_add() {
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
+}
+
+/// A mutating write upgrades legacy bare deployments.json into the wrapped store format.
+#[test]
+fn tag_add_upgrades_legacy_deployments_file_to_versioned_format() {
+    let ctx = TestContext::new("project");
+    ctx.run(["init"]).success();
+    helpers::seed_registry(ctx.path());
+
+    let deployments_path = ctx.path().join(".treb/deployments.json");
+    let before = fs::read_to_string(&deployments_path).expect("read legacy deployments fixture");
+    assert!(
+        !before.contains("\"_format\""),
+        "seeded fixture should start as the legacy bare-map format"
+    );
+
+    ctx.run(["tag", "--add", "v3-release", "mainnet/42220/FPMM:v3.0.0"]).success();
+
+    let after = fs::read_to_string(&deployments_path).expect("read upgraded deployments file");
+    let json: serde_json::Value =
+        serde_json::from_str(&after).expect("upgraded deployments file should be valid json");
+
+    assert_eq!(json["_format"], STORE_FORMAT);
+
+    let entries = json["entries"].as_object().expect("wrapped deployments should contain entries");
+    let deployment = entries
+        .get("mainnet/42220/FPMM:v3.0.0")
+        .and_then(serde_json::Value::as_object)
+        .expect("upgraded deployments should preserve the tagged deployment");
+
+    assert_eq!(deployment.get("contractName"), Some(&serde_json::json!("FPMM")));
+    assert_eq!(deployment.get("tags"), Some(&serde_json::json!(["v3-release"])));
 }
 
 /// Adding a tag with --json produces valid JSON with action and tag fields.

@@ -1,28 +1,22 @@
 //! `treb migrate` command implementation.
 //!
-//! Handles config format detection and v1→v2 conversion (`treb migrate config`)
-//! plus a legacy registry-migration compatibility entrypoint
-//! (`treb migrate registry`).
+//! Handles config format detection and v1→v2 conversion (`treb migrate config`).
 
 use std::{
     collections::HashMap,
-    env, fs,
+    env,
     io::IsTerminal,
-    path::{Path, PathBuf},
+    path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, bail};
 use clap::Subcommand;
+use owo_colors::OwoColorize;
 use treb_config::{
     AccountConfig, NamespaceRoles, TrebConfigFormat, detect_treb_config_format,
     extract_treb_senders_from_foundry, load_treb_config_v1, serialize_treb_config_v2,
 };
-use treb_registry::{
-    REGISTRY_DIR, detect_legacy_registry_store_files, rename_legacy_registry_store_files,
-};
-
-use owo_colors::OwoColorize;
 
 use crate::{
     output,
@@ -58,15 +52,6 @@ pub enum MigrateSubcommand {
         #[arg(long)]
         cleanup_foundry: bool,
     },
-    /// Report that registry migrations are no longer required
-    ///
-    /// Registry store files upgrade in place when they are rewritten, so this
-    /// command only reports that there is nothing to migrate.
-    Registry {
-        /// Simulate execution without making changes
-        #[arg(long)]
-        dry_run: bool,
-    },
 }
 
 // ── run ───────────────────────────────────────────────────────────────────────
@@ -83,7 +68,6 @@ pub async fn run(subcommand: MigrateSubcommand) -> anyhow::Result<()> {
         MigrateSubcommand::Config { dry_run, json, yes, cleanup_foundry } => {
             run_config(&cwd, dry_run, json, yes, cleanup_foundry).await
         }
-        MigrateSubcommand::Registry { dry_run } => run_registry(&cwd, dry_run).await,
     }
 }
 
@@ -523,100 +507,6 @@ fn convert_foundry_senders_to_v2(
     treb_config::TrebFileConfigV2 { accounts: foundry_senders, namespace, fork: Default::default() }
 }
 
-// ── run_registry ──────────────────────────────────────────────────────────────
-
-fn registry_dirs_for_migration(registry_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
-    let mut dirs = vec![registry_dir.to_path_buf()];
-    let snapshots_dir = registry_dir.join("snapshots");
-
-    if snapshots_dir.is_dir() {
-        let mut snapshot_dirs = Vec::new();
-        for entry in fs::read_dir(&snapshots_dir)
-            .with_context(|| format!("failed to read {}", snapshots_dir.display()))?
-        {
-            let entry = entry.with_context(|| {
-                format!("failed to read snapshot entry in {}", snapshots_dir.display())
-            })?;
-            let path = entry.path();
-            if path.is_dir() {
-                snapshot_dirs.push(path);
-            }
-        }
-        snapshot_dirs.sort();
-        dirs.extend(snapshot_dirs);
-    }
-
-    Ok(dirs)
-}
-
-fn pending_legacy_registry_renames(registry_dir: &Path) -> anyhow::Result<Vec<(PathBuf, PathBuf)>> {
-    let mut pending = Vec::new();
-    for dir in registry_dirs_for_migration(registry_dir)? {
-        pending.extend(detect_legacy_registry_store_files(&dir));
-    }
-    pending.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(pending)
-}
-
-fn display_registry_path(path: &Path, project_root: &Path) -> String {
-    path.strip_prefix(project_root).unwrap_or(path).display().to_string()
-}
-
-async fn run_registry(project_root: &Path, dry_run: bool) -> anyhow::Result<()> {
-    if !project_root.join(REGISTRY_DIR).exists() {
-        bail!("project not initialized — .treb/ directory not found\n\nRun `treb init` first.");
-    }
-
-    let registry_dir = project_root.join(REGISTRY_DIR);
-
-    output::print_stage(emoji::MAGNIFYING_GLASS, "Checking registry migration status...");
-
-    let pending = pending_legacy_registry_renames(&registry_dir)?;
-    if pending.is_empty() {
-        output::print_stage(
-            emoji::CHECK,
-            "Registry store files upgrade automatically on save; no migration step is required.",
-        );
-        return Ok(());
-    }
-
-    let noun = if pending.len() == 1 { "file" } else { "files" };
-
-    if dry_run {
-        output::print_stage(
-            emoji::CLIPBOARD,
-            &format!("Found {} legacy registry store {noun} that would be renamed:", pending.len()),
-        );
-        for (old_path, new_path) in pending {
-            eprintln!(
-                "  {} -> {}",
-                display_registry_path(&old_path, project_root),
-                display_registry_path(&new_path, project_root)
-            );
-        }
-        return Ok(());
-    }
-
-    let mut renamed = Vec::new();
-    for dir in registry_dirs_for_migration(&registry_dir)? {
-        renamed.extend(rename_legacy_registry_store_files(&dir)?);
-    }
-
-    output::print_stage(
-        emoji::CHECK,
-        &format!("Renamed {} legacy registry store {noun}.", renamed.len()),
-    );
-    for (old_path, new_path) in renamed {
-        eprintln!(
-            "  {} -> {}",
-            display_registry_path(&old_path, project_root),
-            display_registry_path(&new_path, project_root)
-        );
-    }
-
-    Ok(())
-}
-
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -929,24 +819,6 @@ derivation_path = "m/44'/60'/0'/0/0"
             "ledger_signer from foundry.toml should be migrated"
         );
         assert_eq!(v2.accounts["ledger_signer"].type_, Some(SenderType::Ledger));
-    }
-
-    // ── run_registry ──────────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn run_registry_is_noop_for_initialized_project() {
-        let dir = TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(REGISTRY_DIR)).unwrap();
-
-        run_registry(dir.path(), false).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn run_registry_requires_initialized_project() {
-        let dir = TempDir::new().unwrap();
-
-        let err = run_registry(dir.path(), false).await.unwrap_err();
-        assert!(err.to_string().contains("project not initialized"), "got: {err}");
     }
 
     #[test]

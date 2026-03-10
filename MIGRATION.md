@@ -184,9 +184,9 @@ Full fork lifecycle management with `treb fork enter`, `fork exit`, `fork revert
 
 The Rust CLI reads and writes the same `.treb/` directory structure. Registry files (`deployments.json`, `transactions.json`, etc.) are forward-compatible — the Rust CLI may add new fields that the Go CLI will ignore via serde defaults. The Rust CLI also introduces new registry files (`safe-txs.json`, `governor-txs.json`, `lookup.json`, `fork.json`) that the Go CLI does not use.
 
-The `registry.json` metadata file differs between CLIs: the Go CLI stores a `SolidityRegistry` map while the Rust CLI stores version and timestamp metadata. This does not affect deployment data.
+The `registry.json` metadata file differs between CLIs: the Go CLI stores a `SolidityRegistry` map while the Rust CLI ignores that file. This does not affect deployment data.
 
-Running `treb migrate registry` applies any pending schema migrations to bring registry files to the current version.
+Registry store files upgrade automatically when the Rust CLI rewrites them. There is no separate `treb migrate registry` step.
 
 ## Migration Checklist
 
@@ -204,20 +204,13 @@ Running `treb migrate registry` applies any pending schema migrations to bring r
    treb migrate config --cleanup-foundry  # also remove deprecated foundry.toml sections
    ```
 
-3. **Migrate registry** (apply any schema updates)
-
-   ```sh
-   treb migrate registry --dry-run  # preview pending migrations
-   treb migrate registry            # apply migrations
-   ```
-
-4. **Verify deployments**
+3. **Verify deployments**
 
    ```sh
    treb list                        # confirm all deployments are visible
    ```
 
-5. **Test with dry run**
+4. **Test with dry run**
 
    ```sh
    treb run script/Deploy.s.sol --network sepolia --dry-run

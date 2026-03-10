@@ -1,3 +1,0 @@
-=== cmd 0: [migrate registry --dry-run] ===
-🔍 Checking registry migration status...
-✅ Registry store files upgrade automatically on save; no migration step is required.

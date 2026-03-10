@@ -116,7 +116,7 @@
         "Clippy passes (cargo clippy --workspace --all-targets)"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]

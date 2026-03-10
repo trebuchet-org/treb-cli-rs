@@ -6,6 +6,7 @@
 - Secondary-index stores that persist `Vec<String>` ID lists should sort those vectors before saving or returning rebuilt data, otherwise hash-map iteration can make the JSON output nondeterministic.
 - Registry-only changes should be validated with `cargo check -p treb-registry` and `cargo test -p treb-registry` before running broader workspace checks.
 - Rust registry code should not create or read `.treb/registry.json`; treat that filename as external Go/Solidity registry data and only assert on actual store files plus `config.local.json`.
+- `crates/treb-cli/tests/helpers::seed_registry()` intentionally writes the legacy bare deployments fixture, so mutating CLI tests can use it to verify automatic upgrade to wrapped `{"_format":"treb-v1","entries":...}` store files without bespoke fixtures.
 
 Started: Tue Mar 10 09:50:03 AM CET 2026
 ---
@@ -70,4 +71,13 @@ Started: Tue Mar 10 09:50:03 AM CET 2026
   - `.treb/registry.json` belongs to external Go/Solidity registry data now; Rust init/open/reset flows should never synthesize it or validate its contents.
   - When a removed registry-crate API is still referenced by `treb-cli`, keeping the CLI path as a narrow no-op shim preserves workspace compileability without prematurely taking the next story.
   - The CLI integration framework’s default `.treb/` artifact list must exclude `registry.json` once Rust metadata ownership is removed, or unrelated init-style goldens will fail.
+---
+## 2026-03-10 12:18:42 CET - P1-US-007
+- Removed the `treb migrate registry` CLI subcommand, its legacy rename implementation, and the now-dead registry rename exports; updated README/MIGRATION guidance to reflect automatic on-save store upgrades instead of a dedicated registry migration command.
+- Replaced registry-migration coverage with direct CLI assertions that `migrate --help` no longer mentions `registry`, `migrate registry` fails as an unknown subcommand, and a real mutating `tag --add` flow upgrades a legacy bare `deployments.json` file to the wrapped `{"_format":"treb-v1","entries":...}` format.
+- Files changed: `crates/treb-cli/src/commands/migrate.rs`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/tests/cli_prune_reset_migrate.rs`, `crates/treb-cli/tests/integration_migrate.rs`, `crates/treb-cli/tests/integration_tag.rs`, `crates/treb-cli/tests/golden/migrate_registry_dry_run_up_to_date/commands.golden`, `crates/treb-cli/tests/golden/migrate_registry_up_to_date/commands.golden`, `crates/treb-registry/src/lib.rs`, `README.md`, `MIGRATION.md`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Removing a Clap subcommand requires updating both the enum in `commands/*` and any helper matchers in `main.rs`, or JSON-mode flag detection will stop compiling.
+  - The CLI’s legacy-registry compatibility story is now “read old file names when present and rewrite in the new wrapped format on normal saves,” so tests should exercise a real write path instead of a dedicated migrate command.
+  - Golden migrate coverage now belongs only to `migrate config`; command-removal behavior is better covered with direct assert_cmd tests than with golden snapshots.
 ---

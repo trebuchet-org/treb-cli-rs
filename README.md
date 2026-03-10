@@ -134,7 +134,8 @@ No files changed, compilation skipped
 | Subcommand | Description |
 |---|---|
 | `migrate config` | Convert treb.toml v1 to v2 (`--dry-run`, `--json`) |
-| `migrate registry` | Apply versioned registry schema migrations (`--dry-run`) |
+
+Registry store files upgrade automatically when a command rewrites them; there is no separate `migrate registry` subcommand.
 
 ### fork
 
