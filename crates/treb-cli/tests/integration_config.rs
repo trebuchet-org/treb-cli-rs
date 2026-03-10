@@ -8,7 +8,7 @@ use framework::{
     normalizer::PathNormalizer,
 };
 
-/// Default config show displays Namespace, Network (not set), senders table.
+/// Default config show displays Namespace, Network (not set), and inline sender rows.
 #[test]
 fn config_show_default() {
     let ctx = TestContext::new("project");
