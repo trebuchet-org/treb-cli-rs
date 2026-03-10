@@ -556,49 +556,109 @@ pub async fn run_anvil_status(
         return Ok(());
     }
 
-    let mut table = crate::output::build_table(&[
-        "Network",
-        "Instance",
-        "RPC URL",
-        "Port",
-        "Chain ID",
-        "Fork Block",
-        "Started At",
-        "Uptime",
-        "Status",
-    ]);
+    let cwd = env::current_dir().unwrap_or_default();
 
-    for entry in &forks {
+    for (i, entry) in forks.iter().enumerate() {
+        let instance_name = entry.resolved_instance_name();
         let running = is_port_reachable(entry.port).await;
-        let status_text = if running { "running" } else { "stopped" };
-        let uptime = format_uptime(now - entry.started_at);
-        let fork_block =
-            entry.fork_block_number.map(|b| b.to_string()).unwrap_or_else(|| "latest".into());
 
-        let status_cell = if crate::ui::color::is_color_enabled() {
-            if running {
-                comfy_table::Cell::new(status_text).fg(comfy_table::Color::Green)
+        // Cyan bold header: 📊 Anvil Status ('NAME'):
+        println!(
+            "{} {}",
+            emoji::CHART,
+            styled(&format!("Anvil Status ('{instance_name}'):"), color::STAGE),
+        );
+
+        if running {
+            // Green status with PID
+            println!(
+                "  Status: {} {}",
+                emoji::GREEN_CIRCLE,
+                styled(&format!("Running (PID {})", entry.anvil_pid), color::GREEN),
+            );
+            // Blue RPC URL
+            println!(
+                "  RPC URL: {}",
+                styled(&entry.rpc_url, color::BLUE),
+            );
+            // Yellow log file
+            let log_path = if entry.log_file.is_empty() {
+                log_file_path(&treb_dir, instance_name).display().to_string()
             } else {
-                comfy_table::Cell::new(status_text).fg(comfy_table::Color::Red)
+                entry.log_file.clone()
+            };
+            let display_log = human_display_path(&cwd, Path::new(&log_path));
+            println!(
+                "  Log file: {}",
+                styled(&display_log.display().to_string(), color::YELLOW),
+            );
+            // RPC health check
+            let rpc_healthy = check_rpc_health(&entry.rpc_url).await;
+            if rpc_healthy {
+                println!(
+                    "  RPC Health: {} {}",
+                    emoji::CHECK,
+                    styled("Responding", color::GREEN),
+                );
+            } else {
+                println!(
+                    "  RPC Health: {} {}",
+                    emoji::CROSS,
+                    styled("Not responding", color::RED),
+                );
+            }
+            // CreateX status check
+            let createx_deployed = check_createx_deployed(&entry.rpc_url).await;
+            if createx_deployed {
+                println!(
+                    "  CreateX Status: {} {}",
+                    emoji::CHECK,
+                    styled("Deployed at 0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed", color::GREEN),
+                );
+            } else {
+                println!(
+                    "  CreateX Status: {} {}",
+                    emoji::CROSS,
+                    styled("Not deployed", color::RED),
+                );
             }
         } else {
-            comfy_table::Cell::new(status_text)
-        };
+            // Red status
+            println!(
+                "  Status: {} {}",
+                emoji::RED_CIRCLE,
+                styled("Not running", color::RED),
+            );
+            // Gray PID file
+            let pid_path = if entry.pid_file.is_empty() {
+                pid_file_path(&treb_dir, instance_name).display().to_string()
+            } else {
+                entry.pid_file.clone()
+            };
+            let display_pid = human_display_path(&cwd, Path::new(&pid_path));
+            println!(
+                "  PID file: {}",
+                styled(&display_pid.display().to_string(), color::GRAY),
+            );
+            // Gray log file
+            let log_path = if entry.log_file.is_empty() {
+                log_file_path(&treb_dir, instance_name).display().to_string()
+            } else {
+                entry.log_file.clone()
+            };
+            let display_log = human_display_path(&cwd, Path::new(&log_path));
+            println!(
+                "  Log file: {}",
+                styled(&display_log.display().to_string(), color::GRAY),
+            );
+        }
 
-        table.add_row(vec![
-            comfy_table::Cell::new(&entry.network),
-            comfy_table::Cell::new(entry.resolved_instance_name()),
-            comfy_table::Cell::new(&entry.rpc_url),
-            comfy_table::Cell::new(entry.port),
-            comfy_table::Cell::new(entry.chain_id),
-            comfy_table::Cell::new(&fork_block),
-            comfy_table::Cell::new(entry.started_at.format("%Y-%m-%d %H:%M:%S UTC")),
-            comfy_table::Cell::new(&uptime),
-            status_cell,
-        ]);
+        // Blank line between instances (but not after the last one)
+        if i < forks.len() - 1 {
+            println!();
+        }
     }
 
-    crate::output::print_table(&table);
     Ok(())
 }
 
@@ -865,6 +925,55 @@ pub(crate) async fn is_port_reachable(port: u16) -> bool {
     }
     let addr = format!("127.0.0.1:{port}");
     TcpStream::connect(&addr).await.is_ok()
+}
+
+/// Check whether an Anvil RPC endpoint is healthy by sending an `eth_chainId` request.
+///
+/// Returns `true` if the endpoint responds with a valid JSON-RPC result.
+async fn check_rpc_health(rpc_url: &str) -> bool {
+    use std::time::Duration;
+    let Ok(client) = reqwest::Client::builder().timeout(Duration::from_secs(5)).build() else {
+        return false;
+    };
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "eth_chainId",
+        "params": [],
+        "id": 1
+    });
+    let Ok(resp) = client.post(rpc_url).json(&body).send().await else {
+        return false;
+    };
+    let Ok(json) = resp.json::<serde_json::Value>().await else {
+        return false;
+    };
+    json.get("result").is_some()
+}
+
+/// Check whether the CreateX factory is deployed at the canonical address.
+///
+/// Sends an `eth_getCode` request; returns `true` if the result is non-empty bytecode.
+async fn check_createx_deployed(rpc_url: &str) -> bool {
+    use std::time::Duration;
+    let Ok(client) = reqwest::Client::builder().timeout(Duration::from_secs(5)).build() else {
+        return false;
+    };
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "eth_getCode",
+        "params": ["0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed", "latest"],
+        "id": 1
+    });
+    let Ok(resp) = client.post(rpc_url).json(&body).send().await else {
+        return false;
+    };
+    let Ok(json) = resp.json::<serde_json::Value>().await else {
+        return false;
+    };
+    match json.get("result").and_then(|r| r.as_str()) {
+        Some(code) => code != "0x" && !code.is_empty(),
+        None => false,
+    }
 }
 
 /// Take an EVM snapshot via HTTP JSON-RPC and return the snapshot ID hex string.
