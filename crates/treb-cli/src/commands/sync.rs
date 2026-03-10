@@ -60,46 +60,6 @@ struct ResolvedRpcUrls {
     warnings: Vec<String>,
 }
 
-fn missing_env_vars(value: &str) -> Vec<String> {
-    let mut missing = Vec::new();
-    let mut remainder = value;
-
-    while let Some(start) = remainder.find("${") {
-        let after_start = &remainder[start + 2..];
-        let Some(end) = after_start.find('}') else {
-            break;
-        };
-
-        let var_name = &after_start[..end];
-        if !var_name.is_empty() && std::env::var_os(var_name).is_none() {
-            missing.push(var_name.to_string());
-        }
-
-        remainder = &after_start[end + 1..];
-    }
-
-    missing.sort();
-    missing.dedup();
-    missing
-}
-
-fn expand_rpc_endpoint(name: &str, raw_url: &str) -> Result<String, String> {
-    let missing_vars = missing_env_vars(raw_url);
-    if !missing_vars.is_empty() {
-        return Err(format!(
-            "RPC endpoint '{name}' is missing required environment variables after .env expansion: {}",
-            missing_vars.join(", ")
-        ));
-    }
-
-    let expanded = treb_config::expand_env_vars(raw_url);
-    if expanded.trim().is_empty() {
-        return Err(format!("RPC endpoint '{name}' is empty after .env expansion"));
-    }
-
-    Ok(expanded)
-}
-
 /// Resolve RPC URLs for a set of chain IDs by probing foundry.toml endpoints.
 ///
 /// Iterates over configured `[rpc_endpoints]`, calls `eth_chainId` on each,
@@ -109,40 +69,50 @@ async fn resolve_rpc_urls(
     needed_chains: &HashSet<u64>,
     debug: bool,
 ) -> ResolvedRpcUrls {
-    treb_config::load_dotenv(cwd);
-
-    let config = match treb_config::load_foundry_config(cwd) {
-        Ok(c) => c,
+    let endpoints = match treb_config::resolve_rpc_endpoints(cwd) {
+        Ok(endpoints) => endpoints,
         Err(_) => return ResolvedRpcUrls::default(),
     };
-    let endpoints = treb_config::rpc_endpoints(&config);
 
     let mut resolved = ResolvedRpcUrls::default();
 
-    for (name, url) in &endpoints {
-        let url = match expand_rpc_endpoint(name, url) {
-            Ok(url) => url,
-            Err(warning) => {
-                resolved.warnings.push(warning);
-                continue;
-            }
-        };
-
+    for (name, endpoint) in &endpoints {
         if resolved.rpc_map.len() == needed_chains.len() {
             break; // found all needed chains
+        }
+
+        if !endpoint.missing_vars.is_empty() {
+            resolved.warnings.push(format!(
+                "RPC endpoint '{name}' is missing required environment variables after .env expansion: {}",
+                endpoint.missing_vars.join(", ")
+            ));
+            continue;
+        }
+
+        if endpoint.unresolved {
+            resolved.warnings.push(format!(
+                "RPC endpoint '{name}' contains unresolved environment variables: {}",
+                endpoint.raw_url
+            ));
+            continue;
+        }
+
+        if endpoint.expanded_url.trim().is_empty() {
+            resolved.warnings.push(format!("RPC endpoint '{name}' is empty after .env expansion"));
+            continue;
         }
 
         if debug {
             eprintln!("[debug] probing RPC endpoint '{name}' for chain ID...");
         }
 
-        match super::run::fetch_chain_id(&url).await {
+        match super::run::fetch_chain_id(&endpoint.expanded_url).await {
             Ok(chain_id) => {
                 if needed_chains.contains(&chain_id) && !resolved.rpc_map.contains_key(&chain_id) {
                     if debug {
                         eprintln!("[debug] endpoint '{name}' → chain {chain_id}");
                     }
-                    resolved.rpc_map.insert(chain_id, url);
+                    resolved.rpc_map.insert(chain_id, endpoint.expanded_url.clone());
                 }
             }
             Err(e) => {
@@ -651,11 +621,6 @@ mod tests {
     use treb_core::types::{GovernorProposal, Operation, Transaction};
     use treb_safe::types::{SafeServiceConfirmation, SafeServiceMultisigResponse};
 
-    fn env_lock_blocking() -> MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(())).blocking_lock()
-    }
-
     async fn env_lock() -> MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(())).lock().await
@@ -775,13 +740,26 @@ mod tests {
         assert!(resolve_chain_id("nonexistent_chain_xyz").is_err());
     }
 
-    #[test]
-    fn expand_rpc_endpoint_reports_missing_env_vars() {
-        let _lock = env_lock_blocking();
+    #[tokio::test]
+    async fn resolve_rpc_urls_reports_missing_env_vars() {
+        let _lock = env_lock().await;
         let _guard = EnvVarGuard::unset("TREB_SYNC_MISSING_RPC");
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("foundry.toml"),
+            r#"
+[profile.default]
+src = "src"
+out = "out"
 
-        let err = expand_rpc_endpoint("mainnet", "https://rpc.example/${TREB_SYNC_MISSING_RPC}")
-            .unwrap_err();
+[rpc_endpoints]
+mainnet = "https://rpc.example/${TREB_SYNC_MISSING_RPC}"
+"#,
+        )
+        .unwrap();
+
+        let resolved = resolve_rpc_urls(tmp.path(), &HashSet::from([1_u64]), false).await;
+        let err = resolved.warnings.join("\n");
 
         assert!(err.contains("mainnet"), "got: {err}");
         assert!(err.contains("TREB_SYNC_MISSING_RPC"), "got: {err}");

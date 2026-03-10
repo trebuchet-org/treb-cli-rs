@@ -239,13 +239,12 @@ pub(crate) fn resolve_rpc_url_for_chain_id(
     if network_or_url.starts_with("http://") || network_or_url.starts_with("https://") {
         return Some(network_or_url.to_string());
     }
-    let config = treb_config::load_foundry_config(cwd).ok()?;
-    let endpoints = treb_config::rpc_endpoints(&config);
-    let url = endpoints.get(network_or_url)?;
-    if url.contains("${") {
-        return None; // unresolved env vars
+    let endpoints = treb_config::resolve_rpc_endpoints(cwd).ok()?;
+    let endpoint = endpoints.get(network_or_url)?;
+    if endpoint.unresolved || endpoint.expanded_url.trim().is_empty() {
+        return None;
     }
-    Some(url.clone())
+    Some(endpoint.expanded_url.clone())
 }
 
 /// Fetch the chain ID from an RPC endpoint via `eth_chainId`.
@@ -315,9 +314,8 @@ pub async fn run(
 
     // ── Interactive network selection when --network is omitted ───────────
     let network = if network.is_none() && prompts_enabled {
-        let foundry_cfg = treb_config::load_foundry_config(&cwd)
+        let endpoints = treb_config::resolve_rpc_endpoints(&cwd)
             .map_err(|e| anyhow::anyhow!("failed to load foundry config: {e}"))?;
-        let endpoints = treb_config::rpc_endpoints(&foundry_cfg);
         let mut names: Vec<String> = endpoints.keys().cloned().collect();
         names.sort();
         fuzzy_select_network(&names).map_err(|e| anyhow::anyhow!("{e}"))?.map(|s| s.to_string())
@@ -1085,6 +1083,13 @@ mod tests {
             unsafe { env::set_var(name, value) };
             Self { name, original }
         }
+
+        fn unset(name: &'static str) -> Self {
+            let original = env::var(name).ok();
+            // SAFETY: tests here are scoped and restore the original environment on drop.
+            unsafe { env::remove_var(name) };
+            Self { name, original }
+        }
     }
 
     impl Drop for TestEnvVarGuard {
@@ -1208,6 +1213,21 @@ mod tests {
         fs::create_dir_all(&treb_dir).unwrap();
         let mut store = ForkStateStore::new(&treb_dir);
         store.insert_active_fork(entry).unwrap();
+    }
+
+    fn write_foundry_rpc_project(project_root: &std::path::Path) {
+        fs::write(
+            project_root.join("foundry.toml"),
+            r#"
+[profile.default]
+src = "src"
+
+[rpc_endpoints]
+mainnet = "${TREB_RUN_RPC_URL_P3_FIX}"
+needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
+"#,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -1388,6 +1408,30 @@ mod tests {
         let _fork_mode = TestEnvVarGuard::set("TREB_FORK_MODE", "true");
 
         assert!(is_active_fork_run(tmp.path(), None, None));
+    }
+
+    #[test]
+    fn resolve_rpc_url_for_chain_id_expands_dotenv_backed_alias() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _rpc = TestEnvVarGuard::unset("TREB_RUN_RPC_URL_P3_FIX");
+        write_foundry_rpc_project(tmp.path());
+        fs::write(tmp.path().join(".env"), "TREB_RUN_RPC_URL_P3_FIX=https://mainnet.rpc.example\n")
+            .unwrap();
+
+        let url = resolve_rpc_url_for_chain_id("mainnet", tmp.path());
+
+        assert_eq!(url.as_deref(), Some("https://mainnet.rpc.example"));
+    }
+
+    #[test]
+    fn resolve_rpc_url_for_chain_id_rejects_missing_env_alias() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _key = TestEnvVarGuard::unset("TREB_RUN_MISSING_KEY_P3_FIX");
+        write_foundry_rpc_project(tmp.path());
+
+        let url = resolve_rpc_url_for_chain_id("needs_env", tmp.path());
+
+        assert!(url.is_none());
     }
 
     #[test]

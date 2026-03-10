@@ -8,7 +8,18 @@ use std::{collections::HashMap, path::Path};
 
 use treb_core::error::{Result, TrebError};
 
-use crate::{SenderConfig, expand_env_vars, trebfile::expand_sender_config_env_vars};
+use crate::{
+    SenderConfig, env::load_dotenv, expand_env_vars, trebfile::expand_sender_config_env_vars,
+};
+
+/// RPC endpoint with both raw and expanded values plus unresolved env metadata.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedRpcEndpoint {
+    pub raw_url: String,
+    pub expanded_url: String,
+    pub missing_vars: Vec<String>,
+    pub unresolved: bool,
+}
 
 /// Load foundry configuration from the given project root.
 ///
@@ -64,16 +75,83 @@ pub fn extract_treb_senders_from_foundry(
     result
 }
 
-/// Extract RPC endpoint URLs from a loaded foundry config.
-///
-/// Returns a map of endpoint alias to URL string with `${VAR}` environment
-/// references expanded via [`crate::expand_env_vars`].
+fn has_unresolved_env_vars(url: &str) -> bool {
+    let bytes = url.as_bytes();
+    let mut idx = 0;
+
+    while idx < bytes.len() {
+        if bytes[idx] == b'$' {
+            match bytes.get(idx + 1).copied() {
+                Some(b'{') => return true,
+                Some(next) if next == b'_' || next.is_ascii_alphabetic() => return true,
+                _ => {}
+            }
+        }
+
+        idx += 1;
+    }
+
+    false
+}
+
+fn missing_braced_env_vars(url: &str) -> Vec<String> {
+    let mut missing = Vec::new();
+    let mut chars = url.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '$' && chars.peek() == Some(&'{') {
+            chars.next(); // consume '{'
+            let mut var_name = String::new();
+            let mut closed = false;
+
+            for next in chars.by_ref() {
+                if next == '}' {
+                    closed = true;
+                    break;
+                }
+                var_name.push(next);
+            }
+
+            if !closed {
+                missing.push(var_name);
+                break;
+            }
+
+            if !var_name.is_empty() && std::env::var_os(&var_name).is_none() {
+                missing.push(var_name);
+            }
+        }
+    }
+
+    missing.sort();
+    missing.dedup();
+    missing
+}
+
+/// Extract raw RPC endpoint URLs from a loaded foundry config.
 pub fn rpc_endpoints(config: &foundry_config::Config) -> HashMap<String, String> {
     let mut endpoints = HashMap::new();
     for (name, endpoint) in config.rpc_endpoints.iter() {
-        endpoints.insert(name.clone(), expand_env_vars(&endpoint.endpoint.to_string()));
+        endpoints.insert(name.clone(), endpoint.endpoint.to_string());
     }
     endpoints
+}
+
+/// Load and expand RPC endpoints from foundry.toml after sourcing `.env` files.
+pub fn resolve_rpc_endpoints(project_root: &Path) -> Result<HashMap<String, ResolvedRpcEndpoint>> {
+    load_dotenv(project_root);
+    let config = load_foundry_config(project_root)?;
+
+    let mut endpoints = HashMap::new();
+    for (name, raw_url) in rpc_endpoints(&config) {
+        let missing_vars = missing_braced_env_vars(&raw_url);
+        let expanded_url = expand_env_vars(&raw_url);
+        let unresolved = !missing_vars.is_empty() || has_unresolved_env_vars(&expanded_url);
+        endpoints
+            .insert(name, ResolvedRpcEndpoint { raw_url, expanded_url, missing_vars, unresolved });
+    }
+
+    Ok(endpoints)
 }
 
 #[cfg(test)]
@@ -290,7 +368,7 @@ sepolia = "https://sepolia.example.com"
     }
 
     #[test]
-    fn rpc_endpoints_expand_env_var_urls() {
+    fn rpc_endpoints_preserve_raw_env_var_urls() {
         let tmp = TempDir::new().unwrap();
         write_foundry_toml(
             tmp.path(),
@@ -312,7 +390,7 @@ mainnet = "${TREB_TEST_MAINNET_RPC_URL_P3_US_001}"
         let config = load_foundry_config(tmp.path()).unwrap();
         let eps = rpc_endpoints(&config);
 
-        assert_eq!(eps.get("mainnet").unwrap(), "https://eth-mainnet.example.com");
+        assert_eq!(eps.get("mainnet").unwrap(), "${TREB_TEST_MAINNET_RPC_URL_P3_US_001}");
 
         unsafe { std::env::remove_var("TREB_TEST_MAINNET_RPC_URL_P3_US_001") };
     }
@@ -338,7 +416,7 @@ sepolia = "https://sepolia.example.com"
     }
 
     #[test]
-    fn rpc_endpoints_expand_mixed_urls() {
+    fn resolve_rpc_endpoints_expand_mixed_urls() {
         let tmp = TempDir::new().unwrap();
         write_foundry_toml(
             tmp.path(),
@@ -352,16 +430,22 @@ alchemy = "https://eth-mainnet.g.alchemy.com/v2/${TREB_TEST_ALCHEMY_KEY_P3_US_00
         );
         unsafe { std::env::set_var("TREB_TEST_ALCHEMY_KEY_P3_US_001", "secret-key") };
 
-        let config = load_foundry_config(tmp.path()).unwrap();
-        let eps = rpc_endpoints(&config);
+        let eps = resolve_rpc_endpoints(tmp.path()).unwrap();
+        let alchemy = eps.get("alchemy").unwrap();
 
-        assert_eq!(eps.get("alchemy").unwrap(), "https://eth-mainnet.g.alchemy.com/v2/secret-key");
+        assert_eq!(
+            alchemy.raw_url,
+            "https://eth-mainnet.g.alchemy.com/v2/${TREB_TEST_ALCHEMY_KEY_P3_US_001}"
+        );
+        assert_eq!(alchemy.expanded_url, "https://eth-mainnet.g.alchemy.com/v2/secret-key");
+        assert!(alchemy.missing_vars.is_empty());
+        assert!(!alchemy.unresolved);
 
         unsafe { std::env::remove_var("TREB_TEST_ALCHEMY_KEY_P3_US_001") };
     }
 
     #[test]
-    fn rpc_endpoints_expand_unset_env_vars_to_empty_string() {
+    fn resolve_rpc_endpoints_report_missing_env_vars() {
         let tmp = TempDir::new().unwrap();
         write_foundry_toml(
             tmp.path(),
@@ -375,9 +459,12 @@ local = "http://localhost/${TREB_TEST_UNSET_RPC_SEGMENT_P3_US_001}"
         );
         unsafe { std::env::remove_var("TREB_TEST_UNSET_RPC_SEGMENT_P3_US_001") };
 
-        let config = load_foundry_config(tmp.path()).unwrap();
-        let eps = rpc_endpoints(&config);
+        let eps = resolve_rpc_endpoints(tmp.path()).unwrap();
+        let local = eps.get("local").unwrap();
 
-        assert_eq!(eps.get("local").unwrap(), "http://localhost/");
+        assert_eq!(local.raw_url, "http://localhost/${TREB_TEST_UNSET_RPC_SEGMENT_P3_US_001}");
+        assert_eq!(local.expanded_url, "http://localhost/");
+        assert_eq!(local.missing_vars, vec!["TREB_TEST_UNSET_RPC_SEGMENT_P3_US_001".to_string()]);
+        assert!(local.unresolved);
     }
 }

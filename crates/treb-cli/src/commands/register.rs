@@ -93,25 +93,39 @@ fn resolve_rpc_url(
         return Ok(network_name);
     }
 
-    // Look up in foundry.toml [rpc_endpoints].
-    let config = treb_config::load_foundry_config(cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let endpoints = treb_config::rpc_endpoints(&config);
+    let endpoints = treb_config::resolve_rpc_endpoints(cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let url = endpoints.get(&network_name).ok_or_else(|| {
         anyhow::anyhow!("network '{}' not found in foundry.toml [rpc_endpoints]", network_name)
     })?;
 
-    // Bail if the URL has unresolved env vars.
-    if url.contains("${") {
+    if !url.missing_vars.is_empty() {
+        bail!(
+            "RPC URL for network '{}' is missing required environment variables after .env expansion: {}\n\n\
+             Set the required environment variables or use --rpc-url directly.",
+            network_name,
+            url.missing_vars.join(", ")
+        );
+    }
+
+    if url.unresolved {
         bail!(
             "RPC URL for network '{}' contains unresolved environment variables: {}\n\n\
              Set the required environment variables or use --rpc-url directly.",
             network_name,
-            url
+            url.raw_url
         );
     }
 
-    Ok(url.clone())
+    if url.expanded_url.trim().is_empty() {
+        bail!(
+            "RPC URL for network '{}' is empty after .env expansion\n\n\
+             Set the required environment variables or use --rpc-url directly.",
+            network_name
+        );
+    }
+
+    Ok(url.expanded_url.clone())
 }
 
 // ── Trace parsing ───────────────────────────────────────────────────────
@@ -737,13 +751,28 @@ needs_env = "https://rpc.example.com/${API_KEY}"
     }
 
     #[test]
-    fn rpc_url_env_var_expands_to_empty_string_when_unset() {
+    fn rpc_url_resolves_from_dotenv() {
         let _lock = env_lock();
         let _api_key = EnvVarGuard::unset("API_KEY");
         let tmp = TempDir::new().unwrap();
         setup_project(tmp.path());
+        std::fs::write(tmp.path().join(".env"), "API_KEY=dotenv-key\n").unwrap();
+
         let url = resolve_rpc_url(None, Some("needs_env".to_string()), tmp.path()).unwrap();
-        assert_eq!(url, "https://rpc.example.com/");
+
+        assert_eq!(url, "https://rpc.example.com/dotenv-key");
+    }
+
+    #[test]
+    fn rpc_url_missing_env_var_errors() {
+        let _lock = env_lock();
+        let _api_key = EnvVarGuard::unset("API_KEY");
+        let tmp = TempDir::new().unwrap();
+        setup_project(tmp.path());
+        let err = resolve_rpc_url(None, Some("needs_env".to_string()), tmp.path()).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("needs_env"), "got: {msg}");
+        assert!(msg.contains("API_KEY"), "got: {msg}");
     }
 
     // ── extract_creations_from_trace ────────────────────────────────────

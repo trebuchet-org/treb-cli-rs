@@ -51,55 +51,6 @@ async fn resolve_chain_id(client: &reqwest::Client, url: &str) -> (Option<u64>, 
     }
 }
 
-/// Returns true if the URL string contains unresolved environment variable
-/// references like `${VAR}` or `$VAR`.
-fn has_unresolved_env_vars(url: &str) -> bool {
-    let bytes = url.as_bytes();
-    let mut idx = 0;
-
-    while idx < bytes.len() {
-        if bytes[idx] == b'$' {
-            match bytes.get(idx + 1).copied() {
-                Some(b'{') => return true,
-                Some(next) if next == b'_' || next.is_ascii_alphabetic() => return true,
-                _ => {}
-            }
-        }
-
-        idx += 1;
-    }
-
-    false
-}
-
-/// Returns true if the URL contains a `${VAR}` placeholder whose environment
-/// variable is not set.
-fn has_missing_braced_env_vars(url: &str) -> bool {
-    let mut chars = url.chars().peekable();
-
-    while let Some(c) = chars.next() {
-        if c == '$' && chars.peek() == Some(&'{') {
-            chars.next(); // consume '{'
-            let mut var_name = String::new();
-            let mut closed = false;
-
-            for next in chars.by_ref() {
-                if next == '}' {
-                    closed = true;
-                    break;
-                }
-                var_name.push(next);
-            }
-
-            if !closed || std::env::var(&var_name).is_err() {
-                return true;
-            }
-        }
-    }
-
-    false
-}
-
 pub async fn run(json: bool) -> anyhow::Result<()> {
     let cwd = std::env::current_dir()?;
 
@@ -111,10 +62,10 @@ pub async fn run(json: bool) -> anyhow::Result<()> {
         );
     }
 
-    treb_config::load_dotenv(&cwd);
-    let config = treb_config::load_foundry_config(&cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let endpoint_map =
+        treb_config::resolve_rpc_endpoints(&cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    if config.rpc_endpoints.is_empty() {
+    if endpoint_map.is_empty() {
         if json {
             output::print_json(&Vec::<NetworkInfo>::new())?;
         } else {
@@ -124,18 +75,8 @@ pub async fn run(json: bool) -> anyhow::Result<()> {
     }
 
     // Sort endpoints alphabetically by name
-    let mut endpoint_entries: Vec<(String, String, String, bool)> = config
-        .rpc_endpoints
-        .iter()
-        .map(|(name, endpoint)| {
-            let raw_url = endpoint.endpoint.to_string();
-            let expanded_url = treb_config::expand_env_vars(&raw_url);
-            let unresolved =
-                has_missing_braced_env_vars(&raw_url) || has_unresolved_env_vars(&expanded_url);
-
-            (name.clone(), raw_url, expanded_url, unresolved)
-        })
-        .collect();
+    let mut endpoint_entries: Vec<(String, treb_config::ResolvedRpcEndpoint)> =
+        endpoint_map.into_iter().collect();
     endpoint_entries.sort_by(|a, b| a.0.cmp(&b.0));
 
     let client = reqwest::Client::builder().timeout(Duration::from_secs(5)).build()?;
@@ -144,20 +85,20 @@ pub async fn run(json: bool) -> anyhow::Result<()> {
     let mut results: Vec<NetworkInfo> = Vec::with_capacity(endpoint_entries.len());
     let mut futures = Vec::new();
 
-    for (name, raw_url, expanded_url, unresolved) in endpoint_entries {
+    for (name, endpoint) in endpoint_entries {
         let client = client.clone();
 
         futures.push(tokio::spawn(async move {
-            if unresolved {
+            if endpoint.unresolved {
                 NetworkInfo {
                     name,
-                    rpc_url: raw_url,
+                    rpc_url: endpoint.raw_url,
                     chain_id: None,
                     status: "unresolved env var".to_string(),
                 }
             } else {
-                let (chain_id, status) = resolve_chain_id(&client, &expanded_url).await;
-                NetworkInfo { name, rpc_url: expanded_url, chain_id, status }
+                let (chain_id, status) = resolve_chain_id(&client, &endpoint.expanded_url).await;
+                NetworkInfo { name, rpc_url: endpoint.expanded_url, chain_id, status }
             }
         }));
     }
