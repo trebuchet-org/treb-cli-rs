@@ -1,9 +1,11 @@
 use std::{
+    collections::BTreeSet,
     fs,
     path::{Path, PathBuf},
 };
 
 use chrono::{DateTime, Utc};
+use serde_json::Value;
 use tempfile::TempDir;
 use treb_core::types::{DeploymentMethod, DeploymentType, TransactionStatus};
 use treb_registry::{
@@ -30,6 +32,102 @@ fn seed_registry_file(dir: &TempDir, target_file: &str, fixture_file: &str) {
 
 fn parse_utc(timestamp: &str) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(timestamp).unwrap().with_timezone(&Utc)
+}
+
+fn load_fixture_json(file_name: &str) -> Value {
+    let fixture_path = go_compat_fixture_path(file_name);
+    let fixture = fs::read_to_string(&fixture_path)
+        .unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", fixture_path.display()));
+    serde_json::from_str(&fixture)
+        .unwrap_or_else(|e| panic!("failed to parse fixture {}: {e}", fixture_path.display()))
+}
+
+fn load_registry_json(dir: &TempDir, target_file: &str) -> Value {
+    let path = dir.path().join(target_file);
+    let raw = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+    serde_json::from_str(&raw)
+        .unwrap_or_else(|e| panic!("failed to parse {} as JSON: {e}", path.display()))
+}
+
+fn assert_bare_registry_map(value: &Value, expected_entries: usize) {
+    let object = value.as_object().expect("registry file should deserialize to a JSON object");
+    assert_eq!(object.len(), expected_entries);
+    assert!(!object.contains_key("_format"));
+    assert!(!object.contains_key("entries"));
+}
+
+fn assert_go_compat_json(expected: &Value, actual: &Value, path: &str) {
+    match (expected, actual) {
+        (Value::Object(expected_obj), Value::Object(actual_obj)) => {
+            let expected_keys: BTreeSet<&str> = expected_obj.keys().map(String::as_str).collect();
+            let actual_keys: BTreeSet<&str> = actual_obj.keys().map(String::as_str).collect();
+            assert_eq!(actual_keys, expected_keys, "object keys differ at {path}");
+
+            for (key, expected_value) in expected_obj {
+                let actual_value =
+                    actual_obj.get(key).unwrap_or_else(|| panic!("missing key {key} at {path}"));
+                let child_path = format!("{path}.{key}");
+                assert_go_compat_json(expected_value, actual_value, &child_path);
+            }
+        }
+        (Value::Array(expected_items), Value::Array(actual_items)) => {
+            assert_eq!(actual_items.len(), expected_items.len(), "array length differs at {path}");
+
+            for (index, (expected_item, actual_item)) in
+                expected_items.iter().zip(actual_items.iter()).enumerate()
+            {
+                let child_path = format!("{path}[{index}]");
+                assert_go_compat_json(expected_item, actual_item, &child_path);
+            }
+        }
+        (Value::String(expected_str), Value::String(actual_str)) => {
+            match (
+                DateTime::parse_from_rfc3339(expected_str),
+                DateTime::parse_from_rfc3339(actual_str),
+            ) {
+                (Ok(expected_ts), Ok(actual_ts)) => {
+                    assert_eq!(
+                        actual_ts.with_timezone(&Utc),
+                        expected_ts.with_timezone(&Utc),
+                        "timestamp differs at {path}"
+                    );
+                }
+                _ => assert_eq!(actual_str, expected_str, "string differs at {path}"),
+            }
+        }
+        _ => assert_eq!(actual, expected, "value differs at {path}"),
+    }
+}
+
+fn set_string_field(value: &mut Value, entry_id: &str, field: &str, updated_value: &str) {
+    value
+        .get_mut(entry_id)
+        .unwrap_or_else(|| panic!("missing fixture entry {entry_id}"))
+        .get_mut(field)
+        .unwrap_or_else(|| panic!("missing fixture field {field} on {entry_id}"))
+        .clone_from(&Value::String(updated_value.to_string()));
+}
+
+fn collect_rs_files(dir: &Path) -> Vec<PathBuf> {
+    let mut stack = vec![dir.to_path_buf()];
+    let mut files = Vec::new();
+
+    while let Some(current) = stack.pop() {
+        for entry in fs::read_dir(&current)
+            .unwrap_or_else(|e| panic!("failed to read directory {}: {e}", current.display()))
+        {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+                files.push(path);
+            }
+        }
+    }
+
+    files.sort();
+    files
 }
 
 #[test]
@@ -165,4 +263,99 @@ fn go_compat_safe_txs_deserialize() {
     assert!(queued.transaction_ids.is_empty());
     assert!(queued.executed_at.is_none());
     assert_eq!(queued.execution_tx_hash, "");
+}
+
+#[test]
+fn go_compat_deployments_round_trip() {
+    let mut expected = load_fixture_json("deployments.json");
+    let dir = TempDir::new().unwrap();
+    seed_registry_file(&dir, DEPLOYMENTS_FILE, "deployments.json");
+
+    let mut store = DeploymentStore::new(dir.path());
+    store.load().unwrap();
+
+    let entry_id = "mainnet/42220/FPMMFactory:v3.0.0";
+    let mut deployment = store.remove(entry_id).expect("fixture deployment should load");
+    deployment
+        .tags
+        .as_mut()
+        .expect("fixture deployment should have tags")
+        .push("rust-round-trip".to_string());
+    store.insert(deployment).unwrap();
+
+    let tags = expected
+        .get_mut(entry_id)
+        .and_then(Value::as_object_mut)
+        .and_then(|entry| entry.get_mut("tags"))
+        .and_then(Value::as_array_mut)
+        .expect("fixture deployment tags should exist");
+    tags.push(Value::String("rust-round-trip".to_string()));
+
+    let saved = load_registry_json(&dir, DEPLOYMENTS_FILE);
+    assert_bare_registry_map(&saved, DEPLOYMENTS_FIXTURE_COUNT);
+    assert_go_compat_json(&expected, &saved, "$");
+}
+
+#[test]
+fn go_compat_transactions_round_trip() {
+    let mut expected = load_fixture_json("transactions.json");
+    let dir = TempDir::new().unwrap();
+    seed_registry_file(&dir, TRANSACTIONS_FILE, "transactions.json");
+
+    let mut store = TransactionStore::new(dir.path());
+    store.load().unwrap();
+
+    let entry_id = "tx-internal-01ecf419ab2fc8e6498e8f57eecb94f1ac3b164d33848cdc862f44e7ac285477";
+    let mut transaction = store.get(entry_id).expect("fixture transaction should load").clone();
+    transaction.environment = "virtual-rust".to_string();
+    store.update(transaction).unwrap();
+    set_string_field(&mut expected, entry_id, "environment", "virtual-rust");
+
+    let saved = load_registry_json(&dir, TRANSACTIONS_FILE);
+    assert_bare_registry_map(&saved, TRANSACTIONS_FIXTURE_COUNT);
+    assert_go_compat_json(&expected, &saved, "$");
+}
+
+#[test]
+fn go_compat_safe_txs_round_trip() {
+    let mut expected = load_fixture_json("safe-txs.json");
+    let dir = TempDir::new().unwrap();
+    seed_registry_file(&dir, SAFE_TXS_FILE, "safe-txs.json");
+
+    let mut store = SafeTransactionStore::new(dir.path());
+    store.load().unwrap();
+
+    let entry_id = "0x4bc1c1b19989b6fef589847284fb74116d588bf0dd21a58c9cd15b8957eefa1f";
+    let mut safe_tx = store.get(entry_id).expect("fixture safe transaction should load").clone();
+    safe_tx.proposed_by = "0x1111111111111111111111111111111111111111".to_string();
+    store.update(safe_tx).unwrap();
+    set_string_field(
+        &mut expected,
+        entry_id,
+        "proposedBy",
+        "0x1111111111111111111111111111111111111111",
+    );
+
+    let saved = load_registry_json(&dir, SAFE_TXS_FILE);
+    assert_bare_registry_map(&saved, SAFE_TXS_FIXTURE_COUNT);
+    assert_go_compat_json(&expected, &saved, "$");
+}
+
+#[test]
+fn registry_models_do_not_use_deny_unknown_fields() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+    let source_dirs =
+        [repo_root.join("crates/treb-core/src/types"), repo_root.join("crates/treb-registry/src")];
+
+    for source_dir in source_dirs {
+        for path in collect_rs_files(&source_dir) {
+            let contents = fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("failed to read source file {}: {e}", path.display()));
+            assert!(
+                !contents.contains("deny_unknown_fields"),
+                "{} should not use #[serde(deny_unknown_fields)] for Go compatibility",
+                path.display()
+            );
+        }
+    }
 }

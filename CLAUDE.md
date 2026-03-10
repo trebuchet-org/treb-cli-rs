@@ -55,6 +55,8 @@ treb — deployment orchestration CLI for Foundry projects. Rust workspace with 
 
 **Go registry store-load tests**: For `treb-registry` compatibility coverage, seed a temp registry directory with the raw go-compat fixture under the real store filename (`deployments.json`, `transactions.json`, `safe-txs.json`) and call `Store::load()`; compare offset timestamps as `DateTime<Utc>` values rather than raw strings.
 
+**Go registry round-trip tests**: When Rust rewrites Go-created registry data, compare recursive JSON key sets and timestamp instants instead of literal RFC3339 strings. The schema should stay identical, but `DateTime<Utc>` serialization normalizes offset timestamps to `Z`.
+
 **Anvil spawning references**:
 - `crates/treb-cli/tests/e2e/mod.rs` — `spawn_anvil_or_skip()` for workflow tests that need a transient node and must skip cleanly in restricted environments
 - `crates/treb-cli/tests/framework/anvil_node.rs` — `AnvilNode::spawn()` / `spawn_with_config()` for integration tests that manage named nodes through `TestContext`

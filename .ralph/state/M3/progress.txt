@@ -4,6 +4,7 @@ Started: Tue Mar 10 12:34:35 PM CET 2026
 - Go registry compatibility fixtures belong in `crates/treb-registry/tests/fixtures/go-compat/` as bare JSON maps; prefer production slices from `/home/sol/projects/mento-deployments-v2/.treb/` and call out any extra edge-case coverage when the live snapshot does not exercise it.
 - For `treb-registry` cross-CLI store tests, seed a temp registry dir with the raw fixture bytes under the real store filename and call `Store::load()` so the compatibility coverage exercises the actual read path; compare offset timestamps after converting them to `DateTime<Utc>`.
 - `write_versioned_file()` now writes bare JSON for Go compatibility, while `read_versioned_file()` and `read_versioned_file_compat()` must keep accepting legacy `{"_format":"treb-v1","entries":...}` payloads; persistence tests should assert the top-level bare object directly.
+- Go-fixture round-trip assertions should compare recursive JSON key sets and timestamp instants, not literal RFC3339 strings, because `chrono::DateTime<Utc>` rewrites source offsets to `Z` on save without changing the represented instant.
 ---
 ## 2026-03-10 12:56 CET - P2-US-001
 - Added bare Go-compat fixture maps for deployments (11 entries), transactions (10 entries), and safe transactions (8 entries) under `crates/treb-registry/tests/fixtures/go-compat/`.
@@ -30,5 +31,14 @@ Started: Tue Mar 10 12:34:35 PM CET 2026
 - **Learnings for future iterations:**
   - Go compatibility now depends on the write path staying bare; backward compatibility belongs in `read_versioned_file()` and `read_versioned_file_compat()`, not in persisted output.
   - The helper-level `io.rs` tests cover the lock wait, trailing newline, indentation, and read-after-write round trip for `write_versioned_file()`, so future persistence changes should start there before touching individual stores.
+  - `cargo test -p treb-registry` and `cargo clippy -p treb-registry --all-targets -- -D warnings` pass for this story.
+---
+## 2026-03-10 13:34 CET - P2-US-004
+- Added Go-fixture round-trip tests in `crates/treb-registry/tests/go_compat_deserialize.rs` for deployments, transactions, and safe transactions, each loading the Go-created file, mutating it through the Rust store, and asserting bare JSON output with identical recursive key sets.
+- Added a compatibility regression test that scans the registry/core model sources to ensure no serde type opts into `deny_unknown_fields`, and documented the timestamp-offset normalization gap on the relevant Rust type definitions.
+- Files changed: `crates/treb-registry/tests/go_compat_deserialize.rs`, `crates/treb-core/src/types/deployment.rs`, `crates/treb-core/src/types/transaction.rs`, `crates/treb-core/src/types/safe_transaction.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Rust preserves Go registry timestamps by instant, but `DateTime<Utc>` serialization normalizes source offsets to `Z`, so round-trip tests should compare parsed instants instead of raw timestamp strings.
+  - Recursive JSON key-set comparisons are the reliable way to prove Rust writes keep the Go JSON tag schema intact while still allowing value updates.
   - `cargo test -p treb-registry` and `cargo clippy -p treb-registry --all-targets -- -D warnings` pass for this story.
 ---

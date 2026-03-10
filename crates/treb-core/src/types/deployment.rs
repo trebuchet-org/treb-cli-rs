@@ -15,6 +15,10 @@ use super::enums::{DeploymentMethod, DeploymentType, VerificationStatus};
 // ---------------------------------------------------------------------------
 
 /// A deployed contract instance on a specific chain.
+///
+/// Go registry files may emit RFC3339 timestamps with a source offset, while
+/// Rust stores these as `DateTime<Utc>`. Round trips therefore preserve the
+/// instant and field names, but serialize back out normalized to `Z`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Deployment {
