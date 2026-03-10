@@ -1352,6 +1352,26 @@ mod tests {
     }
 
     #[test]
+    fn addressbook_alias_remove_parses_identically() {
+        let cli =
+            parse_cli_from(["treb", "ab", "-n", "1", "-s", "production", "remove", "Foo"]).unwrap();
+
+        match cli.command {
+            Commands::Addressbook { namespace, network, subcommand } => {
+                assert_eq!(namespace.as_deref(), Some("production"));
+                assert_eq!(network.as_deref(), Some("1"));
+                match subcommand {
+                    commands::addressbook::AddressbookSubcommand::Remove { name } => {
+                        assert_eq!(name, "Foo");
+                    }
+                    _ => panic!("expected addressbook remove subcommand"),
+                }
+            }
+            _ => panic!("expected addressbook command"),
+        }
+    }
+
+    #[test]
     fn show_long_query_flags_parse_without_runtime_wiring() {
         let cli = parse_cli_from([
             "treb",

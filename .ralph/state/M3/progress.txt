@@ -2,6 +2,7 @@
 ## Codebase Patterns
 - Nested map registry stores should sort both outer and inner maps into `BTreeMap`s before `write_versioned_file()` so bare JSON output stays deterministic.
 - Top-level CLI commands must stay in sync across `crates/treb-cli/src/main.rs`, `crates/treb-cli/build.rs`, and any manually maintained root-help goldens because clap parsing, shell completions, and grouped help are wired separately.
+- Addressbook subcommands should reuse `resolve_effective_chain_id()` in `crates/treb-cli/src/commands/addressbook.rs` so numeric chain IDs, Alloy named chains, and config defaults resolve consistently across `set`, `remove`, and `list`.
 
 Started: Wed Mar 11 12:14:13 AM CET 2026
 ---
@@ -22,4 +23,13 @@ Started: Wed Mar 11 12:14:13 AM CET 2026
   - Patterns discovered: top-level CLI commands require parallel updates in clap derive definitions, `build.rs` completions, and grouped help snapshots because those surfaces are maintained independently.
   - Gotchas encountered: changing `build_grouped_help()` will break `help_root` until the corresponding golden snapshot is refreshed.
   - Useful context: addressbook chain resolution now lives in `crates/treb-cli/src/commands/addressbook.rs` and already supports both numeric chain IDs and Alloy named chains for reuse by `remove` and `list`.
+---
+## 2026-03-11 00:41:54 CET - P9-US-003
+- Implemented `treb addressbook remove <name>` so it reuses the shared addressbook chain-resolution path, removes entries through the registry facade, prints `Removed <name> (chain <chainId>)` on success, and rewrites missing-entry failures to `addressbook entry '<name>' not found on chain <chainId>`.
+- Added focused test coverage for the CLI-facing remove error mapping and for `treb ab ... remove` parser behavior.
+- Files changed: `crates/treb-cli/src/commands/addressbook.rs`, `crates/treb-cli/src/main.rs`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: addressbook subcommands should keep using `resolve_effective_chain_id()` in `crates/treb-cli/src/commands/addressbook.rs` so `--network` and config defaults resolve identically across set/remove/list.
+  - Gotchas encountered: the registry store returns a generic missing-entry error, so the command layer needs to translate that into the subcommand’s exact user-facing wording.
+  - Useful context: `cargo test -p treb-cli addressbook` is a fast focused check for the addressbook command module and parser coverage while broader integration coverage is still pending in later stories.
 ---

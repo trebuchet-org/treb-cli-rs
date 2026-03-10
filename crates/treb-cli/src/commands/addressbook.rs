@@ -36,9 +36,7 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     match subcommand {
         AddressbookSubcommand::Set { name, address } => run_set(namespace, network, name, address),
-        AddressbookSubcommand::Remove { .. } => {
-            bail!("addressbook remove is not implemented yet")
-        }
+        AddressbookSubcommand::Remove { name } => run_remove(namespace, network, name),
         AddressbookSubcommand::List => bail!("addressbook list is not implemented yet"),
     }
 }
@@ -64,6 +62,35 @@ fn run_set(
 
     println!("Set {name} = {address} (chain {chain_id})");
     Ok(())
+}
+
+fn run_remove(
+    namespace: Option<String>,
+    network: Option<String>,
+    name: String,
+) -> anyhow::Result<()> {
+    let cwd = env::current_dir().context("failed to determine current directory")?;
+    ensure_initialized(&cwd)?;
+
+    let chain_id = resolve_effective_chain_id(&cwd, namespace, network)
+        .context("failed to resolve chain ID")?;
+
+    let mut registry = Registry::open(&cwd).context("failed to open registry")?;
+    registry
+        .remove_addressbook_entry(&chain_id.to_string(), &name)
+        .map_err(|err| map_remove_entry_error(&name, chain_id, err))?;
+
+    println!("Removed {name} (chain {chain_id})");
+    Ok(())
+}
+
+fn map_remove_entry_error(name: &str, chain_id: u64, err: impl std::fmt::Display) -> anyhow::Error {
+    let message = err.to_string();
+    if message.contains("addressbook entry not found") {
+        anyhow::anyhow!("addressbook entry '{name}' not found on chain {chain_id}")
+    } else {
+        anyhow::anyhow!("{message}")
+    }
 }
 
 fn ensure_initialized(cwd: &std::path::Path) -> anyhow::Result<()> {
@@ -147,5 +174,16 @@ mod tests {
             err.to_string(),
             "invalid address '0x1234'; expected a 0x-prefixed 40-hex-character address"
         );
+    }
+
+    #[test]
+    fn remove_not_found_errors_use_cli_facing_message() {
+        let err = map_remove_entry_error(
+            "Treasury",
+            1,
+            "addressbook entry not found: Treasury on chain 1",
+        );
+
+        assert_eq!(err.to_string(), "addressbook entry 'Treasury' not found on chain 1");
     }
 }
