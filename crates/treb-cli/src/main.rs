@@ -1,6 +1,6 @@
 use std::env;
 
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use treb_cli::{commands, output, ui};
 use treb_core::types::DeploymentType;
 
@@ -526,6 +526,83 @@ fn anvil_subcommand_json_flag(subcommand: &commands::dev::AnvilSubcommand) -> bo
     }
 }
 
+/// Build a CLI command with grouped subcommands for help display.
+///
+/// Clap doesn't natively support multiple subcommand groups. This function takes the
+/// derived `Cli::command()`, hides all subcommands from the default rendering, and
+/// injects a custom grouped help text via `after_help` with a custom `help_template`.
+fn build_grouped_command() -> clap::Command {
+    let mut cmd = Cli::command();
+
+    // Build grouped help text from subcommand metadata before hiding them
+    let grouped_help = build_grouped_help(&cmd);
+
+    // Hide all subcommands from default {subcommands} rendering
+    let names: Vec<String> =
+        cmd.get_subcommands().map(|s| s.get_name().to_string()).collect();
+    for name in &names {
+        cmd = cmd.mut_subcommand(name, |s| s.hide(true));
+    }
+
+    cmd.after_help(grouped_help)
+        .override_usage("treb [OPTIONS] <COMMAND>")
+        .help_template(
+            "{about-with-newline}\n\
+             {usage-heading} {usage}\
+             {after-help}\n\
+             \nOptions:\n\
+             {options}\n\
+             Use \"treb [command] --help\" for more information about a command.\n",
+        )
+}
+
+fn build_grouped_help(cmd: &clap::Command) -> String {
+    let mut s = String::new();
+
+    fn write_group(s: &mut String, cmd: &clap::Command, heading: &str, names: &[&str]) {
+        s.push_str(heading);
+        s.push('\n');
+        for name in names {
+            if let Some(sub) = cmd.find_subcommand(name) {
+                let about =
+                    sub.get_about().map(|a| a.to_string()).unwrap_or_default();
+                s.push_str(&format!("  {name:<14}{about}\n"));
+            }
+        }
+    }
+
+    write_group(
+        &mut s,
+        cmd,
+        "Main Commands:",
+        &["init", "list", "show", "gen-deploy", "run", "verify", "compose", "fork"],
+    );
+    s.push('\n');
+    write_group(
+        &mut s,
+        cmd,
+        "Management Commands:",
+        &[
+            "sync", "tag", "register", "dev", "networks", "prune", "reset", "config",
+            "migrate",
+        ],
+    );
+    s.push('\n');
+    write_group(
+        &mut s,
+        cmd,
+        "Additional Commands:",
+        &["version", "completions"],
+    );
+
+    // Remove trailing newline so the template controls spacing
+    if s.ends_with('\n') {
+        s.pop();
+    }
+
+    s
+}
+
 fn argv_requests_flag(flag: &str) -> bool {
     let prefix = format!("{flag}=");
     env::args_os().skip(1).take_while(|arg| arg != "--").any(|arg| {
@@ -540,8 +617,11 @@ async fn main() {
     ui::color::color_enabled(no_color_requested);
 
     let json_requested = argv_requests_flag("--json");
-    let cli = match Cli::try_parse() {
-        Ok(cli) => cli,
+    let cmd = build_grouped_command();
+    let cli = match cmd.try_get_matches() {
+        Ok(matches) => {
+            Cli::from_arg_matches(&matches).expect("bug: derive/builder arg mismatch")
+        }
         Err(err) => {
             if json_requested
                 && !matches!(
