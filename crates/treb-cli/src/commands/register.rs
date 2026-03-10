@@ -498,7 +498,7 @@ pub async fn run(
             },
         };
 
-        dep_labels.push(display_label);
+        dep_labels.push(display_label.clone());
 
         let deployment = Deployment {
             id: deployment_id.clone(),
@@ -550,14 +550,15 @@ pub async fn run(
                 address: creation.address.clone(),
                 contract_name: name,
                 deployment_id,
-                label: dep_label,
+                label: display_label.unwrap_or_default(),
             },
             creation.create_type.clone(),
         ));
     }
 
     // ── Create transaction record ───────────────────────────────────────
-    let deployment_ids: Vec<String> = registered.iter().map(|(d, _)| d.deployment_id.clone()).collect();
+    let deployment_ids: Vec<String> =
+        registered.iter().map(|(d, _)| d.deployment_id.clone()).collect();
 
     let operations: Vec<Operation> = registered
         .iter()
@@ -594,9 +595,7 @@ pub async fn run(
     let dep_jsons: Vec<RegisteredDeploymentJson> = registered.into_iter().map(|(d, _)| d).collect();
 
     if json {
-        output::print_json(&RegisterOutputJson {
-            deployments: dep_jsons,
-        })?;
+        output::print_json(&RegisterOutputJson { deployments: dep_jsons })?;
     } else {
         let n = dep_jsons.len();
         let header = format!("{} Successfully registered {} deployment(s)", emoji::CHECK_MARK, n);
@@ -854,6 +853,36 @@ needs_env = "https://rpc.example.com/${API_KEY}"
 
         assert_eq!(registry_label, "factory_1");
         assert_eq!(display_label.as_deref(), Some("factory"));
+    }
+
+    #[test]
+    fn register_json_label_uses_display_label_for_unlabeled_multi_create() {
+        let (registry_label, display_label) = deployment_labels(None, 2, 0);
+        let payload = serde_json::to_value(RegisteredDeploymentJson {
+            address: "0x1234".to_string(),
+            contract_name: "Unknown_0".to_string(),
+            deployment_id: "default/31337/Unknown_0:_0".to_string(),
+            label: display_label.unwrap_or_default(),
+        })
+        .expect("register deployment json should serialize");
+
+        assert_eq!(registry_label, "_0");
+        assert_eq!(payload["label"], "");
+    }
+
+    #[test]
+    fn register_json_label_uses_display_label_for_labeled_multi_create() {
+        let (registry_label, display_label) = deployment_labels(Some("factory"), 2, 1);
+        let payload = serde_json::to_value(RegisteredDeploymentJson {
+            address: "0x1234".to_string(),
+            contract_name: "Factory_1".to_string(),
+            deployment_id: "default/31337/Factory_1:factory_1".to_string(),
+            label: display_label.unwrap_or_default(),
+        })
+        .expect("register deployment json should serialize");
+
+        assert_eq!(registry_label, "factory_1");
+        assert_eq!(payload["label"], "factory");
     }
 
     // ── parse_hex_u64 ───────────────────────────────────────────────────
