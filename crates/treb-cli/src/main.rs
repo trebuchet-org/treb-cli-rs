@@ -19,7 +19,12 @@ fn parse_deployment_type(s: &str) -> Result<DeploymentType, String> {
 
 /// Smart contract deployment orchestrator for Foundry
 #[derive(Parser)]
-#[command(name = "treb", version, about, long_about = "Trebuchet (treb) orchestrates Foundry script execution for deterministic smart contract deployments using CreateX factory contracts.")]
+#[command(
+    name = "treb",
+    version,
+    about,
+    long_about = "Trebuchet (treb) orchestrates Foundry script execution for deterministic smart contract deployments using CreateX factory contracts."
+)]
 struct Cli {
     /// Disable colored output (also respected via NO_COLOR env var)
     #[arg(long, global = true)]
@@ -38,6 +43,7 @@ enum Commands {
     /// This command executes Foundry scripts while:
     /// - Automatically configuring senders based on your treb configuration
     /// - Parsing deployment events from script execution
+    #[command(verbatim_doc_comment)]
     Run {
         /// Path to the Forge script (e.g., script/Deploy.s.sol)
         script: String,
@@ -139,6 +145,7 @@ enum Commands {
     /// You can specify deployments using:
     /// - Contract name: "Counter"
     /// - Contract with label: "Counter:v2"
+    #[command(verbatim_doc_comment)]
     Show {
         /// Deployment identifier (full ID, name, address, name:label, or namespace/name); omit to
         /// select interactively
@@ -174,6 +181,7 @@ enum Commands {
     /// Examples:
     ///   treb verify Counter                      # Verify specific contract (all verifiers)
     ///   treb verify Counter -e                   # Verify on Etherscan only
+    #[command(verbatim_doc_comment)]
     Verify {
         /// Deployment identifier (full ID, name, address, name:label, or namespace/name)
         deployment: Option<String>,
@@ -220,6 +228,7 @@ enum Commands {
     ///
     /// Examples:
     ///   treb tag Counter:v1                  # Show current tags
+    #[command(verbatim_doc_comment)]
     Tag {
         /// Deployment identifier (full ID, name, address, name:label, or namespace/name); omit to
         /// select interactively
@@ -243,6 +252,7 @@ enum Commands {
     /// You can provide either:
     /// - A transaction hash (and treb will trace the transaction to find all contract creations)
     /// - Explicit parameters (address, contract path, transaction hash)
+    #[command(verbatim_doc_comment)]
     Register {
         /// Transaction hash to trace for contract creations
         #[arg(long)]
@@ -285,6 +295,7 @@ enum Commands {
     ///
     /// This command will:
     /// - Check all pending Safe transactions for execution status
+    #[command(verbatim_doc_comment)]
     Sync {
         /// Network name or chain ID
         #[arg(long)]
@@ -430,6 +441,7 @@ enum Commands {
     /// 3. Map profile names to namespaces with role->account mappings
     /// 4. Show a preview of the generated treb.toml
     /// 5. Ask for confirmation before writing
+    #[command(verbatim_doc_comment)]
     Migrate {
         #[command(subcommand)]
         subcommand: commands::migrate::MigrateSubcommand,
@@ -459,6 +471,7 @@ enum Commands {
     ///   treb completions bash >> ~/.bashrc
     ///   treb completions zsh > ~/.zsh/completions/_treb
     ///   treb completions fish > ~/.config/fish/completions/treb.fish
+    #[command(verbatim_doc_comment)]
     Completions {
         /// Shell type: bash, zsh, fish, elvish, or powershell
         shell: String,
@@ -570,12 +583,13 @@ fn build_grouped_command() -> clap::Command {
     }
 
     cmd.after_help(grouped_help).override_usage("treb [OPTIONS] <COMMAND>").help_template(
-        "{about-with-newline}\n\
-             {usage-heading} {usage}\
-             {after-help}\n\
-             \nOptions:\n\
-             {options}\n\
-             Use \"treb [command] --help\" for more information about a command.\n",
+        "Smart contract deployment orchestrator for Foundry\n\
+         \n\
+         {usage-heading} {usage}\
+         {after-help}\n\
+         \nOptions:\n\
+         {options}\n\
+         Use \"treb [command] --help\" for more information about a command.\n",
     )
 }
 
