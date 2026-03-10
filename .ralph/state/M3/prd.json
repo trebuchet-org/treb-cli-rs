@@ -31,7 +31,7 @@
         "cargo test -p treb-config passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

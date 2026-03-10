@@ -8,7 +8,7 @@ use std::{collections::HashMap, path::Path};
 
 use treb_core::error::{Result, TrebError};
 
-use crate::{SenderConfig, expand_env_vars};
+use crate::{SenderConfig, expand_env_vars, trebfile::expand_sender_config_env_vars};
 
 /// Load foundry configuration from the given project root.
 ///
@@ -56,7 +56,8 @@ pub fn extract_treb_senders_from_foundry(
 
     let mut result = HashMap::new();
     for (name, value) in senders {
-        if let Ok(sender) = value.clone().try_into::<SenderConfig>() {
+        if let Ok(mut sender) = value.clone().try_into::<SenderConfig>() {
+            expand_sender_config_env_vars(&mut sender);
             result.insert(name.clone(), sender);
         }
     }
@@ -182,6 +183,90 @@ address = "0xAddr"
         );
         let senders = extract_treb_senders_from_foundry(tmp.path(), "production");
         assert!(senders.is_empty());
+    }
+
+    #[test]
+    fn extract_treb_senders_expand_env_var_fields() {
+        let tmp = TempDir::new().unwrap();
+        write_foundry_toml(
+            tmp.path(),
+            r#"
+[profile.default.treb.senders.deployer]
+type = "safe"
+address = "${TREB_TEST_ADDR_P3_US_002}"
+safe = "${TREB_TEST_SAFE_P3_US_002}"
+signer = "${TREB_TEST_SIGNER_P3_US_002}"
+
+[profile.default.treb.senders.governor]
+type = "oz_governor"
+governor = "${TREB_TEST_GOVERNOR_P3_US_002}"
+timelock = "${TREB_TEST_TIMELOCK_P3_US_002}"
+proposer = "${TREB_TEST_PROPOSER_P3_US_002}"
+
+[profile.default.treb.senders.ledger_signer]
+type = "ledger"
+private_key = "${TREB_TEST_PRIVATE_KEY_P3_US_002}"
+derivation_path = "${TREB_TEST_DERIVATION_PATH_P3_US_002}"
+"#,
+        );
+
+        unsafe {
+            std::env::set_var("TREB_TEST_ADDR_P3_US_002", "0xDeployerAddr");
+            std::env::set_var("TREB_TEST_SAFE_P3_US_002", "0xSafeAddr");
+            std::env::set_var("TREB_TEST_SIGNER_P3_US_002", "signer-account");
+            std::env::set_var("TREB_TEST_GOVERNOR_P3_US_002", "0xGovernorAddr");
+            std::env::set_var("TREB_TEST_TIMELOCK_P3_US_002", "0xTimelockAddr");
+            std::env::set_var("TREB_TEST_PROPOSER_P3_US_002", "proposer-account");
+            std::env::set_var("TREB_TEST_PRIVATE_KEY_P3_US_002", "0xPrivateKey");
+            std::env::set_var("TREB_TEST_DERIVATION_PATH_P3_US_002", "m/44'/60'/0'/0/1");
+        }
+
+        let senders = extract_treb_senders_from_foundry(tmp.path(), "default");
+
+        let deployer = senders.get("deployer").unwrap();
+        assert_eq!(deployer.address.as_deref(), Some("0xDeployerAddr"));
+        assert_eq!(deployer.safe.as_deref(), Some("0xSafeAddr"));
+        assert_eq!(deployer.signer.as_deref(), Some("signer-account"));
+
+        let governor = senders.get("governor").unwrap();
+        assert_eq!(governor.governor.as_deref(), Some("0xGovernorAddr"));
+        assert_eq!(governor.timelock.as_deref(), Some("0xTimelockAddr"));
+        assert_eq!(governor.proposer.as_deref(), Some("proposer-account"));
+
+        let ledger = senders.get("ledger_signer").unwrap();
+        assert_eq!(ledger.private_key.as_deref(), Some("0xPrivateKey"));
+        assert_eq!(ledger.derivation_path.as_deref(), Some("m/44'/60'/0'/0/1"));
+
+        unsafe {
+            std::env::remove_var("TREB_TEST_ADDR_P3_US_002");
+            std::env::remove_var("TREB_TEST_SAFE_P3_US_002");
+            std::env::remove_var("TREB_TEST_SIGNER_P3_US_002");
+            std::env::remove_var("TREB_TEST_GOVERNOR_P3_US_002");
+            std::env::remove_var("TREB_TEST_TIMELOCK_P3_US_002");
+            std::env::remove_var("TREB_TEST_PROPOSER_P3_US_002");
+            std::env::remove_var("TREB_TEST_PRIVATE_KEY_P3_US_002");
+            std::env::remove_var("TREB_TEST_DERIVATION_PATH_P3_US_002");
+        }
+    }
+
+    #[test]
+    fn extract_treb_senders_leave_literal_fields_unchanged() {
+        let tmp = TempDir::new().unwrap();
+        write_foundry_toml(
+            tmp.path(),
+            r#"
+[profile.default.treb.senders.deployer]
+type = "private_key"
+address = "0xLiteralAddr"
+private_key = "0xLiteralKey"
+"#,
+        );
+
+        let senders = extract_treb_senders_from_foundry(tmp.path(), "default");
+        let deployer = senders.get("deployer").unwrap();
+
+        assert_eq!(deployer.address.as_deref(), Some("0xLiteralAddr"));
+        assert_eq!(deployer.private_key.as_deref(), Some("0xLiteralKey"));
     }
 
     #[test]
