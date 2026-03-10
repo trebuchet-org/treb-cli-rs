@@ -1,0 +1,38 @@
+=== cmd 0: [show --help] ===
+Show detailed deployment information from registry
+
+Show detailed information about a specific deployment.
+
+You can specify deployments using:
+- Contract name: "Counter"
+- Contract with label: "Counter:v2"
+
+Usage: treb show [OPTIONS] [DEPLOYMENT]
+
+Arguments:
+  [DEPLOYMENT]
+          Deployment identifier (full ID, name, address, name:label, or namespace/name); omit to
+          select interactively
+
+Options:
+      --namespace <NAMESPACE>
+          Deployment namespace
+
+      --no-color
+          Disable colored output (also respected via NO_COLOR env var)
+
+      --network <NETWORK>
+          Network name or chain ID
+
+      --non-interactive
+          Skip interactive prompts (also enabled via TREB_NON_INTERACTIVE=1, CI=true, or non-TTY
+          stdin/stdout)
+
+      --no-fork
+          Hide fork deployments
+
+      --json
+          Output as JSON
+
+  -h, --help
+          Print help (see a summary with '-h')

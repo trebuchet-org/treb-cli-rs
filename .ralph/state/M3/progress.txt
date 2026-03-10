@@ -1,69 +1,70 @@
-# Ralph Progress Log
 ## Codebase Patterns
-- When a clap flag becomes global in `crates/treb-cli/src/main.rs`, mirror it in `crates/treb-cli/build.rs` and refresh the affected `tests/golden/help_*` snapshots because the option propagates into root and subcommand help.
-- When a command relies on `ui::selector` or destructive prompt-skipping logic, pass `Cli.non_interactive` all the way down; `is_non_interactive(false)` only honors env/TTY fallbacks and silently ignores the parsed global flag.
-- `crates/treb-cli/src/ui/interactive.rs` treats `TREB_NON_INTERACTIVE=1|true` as opt-in, while `CI` remains a separate `true`-only switch; keep those env semantics distinct when refactoring prompt detection.
-- When adding subcommand short flags in `crates/treb-cli/src/main.rs`, mirror them in `crates/treb-cli/build.rs`; fast regression coverage can live in `src/main.rs` via `parse_cli_from(...)` and targeted subcommand help assertions without introducing new golden snapshots.
-- For shorthand or alias parity on registry-backed CLI commands, seed a temp config project and compare raw stdout/stderr in `crates/treb-cli/tests/cli_compatibility_aliases.rs`; parser-only tests do not catch output drift between long and short forms.
+- For CLI flag changes in `crates/treb-cli`, keep the derive parser in `src/main.rs`, the shell completion builder in `build.rs`, and a focused `parse_cli_from(...)` regression test in sync.
+- For scoped deployment queries in CLI commands, filter `Registry::list_deployments()` with `commands::list::filter_deployments()` and resolve the user query with `commands::resolve::resolve_deployment_in_scope()` so namespace/network/fork filters affect ambiguity resolution consistently.
+- For scoped commands that support interactive deployment selection, pass the filtered deployment slice into `fuzzy_select_deployment_id()` too; otherwise the prompt can offer out-of-scope deployments even when typed queries are scoped correctly.
+- For clap help changes that are specific to one command, add or refresh a dedicated `help_<command>` golden in `crates/treb-cli/tests/integration_help.rs`; root `treb --help` snapshots do not catch all subcommand help drift.
+- For scoped CLI behavior in `crates/treb-cli/tests/integration_*.rs`, prefer direct `TestContext` subprocess assertions plus ad hoc `Registry::insert_deployment()` setup when the shared fixtures do not include the ambiguous namespace/network combinations you need; keep goldens for formatting-heavy coverage.
 
-Started: Tue Mar 10 05:21:40 PM CET 2026
+# Ralph Progress Log
+Started: Tue Mar 10 09:09:42 PM CET 2026
 ---
-## 2026-03-10 19:57:38 CET - P5-US-001
-- Implemented a global `--non-interactive` flag on `Cli`, removed duplicate `non_interactive` fields from `Run` and `Compose`, and routed the global value into those command handlers.
-- Files changed: `crates/treb-cli/src/main.rs`, `crates/treb-cli/build.rs`, `crates/treb-cli/tests/golden/help_root/commands.golden`, `crates/treb-cli/tests/golden/help_gen/commands.golden`, `crates/treb-cli/tests/golden/help_completion/commands.golden`, `crates/treb-cli/tests/golden/help_config/commands.golden`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-10 21:19:07 CET - P6-US-001
+- Added long-only `--namespace`, `--network`, and `--no-fork` clap fields to `treb show` and kept runtime behavior unchanged.
+- Mirrored the new `show` flags in shell completion generation and added parser tests for successful long-flag parsing plus rejection of `-n`/`-s`.
+- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/build.rs`
 - **Learnings for future iterations:**
   - Patterns discovered (e.g., "this codebase uses X for Y")
-  - Global clap flags must be defined in both `src/main.rs` and `build.rs` to keep runtime parsing and generated completions aligned.
-  - The `integration_help` golden suite captures root help and representative subcommand help, so promoting a flag to global changes multiple `help_*` snapshots even when command behavior is otherwise unchanged.
+    The CLI parser for `treb-cli` is split between clap derive definitions in `src/main.rs` and manual completion builders in `build.rs`; both must move together.
   - Gotchas encountered (e.g., "don't forget to update Z when changing W")
-  - `cargo test -p treb-cli` includes extensive golden and e2e coverage; even parser-only CLI changes should expect snapshot churn before the full package test run goes green.
+    Negative `parse_cli_from(...)` tests should use `match` rather than `unwrap_err()` unless the parsed `Cli` type implements `Debug`.
   - Useful context (e.g., "the evaluation panel is in component X")
-  - Parser acceptance for root/global flags is covered cleanly in `crates/treb-cli/src/main.rs` unit tests via `parse_cli_from(...)`, which exercises the same normalized clap entry point used by `main()`.
+    `Commands::Show` can safely accept parser-only fields before runtime wiring by matching with `..` in the main command dispatch.
 ---
-## 2026-03-10 20:08:33 CET - P5-US-002
-- Wired the global `non_interactive` flag through `show`, `tag`, `verify`, `prune`, and `reset`, updated shared selector helpers to accept the parsed flag, and made `run` pass the same value into network selection so interactive helpers consistently respect the global clap flag.
-- Files changed: `crates/treb-cli/src/main.rs`, `crates/treb-cli/src/commands/show.rs`, `crates/treb-cli/src/commands/tag.rs`, `crates/treb-cli/src/commands/verify.rs`, `crates/treb-cli/src/commands/prune.rs`, `crates/treb-cli/src/commands/reset.rs`, `crates/treb-cli/src/commands/run.rs`, `crates/treb-cli/src/ui/selector.rs`, `crates/treb-cli/tests/integration_prune.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-10 21:31:07 CET - P6-US-002
+- Wired `treb show` runtime resolution through namespace, network, and `--no-fork` filters, including scoped interactive selection and filtered no-match error context.
+- Added scoped resolution support in `commands::resolve` and end-to-end CLI coverage for namespace, network, combined JSON, and no-fork filtering behavior.
+- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `CLAUDE.md`, `crates/treb-cli/src/commands/resolve.rs`, `crates/treb-cli/src/commands/show.rs`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/tests/cli_list_show.rs`
 - **Learnings for future iterations:**
   - Patterns discovered (e.g., "this codebase uses X for Y")
-  - Shared UI helpers like `ui::selector::*` are intentionally generic and do not see clap state unless the command passes `non_interactive` explicitly.
-  - Destructive commands (`prune`, `reset`) and selection-based commands (`show`, `tag`, `verify`) each own their non-interactive branching, so global flag regressions need both command-level wiring and helper-level plumbing.
+    Query-scoped command behavior is easiest to keep consistent by reusing `commands::list::filter_deployments()` for the candidate set and layering command-specific resolution on top of that filtered slice.
   - Gotchas encountered (e.g., "don't forget to update Z when changing W")
-  - Searching for `is_non_interactive(false)` only catches direct detector calls; commands that route through selector helpers can still ignore the global flag until those helper signatures are updated too.
+    `resolve_deployment()` resolves against the whole registry, so scoped commands need `resolve_deployment_in_scope()` or they will stay ambiguous even when filters should narrow the result to one deployment.
   - Useful context (e.g., "the evaluation panel is in component X")
-  - `crates/treb-cli/tests/integration_prune.rs` is a good fit for end-to-end confirmation-skipping coverage because it seeds a small registry and asserts both stdout and post-run registry state.
+    Focused binary tests in `crates/treb-cli/tests/cli_list_show.rs` are sufficient to cover `show` runtime filtering without touching golden snapshots because the existing clap/help surface for `show` was already in place.
 ---
-## 2026-03-10 20:37:25 CET - P5-US-003
-- Implemented `TREB_NON_INTERACTIVE=1` support in the shared non-interactive detector while preserving case-insensitive `true` handling and rejecting `0`/`false`.
-- Files changed: `crates/treb-cli/src/ui/interactive.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-10 21:42:55 CET - P6-US-003
+- Wired `treb tag` runtime handling to honor `--namespace` and `--network` for direct query resolution and interactive deployment selection, and added scoped no-match error context.
+- Added focused CLI tests covering scoped tag show, scoped tag add with combined namespace/network flags, and scoped tag remove behavior against ambiguous deployments.
+- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `CLAUDE.md`, `crates/treb-cli/src/commands/tag.rs`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/tests/cli_tag.rs`
 - **Learnings for future iterations:**
   - Patterns discovered (e.g., "this codebase uses X for Y")
-  - The env parsing contract for prompt suppression lives in `crates/treb-cli/src/ui/interactive.rs`; focused unit tests there are the fastest way to pin accepted truthy and falsey values without touching command-level coverage.
+    Scoped deployment commands should reuse `DeploymentFilters` plus `resolve_deployment_in_scope()` for both typed queries and interactive selection so all entry paths share the same candidate set.
   - Gotchas encountered (e.g., "don't forget to update Z when changing W")
-  - `TREB_NON_INTERACTIVE` and `CI` do not share identical truth tables: only the former accepts `"1"`, while both env vars stay case-insensitive for `"true"`.
+    `cargo test -p treb-cli cli_tag` only applies a name filter; use `cargo test -p treb-cli --test cli_tag` when you need to execute that integration test file directly.
   - Useful context (e.g., "the evaluation panel is in component X")
-  - `cargo test -p treb-cli` already exercises `integration_non_interactive.rs`, so a detector-only change still gets end-to-end regression coverage even when the story only requires unit-test updates.
+    A standalone `crates/treb-cli/tests/cli_tag.rs` binary test file is enough for focused tag-scope coverage without introducing new golden snapshots.
 ---
-## 2026-03-10 20:48:17 CET - P5-US-004
-- Added `-n`/`-s` short flags to `list` in the derive parser and completion builder, and added parser-only `network`/`namespace` options with the same short flags to `tag` so clap accepts the Go-compatible shorthand without changing tag runtime behavior yet.
-- Files changed: `crates/treb-cli/src/main.rs`, `crates/treb-cli/build.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-10 21:52:10 CET - P6-US-004
+- Added dedicated `show --help` golden coverage so the new `--namespace`, `--network`, and `--no-fork` options are snapshot-tested directly.
+- Refreshed help-test documentation to note that command-specific clap help changes need their own `help_<command>` golden, even when root help does not change.
+- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `CLAUDE.md`, `crates/treb-cli/tests/integration_help.rs`, `crates/treb-cli/tests/golden/help_show/commands.golden`
 - **Learnings for future iterations:**
   - Patterns discovered (e.g., "this codebase uses X for Y")
-  - Subcommand shorthand flags need to be kept in sync across both the derive-based CLI in `crates/treb-cli/src/main.rs` and the completion tree in `crates/treb-cli/build.rs`.
-  - Targeted clap regression coverage is cheap in `crates/treb-cli/src/main.rs` tests: `parse_cli_from(...)` can pin aliases and short-flag parsing, and `find_subcommand_mut(...).write_long_help(...)` can assert the exact help row without snapshot churn.
+    Subcommand help output is covered through `crates/treb-cli/tests/integration_help.rs`, with one golden directory per command-specific help case.
   - Gotchas encountered (e.g., "don't forget to update Z when changing W")
-  - `tag` can accept parser-only filter fields for compatibility while its handler keeps ignoring them; the match arm in `run()` needs `..` once new clap fields are added.
+    Root `treb --help` can remain stable while clap-generated subcommand help changes, so snapshotting only `help_root` is not enough for new per-command flags.
   - Useful context (e.g., "the evaluation panel is in component X")
-  - Existing `tests/cli_completions.rs` coverage is enough to catch builder/runtime drift for command metadata, so parser-surface stories do not always need new golden fixtures.
+    `UPDATE_GOLDEN=1 cargo test -p treb-cli --test integration_help help_show` is sufficient to create or refresh a single help snapshot without broader golden churn.
 ---
-## 2026-03-10 20:59:51 CET - P5-US-005
-- Added focused regression coverage for Phase 5 by snapshotting `treb list --help`, adding a golden integration test for `treb --non-interactive list`, verifying `TREB_NON_INTERACTIVE=1` skips prune confirmation, and pinning `list` long-vs-short filter parity in `cli_compatibility_aliases.rs`.
-- Files changed: `crates/treb-cli/tests/integration_help.rs`, `crates/treb-cli/tests/integration_list.rs`, `crates/treb-cli/tests/integration_prune.rs`, `crates/treb-cli/tests/cli_compatibility_aliases.rs`, `crates/treb-cli/tests/golden/help_list/commands.golden`, `crates/treb-cli/tests/golden/list_global_non_interactive/commands.golden`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-10 22:02:50 CET - P6-US-005
+- Added integration coverage for scoped `show` filtering across namespace, network, no-fork, and combined JSON cases, including success and no-match assertions.
+- Added integration coverage for scoped `tag` show/add/remove behavior plus a filtered no-match case, using subprocess execution and seeded/custom registry setup through the existing test harness.
+- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `CLAUDE.md`, `crates/treb-cli/tests/integration_show.rs`, `crates/treb-cli/tests/integration_tag.rs`
 - **Learnings for future iterations:**
   - Patterns discovered (e.g., "this codebase uses X for Y")
-  - Help-surface changes that are intentionally kept out of the broad help snapshot set can still be covered cheaply with a dedicated `integration_help` golden like `help_list`, which locks the clap-rendered subcommand help without touching root help baselines.
-  - For CLI shorthand compatibility on stateful commands, compare canonical and shorthand invocations at the subprocess level after seeding real registry state; parser tests alone miss output mismatches.
+    The `integration_*.rs` suites can mix golden-backed scenarios with direct `TestContext` assertions, which is cleaner for scope-specific success/error checks than snapshotting every filtered branch.
   - Gotchas encountered (e.g., "don't forget to update Z when changing W")
-  - New golden integration cases need normalized output copied from the harness, not guessed from nearby command tests, because the list renderer includes namespace sections, badges, and timestamp placeholders that differ from simpler unit-test fixtures.
+    The shared seeded registry fixture is useful for real-world fork coverage, but it does not include ambiguous namespace/network variants; scoped resolution tests often need extra deployments inserted directly into a temp registry.
   - Useful context (e.g., "the evaluation panel is in component X")
-  - `integration_prune.rs` is the strongest place to prove `TREB_NON_INTERACTIVE=1` works end-to-end because it exercises an actual confirmation bypass and validates the registry mutation afterward.
+    `NO_COLOR=1` keeps scoped human-output assertions stable in direct subprocess tests, while `show --json` assertions can read `Assert::get_output().stdout` without introducing new goldens.
 ---

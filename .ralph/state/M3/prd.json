@@ -1,86 +1,86 @@
 {
   "project": "treb-cli-rs",
-  "branchName": "feat/M3-P05-global-non-interactive-flag-and-short-flags",
-  "description": "Promote --non-interactive to a global CLI flag, add -s/-n short flags to list and tag commands, and accept TREB_NON_INTERACTIVE=1 in addition to true",
+  "branchName": "feat/M3-P06-deployment-query-flags-show-list-tag",
+  "description": "Add deployment query and scoping flags to show, list, and tag commands to match Go CLI filtering capabilities. Wire --namespace, --network, and --no-fork into show command, and wire existing tag --namespace/--network clap fields into runtime behavior.",
   "userStories": [
     {
-      "id": "P5-US-001",
-      "title": "Add Global --non-interactive Flag to Cli Struct",
-      "description": "As a CLI user, I want --non-interactive to be a global flag accepted by every command so that I can skip interactive prompts regardless of which subcommand I invoke.",
+      "id": "P6-US-001",
+      "title": "Add --namespace, --network, and --no-fork Flags to show Command",
+      "description": "As a CLI user, I want --namespace, --network, and --no-fork clap fields on the show command so that the parser accepts deployment query scoping flags (parser-only, no runtime wiring yet).",
       "acceptanceCriteria": [
-        "`treb --non-interactive run script/Deploy.s.sol` is accepted by the parser",
-        "`treb run --non-interactive script/Deploy.s.sol` is accepted (clap global flags work in both positions)",
-        "`treb --non-interactive list` is accepted (previously would fail)",
-        "The `Run` and `Compose` variants no longer define their own `non_interactive` field",
-        "Typecheck passes (`cargo check -p treb-cli` — may require US-002 to fully compile)"
+        "treb show --namespace mainnet --network 42220 --no-fork MyContract parses without error",
+        "treb show --namespace mainnet MyContract parses (each flag is optional)",
+        "treb show --no-fork MyContract parses",
+        "treb show MyContract still works (backward compat, no flags required)",
+        "show does NOT have -s/-n short flags (matching Go behavior)",
+        "parse_cli_from(...) unit test in main.rs pins the new flag parsing",
+        "--namespace, --network, --no-fork added to build_show() in build.rs for shell completions",
+        "Typecheck passes: cargo check -p treb-cli"
       ],
       "priority": 1,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "P5-US-002",
-      "title": "Wire Global Non-Interactive Flag Through All Command Handlers",
-      "description": "As a CLI user, I want every command that checks for non-interactive mode to receive the global --non-interactive flag value so that prompts are consistently skipped when the flag is set.",
+      "id": "P6-US-002",
+      "title": "Wire show Flags into Deployment Resolution and Filtering",
+      "description": "As a CLI user, I want show --namespace, --network, and --no-fork to filter deployments at runtime so that I can scope deployment lookups to specific namespaces, networks, and exclude fork deployments.",
       "acceptanceCriteria": [
-        "`cargo check -p treb-cli` passes",
-        "`cargo test -p treb-cli` passes",
-        "All command handlers that call `is_non_interactive()` receive the global flag value instead of hardcoded `false`",
-        "No command handler calls `is_non_interactive(false)` anymore",
-        "`treb --non-interactive prune` skips confirmation prompt",
-        "Typecheck passes"
+        "treb show --namespace mainnet MyContract resolves only within mainnet/ namespace",
+        "treb show --network 42220 MyContract resolves only within chain 42220 deployments",
+        "treb show --no-fork MyContract skips any fork/-prefixed deployments",
+        "Flags compose: --namespace mainnet --network 42220 --no-fork applies all three filters with AND logic",
+        "Error message includes active filter context when no match found (e.g. no deployments found in namespace 'mainnet' on network '42220')",
+        "--json output still works with all new flags",
+        "Reuse network_matches() from list.rs or extract to shared module rather than duplicating",
+        "Typecheck passes: cargo check -p treb-cli"
       ],
       "priority": 2,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "P5-US-003",
-      "title": "Accept TREB_NON_INTERACTIVE=1 in Addition to true",
-      "description": "As a CI pipeline author, I want TREB_NON_INTERACTIVE=1 to trigger non-interactive mode so that the env var convention matches common CI usage and the documented convention.",
+      "id": "P6-US-003",
+      "title": "Wire tag --namespace and --network into Runtime Handler",
+      "description": "As a CLI user, I want tag --namespace and --network flags to scope tag operations (show/add/remove) so that tag mutations target the correct deployment when names are ambiguous across namespaces or networks.",
       "acceptanceCriteria": [
-        "`TREB_NON_INTERACTIVE=1` triggers non-interactive mode",
-        "`TREB_NON_INTERACTIVE=true` still triggers non-interactive mode (backward compat)",
-        "`TREB_NON_INTERACTIVE=TRUE` still triggers non-interactive mode (case-insensitive)",
-        "`TREB_NON_INTERACTIVE=0` does NOT trigger non-interactive mode",
-        "`TREB_NON_INTERACTIVE=false` does NOT trigger non-interactive mode",
-        "Unit tests in `interactive.rs` updated to cover the `1` value",
-        "Typecheck passes"
+        "treb tag --namespace mainnet MyContract resolves MyContract only within mainnet/",
+        "treb tag --add v2 -s mainnet -n 42220 MyContract adds tag scoped to mainnet/42220",
+        "treb tag --remove v2 --namespace mainnet MyContract removes tag scoped to mainnet",
+        "When no namespace/network flags provided, behavior is unchanged (full registry scope)",
+        "Typecheck passes: cargo check -p treb-cli"
       ],
       "priority": 3,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "P5-US-004",
-      "title": "Add -s and -n Short Flags to list and tag Commands",
-      "description": "As a CLI user, I want -s for --namespace and -n for --network on list and tag commands so that I have the same shorthand flags available as in the Go CLI.",
+      "id": "P6-US-004",
+      "title": "Update Golden Tests and Help Snapshots",
+      "description": "As a developer, I want golden test snapshots updated for the new show flags so that CI stays green and help output is accurately captured.",
       "acceptanceCriteria": [
-        "`treb list -n mainnet` works (equivalent to `treb list --network mainnet`)",
-        "`treb list -s production` works (equivalent to `treb list --namespace production`)",
-        "`treb ls -n mainnet -s production` works (with alias)",
-        "`treb tag Counter -n mainnet` is accepted by parser (no unknown flag error)",
-        "`treb tag Counter -s production` is accepted by parser",
-        "`treb list --help` shows `-n` next to `--network` and `-s` next to `--namespace`",
-        "No short flag conflicts with other commands",
-        "Typecheck passes"
+        "show --help output includes --namespace, --network, --no-fork in golden snapshot",
+        "All existing golden tests pass without unrelated changes",
+        "Root treb --help golden snapshot updated if show help line changed",
+        "cargo test -p treb-cli passes (all golden comparisons match)"
       ],
       "priority": 4,
       "passes": true,
-      "notes": "Tag command network/namespace fields are accepted by the parser but may be unused until Phase 6 wires filtering logic."
+      "notes": ""
     },
     {
-      "id": "P5-US-005",
-      "title": "Update Golden Tests and Add Integration Tests",
-      "description": "As a developer, I want golden tests and integration tests updated to reflect the new global --non-interactive flag and short flags so that CI catches regressions.",
+      "id": "P6-US-005",
+      "title": "Add Integration Tests for Query Flag Filtering Behavior",
+      "description": "As a developer, I want integration tests verifying runtime filtering behavior of show and tag flags against seeded registry data so that filtering correctness is regression-tested.",
       "acceptanceCriteria": [
-        "All golden help files updated to reflect new global `--non-interactive` and short flags",
-        "`cargo test -p treb-cli` passes with all golden tests",
-        "`cargo test --workspace --all-targets` passes",
-        "`cargo clippy --workspace --all-targets` passes",
-        "New integration test: `--non-interactive` accepted on `list` command",
-        "New integration test: `TREB_NON_INTERACTIVE=1` triggers non-interactive mode",
-        "New compatibility test: `-n`/`-s` short flags produce same output as long forms on `list`"
+        "show --namespace filter test: verifies resolution scoped to namespace and errors when contract exists in another namespace but not the filtered one",
+        "show --network filter test: verifies resolution scoped to chain ID",
+        "show --no-fork filter test: verifies fork/-prefixed deployments are excluded",
+        "show combined filters test: verifies --namespace X --network Y --no-fork composes correctly",
+        "tag --namespace and --network filter tests: verifies scoped tag add/remove operations",
+        "Tests use subprocess execution and seed_registry() or seed_go_compat_registry() fixtures",
+        "Tests verify both success and error cases",
+        "cargo test -p treb-cli passes"
       ],
       "priority": 5,
       "passes": true,

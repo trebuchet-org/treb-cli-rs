@@ -44,6 +44,8 @@ treb — deployment orchestration CLI for Foundry projects. Rust workspace with 
 
 **CLI help snapshots**: Help coverage lives in `crates/treb-cli/tests/integration_help.rs`. Root `treb --help` output is custom-built in `build_grouped_help()`, while subcommand `--help` text still comes from clap, so command-tree changes often need both root and subcommand help snapshots refreshed.
 
+**CLI command help coverage**: When a command gains or changes command-specific flags, prefer adding or refreshing a dedicated `help_<command>` golden in `crates/treb-cli/tests/integration_help.rs` instead of relying on root help; clap-generated subcommand help can drift even when `treb --help` stays unchanged.
+
 **Global clap flags**: When hoisting a flag to `Cli` in `crates/treb-cli/src/main.rs`, mirror it in `crates/treb-cli/build.rs` and refresh the affected `tests/golden/help_*` snapshots; clap will surface the global option in root help and subcommand help, not just on the original command.
 
 **CLI alias compatibility coverage**: When a rename keeps backward-compatible spellings or shorthand forms, add or extend `crates/treb-cli/tests/cli_compatibility_aliases.rs` with byte-for-byte stdout comparisons across the canonical and legacy invocations. For registry-backed commands, seed a temp config project and compare raw stdout/stderr there instead of relying only on parser tests. Keep the feature-specific suites for richer behavior, but pin alias parity in one focused binary-level test file.
@@ -58,6 +60,8 @@ treb — deployment orchestration CLI for Foundry projects. Rust workspace with 
 **Shared E2E helpers** (`crates/treb-cli/tests/e2e/mod.rs`): Reusable helpers for multi-command workflow tests, including `setup_project()`, `run_deployment()`, `run_json()`, and `spawn_anvil_or_skip()`.
 
 **Registry compat test seeding**: `crates/treb-cli/tests/helpers/mod.rs::seed_registry()` writes the legacy bare `deployments_map.json` fixture into `.treb/deployments.json`; use a mutating CLI command such as `tag --add` when you need to verify that a write path preserves Go-compatible bare JSON output instead of reintroducing the legacy wrapper.
+
+**Scoped CLI integration coverage**: For namespace/network/fork filter behavior in `crates/treb-cli/tests/integration_*.rs`, prefer direct `TestContext` subprocess assertions plus local `Registry::insert_deployment()` setup when the shared fixture does not provide the ambiguous deployments you need. Keep goldens for formatting-heavy output, and use focused assertions for scope-specific success/error cases.
 
 **CLI registry artifact goldens**: Golden files that snapshot persisted `.treb/*.json` artifacts in `crates/treb-cli/tests/golden/` must match the current bare-map registry format. If an older snapshot still contains `_format`/`entries`, rewrite it to the bare object before trusting the test result.
 
@@ -106,6 +110,8 @@ cargo clippy --workspace --all-targets        # lint
 - **CLI default subcommands**: When one command should behave like an existing subcommand without changing that command's help/completion tree, normalize argv in `crates/treb-cli/src/main.rs` before clap parsing instead of reshaping the clap enum; keep `--help` unnormalized so parent help remains stable
 - **Non-interactive**: Detected via: `--non-interactive` flag, `TREB_NON_INTERACTIVE=1|true` (case-insensitive), `CI=true` (case-insensitive), stdin not TTY, stdout not TTY
 - **Non-interactive plumbing**: When a command reaches interactive helpers through `ui::selector` or destructive confirmation branches, thread `Cli.non_interactive` down explicitly; calling `is_non_interactive(false)` in those paths only preserves env/TTY fallbacks and drops the global clap flag.
+- **Scoped deployment queries**: For command-specific namespace/network/fork filtering, pre-filter `Registry::list_deployments()` with `commands::list::filter_deployments()` and then resolve the user query with `commands::resolve::resolve_deployment_in_scope()` so scoped lookups can disambiguate shared names without changing the global resolution rules used elsewhere.
+- **Scoped interactive deployment picks**: When a scoped command allows omitting the deployment query, pass the same filtered deployment slice used for scoped resolution into `ui::selector::fuzzy_select_deployment_id()`; otherwise interactive selection can still surface out-of-scope deployments even when direct queries are filtered correctly.
 - **Store pattern**: Each registry store has PathBuf + HashMap + load/save with fs2 file lock + CRUD + sorted list
 - **Versioned store files**: Registry store JSON is now written as bare JSON, but `read_versioned_file()` and `read_versioned_file_compat()` must continue to accept legacy wrapped `{"_format":"treb-v1","entries":...}` payloads for backward compatibility
 - **Deterministic store writes**: Map-backed registry stores should sort into a `BTreeMap` before `write_versioned_file()` so bare JSON remains stable for tests and diffs

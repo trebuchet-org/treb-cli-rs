@@ -155,6 +155,15 @@ enum Commands {
         /// Deployment identifier (full ID, name, address, name:label, or namespace/name); omit to
         /// select interactively
         deployment: Option<String>,
+        /// Deployment namespace
+        #[arg(long)]
+        namespace: Option<String>,
+        /// Network name or chain ID
+        #[arg(long)]
+        network: Option<String>,
+        /// Hide fork deployments
+        #[arg(long)]
+        no_fork: bool,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -843,8 +852,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             )
             .await?
         }
-        Commands::Show { deployment, json } => {
-            commands::show::run(deployment, json, non_interactive).await?
+        Commands::Show { deployment, namespace, network, no_fork, json } => {
+            commands::show::run(deployment, namespace, network, no_fork, json, non_interactive)
+                .await?
         }
         Commands::Init { force } => commands::init::run(force).await?,
         Commands::Config { subcommand } => match subcommand {
@@ -899,8 +909,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             )
             .await?
         }
-        Commands::Tag { deployment, add, remove, json, .. } => {
-            commands::tag::run(deployment, add, remove, json, non_interactive).await?
+        Commands::Tag { deployment, add, remove, network, namespace, json } => {
+            commands::tag::run(deployment, add, remove, network, namespace, json, non_interactive)
+                .await?
         }
         Commands::Register {
             tx_hash,
@@ -1228,6 +1239,44 @@ mod tests {
                 assert_eq!(namespace.as_deref(), Some("production"));
             }
             _ => panic!("expected tag command"),
+        }
+    }
+
+    #[test]
+    fn show_long_query_flags_parse_without_runtime_wiring() {
+        let cli = parse_cli_from([
+            "treb",
+            "show",
+            "--namespace",
+            "mainnet",
+            "--network",
+            "42220",
+            "--no-fork",
+            "Counter",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Show { deployment, namespace, network, no_fork, .. } => {
+                assert_eq!(deployment.as_deref(), Some("Counter"));
+                assert_eq!(namespace.as_deref(), Some("mainnet"));
+                assert_eq!(network.as_deref(), Some("42220"));
+                assert!(no_fork);
+            }
+            _ => panic!("expected show command"),
+        }
+    }
+
+    #[test]
+    fn show_short_query_flags_are_not_accepted() {
+        for args in [
+            ["treb", "show", "-n", "mainnet", "Counter"],
+            ["treb", "show", "-s", "prod", "Counter"],
+        ] {
+            match parse_cli_from(args) {
+                Ok(_) => panic!("expected show short flags to be rejected"),
+                Err(err) => assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument),
+            }
         }
     }
 
