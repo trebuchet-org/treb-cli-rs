@@ -765,7 +765,7 @@ contract ForkSetup {
 
 // ── fork enter: not initialized ─────────────────────────────────────────
 
-/// `treb fork enter --network mainnet` on an uninitialized project (no .treb/)
+/// `treb fork enter mainnet` on an uninitialized project (no .treb/)
 /// should error and mention `treb init`.
 #[test]
 fn fork_enter_not_initialized() {
@@ -776,7 +776,7 @@ fn fork_enter_not_initialized() {
         .pre_setup_hook(|ctx| {
             std::fs::remove_dir_all(ctx.path().join(".treb")).unwrap();
         })
-        .test(&["fork", "enter", "--network", "mainnet"])
+        .test(&["fork", "enter", "mainnet"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -785,7 +785,7 @@ fn fork_enter_not_initialized() {
 
 // ── fork enter: already forked ──────────────────────────────────────────
 
-/// `treb fork enter --network mainnet` when mainnet is already forked should
+/// `treb fork enter mainnet` when mainnet is already forked should
 /// error and suggest running `treb fork exit`.
 #[test]
 fn fork_enter_already_forked() {
@@ -795,7 +795,7 @@ fn fork_enter_already_forked() {
     let test = IntegrationTest::new("fork_enter_already_forked")
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_fork_status(ctx.path()))
-        .test(&["fork", "enter", "--network", "mainnet"])
+        .test(&["fork", "enter", "mainnet"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -804,7 +804,7 @@ fn fork_enter_already_forked() {
 
 // ── fork enter: no RPC URL ──────────────────────────────────────────────
 
-/// `treb fork enter --network mainnet` when mainnet has no RPC endpoint
+/// `treb fork enter mainnet` when mainnet has no RPC endpoint
 /// configured in foundry.toml should error mentioning the missing network.
 #[test]
 fn fork_enter_no_rpc_url() {
@@ -813,7 +813,7 @@ fn fork_enter_no_rpc_url() {
 
     let test = IntegrationTest::new("fork_enter_no_rpc_url")
         .setup(&["init"])
-        .test(&["fork", "enter", "--network", "mainnet"])
+        .test(&["fork", "enter", "mainnet"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -822,7 +822,7 @@ fn fork_enter_no_rpc_url() {
 
 // ── fork enter: success ──────────────────────────────────────────────────
 
-/// `treb fork enter --network localhost` with a deterministic local RPC
+/// `treb fork enter localhost` with a deterministic local RPC
 /// endpoint should succeed and print Go-matching indented field list.
 #[test]
 fn fork_enter_success() {
@@ -836,7 +836,7 @@ fn fork_enter_success() {
 
     let test = IntegrationTest::new("fork_enter_success")
         .setup(&["init"])
-        .test(&["fork", "enter", "--network", "localhost"])
+        .test(&["fork", "enter", "localhost"])
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(LabelNormalizer::new(format!("http://127.0.0.1:{port}"))));
 
@@ -901,7 +901,7 @@ fn fork_revert_not_forked() {
 
 // ── fork revert: no active forks ────────────────────────────────────────
 
-/// `treb fork revert --all --network mainnet` when no forks are active
+/// `treb fork revert --all` when no forks are active
 /// should print "No active forks to revert." (not an error).
 #[test]
 fn fork_revert_no_active_forks() {
@@ -910,7 +910,7 @@ fn fork_revert_no_active_forks() {
 
     let test = IntegrationTest::new("fork_revert_no_active_forks")
         .setup(&["init"])
-        .test(&["fork", "revert", "--network", "mainnet", "--all"])
+        .test(&["fork", "revert", "--all"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
@@ -1020,7 +1020,7 @@ fn fork_restart_success() {
 
 // ── fork enter: JSON output ─────────────────────────────────────────────
 
-/// `treb fork enter --network localhost --json` should return a structured
+/// `treb fork enter localhost --json` should return a structured
 /// JSON error because runtime-only fields are unavailable until anvil starts.
 #[test]
 fn fork_enter_json() {
@@ -1029,7 +1029,7 @@ fn fork_enter_json() {
 
     let test = IntegrationTest::new("fork_enter_json")
         .setup(&["init"])
-        .test(&["fork", "enter", "--network", "localhost", "--json"])
+        .test(&["fork", "enter", "localhost", "--json"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -1061,7 +1061,7 @@ fn fork_exit_all_restores_earliest_snapshot_last() {
     ctx.run(["init"]).success();
     seed_fork_exit_all(ctx.path());
 
-    ctx.run(["fork", "exit", "--network", "mainnet", "--all"]).success();
+    ctx.run(["fork", "exit", "--all"]).success();
 
     let deployments =
         std::fs::read_to_string(ctx.treb_dir().join(DEPLOYMENTS_FILE)).expect("read deployments");
@@ -1082,7 +1082,7 @@ fn fork_exit_all_json_is_always_an_array() {
     ctx.run(["init"]).success();
     seed_fork_exit(ctx.path());
 
-    let assertion = ctx.run(["fork", "exit", "--network", "mainnet", "--all", "--json"]).success();
+    let assertion = ctx.run(["fork", "exit", "--all", "--json"]).success();
     let output = assertion.get_output();
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("parse fork exit JSON output");
@@ -1121,7 +1121,7 @@ fn fork_revert_json_success() {
     run_integration_test(&test, &ctx);
 }
 
-/// `treb fork revert --network mainnet --all --json` with no active forks
+/// `treb fork revert --all --json` with no active forks
 /// should output an empty JSON array.
 #[test]
 fn fork_revert_json_no_active() {
@@ -1130,7 +1130,7 @@ fn fork_revert_json_no_active() {
 
     let test = IntegrationTest::new("fork_revert_json_no_active")
         .setup(&["init"])
-        .test(&["fork", "revert", "--network", "mainnet", "--all", "--json"])
+        .test(&["fork", "revert", "--all", "--json"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);

@@ -53,7 +53,7 @@
         "`cargo test -p treb-cli` passes with no failures"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

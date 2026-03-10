@@ -2,6 +2,7 @@
 ## Codebase Patterns
 - When a clap command supports both positional and flag forms for the same input, mirror the conflicts/required-group wiring in `crates/treb-cli/src/**` and `crates/treb-cli/build.rs`, and set `value_name` on renamed flag fields so usage/errors show the user-facing placeholder instead of the internal field id.
 - When a dual-form fork subcommand also supports `--all`, put the positional arg, `--network`, and `--all` in the same ArgGroup in both clap definitions, then normalize them in the command dispatcher so the bypass path and conflict errors stay consistent.
+- Golden tests that can early-return before exercising their fixture will not rewrite `commands.golden` under `UPDATE_GOLDEN=1`; if only the recorded argv changed, refresh that snapshot from a runnable environment or patch the header manually so the stored command matches the test case.
 
 Started: Tue Mar 10 10:14:21 PM CET 2026
 ---
@@ -22,4 +23,13 @@ Started: Tue Mar 10 10:14:21 PM CET 2026
   - Patterns discovered (e.g., "this codebase uses X for Y"): fork subcommands that accept both positional and `--network` forms are normalized in `commands::fork::run(...)`, which is the right place to keep handler signatures stable while clap evolves.
   - Gotchas encountered (e.g., "don't forget to update Z when changing W"): if a dual-form subcommand also has `--all`, the positional arg, long flag, and `--all` must share one ArgGroup in both parser definitions or the derive parser and generated completions drift.
   - Useful context (e.g., "the evaluation panel is in component X"): the fast coverage for fork argument-shape work lives in the `commands::fork::tests` parser block, so story-level validation does not need to wait on the heavier golden suites unless help text changes.
+---
+## 2026-03-10 22:50:34 CET - P7-US-003
+- Added a dedicated `help_fork_enter` golden test and snapshot covering positional `<NETWORK>`, legacy `--network`, and the `--rpc-url` / `--url` alias surface.
+- Refreshed fork-enter and fork-revert golden command headers to use the current canonical argv, and updated stale `--all` integration cases that were still combining `--all` with `--network`.
+- Files changed: `CLAUDE.md`, `crates/treb-cli/tests/integration_help.rs`, `crates/treb-cli/tests/integration_fork.rs`, `crates/treb-cli/tests/golden/help_fork_enter/commands.golden`, `crates/treb-cli/tests/golden/fork_enter_already_forked/commands.golden`, `crates/treb-cli/tests/golden/fork_enter_json/commands.golden`, `crates/treb-cli/tests/golden/fork_enter_no_rpc_url/commands.golden`, `crates/treb-cli/tests/golden/fork_enter_not_initialized/commands.golden`, `crates/treb-cli/tests/golden/fork_enter_success/commands.golden`, `crates/treb-cli/tests/golden/fork_revert_json_no_active/commands.golden`, `crates/treb-cli/tests/golden/fork_revert_no_active_forks/commands.golden`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y"): command-level help goldens belong in `crates/treb-cli/tests/integration_help.rs`, while fork behavior/output goldens stay in `crates/treb-cli/tests/integration_fork.rs`; keeping those split makes help-surface refreshes cheap.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W"): some golden tests can early-return before running their fixture, so `UPDATE_GOLDEN=1` will not rewrite the stored argv header in those cases even if the test case changed.
+  - Useful context (e.g., "the evaluation panel is in component X"): the fork integration harness snapshots the executed argv in `commands.golden`, so canonical syntax changes often require touching both the test invocation and the matching golden header even when stdout/stderr stays identical.
 ---
