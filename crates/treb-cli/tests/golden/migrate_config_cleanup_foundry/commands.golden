@@ -1,8 +1,14 @@
 === cmd 0: [migrate config --yes --cleanup-foundry] ===
 Backup written to: <PROJECT_ROOT>/treb.toml.bak-<UNIX_TIME>
 Foundry backup written to: <PROJECT_ROOT>/foundry.toml.bak-<UNIX_TIME>
+✓ treb.toml written successfully
+✓ foundry.toml cleaned up
+
+Next steps:
+  1. Review the generated treb.toml
+  2. Run `treb config show` to verify your config is loaded correctly
 🔍 Detecting config format...
 🔄 Converting v1 config to v2...
+Warning: treb.toml already exists and will be overwritten.
 💾 Creating backup...
 🧹 Cleaning up foundry.toml...
-✅ Migration complete — treb.toml updated to v2 format.

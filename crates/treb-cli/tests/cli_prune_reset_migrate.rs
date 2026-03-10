@@ -379,12 +379,10 @@ fn migrate_config_v1_rewrites_file_and_creates_backup() {
 
     let original = fs::read_to_string(tmp.path().join("treb.toml")).unwrap();
 
-    treb()
-        .args(["migrate", "config"])
-        .current_dir(tmp.path())
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("Migration complete"));
+    treb().args(["migrate", "config"]).current_dir(tmp.path()).assert().success().stdout(
+        predicate::str::contains("✓ treb.toml written successfully")
+            .and(predicate::str::contains("Next steps:")),
+    );
 
     // treb.toml should now be v2 format.
     let after = fs::read_to_string(tmp.path().join("treb.toml")).unwrap();

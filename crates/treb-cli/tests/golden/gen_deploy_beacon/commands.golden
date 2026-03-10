@@ -1,4 +1,10 @@
 === cmd 0: [gen-deploy Counter --proxy beacon --output script/DeployCounter_beacon.s.sol] ===
+
+✅ Generated deployment script: script/DeployCounter_beacon.s.sol
+This script will deploy both the implementation and proxy contracts.
+Make sure to update the initializer parameters if needed.
+
+To deploy, run:
+  treb run script/DeployCounter_beacon.s.sol --network <network>
 🔨 Compiling project...
 📝 Generating deploy script...
-✅ Generated deploy script: script/DeployCounter_beacon.s.sol

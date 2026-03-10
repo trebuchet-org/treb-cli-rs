@@ -1,4 +1,8 @@
 === cmd 0: [gen-deploy Counter --strategy create --output script/DeployCounter.s.sol] ===
+
+✅ Generated deployment script: script/DeployCounter.s.sol
+
+To deploy, run:
+  treb run script/DeployCounter.s.sol --network <network>
 🔨 Compiling project...
 📝 Generating deploy script...
-✅ Generated deploy script: script/DeployCounter.s.sol

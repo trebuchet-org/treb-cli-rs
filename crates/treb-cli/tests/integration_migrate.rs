@@ -144,6 +144,22 @@ fn migrate_config_no_treb_toml() {
     run_integration_test(&test, &ctx);
 }
 
+/// Foundry-only migration prints the Go-style warning and writes v2 config.
+#[test]
+fn migrate_config_foundry_only() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("migrate_config_foundry_only")
+        .setup(&["init"])
+        .post_setup_hook(write_foundry_with_treb_senders)
+        .test(&["migrate", "config", "--yes"])
+        .output_artifact("treb.toml")
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
 /// v1→v2 migration with --yes flag skips prompts and writes directly.
 #[test]
 fn migrate_config_v1_to_v2_yes() {

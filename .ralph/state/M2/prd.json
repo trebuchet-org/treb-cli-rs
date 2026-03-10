@@ -1,106 +1,82 @@
 {
   "project": "treb-cli-rs",
-  "branchName": "feat/M2-P11-register-prune-and-reset-command-output",
-  "description": "Port human-readable output of register, prune, and reset commands to match the Go CLI exactly, including emoji-staged headers, indented details, section listings, and aligned count lines.",
+  "branchName": "feat/M2-P12-gen-deploy-and-migrate-command-output",
+  "description": "Port the human-readable output of gen-deploy and migrate commands from the Go CLI to the Rust CLI, achieving exact output parity for success messages, instruction lines, warnings, cancellation text, cleanup messages, and next-steps sections.",
   "userStories": [
     {
-      "id": "P11-US-001",
-      "title": "Port register Command Human Output to Go Indented Format",
-      "description": "As a developer, I want the register command human output to use green bold checkmark header with indented per-deployment details so that it matches the Go CLI format exactly.",
+      "id": "P12-US-001",
+      "title": "Port gen-deploy Human Output to Match Go Format",
+      "description": "As a developer, I want gen-deploy to print the same success message and instruction lines as the Go CLI so that the output is consistent across implementations.",
       "acceptanceCriteria": [
-        "Register human output prints green bold '✓ Successfully registered N deployment(s)' header",
-        "Each deployment shows indented details: Deployment N, Deployment ID, Address, Contract, and optional Label",
-        "Label line is omitted when empty",
-        "Multiple deployments separated by blank lines, no trailing blank line after last",
-        "comfy_table and truncate_address summary line removed",
-        "JSON output (--json) is completely unchanged",
-        "cargo clippy --workspace --all-targets passes with no new warnings"
+        "Success message reads '✅ Generated deployment script: PATH' (not 'deploy script')",
+        "Leading newline before the success emoji",
+        "Type-specific instruction lines printed after success (library, proxy, or none for plain contract)",
+        "'To deploy, run:' line with 'treb run PATH --network <network>' printed for all types",
+        "--json output unchanged (instructions are human-only)",
+        "Typecheck passes (cargo check -p treb-cli)"
       ],
       "priority": 1,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "P11-US-002",
-      "title": "Port prune Command Human Output to Go Section/Emoji Format",
-      "description": "As a developer, I want the prune command human output to use emoji-staged section listings with per-type grouping so that it matches the Go CLI format exactly.",
+      "id": "P12-US-002",
+      "title": "Port migrate config Success, Cleanup, and Next Steps Output",
+      "description": "As a developer, I want migrate config to print green bold checkmark success messages, cleanup output, and a numbered next-steps section matching Go's output style.",
       "acceptanceCriteria": [
-        "Empty result prints '✅ All registry entries are valid. Nothing to prune.'",
-        "Dry-run prints '🔍 Checking registry entries...' header and '🗑️  Found N items to prune:' with per-section listings",
-        "Deployment candidates rendered as '  - {id} at {address} (reason: {reason})'",
-        "Transaction candidates rendered as '  - {id} [{status}] (reason: {reason})'",
-        "Destructive mode shows '⚠️' confirmation, '🔧 Pruning registry entries...', and '✅ Successfully pruned N items'",
-        "Cancellation shows '❌ Prune cancelled.'",
-        "Backup still created internally before destructive removal",
-        "JSON output (--json) completely unchanged",
-        "cargo clippy --workspace --all-targets passes"
+        "Success message is green bold '✓ treb.toml written successfully' (not stage-format '✅ Migration complete...')",
+        "Foundry cleanup success prints green bold '✓ foundry.toml cleaned up'",
+        "Next-steps section printed with correct numbering (2 items if cleaned up, 3 if not)",
+        "Preview shows 'Generated treb.toml:' header before TOML content",
+        "Cancellation text is 'Migration cancelled.'",
+        "--json output unchanged",
+        "Typecheck passes (cargo check -p treb-cli)"
       ],
       "priority": 2,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "P11-US-003",
-      "title": "Port reset Command Human Output to Go Aligned-Count Format",
-      "description": "As a developer, I want the reset command human output to use 'Found N items to reset' header with aligned per-type count lines and plain success message so that it matches the Go CLI format exactly.",
+      "id": "P12-US-003",
+      "title": "Port migrate config Warning Output to Go Format",
+      "description": "As a developer, I want migrate config to print yellow warnings when treb.toml already exists, matching Go's warning format for both interactive and non-interactive modes.",
       "acceptanceCriteria": [
-        "Empty result prints 'Nothing to reset. No registry entries found for the current namespace and network.' in plain text",
-        "Items found prints 'Found N items to reset for namespace ... on network ... (chain ...):' with aligned per-type counts",
-        "Per-type count lines use fixed-width label alignment matching Go spacing",
-        "Confirmation prompt matches Go wording exactly",
-        "Success message is plain text 'Successfully reset N items from the registry.' with no color or emoji",
-        "Backup still created internally before removal but path not displayed",
-        "JSON output (--json) completely unchanged",
-        "cargo clippy --workspace --all-targets passes"
+        "When treb.toml exists and non-interactive: 'Warning: treb.toml already exists and will be overwritten.' printed to stderr",
+        "When treb.toml exists and interactive: yellow 'Warning: treb.toml already exists.' to stderr + overwrite confirmation prompt",
+        "Existing foundry-only warning message format verified against Go",
+        "--json output unchanged",
+        "Typecheck passes (cargo check -p treb-cli)"
       ],
       "priority": 3,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "P11-US-004",
-      "title": "Update Unit Tests for register, prune, and reset Output Changes",
-      "description": "As a developer, I want unit tests and CLI assertion-based integration tests updated to match the new Go-matching output format so that all tests pass.",
+      "id": "P12-US-004",
+      "title": "Update Unit and Integration Tests for gen-deploy and migrate Output",
+      "description": "As a developer, I want all test assertions updated to match the new gen-deploy and migrate output format so that the test suite passes.",
       "acceptanceCriteria": [
-        "cargo test -p treb-cli --lib -- prune passes",
-        "cargo test -p treb-cli --lib -- reset passes",
-        "cargo test -p treb-cli --test cli_prune_reset_migrate passes",
-        "All output string assertions updated to new Go-matching format",
-        "Assertions referencing removed elements (comfy_table headers, stage markers, backup path lines) removed",
-        "cargo clippy --workspace --all-targets passes"
+        "All unit tests pass: cargo test -p treb-cli --lib",
+        "All integration tests (non-golden) pass: cargo test -p treb-cli --test cli_gen_deploy --test cli_prune_reset_migrate",
+        "No test assertions reference old output text ('Generated deploy script', 'Migration complete', 'Cancelled.')",
+        "Typecheck passes (cargo check -p treb-cli --all-targets)"
       ],
       "priority": 4,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "P11-US-005",
-      "title": "Update E2E Workflow Test Assertions for register, prune, and reset",
-      "description": "As a developer, I want E2E workflow tests updated to assert on the new Go-matching output format so that all E2E tests pass.",
+      "id": "P12-US-005",
+      "title": "Update All Golden Test Expected Files",
+      "description": "As a developer, I want all golden test expected files regenerated for gen-deploy and migrate commands so that the full test suite passes with the new output format.",
       "acceptanceCriteria": [
-        "cargo test -p treb-cli --test e2e_register_workflow passes",
-        "cargo test -p treb-cli --test e2e_prune_reset_workflow passes",
-        "Register assertions check for '✓ Successfully registered' and 'Deployment ID:'",
-        "Prune assertions check for section listings and emoji-staged messages",
-        "Reset assertions check for 'Successfully reset N items from the registry.'",
-        "cargo clippy --workspace --all-targets passes"
+        "All 17 gen-deploy golden files updated with 'Generated deployment script' text and instruction lines",
+        "All 8 migrate golden files updated with new success/warning/next-steps format",
+        "Full cargo test -p treb-cli passes with zero failures",
+        "cargo clippy --workspace --all-targets passes with no warnings",
+        "Git diff of golden files reviewed — changes are limited to expected output format changes"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "P11-US-006",
-      "title": "Update All Golden Test Expected Files",
-      "description": "As a developer, I want all golden test expected files for register, prune, and reset regenerated so that golden tests pass and no cross-command drift occurs.",
-      "acceptanceCriteria": [
-        "UPDATE_GOLDEN=1 cargo test -p treb-cli --test integration_register --test integration_prune --test integration_reset passes",
-        "Golden file diffs match expected output format changes with no unexpected regressions",
-        "cargo test -p treb-cli passes (full CLI test suite, no cross-command failures)",
-        "cargo test --workspace --all-targets passes (full workspace validation)",
-        "Error golden files (uninitialized, bad prefix, tx not found) remain unchanged"
-      ],
-      "priority": 6,
       "passes": true,
       "notes": ""
     }

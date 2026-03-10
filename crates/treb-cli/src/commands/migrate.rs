@@ -19,7 +19,17 @@ use treb_config::{
 };
 use treb_registry::{REGISTRY_DIR, REGISTRY_VERSION, run_migrations};
 
-use crate::output;
+use owo_colors::OwoColorize;
+
+use crate::{
+    output,
+    ui::{color, emoji},
+};
+
+/// Apply a color style when color is enabled, plain text otherwise.
+fn styled(text: &str, style: owo_colors::Style) -> String {
+    if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
+}
 
 // ── Subcommand ────────────────────────────────────────────────────────────────
 
@@ -99,13 +109,8 @@ async fn run_config(
             }
 
             if !json {
-                eprintln!(
-                    "{}",
-                    output::format_warning_banner(
-                        "\u{26a0}\u{fe0f}",
-                        "No treb.toml found \u{2014} migrating senders from foundry.toml (deprecated location)."
-                    )
-                );
+                let warning = "Warning: No treb.toml found \u{2014} migrating senders from foundry.toml (deprecated location).";
+                eprintln!("{}", styled(warning, color::WARNING));
                 output::print_stage("\u{1f504}", "Converting foundry.toml senders to v2 config...");
             }
 
@@ -231,11 +236,29 @@ where
         return Ok(());
     }
 
+    // Warn when treb.toml already exists (Go: migrate.go:126-138)
+    if treb_toml_existed && !json {
+        if yes || !stdin_is_tty {
+            // Non-interactive: plain text to stderr (Go: fmt.Fprintln(os.Stderr, ...))
+            eprintln!("Warning: treb.toml already exists and will be overwritten.");
+        } else {
+            // Interactive: yellow warning to stderr + overwrite confirmation prompt
+            let warning = "Warning: treb.toml already exists.";
+            eprintln!("{}", styled(warning, color::WARNING));
+            if !confirm_prompt("Overwrite existing treb.toml?", false) {
+                println!("Migration cancelled.");
+                return Ok(());
+            }
+        }
+    }
+
     // Interactive preview + confirmation (unless --yes, --json, or non-TTY).
     if !yes && !json && stdin_is_tty {
+        println!("Generated treb.toml:");
+        println!();
         println!("{v2_toml}");
-        if !confirm_prompt("Write this config to treb.toml?", false) {
-            println!("Cancelled.");
+        if !confirm_prompt("Write this to treb.toml?", false) {
+            println!("Migration cancelled.");
             return Ok(());
         }
     }
@@ -280,7 +303,29 @@ where
         if let Some(fp) = &foundry_cleanup_path {
             println!("Foundry backup written to: {}", fp.display());
         }
-        output::print_stage("\u{2705}", "Migration complete — treb.toml updated to v2 format.");
+
+        // Green bold success message matching Go: green.Printf("✓ treb.toml written
+        // successfully\n")
+        let success_msg = format!("{} treb.toml written successfully", emoji::CHECK_MARK);
+        println!("{}", styled(&success_msg, color::SUCCESS));
+
+        // Green bold foundry cleanup message if cleanup was performed
+        if foundry_cleanup_path.is_some() {
+            let cleanup_msg = format!("{} foundry.toml cleaned up", emoji::CHECK_MARK);
+            println!("{}", styled(&cleanup_msg, color::SUCCESS));
+        }
+
+        // Next steps section
+        println!();
+        println!("Next steps:");
+        println!("  1. Review the generated treb.toml");
+        if foundry_cleanup_path.is_some() {
+            // Foundry was cleaned up — skip the manual removal step
+            println!("  2. Run `treb config show` to verify your config is loaded correctly");
+        } else {
+            println!("  2. Remove [profile.*.treb.*] sections from foundry.toml");
+            println!("  3. Run `treb config show` to verify your config is loaded correctly");
+        }
     }
 
     Ok(())
@@ -714,12 +759,13 @@ private_key = "0xDeployerKey"
     }
 
     #[tokio::test]
-    async fn write_or_print_v2_cancelled_prompt_does_not_write() {
+    async fn write_or_print_v2_cancelled_overwrite_prompt_does_not_write() {
         let dir = TempDir::new().unwrap();
         let treb_toml = dir.path().join("treb.toml");
         write_v1_treb_toml(dir.path());
         let original = std::fs::read_to_string(&treb_toml).unwrap();
 
+        // Decline the overwrite prompt — should cancel without writing.
         write_or_print_v2_with_prompt(
             dir.path(),
             &treb_toml,
@@ -731,8 +777,9 @@ private_key = "0xDeployerKey"
             false,
             None,
             true,
-            |_, default| {
-                assert!(!default, "interactive migrate confirmation must default to no");
+            |prompt, default| {
+                assert_eq!(prompt, "Overwrite existing treb.toml?");
+                assert!(!default, "overwrite confirmation must default to no");
                 false
             },
         )
@@ -740,14 +787,64 @@ private_key = "0xDeployerKey"
         .unwrap();
 
         let after = std::fs::read_to_string(&treb_toml).unwrap();
-        assert_eq!(after, original, "cancelled prompt must not write changes");
+        assert_eq!(after, original, "declining overwrite must not write changes");
 
         let backups: Vec<_> = std::fs::read_dir(dir.path())
             .unwrap()
             .filter_map(|e| e.ok())
             .filter(|e| e.file_name().to_string_lossy().starts_with("treb.toml.bak-"))
             .collect();
-        assert!(backups.is_empty(), "cancelled prompt should not create backup files");
+        assert!(backups.is_empty(), "declining overwrite should not create backup files");
+    }
+
+    #[tokio::test]
+    async fn write_or_print_v2_cancelled_write_prompt_does_not_write() {
+        use std::cell::Cell;
+
+        let dir = TempDir::new().unwrap();
+        let treb_toml = dir.path().join("treb.toml");
+        write_v1_treb_toml(dir.path());
+        let original = std::fs::read_to_string(&treb_toml).unwrap();
+
+        let call_count = Cell::new(0u32);
+
+        // Accept the overwrite prompt, decline the write prompt.
+        write_or_print_v2_with_prompt(
+            dir.path(),
+            &treb_toml,
+            "[accounts.deployer]\ntype = \"private_key\"\n",
+            false,
+            false,
+            true,
+            false,
+            false,
+            None,
+            true,
+            |prompt, default| {
+                let count = call_count.get();
+                call_count.set(count + 1);
+                assert!(!default, "interactive migrate confirmations must default to no");
+                if count == 0 {
+                    assert_eq!(prompt, "Overwrite existing treb.toml?");
+                    true // accept overwrite
+                } else {
+                    assert_eq!(prompt, "Write this to treb.toml?");
+                    false // decline write
+                }
+            },
+        )
+        .await
+        .unwrap();
+
+        let after = std::fs::read_to_string(&treb_toml).unwrap();
+        assert_eq!(after, original, "declining write prompt must not write changes");
+
+        let backups: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with("treb.toml.bak-"))
+            .collect();
+        assert!(backups.is_empty(), "declining write prompt should not create backup files");
     }
 
     // ── run_config foundry sender migration ───────────────────────────────────
