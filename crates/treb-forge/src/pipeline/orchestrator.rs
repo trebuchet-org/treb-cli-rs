@@ -402,8 +402,7 @@ fn matches_simulated_transaction(
             return false;
         }
 
-        return deployment_targets
-            .is_some_and(|targets| targets.contains(&candidate.to))
+        return deployment_targets.is_some_and(|targets| targets.contains(&candidate.to))
             || (!sim_tx.transaction.data.is_empty()
                 && candidate.data == sim_tx.transaction.data.as_ref());
     }

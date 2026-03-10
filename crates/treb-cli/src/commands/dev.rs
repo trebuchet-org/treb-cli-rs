@@ -10,6 +10,7 @@ use anyhow::{Context, bail};
 use chrono::Utc;
 use clap::Subcommand;
 use owo_colors::{OwoColorize, Style};
+use serde::Serialize;
 use tokio::net::TcpStream;
 use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
 use treb_forge::{anvil::AnvilConfig, createx::deploy_createx};
@@ -18,6 +19,21 @@ use treb_registry::ForkStateStore;
 use crate::ui::{color, emoji};
 
 const TREB_DIR: &str = ".treb";
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AnvilStatusJson {
+    instance_name: String,
+    network: String,
+    rpc_url: String,
+    port: u16,
+    chain_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fork_block_number: Option<u64>,
+    started_at: chrono::DateTime<Utc>,
+    uptime: String,
+    status: String,
+}
 
 /// Apply a color style when color is enabled, plain text otherwise.
 fn styled(text: &str, style: Style) -> String {
@@ -28,7 +44,10 @@ fn styled(text: &str, style: Style) -> String {
 
 #[derive(Subcommand, Debug)]
 pub enum DevSubcommand {
-    /// Manage local Anvil development nodes
+    /// Manage local anvil node
+    ///
+    /// Manage a local anvil node for testing deployments with CreateX factory
+    /// automatically deployed.
     Anvil {
         #[command(subcommand)]
         subcommand: AnvilSubcommand,
@@ -37,7 +56,9 @@ pub enum DevSubcommand {
 
 #[derive(Subcommand, Debug)]
 pub enum AnvilSubcommand {
-    /// Start a local Anvil node in the foreground
+    /// Start local anvil node
+    ///
+    /// Start a local anvil node with CreateX factory deployed. Fails if already running.
     Start {
         /// Network name or chain ID
         #[arg(long)]
@@ -52,7 +73,9 @@ pub enum AnvilSubcommand {
         #[arg(long)]
         name: Option<String>,
     },
-    /// Clean up stale Anvil entries in fork state
+    /// Stop local anvil node
+    ///
+    /// Stop the local anvil node if running.
     Stop {
         /// Network name or chain ID
         #[arg(long)]
@@ -61,7 +84,9 @@ pub enum AnvilSubcommand {
         #[arg(long)]
         name: Option<String>,
     },
-    /// Restart an Anvil node — stops the existing instance and starts a fresh one
+    /// Restart local anvil node
+    ///
+    /// Restart the local anvil node with CreateX factory deployed.
     Restart {
         /// Network name or chain ID
         #[arg(long)]
@@ -76,7 +101,9 @@ pub enum AnvilSubcommand {
         #[arg(long)]
         fork_block_number: Option<u64>,
     },
-    /// Show Anvil node status
+    /// Show anvil status
+    ///
+    /// Show status of the local anvil node.
     Status {
         /// Output as JSON
         #[arg(long)]
@@ -88,7 +115,9 @@ pub enum AnvilSubcommand {
         #[arg(long)]
         name: Option<String>,
     },
-    /// Display Anvil log file contents
+    /// Show anvil logs
+    ///
+    /// Show logs from the local anvil node.
     Logs {
         /// Network name or chain ID
         #[arg(long)]
@@ -540,17 +569,17 @@ pub async fn run_anvil_status(
         for entry in &forks {
             let running = is_port_reachable(entry.port).await;
             let uptime = format_uptime(now - entry.started_at);
-            statuses.push(serde_json::json!({
-                "instanceName":   entry.resolved_instance_name(),
-                "network":         entry.network,
-                "rpcUrl":          entry.rpc_url,
-                "port":            entry.port,
-                "chainId":         entry.chain_id,
-                "forkBlockNumber": entry.fork_block_number,
-                "startedAt":       entry.started_at,
-                "uptime":          uptime,
-                "status":          if running { "running" } else { "stopped" },
-            }));
+            statuses.push(AnvilStatusJson {
+                instance_name: entry.resolved_instance_name().to_string(),
+                network: entry.network.clone(),
+                rpc_url: entry.rpc_url.clone(),
+                port: entry.port,
+                chain_id: entry.chain_id,
+                fork_block_number: entry.fork_block_number,
+                started_at: entry.started_at,
+                uptime,
+                status: if running { "running" } else { "stopped" }.to_string(),
+            });
         }
         crate::output::print_json(&statuses)?;
         return Ok(());

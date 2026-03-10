@@ -3,7 +3,6 @@
   {
     "chainId": 1,
     "deploymentCount": 0,
-    "forkBlockNumber": null,
     "network": "mainnet",
     "port": 18545,
     "rpcUrl": "http://localhost:18545",

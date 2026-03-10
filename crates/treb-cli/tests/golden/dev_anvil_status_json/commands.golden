@@ -2,7 +2,6 @@
 [
   {
     "chainId": 1,
-    "forkBlockNumber": null,
     "instanceName": "mainnet",
     "network": "mainnet",
     "port": 18545,

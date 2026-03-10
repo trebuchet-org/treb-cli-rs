@@ -37,11 +37,13 @@ const CREATEX_ADDRESS: &str = "0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed";
 
 #[derive(Subcommand, Debug)]
 pub enum ForkSubcommand {
-    /// Enter fork mode for a network: snapshot registry and record fork state
+    /// Enter fork mode for a network
     ///
-    /// Snapshots the current registry and records an active fork entry in
-    /// `fork.json`. Run `treb dev anvil start --network <name>` after
-    /// this to start a local node pointing at the forked chain.
+    /// Start a local Anvil fork of the specified network, backup registry files,
+    /// and prepare the environment for fork-mode testing.
+    ///
+    /// The network's RPC endpoint in foundry.toml must use an environment variable
+    /// (e.g., ${SEPOLIA_RPC_URL}) so that treb can override it for the fork.
     Enter {
         /// Network name or chain ID
         #[arg(long)]
@@ -56,10 +58,13 @@ pub enum ForkSubcommand {
         #[arg(long)]
         json: bool,
     },
-    /// Exit fork mode: restore registry from snapshot and remove fork state
+    /// Exit fork mode for a network
     ///
-    /// Restores the registry to the state it was in before `fork enter` and
-    /// removes the fork entry and its snapshot directory.
+    /// Stop the forked Anvil instance, restore registry files to pre-fork state,
+    /// and clean up all fork state files.
+    ///
+    /// If no network is specified, uses the currently configured network. Use
+    /// --all to exit all active forks.
     Exit {
         /// Network name or chain ID
         #[arg(long)]
@@ -71,10 +76,13 @@ pub enum ForkSubcommand {
         #[arg(long)]
         json: bool,
     },
-    /// Revert the fork to its last snapshot
+    /// Revert the last treb run on a fork
     ///
-    /// Restores the registry from the snapshot taken when fork mode was entered,
-    /// discarding any deployments made during the fork session.
+    /// Undo the last treb run by restoring EVM state and registry files from the
+    /// most recent snapshot.
+    ///
+    /// Use --all to revert all runs and restore to the initial fork state. If no
+    /// network is specified, uses the currently configured network.
     Revert {
         /// Network name or chain ID
         #[arg(long)]
@@ -86,10 +94,16 @@ pub enum ForkSubcommand {
         #[arg(long)]
         json: bool,
     },
-    /// Restart the fork from a new block
+    /// Restart a crashed fork
     ///
-    /// Resets the local Anvil node to a fresh fork at the given block number
-    /// (or at the latest block if omitted) without exiting fork mode.
+    /// Restart a fork whose Anvil process has crashed. This will:
+    /// 1. Stop the dead process (if needed)
+    /// 2. Restore registry files to the initial fork state
+    /// 3. Start a fresh fork from the original RPC
+    /// 4. Re-run SetupFork script (if configured)
+    /// 5. Take a new initial snapshot
+    ///
+    /// If no network is specified, uses the currently configured network.
     Restart {
         /// Network name or chain ID
         #[arg(long)]
@@ -101,19 +115,21 @@ pub enum ForkSubcommand {
         #[arg(long)]
         json: bool,
     },
-    /// Show active fork status
+    /// Show status of all active forks
     ///
-    /// Lists all currently active forks with their network name, chain ID,
-    /// fork URL, and the Anvil RPC port if a local node is running.
+    /// Show the state of all active forks including network, chain ID, fork URL,
+    /// anvil health, uptime, snapshot count, and fork-added deployment count.
     Status {
         /// Output as JSON
         #[arg(long)]
         json: bool,
     },
-    /// Show fork history
+    /// Show command history for a fork
     ///
-    /// Displays the log of fork lifecycle events (enter, exit, revert, restart)
-    /// for all networks or a specific one.
+    /// Show chronological list of commands run against a fork and their snapshot
+    /// points.
+    ///
+    /// If no network is specified, uses the currently configured network.
     History {
         /// Network name or chain ID
         #[arg(long)]
@@ -122,10 +138,12 @@ pub enum ForkSubcommand {
         #[arg(long)]
         json: bool,
     },
-    /// Diff current registry vs snapshot
+    /// Show deployments added or changed during fork mode
     ///
-    /// Shows deployments that were added or removed since fork mode was entered
-    /// by comparing the current registry against the saved snapshot.
+    /// Compare current registry state against the initial fork state to show what
+    /// deployments were added or changed during fork mode.
+    ///
+    /// If no network is specified, uses the currently configured network.
     Diff {
         /// Network name or chain ID
         #[arg(long)]
@@ -150,7 +168,9 @@ struct ForkExitJson {
 #[serde(rename_all = "camelCase")]
 struct ForkRevertJson {
     network: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     snapshot_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     new_snapshot_id: Option<String>,
 }
 
@@ -161,7 +181,47 @@ struct ForkRestartJson {
     chain_id: u64,
     port: u16,
     rpc_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     snapshot_id: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ForkStatusJson {
+    network: String,
+    rpc_url: String,
+    port: u16,
+    chain_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fork_block_number: Option<u64>,
+    started_at: chrono::DateTime<Utc>,
+    uptime: String,
+    snapshot_count: usize,
+    deployment_count: usize,
+    status: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ForkDiffResultJson {
+    has_changes: bool,
+    modified_deployments: Vec<ForkDiffEntryJson>,
+    network: String,
+    new_deployments: Vec<ForkDiffEntryJson>,
+    new_transaction_count: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ForkDiffEntryJson {
+    #[serde(skip_serializing_if = "String::is_empty")]
+    address: String,
+    change_type: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    contract_name: String,
+    id: String,
+    #[serde(rename = "type")]
+    deployment_type: String,
 }
 
 #[derive(Default)]
@@ -869,18 +929,18 @@ pub async fn run_status(json: bool) -> anyhow::Result<()> {
             let running = network_is_running(runtime).await;
             let uptime = format_uptime(now - started_at);
             let deployment_count = count_fork_deployments_for_chain(&deployments, chain_id);
-            statuses.push(serde_json::json!({
-                "network":         network,
-                "rpcUrl":          rpc_url,
-                "port":            port,
-                "chainId":         chain_id,
-                "forkBlockNumber": session.fork_block_number,
-                "startedAt":       started_at,
-                "uptime":          uptime,
-                "snapshotCount":   snapshot_count,
-                "deploymentCount": deployment_count,
-                "status":          if running { "running" } else { "stopped" },
-            }));
+            statuses.push(ForkStatusJson {
+                network: network.clone(),
+                rpc_url: rpc_url.to_string(),
+                port,
+                chain_id,
+                fork_block_number: session.fork_block_number,
+                started_at,
+                uptime,
+                snapshot_count,
+                deployment_count,
+                status: if running { "running" } else { "stopped" }.to_string(),
+            });
         }
         output::print_json(&statuses)?;
         return Ok(());
@@ -1000,7 +1060,6 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
 
     // Files to diff.
     let diff_files = [DEPLOYMENTS_FILE, TRANSACTIONS_FILE];
-    let mut changes: Vec<serde_json::Value> = Vec::new();
 
     // Structured data for human output (deployment details + transaction count).
     struct DiffEntry {
@@ -1012,6 +1071,9 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
     let mut modified_deployments: Vec<DiffEntry> = Vec::new();
     let mut new_transactions: usize = 0;
 
+    // Structured data for JSON output (Go-matching schema).
+    let mut new_deployments_json: Vec<ForkDiffEntryJson> = Vec::new();
+    let mut modified_deployments_json: Vec<ForkDiffEntryJson> = Vec::new();
     for &file_name in &diff_files {
         let current_path = treb_dir.join(file_name);
         let snapshot_path = snapshot_dir.join(file_name);
@@ -1040,11 +1102,27 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
                 _ => continue, // unchanged
             };
 
-            changes.push(serde_json::json!({
-                "change": change_type,
-                "file":   file_label,
-                "key":    key,
-            }));
+            // Collect deployment entries for JSON output.
+            if is_deployments && (change_type == "added" || change_type == "modified") {
+                let data = in_current.unwrap();
+                let contract_name =
+                    data.get("contractName").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let address =
+                    data.get("address").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let dtype = data.get("type").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let json_entry = ForkDiffEntryJson {
+                    address: address.clone(),
+                    change_type: change_type.to_string(),
+                    contract_name: contract_name.clone(),
+                    id: key.clone(),
+                    deployment_type: dtype.clone(),
+                };
+                if change_type == "added" {
+                    new_deployments_json.push(json_entry);
+                } else {
+                    modified_deployments_json.push(json_entry);
+                }
+            }
 
             // Collect structured data for human output sections.
             if is_deployments && (change_type == "added" || change_type == "modified") {
@@ -1069,11 +1147,17 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
     }
 
     if json {
-        output::print_json(&serde_json::json!({
-            "network": network,
-            "changes": changes,
-            "clean":   changes.is_empty(),
-        }))?;
+        let has_changes = !new_deployments_json.is_empty()
+            || !modified_deployments_json.is_empty()
+            || new_transactions > 0;
+        let result = ForkDiffResultJson {
+            has_changes,
+            modified_deployments: modified_deployments_json,
+            network: network.clone(),
+            new_deployments: new_deployments_json,
+            new_transaction_count: new_transactions,
+        };
+        output::print_json(&result)?;
         return Ok(());
     }
 

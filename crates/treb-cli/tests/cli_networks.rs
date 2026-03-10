@@ -84,7 +84,7 @@ fn networks_json_parses_with_expected_fields() {
         let obj = entry.as_object().expect("entry is not an object");
         assert!(obj.contains_key("name"), "missing field: name");
         assert!(obj.contains_key("rpcUrl"), "missing field: rpcUrl");
-        assert!(obj.contains_key("chainId"), "missing field: chainId");
+        // chainId is omitted when None (unreachable network)
         assert!(obj.contains_key("status"), "missing field: status");
     }
 }

@@ -176,8 +176,8 @@ async fn register_basic() {
 
 /// Register with JSON output.
 ///
-/// Same setup as `register_basic`, verifies JSON structure with `success`,
-/// `tx_hash`, `chain_id`, `mode`, `deployments`, `transaction_id` fields.
+/// Same setup as `register_basic`, verifies JSON structure with `deployments`
+/// array containing entries with `address`, `contractName`, `deploymentId`, `label`.
 #[tokio::test(flavor = "multi_thread")]
 async fn register_json() {
     let Some(ctx) = register_test_context().await else {

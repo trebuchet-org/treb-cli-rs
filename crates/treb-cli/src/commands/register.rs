@@ -266,22 +266,16 @@ fn deployment_labels(
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RegisterOutputJson {
-    success: bool,
-    tx_hash: String,
-    chain_id: u64,
-    mode: String,
     deployments: Vec<RegisteredDeploymentJson>,
-    transaction_id: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RegisteredDeploymentJson {
-    id: String,
-    contract_name: String,
     address: String,
-    namespace: String,
-    chain_id: u64,
+    contract_name: String,
+    deployment_id: String,
+    label: String,
 }
 
 /// Apply a color style when color is enabled, plain text otherwise.
@@ -378,8 +372,6 @@ pub async fn run(
     }
 
     let mut creations;
-    let mode;
-
     let trace_result = rpc_call(
         &client,
         &effective_rpc_url,
@@ -392,7 +384,6 @@ pub async fn run(
 
     match trace_result {
         Ok(trace) => {
-            mode = "trace";
             creations = extract_creations_from_trace(&trace);
             proxy_patterns = detect_proxy_patterns(&trace);
 
@@ -409,7 +400,6 @@ pub async fn run(
             }
         }
         Err(_) => {
-            mode = "receipt";
             if !json {
                 eprintln!(
                     "{}",
@@ -508,14 +498,14 @@ pub async fn run(
             },
         };
 
-        dep_labels.push(display_label);
+        dep_labels.push(display_label.clone());
 
         let deployment = Deployment {
             id: deployment_id.clone(),
             namespace: effective_namespace.clone(),
             chain_id,
             contract_name: name.clone(),
-            label: dep_label,
+            label: dep_label.clone(),
             address: creation.address.clone(),
             deployment_type: effective_dep_type,
             transaction_id: tx_id.clone(),
@@ -557,18 +547,18 @@ pub async fn run(
 
         registered.push((
             RegisteredDeploymentJson {
-                id: deployment_id,
-                contract_name: name,
                 address: creation.address.clone(),
-                namespace: effective_namespace.clone(),
-                chain_id,
+                contract_name: name,
+                deployment_id,
+                label: display_label.unwrap_or_default(),
             },
             creation.create_type.clone(),
         ));
     }
 
     // ── Create transaction record ───────────────────────────────────────
-    let deployment_ids: Vec<String> = registered.iter().map(|(d, _)| d.id.clone()).collect();
+    let deployment_ids: Vec<String> =
+        registered.iter().map(|(d, _)| d.deployment_id.clone()).collect();
 
     let operations: Vec<Operation> = registered
         .iter()
@@ -605,14 +595,7 @@ pub async fn run(
     let dep_jsons: Vec<RegisteredDeploymentJson> = registered.into_iter().map(|(d, _)| d).collect();
 
     if json {
-        output::print_json(&RegisterOutputJson {
-            success: true,
-            tx_hash: tx_hash.to_string(),
-            chain_id,
-            mode: mode.to_string(),
-            deployments: dep_jsons,
-            transaction_id: tx_id,
-        })?;
+        output::print_json(&RegisterOutputJson { deployments: dep_jsons })?;
     } else {
         let n = dep_jsons.len();
         let header = format!("{} Successfully registered {} deployment(s)", emoji::CHECK_MARK, n);
@@ -620,7 +603,7 @@ pub async fn run(
 
         for (i, (dep, label)) in dep_jsons.iter().zip(dep_labels.iter()).enumerate() {
             println!("  Deployment {}:", i + 1);
-            println!("    Deployment ID: {}", dep.id);
+            println!("    Deployment ID: {}", dep.deployment_id);
             println!("    Address: {}", dep.address);
             println!("    Contract: {}", dep.contract_name);
             if let Some(label) = label {
@@ -870,6 +853,36 @@ needs_env = "https://rpc.example.com/${API_KEY}"
 
         assert_eq!(registry_label, "factory_1");
         assert_eq!(display_label.as_deref(), Some("factory"));
+    }
+
+    #[test]
+    fn register_json_label_uses_display_label_for_unlabeled_multi_create() {
+        let (registry_label, display_label) = deployment_labels(None, 2, 0);
+        let payload = serde_json::to_value(RegisteredDeploymentJson {
+            address: "0x1234".to_string(),
+            contract_name: "Unknown_0".to_string(),
+            deployment_id: "default/31337/Unknown_0:_0".to_string(),
+            label: display_label.unwrap_or_default(),
+        })
+        .expect("register deployment json should serialize");
+
+        assert_eq!(registry_label, "_0");
+        assert_eq!(payload["label"], "");
+    }
+
+    #[test]
+    fn register_json_label_uses_display_label_for_labeled_multi_create() {
+        let (registry_label, display_label) = deployment_labels(Some("factory"), 2, 1);
+        let payload = serde_json::to_value(RegisteredDeploymentJson {
+            address: "0x1234".to_string(),
+            contract_name: "Factory_1".to_string(),
+            deployment_id: "default/31337/Factory_1:factory_1".to_string(),
+            label: display_label.unwrap_or_default(),
+        })
+        .expect("register deployment json should serialize");
+
+        assert_eq!(registry_label, "factory_1");
+        assert_eq!(payload["label"], "factory");
     }
 
     // ── parse_hex_u64 ───────────────────────────────────────────────────

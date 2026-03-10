@@ -53,7 +53,7 @@ fn config_show_json_is_valid() {
 
     let obj = json.as_object().expect("JSON output is not an object");
     assert_eq!(obj["namespace"], "default");
-    assert!(obj.contains_key("network"));
+    // network is omitted when not configured (skip_serializing_if = "Option::is_none")
     assert!(obj.contains_key("profile"));
     assert!(obj.contains_key("configSource"));
     assert!(obj.contains_key("projectRoot"));

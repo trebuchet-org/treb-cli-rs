@@ -3,7 +3,7 @@
   "commit": "<SHORT_HASH>",
   "date": "<DATE>",
   "forgeVersion": "forge v<VERSION> (<SHORT_HASH>)",
-  "foundryVersion": "v1.5.1",
+  "foundryVersion": "v<VERSION>",
   "rustVersion": "rustc 1.96.0-nightly (<SHORT_HASH> 2026-03-01)",
   "trebSolCommit": "<SHORT_HASH>",
   "version": "0.1.0"

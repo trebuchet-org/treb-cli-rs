@@ -41,6 +41,7 @@ struct VerifyOutputJson {
     status: String,
     explorer_url: String,
     reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     verified_at: Option<String>,
     verifiers: HashMap<String, VerifierResultJson>,
 }
