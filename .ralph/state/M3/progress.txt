@@ -2,6 +2,7 @@
 Started: Tue Mar 10 03:36:50 PM CET 2026
 ## Codebase Patterns
 - When changing CLI command names or nesting in `crates/treb-cli/src/main.rs`, also update `build_grouped_help()` there and `crates/treb-cli/build.rs`; root help and generated shell completions are maintained separately from the derive parser.
+- When renaming a CLI command that has golden coverage, update both the `crates/treb-cli/tests/integration_*.rs` command argv and the matching `crates/treb-cli/tests/golden/*/commands.golden` header, because the harness snapshots the invoked argv verbatim.
 
 ---
 ## 2026-03-10 15:51:18 CET - P4-US-001
@@ -12,4 +13,14 @@ Started: Tue Mar 10 03:36:50 PM CET 2026
   - Patterns discovered: `treb-cli` keeps clap parsing in `src/main.rs`, but grouped root help is manually assembled in `build_grouped_help()` and shell completions come from the separate builder in `build.rs`.
   - Gotchas encountered: changing command structure in only one of those locations leaves parsing, `treb --help`, and generated completions out of sync.
   - Useful context: the hidden compatibility form can reuse the same `Args` struct as the nested subcommand, which keeps runtime handling and JSON flag behavior aligned.
+---
+## 2026-03-10 16:02:10 CET - P4-US-002
+- Updated the primary gen-deploy integration coverage to invoke `treb gen deploy ...` in both `crates/treb-cli/tests/cli_gen_deploy.rs` and `crates/treb-cli/tests/integration_gen_deploy.rs`, while keeping the dedicated compatibility assertion for `gen-deploy`.
+- Rewrote every `crates/treb-cli/tests/golden/gen_deploy_*/commands.golden` command header to the nested `gen deploy` syntax so the golden snapshots match the current argv.
+- Added reusable guidance about golden command renames to `CLAUDE.md`.
+- Files changed: `crates/treb-cli/tests/cli_gen_deploy.rs`, `crates/treb-cli/tests/integration_gen_deploy.rs`, `crates/treb-cli/tests/golden/gen_deploy_*/commands.golden`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: command argv for golden integration tests live in two places, the Rust test builders and the `commands.golden` snapshot headers.
+  - Gotchas encountered: updating only the executable test args or only the golden headers leaves `integration_gen_deploy` failing even when the command itself still works.
+  - Useful context: `cli_gen_deploy.rs` is the higher-level binary integration suite, while `integration_gen_deploy.rs` is the golden harness that feeds `tests/golden/gen_deploy_*`.
 ---

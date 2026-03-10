@@ -1,4 +1,4 @@
-=== cmd 0: [gen-deploy NonExistentContract] ===
+=== cmd 0: [gen deploy NonExistentContract] ===
 🔨 Compiling project...
 Error: contract 'NonExistentContract' not found in compilation output.
 

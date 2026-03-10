@@ -1,4 +1,4 @@
-=== cmd 0: [gen-deploy Counter --strategy create2 --proxy uups --output script/DeployCounter_create2_uups.s.sol] ===
+=== cmd 0: [gen deploy Counter --strategy create2 --proxy uups --output script/DeployCounter_create2_uups.s.sol] ===
 
 ✅ Generated deployment script: script/DeployCounter_create2_uups.s.sol
 This script will deploy both the implementation and proxy contracts.

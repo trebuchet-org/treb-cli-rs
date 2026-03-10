@@ -40,6 +40,8 @@ treb — deployment orchestration CLI for Foundry projects. Rust workspace with 
 
 **Golden file tests**: 175 snapshots in `crates/treb-cli/tests/golden/`. CLI tests compare normalized output against `.expected` files. Update with `UPDATE_GOLDEN=1`.
 
+**Golden command renames**: When a CLI command spelling changes, update both the invoking test cases in `crates/treb-cli/tests/integration_*.rs` and the matching `tests/golden/*/commands.golden` headers; the golden harness snapshots the argv list verbatim.
+
 **Test framework** (`crates/treb-cli/tests/framework/`):
 - `TrebRunner` — subprocess CLI execution
 - `TestContext` — high-level harness with anvil + workdir

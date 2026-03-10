@@ -1,4 +1,4 @@
-=== cmd 0: [gen-deploy Counter --proxy erc1967 --output script/DeployCounter_erc1967.s.sol] ===
+=== cmd 0: [gen deploy Counter --proxy erc1967 --output script/DeployCounter_erc1967.s.sol] ===
 
 ✅ Generated deployment script: script/DeployCounter_erc1967.s.sol
 This script will deploy both the implementation and proxy contracts.

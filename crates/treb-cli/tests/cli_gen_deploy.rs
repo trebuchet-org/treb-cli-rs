@@ -1,4 +1,4 @@
-//! Integration tests for `treb gen-deploy`.
+//! Integration tests for `treb gen deploy`.
 //!
 //! These tests verify end-to-end behavior: CLI argument parsing, generated
 //! script correctness, Solidity compilation, JSON output, error handling,
@@ -62,7 +62,8 @@ fn gen_deploy_create_create2_create3_scripts_compile() {
     // CREATE — contract with constructor
     treb()
         .args([
-            "gen-deploy",
+            "gen",
+            "deploy",
             "Counter",
             "--strategy",
             "create",
@@ -76,7 +77,8 @@ fn gen_deploy_create_create2_create3_scripts_compile() {
     // CREATE — contract without constructor
     treb()
         .args([
-            "gen-deploy",
+            "gen",
+            "deploy",
             "SimpleContract",
             "--strategy",
             "create",
@@ -90,7 +92,8 @@ fn gen_deploy_create_create2_create3_scripts_compile() {
     // CREATE — library
     treb()
         .args([
-            "gen-deploy",
+            "gen",
+            "deploy",
             "MathLib",
             "--strategy",
             "create",
@@ -104,7 +107,8 @@ fn gen_deploy_create_create2_create3_scripts_compile() {
     // CREATE2 — contract with constructor
     treb()
         .args([
-            "gen-deploy",
+            "gen",
+            "deploy",
             "Counter",
             "--strategy",
             "create2",
@@ -118,7 +122,8 @@ fn gen_deploy_create_create2_create3_scripts_compile() {
     // CREATE2 — library
     treb()
         .args([
-            "gen-deploy",
+            "gen",
+            "deploy",
             "MathLib",
             "--strategy",
             "create2",
@@ -132,7 +137,8 @@ fn gen_deploy_create_create2_create3_scripts_compile() {
     // CREATE3 — contract with constructor
     treb()
         .args([
-            "gen-deploy",
+            "gen",
+            "deploy",
             "Counter",
             "--strategy",
             "create3",
@@ -146,7 +152,8 @@ fn gen_deploy_create_create2_create3_scripts_compile() {
     // CREATE3 — contract without constructor
     treb()
         .args([
-            "gen-deploy",
+            "gen",
+            "deploy",
             "SimpleContract",
             "--strategy",
             "create3",
@@ -170,7 +177,8 @@ fn gen_deploy_proxy_scripts_compile() {
     // ERC1967 proxy
     treb()
         .args([
-            "gen-deploy",
+            "gen",
+            "deploy",
             "Counter",
             "--proxy",
             "erc1967",
@@ -184,7 +192,8 @@ fn gen_deploy_proxy_scripts_compile() {
     // UUPS proxy (no constructor contract)
     treb()
         .args([
-            "gen-deploy",
+            "gen",
+            "deploy",
             "SimpleContract",
             "--proxy",
             "uups",
@@ -198,7 +207,8 @@ fn gen_deploy_proxy_scripts_compile() {
     // Transparent proxy
     treb()
         .args([
-            "gen-deploy",
+            "gen",
+            "deploy",
             "Counter",
             "--proxy",
             "transparent",
@@ -212,7 +222,8 @@ fn gen_deploy_proxy_scripts_compile() {
     // Beacon proxy
     treb()
         .args([
-            "gen-deploy",
+            "gen",
+            "deploy",
             "Counter",
             "--proxy",
             "beacon",
@@ -226,7 +237,8 @@ fn gen_deploy_proxy_scripts_compile() {
     // CREATE2 + UUPS composition
     treb()
         .args([
-            "gen-deploy",
+            "gen",
+            "deploy",
             "Counter",
             "--strategy",
             "create2",
@@ -242,7 +254,8 @@ fn gen_deploy_proxy_scripts_compile() {
     // CREATE3 + Transparent composition
     treb()
         .args([
-            "gen-deploy",
+            "gen",
+            "deploy",
             "Counter",
             "--strategy",
             "create3",
@@ -266,7 +279,7 @@ fn gen_deploy_json_output_has_expected_fields() {
     let tmp = setup_project();
 
     let output = treb()
-        .args(["gen-deploy", "Counter", "--json"])
+        .args(["gen", "deploy", "Counter", "--json"])
         .current_dir(tmp.path())
         .output()
         .expect("command should run");
@@ -315,7 +328,7 @@ fn gen_deploy_json_output_with_proxy() {
     let tmp = setup_project();
 
     let output = treb()
-        .args(["gen-deploy", "Counter", "--strategy", "create2", "--proxy", "uups", "--json"])
+        .args(["gen", "deploy", "Counter", "--strategy", "create2", "--proxy", "uups", "--json"])
         .current_dir(tmp.path())
         .output()
         .expect("command should run");
@@ -335,7 +348,7 @@ fn gen_deploy_json_output_with_proxy() {
 fn gen_deploy_json_does_not_write_file() {
     let tmp = setup_project();
 
-    treb().args(["gen-deploy", "Counter", "--json"]).current_dir(tmp.path()).assert().success();
+    treb().args(["gen", "deploy", "Counter", "--json"]).current_dir(tmp.path()).assert().success();
 
     // --json should NOT write a file
     assert!(
@@ -352,7 +365,8 @@ fn gen_deploy_human_success_block_is_printed_to_stdout() {
         .env("NO_COLOR", "1")
         .args([
             "--no-color",
-            "gen-deploy",
+            "gen",
+            "deploy",
             "Counter",
             "--proxy",
             "uups",
@@ -397,7 +411,8 @@ fn gen_deploy_library_guidance_matches_strategy() {
         .env("NO_COLOR", "1")
         .args([
             "--no-color",
-            "gen-deploy",
+            "gen",
+            "deploy",
             "MathLib",
             "--strategy",
             "create",
@@ -423,7 +438,8 @@ fn gen_deploy_library_guidance_matches_strategy() {
         .env("NO_COLOR", "1")
         .args([
             "--no-color",
-            "gen-deploy",
+            "gen",
+            "deploy",
             "MathLib",
             "--strategy",
             "create2",
@@ -446,7 +462,8 @@ fn gen_deploy_library_guidance_matches_strategy() {
         .env("NO_COLOR", "1")
         .args([
             "--no-color",
-            "gen-deploy",
+            "gen",
+            "deploy",
             "MathLib",
             "--strategy",
             "create3",
@@ -471,7 +488,7 @@ fn gen_deploy_library_guidance_matches_strategy() {
 #[test]
 fn gen_deploy_missing_artifact_argument_fails() {
     treb()
-        .arg("gen-deploy")
+        .args(["gen", "deploy"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("<ARTIFACT>").or(predicate::str::contains("required")));
@@ -482,7 +499,7 @@ fn gen_deploy_invalid_artifact_lists_available() {
     let tmp = setup_project();
 
     treb()
-        .args(["gen-deploy", "NonExistentContract"])
+        .args(["gen", "deploy", "NonExistentContract"])
         .current_dir(tmp.path())
         .assert()
         .failure()
@@ -494,7 +511,7 @@ fn gen_deploy_invalid_strategy_lists_valid() {
     let tmp = setup_project();
 
     treb()
-        .args(["gen-deploy", "Counter", "--strategy", "invalid"])
+        .args(["gen", "deploy", "Counter", "--strategy", "invalid"])
         .current_dir(tmp.path())
         .assert()
         .failure()
@@ -511,7 +528,7 @@ fn gen_deploy_invalid_proxy_lists_valid() {
     let tmp = setup_project();
 
     treb()
-        .args(["gen-deploy", "Counter", "--proxy", "invalid"])
+        .args(["gen", "deploy", "Counter", "--proxy", "invalid"])
         .current_dir(tmp.path())
         .assert()
         .failure()
@@ -529,7 +546,7 @@ fn gen_deploy_library_with_proxy_fails() {
     let tmp = setup_project();
 
     treb()
-        .args(["gen-deploy", "MathLib", "--proxy", "erc1967"])
+        .args(["gen", "deploy", "MathLib", "--proxy", "erc1967"])
         .current_dir(tmp.path())
         .assert()
         .failure()
@@ -544,7 +561,7 @@ fn gen_deploy_custom_output_creates_file() {
     let custom_path = "custom/nested/Deploy.s.sol";
 
     treb()
-        .args(["gen-deploy", "Counter", "--output", custom_path])
+        .args(["gen", "deploy", "Counter", "--output", custom_path])
         .current_dir(tmp.path())
         .assert()
         .success();
@@ -560,7 +577,7 @@ fn gen_deploy_custom_output_creates_file() {
 fn gen_deploy_default_output_path() {
     let tmp = setup_project();
 
-    treb().args(["gen-deploy", "Counter"]).current_dir(tmp.path()).assert().success();
+    treb().args(["gen", "deploy", "Counter"]).current_dir(tmp.path()).assert().success();
 
     let default_path = tmp.path().join("script/DeployCounter.s.sol");
     assert!(default_path.exists(), "file should be at default path script/DeployCounter.s.sol");
@@ -574,7 +591,8 @@ fn gen_deploy_custom_proxy_contract_name() {
 
     let output = treb()
         .args([
-            "gen-deploy",
+            "gen",
+            "deploy",
             "Counter",
             "--proxy",
             "erc1967",
