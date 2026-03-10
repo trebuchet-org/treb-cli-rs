@@ -45,7 +45,8 @@ pub fn read_json_file_or_default<T: DeserializeOwned + Default>(
 
 /// Read a versioned store file, accepting both wrapped and legacy bare JSON.
 ///
-/// Returns `T::default()` when the file does not exist.
+/// Returns `T::default()` when the file does not exist or a wrapped payload is
+/// incompatible/corrupt.
 pub fn read_versioned_file<T: DeserializeOwned + Default>(path: &Path) -> Result<T, TrebError> {
     if !path.exists() {
         return Ok(T::default());
@@ -57,16 +58,10 @@ pub fn read_versioned_file<T: DeserializeOwned + Default>(path: &Path) -> Result
         .is_some_and(|object| object.contains_key("_format") && object.contains_key("entries"));
 
     if looks_wrapped {
-        let wrapped: VersionedStore<T> = deserialize_value(path, value)?;
-        if wrapped.format != crate::STORE_FORMAT {
-            return Err(TrebError::Registry(format!(
-                "unsupported store format in {}: expected {}, found {}",
-                path.display(),
-                crate::STORE_FORMAT,
-                wrapped.format
-            )));
-        }
-        return Ok(wrapped.entries);
+        return match serde_json::from_value::<VersionedStore<T>>(value) {
+            Ok(wrapped) => Ok(wrapped.entries),
+            Err(_) => Ok(T::default()),
+        };
     }
 
     deserialize_value(path, value)
@@ -288,6 +283,45 @@ mod tests {
 
         let loaded: HashMap<String, Vec<u32>> = read_versioned_file(&path).unwrap();
         assert_eq!(loaded, map);
+    }
+
+    #[test]
+    fn read_versioned_file_ignores_unknown_wrapped_format() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("wrapped-unknown-format.json");
+
+        let mut map: HashMap<String, Vec<u32>> = HashMap::new();
+        map.insert("primes".into(), vec![2, 3, 5, 7, 11]);
+
+        write_json_file(
+            &path,
+            &serde_json::json!({
+                "_format": "treb-v999",
+                "entries": map,
+            }),
+        )
+        .unwrap();
+
+        let loaded: HashMap<String, Vec<u32>> = read_versioned_file(&path).unwrap();
+        assert_eq!(loaded["primes"], vec![2, 3, 5, 7, 11]);
+    }
+
+    #[test]
+    fn read_versioned_file_returns_default_for_incompatible_wrapped_payload() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("wrapped-incompatible.json");
+
+        write_json_file(
+            &path,
+            &serde_json::json!({
+                "_format": "treb-v999",
+                "entries": [1, 2, 3],
+            }),
+        )
+        .unwrap();
+
+        let loaded: HashMap<String, Vec<u32>> = read_versioned_file(&path).unwrap();
+        assert!(loaded.is_empty());
     }
 
     #[test]
