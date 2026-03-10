@@ -1,89 +1,91 @@
 {
   "project": "treb-cli-rs",
-  "branchName": "feat/M3-P06-deployment-query-flags-show-list-tag",
-  "description": "Add deployment query and scoping flags to show, list, and tag commands to match Go CLI filtering capabilities. Wire --namespace, --network, and --no-fork into show command, and wire existing tag --namespace/--network clap fields into runtime behavior.",
+  "branchName": "feat/M3-P07-fork-command-positional-arguments",
+  "description": "Add positional network argument support to all fork subcommands and --url alias to fork enter, achieving drop-in parity with the Go CLI while preserving backward-compatible --network flag form",
   "userStories": [
     {
-      "id": "P6-US-001",
-      "title": "Add --namespace, --network, and --no-fork Flags to show Command",
-      "description": "As a CLI user, I want --namespace, --network, and --no-fork clap fields on the show command so that the parser accepts deployment query scoping flags (parser-only, no runtime wiring yet).",
+      "id": "P7-US-001",
+      "title": "Add Positional Network Argument and --url Alias to fork enter",
+      "description": "As a CLI user, I want to run `fork enter sepolia` with a positional network argument and use `--url` as an alias for `--rpc-url`, so that fork enter matches Go CLI syntax and is consistent with other Foundry-style tools",
       "acceptanceCriteria": [
-        "treb show --namespace mainnet --network 42220 --no-fork MyContract parses without error",
-        "treb show --namespace mainnet MyContract parses (each flag is optional)",
-        "treb show --no-fork MyContract parses",
-        "treb show MyContract still works (backward compat, no flags required)",
-        "show does NOT have -s/-n short flags (matching Go behavior)",
-        "parse_cli_from(...) unit test in main.rs pins the new flag parsing",
-        "--namespace, --network, --no-fork added to build_show() in build.rs for shell completions",
-        "Typecheck passes: cargo check -p treb-cli"
+        "`treb fork enter sepolia` works (positional network)",
+        "`treb fork enter --network sepolia` still works (flag form)",
+        "`treb fork enter sepolia --network mainnet` errors with clear conflict message",
+        "`treb fork enter` (no network) errors with clear missing-network message",
+        "`treb fork enter sepolia --url http://localhost:8545` works (alias for --rpc-url)",
+        "`treb fork enter sepolia --rpc-url http://localhost:8545` still works",
+        "Typecheck passes: `cargo check -p treb-cli`",
+        "`cargo clippy -p treb-cli --all-targets` passes"
       ],
       "priority": 1,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "P6-US-002",
-      "title": "Wire show Flags into Deployment Resolution and Filtering",
-      "description": "As a CLI user, I want show --namespace, --network, and --no-fork to filter deployments at runtime so that I can scope deployment lookups to specific namespaces, networks, and exclude fork deployments.",
+      "id": "P7-US-002",
+      "title": "Add Optional Positional Network to Remaining Fork Subcommands",
+      "description": "As a CLI user, I want to run `fork exit sepolia`, `fork revert mainnet`, `fork restart mainnet`, `fork history sepolia`, and `fork diff mainnet` with positional network arguments, so that all fork subcommands match Go CLI syntax",
       "acceptanceCriteria": [
-        "treb show --namespace mainnet MyContract resolves only within mainnet/ namespace",
-        "treb show --network 42220 MyContract resolves only within chain 42220 deployments",
-        "treb show --no-fork MyContract skips any fork/-prefixed deployments",
-        "Flags compose: --namespace mainnet --network 42220 --no-fork applies all three filters with AND logic",
-        "Error message includes active filter context when no match found (e.g. no deployments found in namespace 'mainnet' on network '42220')",
-        "--json output still works with all new flags",
-        "Reuse network_matches() from list.rs or extract to shared module rather than duplicating",
-        "Typecheck passes: cargo check -p treb-cli"
+        "`treb fork exit sepolia` works (positional)",
+        "`treb fork exit --network sepolia` still works (flag form)",
+        "`treb fork exit sepolia --network mainnet` errors with conflict message",
+        "`treb fork exit --all` works without network",
+        "`treb fork revert mainnet`, `treb fork restart mainnet`, `treb fork diff mainnet` all work positionally",
+        "`treb fork history` works without network (shows all history)",
+        "`treb fork history sepolia` works (filters by network)",
+        "Typecheck passes: `cargo check -p treb-cli`",
+        "`cargo clippy -p treb-cli --all-targets` passes"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P6-US-003",
-      "title": "Wire tag --namespace and --network into Runtime Handler",
-      "description": "As a CLI user, I want tag --namespace and --network flags to scope tag operations (show/add/remove) so that tag mutations target the correct deployment when names are ambiguous across namespaces or networks.",
+      "id": "P7-US-003",
+      "title": "Update Golden Tests and Help Snapshots",
+      "description": "As a developer, I want all fork-related golden test snapshots refreshed to reflect positional argument syntax in help output, so that the test suite stays current and a help_fork_enter golden locks the new argument surface",
       "acceptanceCriteria": [
-        "treb tag --namespace mainnet MyContract resolves MyContract only within mainnet/",
-        "treb tag --add v2 -s mainnet -n 42220 MyContract adds tag scoped to mainnet/42220",
-        "treb tag --remove v2 --namespace mainnet MyContract removes tag scoped to mainnet",
-        "When no namespace/network flags provided, behavior is unchanged (full registry scope)",
-        "Typecheck passes: cargo check -p treb-cli"
+        "`cargo test -p treb-cli --test fork_integration` passes",
+        "`cargo test -p treb-cli --test integration_fork` passes",
+        "`cargo test -p treb-cli --test integration_help` passes",
+        "All fork golden snapshots are current (no diff with `UPDATE_GOLDEN=1`)",
+        "A `help_fork_enter` golden test exists showing positional `<NETWORK>`, `--network`, `--rpc-url`/`--url`",
+        "`cargo test -p treb-cli` passes with no failures"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P6-US-004",
-      "title": "Update Golden Tests and Help Snapshots",
-      "description": "As a developer, I want golden test snapshots updated for the new show flags so that CI stays green and help output is accurately captured.",
+      "id": "P7-US-004",
+      "title": "Add Integration Tests for Positional Argument Behavior",
+      "description": "As a developer, I want focused integration tests verifying positional arguments, flag arguments, conflict detection, and the --url alias at the subprocess level, so that argument parsing correctness is locked in",
       "acceptanceCriteria": [
-        "show --help output includes --namespace, --network, --no-fork in golden snapshot",
-        "All existing golden tests pass without unrelated changes",
-        "Root treb --help golden snapshot updated if show help line changed",
-        "cargo test -p treb-cli passes (all golden comparisons match)"
+        "All new tests pass: `cargo test -p treb-cli --test integration_fork`",
+        "Conflict detection tests verify stderr contains conflict message",
+        "Missing-network tests verify stderr contains missing-network message",
+        "`--url` alias test verifies identical behavior to `--rpc-url`",
+        "No regressions in existing fork integration tests",
+        "Typecheck passes: `cargo check -p treb-cli`"
       ],
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P6-US-005",
-      "title": "Add Integration Tests for Query Flag Filtering Behavior",
-      "description": "As a developer, I want integration tests verifying runtime filtering behavior of show and tag flags against seeded registry data so that filtering correctness is regression-tested.",
+      "id": "P7-US-005",
+      "title": "Add CLI Compatibility Alias Tests for Positional vs Flag Forms",
+      "description": "As a developer, I want byte-for-byte stdout/stderr comparison tests proving positional and flag forms produce identical output for all fork subcommands, so that backward compatibility is proven at the binary level",
       "acceptanceCriteria": [
-        "show --namespace filter test: verifies resolution scoped to namespace and errors when contract exists in another namespace but not the filtered one",
-        "show --network filter test: verifies resolution scoped to chain ID",
-        "show --no-fork filter test: verifies fork/-prefixed deployments are excluded",
-        "show combined filters test: verifies --namespace X --network Y --no-fork composes correctly",
-        "tag --namespace and --network filter tests: verifies scoped tag add/remove operations",
-        "Tests use subprocess execution and seed_registry() or seed_go_compat_registry() fixtures",
-        "Tests verify both success and error cases",
-        "cargo test -p treb-cli passes"
+        "All parity tests pass: `cargo test -p treb-cli --test cli_compatibility_aliases`",
+        "Each test asserts byte-for-byte identical stdout between positional and flag forms",
+        "Each test asserts byte-for-byte identical stderr between positional and flag forms",
+        "`--url` and `--rpc-url` produce identical output",
+        "No regressions in existing alias compatibility tests",
+        "Typecheck passes: `cargo check -p treb-cli`"
       ],
       "priority": 5,
-      "passes": true,
+      "passes": false,
       "notes": ""
     }
   ]

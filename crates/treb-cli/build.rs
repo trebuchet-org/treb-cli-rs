@@ -1,6 +1,6 @@
 use std::{path::Path, process::Command};
 
-use clap::{Arg, ArgAction, Command as ClapCommand};
+use clap::{Arg, ArgAction, ArgGroup, Command as ClapCommand};
 use clap_complete::{Shell, generate_to};
 
 fn build_cli() -> ClapCommand {
@@ -475,8 +475,31 @@ fn build_fork() -> ClapCommand {
         .subcommand(
             ClapCommand::new("enter")
                 .about("Enter fork mode for a network: snapshot registry and record fork state")
-                .arg(Arg::new("network").long("network").required(true).help("Network name"))
-                .arg(Arg::new("rpc-url").long("rpc-url").help("Upstream RPC URL to fork"))
+                .arg(
+                    Arg::new("network")
+                        .value_name("NETWORK")
+                        .conflicts_with("network-flag")
+                        .help("Network name"),
+                )
+                .arg(
+                    Arg::new("network-flag")
+                        .long("network")
+                        .value_name("NETWORK")
+                        .conflicts_with("network")
+                        .help("Network name"),
+                )
+                .group(
+                    ArgGroup::new("enter-network")
+                        .args(["network", "network-flag"])
+                        .required(true)
+                        .multiple(false),
+                )
+                .arg(
+                    Arg::new("rpc-url")
+                        .long("rpc-url")
+                        .visible_alias("url")
+                        .help("Upstream RPC URL to fork"),
+                )
                 .arg(
                     Arg::new("fork-block-number")
                         .long("fork-block-number")

@@ -1,70 +1,15 @@
-## Codebase Patterns
-- For CLI flag changes in `crates/treb-cli`, keep the derive parser in `src/main.rs`, the shell completion builder in `build.rs`, and a focused `parse_cli_from(...)` regression test in sync.
-- For scoped deployment queries in CLI commands, filter `Registry::list_deployments()` with `commands::list::filter_deployments()` and resolve the user query with `commands::resolve::resolve_deployment_in_scope()` so namespace/network/fork filters affect ambiguity resolution consistently.
-- For scoped commands that support interactive deployment selection, pass the filtered deployment slice into `fuzzy_select_deployment_id()` too; otherwise the prompt can offer out-of-scope deployments even when typed queries are scoped correctly.
-- For clap help changes that are specific to one command, add or refresh a dedicated `help_<command>` golden in `crates/treb-cli/tests/integration_help.rs`; root `treb --help` snapshots do not catch all subcommand help drift.
-- For scoped CLI behavior in `crates/treb-cli/tests/integration_*.rs`, prefer direct `TestContext` subprocess assertions plus ad hoc `Registry::insert_deployment()` setup when the shared fixtures do not include the ambiguous namespace/network combinations you need; keep goldens for formatting-heavy coverage.
-
 # Ralph Progress Log
-Started: Tue Mar 10 09:09:42 PM CET 2026
+## Codebase Patterns
+- When a clap command supports both positional and flag forms for the same input, mirror the conflicts/required-group wiring in `crates/treb-cli/src/**` and `crates/treb-cli/build.rs`, and set `value_name` on renamed flag fields so usage/errors show the user-facing placeholder instead of the internal field id.
+
+Started: Tue Mar 10 10:14:21 PM CET 2026
 ---
-## 2026-03-10 21:19:07 CET - P6-US-001
-- Added long-only `--namespace`, `--network`, and `--no-fork` clap fields to `treb show` and kept runtime behavior unchanged.
-- Mirrored the new `show` flags in shell completion generation and added parser tests for successful long-flag parsing plus rejection of `-n`/`-s`.
-- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/build.rs`
+## 2026-03-10 22:25:54 CET - P7-US-001
+- Implemented `fork enter` positional `<NETWORK>` support while keeping `--network` working, and added `--url` as a visible alias for `--rpc-url`.
+- Added clap coverage for positional parsing, alias parsing, missing/conflicting network forms, and an integration test proving positional `fork enter <network> --url <rpc>` persists fork state correctly.
+- Files changed: `CLAUDE.md`, `crates/treb-cli/build.rs`, `crates/treb-cli/src/commands/fork.rs`, `crates/treb-cli/tests/fork_integration.rs`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
 - **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    The CLI parser for `treb-cli` is split between clap derive definitions in `src/main.rs` and manual completion builders in `build.rs`; both must move together.
-  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
-    Negative `parse_cli_from(...)` tests should use `match` rather than `unwrap_err()` unless the parsed `Cli` type implements `Debug`.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    `Commands::Show` can safely accept parser-only fields before runtime wiring by matching with `..` in the main command dispatch.
----
-## 2026-03-10 21:31:07 CET - P6-US-002
-- Wired `treb show` runtime resolution through namespace, network, and `--no-fork` filters, including scoped interactive selection and filtered no-match error context.
-- Added scoped resolution support in `commands::resolve` and end-to-end CLI coverage for namespace, network, combined JSON, and no-fork filtering behavior.
-- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `CLAUDE.md`, `crates/treb-cli/src/commands/resolve.rs`, `crates/treb-cli/src/commands/show.rs`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/tests/cli_list_show.rs`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    Query-scoped command behavior is easiest to keep consistent by reusing `commands::list::filter_deployments()` for the candidate set and layering command-specific resolution on top of that filtered slice.
-  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
-    `resolve_deployment()` resolves against the whole registry, so scoped commands need `resolve_deployment_in_scope()` or they will stay ambiguous even when filters should narrow the result to one deployment.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    Focused binary tests in `crates/treb-cli/tests/cli_list_show.rs` are sufficient to cover `show` runtime filtering without touching golden snapshots because the existing clap/help surface for `show` was already in place.
----
-## 2026-03-10 21:42:55 CET - P6-US-003
-- Wired `treb tag` runtime handling to honor `--namespace` and `--network` for direct query resolution and interactive deployment selection, and added scoped no-match error context.
-- Added focused CLI tests covering scoped tag show, scoped tag add with combined namespace/network flags, and scoped tag remove behavior against ambiguous deployments.
-- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `CLAUDE.md`, `crates/treb-cli/src/commands/tag.rs`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/tests/cli_tag.rs`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    Scoped deployment commands should reuse `DeploymentFilters` plus `resolve_deployment_in_scope()` for both typed queries and interactive selection so all entry paths share the same candidate set.
-  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
-    `cargo test -p treb-cli cli_tag` only applies a name filter; use `cargo test -p treb-cli --test cli_tag` when you need to execute that integration test file directly.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    A standalone `crates/treb-cli/tests/cli_tag.rs` binary test file is enough for focused tag-scope coverage without introducing new golden snapshots.
----
-## 2026-03-10 21:52:10 CET - P6-US-004
-- Added dedicated `show --help` golden coverage so the new `--namespace`, `--network`, and `--no-fork` options are snapshot-tested directly.
-- Refreshed help-test documentation to note that command-specific clap help changes need their own `help_<command>` golden, even when root help does not change.
-- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `CLAUDE.md`, `crates/treb-cli/tests/integration_help.rs`, `crates/treb-cli/tests/golden/help_show/commands.golden`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    Subcommand help output is covered through `crates/treb-cli/tests/integration_help.rs`, with one golden directory per command-specific help case.
-  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
-    Root `treb --help` can remain stable while clap-generated subcommand help changes, so snapshotting only `help_root` is not enough for new per-command flags.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    `UPDATE_GOLDEN=1 cargo test -p treb-cli --test integration_help help_show` is sufficient to create or refresh a single help snapshot without broader golden churn.
----
-## 2026-03-10 22:02:50 CET - P6-US-005
-- Added integration coverage for scoped `show` filtering across namespace, network, no-fork, and combined JSON cases, including success and no-match assertions.
-- Added integration coverage for scoped `tag` show/add/remove behavior plus a filtered no-match case, using subprocess execution and seeded/custom registry setup through the existing test harness.
-- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `CLAUDE.md`, `crates/treb-cli/tests/integration_show.rs`, `crates/treb-cli/tests/integration_tag.rs`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y")
-    The `integration_*.rs` suites can mix golden-backed scenarios with direct `TestContext` assertions, which is cleaner for scope-specific success/error checks than snapshotting every filtered branch.
-  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
-    The shared seeded registry fixture is useful for real-world fork coverage, but it does not include ambiguous namespace/network variants; scoped resolution tests often need extra deployments inserted directly into a temp registry.
-  - Useful context (e.g., "the evaluation panel is in component X")
-    `NO_COLOR=1` keeps scoped human-output assertions stable in direct subprocess tests, while `show --json` assertions can read `Assert::get_output().stdout` without introducing new goldens.
+  - Patterns discovered (e.g., "this codebase uses X for Y"): fork clap surfaces are defined twice, in the derive parser and in `crates/treb-cli/build.rs`, so positional/alias changes must be mirrored in both places.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W"): when the clap field name differs from the displayed long flag, missing `value_name` leaks the internal field id into usage and conflict errors.
+  - Useful context (e.g., "the evaluation panel is in component X"): `crates/treb-cli/src/commands/fork.rs` already has local parser tests for subcommand shapes, while `crates/treb-cli/tests/fork_integration.rs` is the lightest place to verify persisted fork state against a live RPC.
 ---

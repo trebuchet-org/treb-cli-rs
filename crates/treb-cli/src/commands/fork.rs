@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::{Context, bail};
 use chrono::Utc;
-use clap::Subcommand;
+use clap::{ArgGroup, Subcommand};
 use foundry_common::{
     Shell as FoundryShell,
     shell::{ColorChoice, OutputFormat, OutputMode, Verbosity},
@@ -44,12 +44,21 @@ pub enum ForkSubcommand {
     ///
     /// The network's RPC endpoint in foundry.toml must use an environment variable
     /// (e.g., ${SEPOLIA_RPC_URL}) so that treb can override it for the fork.
+    #[command(group(
+        ArgGroup::new("enter_network")
+            .args(["network", "network_flag"])
+            .required(true)
+            .multiple(false)
+    ))]
     Enter {
         /// Network name or chain ID
-        #[arg(long)]
-        network: String,
+        #[arg(value_name = "NETWORK")]
+        network: Option<String>,
+        /// Network name or chain ID
+        #[arg(long = "network", value_name = "NETWORK")]
+        network_flag: Option<String>,
         /// Explicit RPC URL (overrides network)
-        #[arg(long)]
+        #[arg(long, visible_alias = "url")]
         rpc_url: Option<String>,
         /// Fork at a specific block number
         #[arg(long)]
@@ -286,7 +295,8 @@ impl Drop for FoundryShellGuard {
 
 pub async fn run(subcommand: ForkSubcommand) -> anyhow::Result<()> {
     match subcommand {
-        ForkSubcommand::Enter { network, rpc_url, fork_block_number, json } => {
+        ForkSubcommand::Enter { network, network_flag, rpc_url, fork_block_number, json } => {
+            let network = resolve_enter_network(network, network_flag)?;
             run_enter(network, rpc_url, fork_block_number, json).await
         }
         ForkSubcommand::Exit { network, all, json } => run_exit(network, all, json).await,
@@ -297,6 +307,23 @@ pub async fn run(subcommand: ForkSubcommand) -> anyhow::Result<()> {
         ForkSubcommand::Status { json } => run_status(json).await,
         ForkSubcommand::History { network, json } => run_history(network, json).await,
         ForkSubcommand::Diff { network, json } => run_diff(network, json).await,
+    }
+}
+
+fn resolve_enter_network(
+    positional_network: Option<String>,
+    flag_network: Option<String>,
+) -> anyhow::Result<String> {
+    match (positional_network, flag_network) {
+        (Some(_), Some(_)) => {
+            bail!(
+                "network specified twice; use either `fork enter <NETWORK>` or `fork enter --network <NETWORK>`"
+            )
+        }
+        (Some(network), None) | (None, Some(network)) => Ok(network),
+        (None, None) => bail!(
+            "missing network; pass `fork enter <NETWORK>` or `fork enter --network <NETWORK>`"
+        ),
     }
 }
 
@@ -1653,8 +1680,24 @@ mod tests {
     fn parse_enter_network_only() {
         let sub = parse_fork(&["enter", "--network", "mainnet"]).unwrap();
         match sub {
-            ForkSubcommand::Enter { network, rpc_url, fork_block_number, json } => {
-                assert_eq!(network, "mainnet");
+            ForkSubcommand::Enter { network, network_flag, rpc_url, fork_block_number, json } => {
+                assert!(network.is_none());
+                assert_eq!(network_flag.as_deref(), Some("mainnet"));
+                assert!(rpc_url.is_none());
+                assert!(fork_block_number.is_none());
+                assert!(!json);
+            }
+            _ => panic!("expected Enter"),
+        }
+    }
+
+    #[test]
+    fn parse_enter_network_positional() {
+        let sub = parse_fork(&["enter", "mainnet"]).unwrap();
+        match sub {
+            ForkSubcommand::Enter { network, network_flag, rpc_url, fork_block_number, json } => {
+                assert_eq!(network.as_deref(), Some("mainnet"));
+                assert!(network_flag.is_none());
                 assert!(rpc_url.is_none());
                 assert!(fork_block_number.is_none());
                 assert!(!json);
@@ -1677,14 +1720,43 @@ mod tests {
         ])
         .unwrap();
         match sub {
-            ForkSubcommand::Enter { network, rpc_url, fork_block_number, json } => {
-                assert_eq!(network, "mainnet");
+            ForkSubcommand::Enter { network, network_flag, rpc_url, fork_block_number, json } => {
+                assert!(network.is_none());
+                assert_eq!(network_flag.as_deref(), Some("mainnet"));
                 assert_eq!(rpc_url.as_deref(), Some("https://eth.example.com"));
                 assert_eq!(fork_block_number, Some(19_000_000));
                 assert!(json);
             }
             _ => panic!("expected Enter"),
         }
+    }
+
+    #[test]
+    fn parse_enter_url_alias() {
+        let sub = parse_fork(&["enter", "mainnet", "--url", "https://eth.example.com"]).unwrap();
+        match sub {
+            ForkSubcommand::Enter { network, network_flag, rpc_url, fork_block_number, json } => {
+                assert_eq!(network.as_deref(), Some("mainnet"));
+                assert!(network_flag.is_none());
+                assert_eq!(rpc_url.as_deref(), Some("https://eth.example.com"));
+                assert!(fork_block_number.is_none());
+                assert!(!json);
+            }
+            _ => panic!("expected Enter"),
+        }
+    }
+
+    #[test]
+    fn parse_enter_rejects_conflicting_network_forms() {
+        let err = parse_fork(&["enter", "sepolia", "--network", "mainnet"])
+            .expect_err("expected conflict");
+        assert!(err.to_string().contains("cannot be used with"));
+    }
+
+    #[test]
+    fn parse_enter_requires_network() {
+        let err = parse_fork(&["enter"]).expect_err("expected missing network");
+        assert!(err.to_string().contains("required arguments were not provided"));
     }
 
     #[test]
