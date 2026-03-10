@@ -82,5 +82,6 @@ cargo clippy --workspace --all-targets        # lint
 - **Store pattern**: Each registry store has PathBuf + HashMap + load/save with fs2 file lock + CRUD + sorted list
 - **Versioned store files**: Registry store JSON can be wrapped as `{"_format":"treb-v1","entries":...}`; use `read_versioned_file()` for backward-compatible reads and `write_versioned_file()` for locked atomic writes
 - **Deterministic store writes**: Map-backed registry stores should sort into a `BTreeMap` before `write_versioned_file()` so wrapped JSON remains stable for tests and diffs
+- **Fork state persistence**: `ForkStateStore` should serialize the `forks` map through a sorted persistence view before `write_versioned_file()`, but keep `history` in insertion order because newest entries are stored first
 - **Secondary index ordering**: When a persisted registry index stores `Vec<String>` ID lists inside maps, sort those vectors before saving or returning rebuilt data so lookup file round-trips stay deterministic
 - **Config ownership**: Only `treb-config` parses config files; other crates consume resolved config

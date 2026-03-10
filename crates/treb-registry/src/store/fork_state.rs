@@ -1,7 +1,7 @@
 //! Persistent store for fork-mode state and registry snapshot/restore.
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
 };
@@ -14,7 +14,7 @@ use treb_core::{
 use crate::{
     DEPLOYMENTS_FILE, FORK_STATE_FILE, GOVERNOR_PROPOSALS_FILE, LOOKUP_FILE, SAFE_TXS_FILE,
     TRANSACTIONS_FILE,
-    io::{read_json_file_or_default, with_file_lock, write_json_file},
+    io::{read_versioned_file, write_versioned_file},
 };
 
 /// Registry JSON files that are snapshotted/restored during fork mode.
@@ -23,6 +23,22 @@ const SNAPSHOT_FILES: &[&str] =
 
 /// Maximum number of history entries retained.
 const MAX_HISTORY: usize = 100;
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedForkState {
+    forks: BTreeMap<String, ForkEntry>,
+    history: Vec<ForkHistoryEntry>,
+}
+
+impl From<&ForkState> for PersistedForkState {
+    fn from(state: &ForkState) -> Self {
+        Self {
+            forks: state.forks.iter().map(|(key, entry)| (key.clone(), entry.clone())).collect(),
+            history: state.history.clone(),
+        }
+    }
+}
 
 fn active_fork_key(network: &str, instance_name: Option<&str>) -> String {
     match instance_name {
@@ -100,13 +116,14 @@ impl ForkStateStore {
 
     /// Load fork state from disk, replacing any in-memory data.
     pub fn load(&mut self) -> Result<(), TrebError> {
-        self.data = read_json_file_or_default(&self.path)?;
+        self.data = read_versioned_file(&self.path)?;
         Ok(())
     }
 
-    /// Atomically save fork state to disk under a file lock.
+    /// Atomically save fork state to disk under the versioned store wrapper.
     pub fn save(&self) -> Result<(), TrebError> {
-        with_file_lock(&self.path, || write_json_file(&self.path, &self.data))
+        let persisted = PersistedForkState::from(&self.data);
+        write_versioned_file(&self.path, &persisted)
     }
 
     /// Get the default active fork entry by network name.
@@ -257,7 +274,13 @@ mod tests {
     use super::*;
 
     use chrono::{TimeZone, Utc};
+    use serde_json::json;
     use tempfile::TempDir;
+
+    use crate::{
+        STORE_FORMAT,
+        io::{VersionedStore, read_json_file, write_json_file},
+    };
 
     fn sample_fork_entry(network: &str) -> ForkEntry {
         let ts = Utc.with_ymd_and_hms(2026, 3, 3, 12, 0, 0).unwrap();
@@ -603,5 +626,90 @@ mod tests {
             assert_eq!(store.data().history.len(), 1);
             assert_eq!(store.data().history[0].action, "enter");
         }
+    }
+
+    #[test]
+    fn load_reads_legacy_bare_state() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(FORK_STATE_FILE);
+        let mut state = ForkState::default();
+        state.forks.insert("mainnet".into(), sample_fork_entry("mainnet"));
+        state.history.push(sample_history_entry("enter", "mainnet"));
+
+        write_json_file(&path, &state).unwrap();
+
+        let mut store = ForkStateStore::new(dir.path());
+        store.load().unwrap();
+
+        assert_eq!(store.data(), &state);
+    }
+
+    #[test]
+    fn load_reads_wrapped_format() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(FORK_STATE_FILE);
+        let mut state = ForkState::default();
+        state.forks.insert("mainnet".into(), sample_fork_entry("mainnet"));
+        state.history.push(sample_history_entry("enter", "mainnet"));
+
+        write_json_file(&path, &VersionedStore::new(state.clone())).unwrap();
+
+        let mut store = ForkStateStore::new(dir.path());
+        store.load().unwrap();
+
+        assert_eq!(store.data(), &state);
+    }
+
+    #[test]
+    fn save_writes_wrapped_format() {
+        let dir = TempDir::new().unwrap();
+        let mut store = ForkStateStore::new(dir.path());
+
+        store.insert_active_fork(sample_fork_entry("mainnet")).unwrap();
+        store.add_history(sample_history_entry("enter", "mainnet")).unwrap();
+
+        let saved: serde_json::Value = read_json_file(&dir.path().join(FORK_STATE_FILE)).unwrap();
+        assert_eq!(saved["_format"], STORE_FORMAT);
+        assert!(saved["entries"]["forks"].get("mainnet").is_some());
+        assert_eq!(saved["entries"]["history"][0]["action"], "enter");
+    }
+
+    #[test]
+    fn snapshot_and_restore_preserve_wrapped_registry_files() {
+        let reg_dir = TempDir::new().unwrap();
+        let snap_dir = TempDir::new().unwrap();
+        let deployments_path = reg_dir.path().join(DEPLOYMENTS_FILE);
+
+        let wrapped = json!({
+            "_format": STORE_FORMAT,
+            "entries": {
+                "dep-1": {
+                    "wrapped": true
+                }
+            }
+        });
+        write_json_file(&deployments_path, &wrapped).unwrap();
+
+        snapshot_registry(reg_dir.path(), snap_dir.path()).unwrap();
+        let snap_value: serde_json::Value =
+            read_json_file(&snap_dir.path().join(DEPLOYMENTS_FILE)).unwrap();
+        assert_eq!(snap_value, wrapped);
+
+        write_json_file(
+            &deployments_path,
+            &json!({
+                "_format": STORE_FORMAT,
+                "entries": {
+                    "dep-2": {
+                        "wrapped": false
+                    }
+                }
+            }),
+        )
+        .unwrap();
+
+        restore_registry(snap_dir.path(), reg_dir.path()).unwrap();
+        let restored: serde_json::Value = read_json_file(&deployments_path).unwrap();
+        assert_eq!(restored, wrapped);
     }
 }

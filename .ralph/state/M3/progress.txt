@@ -2,6 +2,7 @@
 ## Codebase Patterns
 - Registry store files should use `read_versioned_file()` for backward-compatible reads and `write_versioned_file()` for locked atomic writes to the `{"_format":"treb-v1","entries":...}` wrapper format.
 - Map-backed registry stores should sort entries into a `BTreeMap` before `write_versioned_file()` so wrapped JSON stays deterministic for tests and diffs.
+- `ForkStateStore` should persist through a sorted wrapper view of `forks` while keeping the `history` vector order intact, so `fork.json` remains deterministic without changing recency semantics.
 - Secondary-index stores that persist `Vec<String>` ID lists should sort those vectors before saving or returning rebuilt data, otherwise hash-map iteration can make the JSON output nondeterministic.
 - Registry-only changes should be validated with `cargo check -p treb-registry` and `cargo test -p treb-registry` before running broader workspace checks.
 
@@ -50,4 +51,13 @@ Started: Tue Mar 10 09:50:03 AM CET 2026
   - Transaction-family store migration follows the same mechanical pattern as deployments: `read_versioned_file()` on load, `write_versioned_file()` on save, and no extra `with_file_lock()` wrapper.
   - Bare fixture files can remain the source of truth for transaction and safe-transaction tests; assert against wrapped saved output instead of rewriting the fixtures.
   - Registry integration expectations can remain mixed during the migration, but each store file’s assertion must flip to the wrapped `{"_format":"treb-v1","entries":...}` shape as soon as that store migrates.
+---
+## 2026-03-10 11:14:44 CET - P1-US-005
+- Updated `ForkStateStore` to load through `read_versioned_file()` and save through `write_versioned_file()`, persisting `forks` through a sorted wrapper view so wrapped `fork.json` stays deterministic.
+- Added fork-state tests covering legacy bare-state loads, wrapped-format loads, wrapped-on-save output, and snapshot/restore preservation for wrapped registry files; added reusable fork-state persistence guidance to `CLAUDE.md`.
+- Files changed: `crates/treb-registry/src/store/fork_state.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - `ForkStateStore` can read wrapped files directly into `ForkState`, but saving should go through a separate serializable view so `forks` can be sorted without changing the runtime `HashMap`.
+  - Fork history order is meaningful; keep the `history` vector in recency order even while normalizing the persisted `forks` map.
+  - `snapshot_registry()` and `restore_registry()` are format-agnostic byte copies, so wrapped-file coverage can use lightweight `serde_json::Value` fixtures instead of full typed store payloads.
 ---
