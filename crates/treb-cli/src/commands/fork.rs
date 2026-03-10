@@ -169,6 +169,22 @@ struct ForkRestartJson {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ForkStatusJson {
+    network: String,
+    rpc_url: String,
+    port: u16,
+    chain_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fork_block_number: Option<u64>,
+    started_at: chrono::DateTime<Utc>,
+    uptime: String,
+    snapshot_count: usize,
+    deployment_count: usize,
+    status: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ForkDiffResultJson {
     has_changes: bool,
     modified_deployments: Vec<ForkDiffEntryJson>,
@@ -895,18 +911,18 @@ pub async fn run_status(json: bool) -> anyhow::Result<()> {
             let running = network_is_running(runtime).await;
             let uptime = format_uptime(now - started_at);
             let deployment_count = count_fork_deployments_for_chain(&deployments, chain_id);
-            statuses.push(serde_json::json!({
-                "network":         network,
-                "rpcUrl":          rpc_url,
-                "port":            port,
-                "chainId":         chain_id,
-                "forkBlockNumber": session.fork_block_number,
-                "startedAt":       started_at,
-                "uptime":          uptime,
-                "snapshotCount":   snapshot_count,
-                "deploymentCount": deployment_count,
-                "status":          if running { "running" } else { "stopped" },
-            }));
+            statuses.push(ForkStatusJson {
+                network: network.clone(),
+                rpc_url: rpc_url.to_string(),
+                port,
+                chain_id,
+                fork_block_number: session.fork_block_number,
+                started_at,
+                uptime,
+                snapshot_count,
+                deployment_count,
+                status: if running { "running" } else { "stopped" }.to_string(),
+            });
         }
         output::print_json(&statuses)?;
         return Ok(());

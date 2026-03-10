@@ -10,6 +10,7 @@ use anyhow::{Context, bail};
 use chrono::Utc;
 use clap::Subcommand;
 use owo_colors::{OwoColorize, Style};
+use serde::Serialize;
 use tokio::net::TcpStream;
 use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
 use treb_forge::{anvil::AnvilConfig, createx::deploy_createx};
@@ -18,6 +19,21 @@ use treb_registry::ForkStateStore;
 use crate::ui::{color, emoji};
 
 const TREB_DIR: &str = ".treb";
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AnvilStatusJson {
+    instance_name: String,
+    network: String,
+    rpc_url: String,
+    port: u16,
+    chain_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fork_block_number: Option<u64>,
+    started_at: chrono::DateTime<Utc>,
+    uptime: String,
+    status: String,
+}
 
 /// Apply a color style when color is enabled, plain text otherwise.
 fn styled(text: &str, style: Style) -> String {
@@ -540,17 +556,17 @@ pub async fn run_anvil_status(
         for entry in &forks {
             let running = is_port_reachable(entry.port).await;
             let uptime = format_uptime(now - entry.started_at);
-            statuses.push(serde_json::json!({
-                "instanceName":   entry.resolved_instance_name(),
-                "network":         entry.network,
-                "rpcUrl":          entry.rpc_url,
-                "port":            entry.port,
-                "chainId":         entry.chain_id,
-                "forkBlockNumber": entry.fork_block_number,
-                "startedAt":       entry.started_at,
-                "uptime":          uptime,
-                "status":          if running { "running" } else { "stopped" },
-            }));
+            statuses.push(AnvilStatusJson {
+                instance_name: entry.resolved_instance_name().to_string(),
+                network: entry.network.clone(),
+                rpc_url: entry.rpc_url.clone(),
+                port: entry.port,
+                chain_id: entry.chain_id,
+                fork_block_number: entry.fork_block_number,
+                started_at: entry.started_at,
+                uptime,
+                status: if running { "running" } else { "stopped" }.to_string(),
+            });
         }
         crate::output::print_json(&statuses)?;
         return Ok(());

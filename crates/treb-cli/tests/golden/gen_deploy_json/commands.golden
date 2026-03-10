@@ -3,6 +3,5 @@
   "code": "// SPDX-License-Identifier: UNLICENSED\npragma solidity ^0.8.0;\n\nimport {Script, console} from \"forge-std/Script.sol\";\nimport { Counter } from \"../src/Counter.sol\";\n\ncontract DeployCounter is Script {\n    function run() public {\n        vm.startBroadcast();\n\n        // TODO: Set constructor arguments\n        uint256 initialCount = 0; // TODO: replace placeholder\n        address _owner = address(0); // TODO: replace placeholder\n\n        Counter deployed = new Counter(initialCount, _owner);\n\n        console.log(\"Counter deployed at:\", address(deployed));\n\n        vm.stopBroadcast();\n    }\n}\n",
   "contractName": "Counter",
   "outputPath": "script/DeployCounter.s.sol",
-  "proxy": null,
   "strategy": "create"
 }
