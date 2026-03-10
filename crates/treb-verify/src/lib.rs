@@ -104,7 +104,7 @@ pub fn format_verify_command(args: &VerifyArgs) -> String {
         vec!["forge".to_string(), "verify-contract".to_string(), args.address.to_string()];
 
     if let Some(contract) = &args.contract {
-        push_flag_value(&mut command, "--contract", contract.to_string());
+        command.push(contract.to_string());
     }
     if let Some(constructor_args) =
         args.constructor_args.as_deref().filter(|value| !value.is_empty())
@@ -126,8 +126,8 @@ pub fn format_verify_command(args: &VerifyArgs) -> String {
     if let Some(root) = &args.root {
         push_flag_value(&mut command, "--root", root.display().to_string());
     }
-    if let Some(api_key) = &args.etherscan.key {
-        push_flag_value(&mut command, "--etherscan-api-key", api_key.as_str());
+    if args.etherscan.key.is_some() {
+        push_redacted_flag(&mut command, "--etherscan-api-key");
     }
     if let Some(chain) = args.etherscan.chain {
         push_flag_value(&mut command, "--chain", chain.to_string());
@@ -138,8 +138,8 @@ pub fn format_verify_command(args: &VerifyArgs) -> String {
     push_flag_value(&mut command, "--retries", args.retry.retries.to_string());
     push_flag_value(&mut command, "--delay", args.retry.delay.to_string());
     push_flag_value(&mut command, "--verifier", args.verifier.verifier.to_string());
-    if let Some(api_key) = &args.verifier.verifier_api_key {
-        push_flag_value(&mut command, "--verifier-api-key", api_key.as_str());
+    if args.verifier.verifier_api_key.is_some() {
+        push_redacted_flag(&mut command, "--verifier-api-key");
     }
     if let Some(verifier_url) = &args.verifier.verifier_url {
         push_flag_value(&mut command, "--verifier-url", verifier_url.as_str());
@@ -183,6 +183,10 @@ fn parse_contract_path_override(contract_path: &str, default_contract_name: &str
 fn push_flag_value(command: &mut Vec<String>, flag: &str, value: impl Into<String>) {
     command.push(flag.to_string());
     command.push(value.into());
+}
+
+fn push_redacted_flag(command: &mut Vec<String>, flag: &str) {
+    push_flag_value(command, flag, "REDACTED");
 }
 
 fn shell_join(args: &[String]) -> String {
@@ -494,20 +498,25 @@ mod tests {
         let args = build_verify_args(&d, &opts).unwrap();
         let command = format_verify_command(&args);
 
-        assert!(command.starts_with(&format!("forge verify-contract {}", args.address)));
-        assert!(command.contains("--contract './src/My Counter.sol:Counter'"));
+        assert!(command.starts_with(&format!(
+            "forge verify-contract {} './src/My Counter.sol:Counter'",
+            args.address
+        )));
+        assert!(!command.contains("--contract"));
         assert!(command.contains("--compiler-version 0.8.24"));
         assert!(command.contains("--force"));
         assert!(command.contains("--skip-is-verified-check"));
         assert!(command.contains("--watch"));
         assert!(command.contains("--root /tmp/test-project"));
-        assert!(command.contains("--etherscan-api-key etherscan-key"));
+        assert!(command.contains("--etherscan-api-key REDACTED"));
+        assert!(!command.contains("etherscan-key"));
         assert!(command.contains("--chain"));
         assert!(command.contains("--rpc-url https://rpc.example.com"));
         assert!(command.contains("--retries 10"));
         assert!(command.contains("--delay 15"));
         assert!(command.contains("--verifier blockscout"));
-        assert!(command.contains("--verifier-api-key my-api-key"));
+        assert!(command.contains("--verifier-api-key REDACTED"));
+        assert!(!command.contains("my-api-key"));
         assert!(command.contains("--verifier-url https://example.com/api"));
     }
 
