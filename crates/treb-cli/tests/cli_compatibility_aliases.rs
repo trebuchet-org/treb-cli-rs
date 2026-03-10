@@ -1,5 +1,7 @@
 //! Focused compatibility coverage for renamed CLI commands and shorthand forms.
 
+mod helpers;
+
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::{fs, path::Path};
@@ -38,6 +40,12 @@ fn setup_config_project() -> tempfile::TempDir {
     let tmp = tempfile::tempdir().unwrap();
     fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
     treb().arg("init").current_dir(tmp.path()).assert().success();
+    tmp
+}
+
+fn setup_seeded_config_project() -> tempfile::TempDir {
+    let tmp = setup_config_project();
+    helpers::seed_registry(tmp.path());
     tmp
 }
 
@@ -110,4 +118,25 @@ fn bare_config_matches_config_show() {
 #[test]
 fn compatibility_suite_still_exposes_completion_output_shape() {
     treb().args(["completion", "bash"]).assert().success().stdout(predicate::str::contains("treb"));
+}
+
+#[test]
+fn list_short_flags_match_long_filter_output() {
+    let tmp = setup_seeded_config_project();
+
+    let long = treb()
+        .args(["list", "--json", "--network", "1", "--namespace", "mainnet"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("run long-form list filters");
+    let short = treb()
+        .args(["list", "--json", "-n", "1", "-s", "mainnet"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("run short-form list filters");
+
+    assert!(long.status.success(), "long-form list filters should succeed");
+    assert!(short.status.success(), "short-form list filters should succeed");
+    assert_eq!(long.stdout, short.stdout, "short-form list filters should match long-form stdout");
+    assert_eq!(long.stderr, short.stderr, "short-form list filters should match long-form stderr");
 }

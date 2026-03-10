@@ -1,0 +1,48 @@
+=== cmd 0: [list --help] ===
+List deployments from registry
+
+List all deployments from the registry.
+
+The list can be filtered by namespace, chain ID, contract name, label, or deployment type.
+
+In fork mode, deployments added during the fork are marked with [fork].
+
+Usage: treb list [OPTIONS]
+
+Options:
+  -n, --network <NETWORK>
+          Network name or chain ID
+
+      --no-color
+          Disable colored output (also respected via NO_COLOR env var)
+
+      --non-interactive
+          Skip interactive prompts (also enabled via TREB_NON_INTERACTIVE=1, CI=true, or non-TTY
+          stdin/stdout)
+
+  -s, --namespace <NAMESPACE>
+          Deployment namespace
+
+      --type <TYPE>
+          Filter by deployment type (SINGLETON, PROXY, LIBRARY)
+
+      --tag <TAG>
+          Filter by tag
+
+      --contract <CONTRACT>
+          Filter by contract name
+
+      --label <LABEL>
+          Filter by deployment label
+
+      --fork
+          Show only fork deployments (namespace starts with fork/)
+
+      --no-fork
+          Hide fork deployments
+
+      --json
+          Output as JSON
+
+  -h, --help
+          Print help (see a summary with '-h')

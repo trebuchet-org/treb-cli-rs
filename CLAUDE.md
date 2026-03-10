@@ -46,7 +46,7 @@ treb — deployment orchestration CLI for Foundry projects. Rust workspace with 
 
 **Global clap flags**: When hoisting a flag to `Cli` in `crates/treb-cli/src/main.rs`, mirror it in `crates/treb-cli/build.rs` and refresh the affected `tests/golden/help_*` snapshots; clap will surface the global option in root help and subcommand help, not just on the original command.
 
-**CLI alias compatibility coverage**: When a rename keeps backward-compatible spellings or shorthand forms, add or extend `crates/treb-cli/tests/cli_compatibility_aliases.rs` with byte-for-byte stdout comparisons across the canonical and legacy invocations. Keep the feature-specific suites for richer behavior, but pin alias parity in one focused binary-level test file.
+**CLI alias compatibility coverage**: When a rename keeps backward-compatible spellings or shorthand forms, add or extend `crates/treb-cli/tests/cli_compatibility_aliases.rs` with byte-for-byte stdout comparisons across the canonical and legacy invocations. For registry-backed commands, seed a temp config project and compare raw stdout/stderr there instead of relying only on parser tests. Keep the feature-specific suites for richer behavior, but pin alias parity in one focused binary-level test file.
 
 **Test framework** (`crates/treb-cli/tests/framework/`):
 - `TrebRunner` — subprocess CLI execution

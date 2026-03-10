@@ -83,7 +83,7 @@
         "New compatibility test: `-n`/`-s` short flags produce same output as long forms on `list`"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]

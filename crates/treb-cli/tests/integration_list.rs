@@ -68,6 +68,21 @@ fn list_ls_alias() {
     run_integration_test(&test, &ctx);
 }
 
+/// Global `--non-interactive` should be accepted before `list`.
+#[test]
+fn list_global_non_interactive() {
+    let ctx = TestContext::new("project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("list_global_non_interactive")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))
+        .test(&["--non-interactive", "list"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
 /// Filter by namespace returns only matching deployments.
 #[test]
 fn list_filter_namespace() {
