@@ -382,10 +382,16 @@ pub async fn run_anvil_stop(network: Option<String>, name: Option<String>) -> an
     if removed.is_empty() {
         if network.is_some() && name.is_none() && targets.is_empty() {
             let net = network.as_deref().unwrap_or_default();
-            println!("Network '{net}' has no tracked Anvil instance; nothing to remove.");
+            println!(
+                "{}",
+                styled(
+                    &format!("Network '{net}' has no tracked Anvil instance; nothing to remove."),
+                    color::YELLOW,
+                )
+            );
             return Ok(());
         }
-        println!("No stale fork state entries found.");
+        println!("{}", styled("No stale fork state entries found.", color::YELLOW));
     } else {
         for (_net, instance_name) in &removed {
             println!(
