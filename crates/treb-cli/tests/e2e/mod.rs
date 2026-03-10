@@ -285,8 +285,14 @@ pub fn read_registry_file(project_root: &Path, filename: &str) -> serde_json::Va
     let path = project_root.join(".treb").join(filename);
     let data = fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
-    serde_json::from_str(&data)
-        .unwrap_or_else(|e| panic!("invalid JSON in {}: {e}", path.display()))
+    let value: serde_json::Value = serde_json::from_str(&data)
+        .unwrap_or_else(|e| panic!("invalid JSON in {}: {e}", path.display()));
+
+    value
+        .as_object()
+        .and_then(|object| object.get("entries").filter(|_| object.contains_key("_format")))
+        .cloned()
+        .unwrap_or(value)
 }
 
 /// Read `.treb/deployments.json` and return the parsed map.

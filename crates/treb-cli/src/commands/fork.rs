@@ -23,8 +23,8 @@ use treb_forge::{
     sender::resolve_all_senders,
 };
 use treb_registry::{
-    DEPLOYMENTS_FILE, ForkStateStore, TRANSACTIONS_FILE, remove_snapshot, restore_registry,
-    snapshot_registry,
+    DEPLOYMENTS_FILE, ForkStateStore, TRANSACTIONS_FILE, read_versioned_file, remove_snapshot,
+    restore_registry, snapshot_registry,
 };
 
 use crate::output;
@@ -1578,11 +1578,12 @@ async fn is_port_reachable(port: u16) -> bool {
     TcpStream::connect(&addr).await.is_ok()
 }
 
-/// Load a JSON file as an object map.  Returns `None` if the file is missing or not an object.
+/// Load a JSON object map, accepting both wrapped and legacy bare JSON store files.
+///
+/// Returns `None` if the file is missing or cannot be parsed as an object map.
 fn load_json_map(path: &Path) -> Option<serde_json::Map<String, serde_json::Value>> {
-    let content = std::fs::read_to_string(path).ok()?;
-    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
-    value.as_object().cloned()
+    path.exists().then_some(())?;
+    read_versioned_file(path).ok()
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────

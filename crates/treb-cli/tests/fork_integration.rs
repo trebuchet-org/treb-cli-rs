@@ -14,7 +14,9 @@ use std::{
 use tempfile::TempDir;
 use treb_config::{LocalConfig, save_local_config};
 use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
-use treb_registry::{DEPLOYMENTS_FILE, FORK_STATE_FILE, ForkStateStore, TRANSACTIONS_FILE};
+use treb_registry::{
+    DEPLOYMENTS_FILE, FORK_STATE_FILE, ForkStateStore, TRANSACTIONS_FILE, write_versioned_file,
+};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -28,6 +30,12 @@ fn make_project() -> (TempDir, PathBuf) {
     let treb_dir = root.path().join(".treb");
     fs::create_dir_all(&treb_dir).unwrap();
     (root, treb_dir)
+}
+
+fn write_wrapped_map(path: &Path, json: &str) {
+    let entries: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(json).expect("wrapped store entries must be a JSON object");
+    write_versioned_file(path, &entries).unwrap();
 }
 
 /// Build a minimal `ForkEntry` suitable for unit-testing fork state operations.
@@ -116,6 +124,48 @@ fn fork_status_json_outputs_valid_json() {
     assert_eq!(arr[0]["network"], "mainnet");
     assert_eq!(arr[0]["port"], 9999);
     assert_eq!(arr[0]["chainId"], 1);
+}
+
+/// `treb fork status --json` should count deployments from wrapped
+/// `deployments.json` entries rather than the store wrapper keys.
+#[test]
+fn fork_status_counts_wrapped_deployments() {
+    let (root, treb_dir) = make_project();
+
+    let mut entry = sample_entry(&treb_dir, "mainnet");
+    entry.chain_id = 1;
+
+    write_wrapped_map(
+        &treb_dir.join(DEPLOYMENTS_FILE),
+        r#"{
+            "fork/1/Counter:default": {"address": "0xaaaa"},
+            "fork/1/Token:default": {"address": "0xbbbb"},
+            "default/1/Ignored:default": {"address": "0xcccc"}
+        }"#,
+    );
+
+    let mut store = ForkStateStore::new(&treb_dir);
+    store.insert_active_fork(entry).unwrap();
+
+    let output = treb()
+        .args(["fork", "status", "--json"])
+        .current_dir(root.path())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output).expect("fork status --json must emit valid JSON");
+    let statuses = parsed.as_array().expect("fork status --json must emit a JSON array");
+
+    assert_eq!(statuses.len(), 1, "one fork entry should be present");
+    assert_eq!(
+        statuses[0]["deploymentCount"].as_u64(),
+        Some(2),
+        "deploymentCount should reflect wrapped fork deployments for the active chain"
+    );
 }
 
 /// `treb fork status` should fall back to the stored upstream fork URL when no
@@ -292,6 +342,74 @@ fn fork_diff_removed_only_human_output_stays_clean() {
         .stdout(predicate::str::contains("New Deployments").not())
         .stdout(predicate::str::contains("Modified Deployments").not())
         .stdout(predicate::str::contains("New Transactions").not());
+}
+
+/// `treb fork diff --json` should diff wrapped `deployments.json` contents
+/// rather than the `_format` and `entries` wrapper keys.
+#[test]
+fn fork_diff_json_reads_wrapped_deployments() {
+    let (root, treb_dir) = make_project();
+
+    let network = "testnet";
+    let snapshot_dir = treb_dir.join("snapshots").join(network);
+    fs::create_dir_all(&snapshot_dir).unwrap();
+
+    write_wrapped_map(
+        &snapshot_dir.join(DEPLOYMENTS_FILE),
+        r#"{
+            "fork/31337/Counter:default": {
+                "address": "0xaaaa",
+                "contractName": "Counter",
+                "type": "script"
+            }
+        }"#,
+    );
+    write_wrapped_map(
+        &treb_dir.join(DEPLOYMENTS_FILE),
+        r#"{
+            "fork/31337/Counter:default": {
+                "address": "0xaaaa",
+                "contractName": "Counter",
+                "type": "script"
+            },
+            "fork/31337/Token:default": {
+                "address": "0xbbbb",
+                "contractName": "Token",
+                "type": "script"
+            }
+        }"#,
+    );
+
+    let tx_json = r#"{"tx_1":{"hash":"0x111"}}"#;
+    fs::write(snapshot_dir.join(TRANSACTIONS_FILE), tx_json).unwrap();
+    fs::write(treb_dir.join(TRANSACTIONS_FILE), tx_json).unwrap();
+
+    let mut store = ForkStateStore::new(&treb_dir);
+    store.insert_active_fork(sample_entry(&treb_dir, network)).unwrap();
+
+    let output = treb()
+        .args(["fork", "diff", "--network", network, "--json"])
+        .current_dir(root.path())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output).expect("fork diff --json must emit valid JSON");
+    let new_deployments =
+        parsed["newDeployments"].as_array().expect("newDeployments must be an array");
+
+    assert_eq!(new_deployments.len(), 1, "exactly one wrapped deployment should be added");
+    assert_eq!(new_deployments[0]["id"], "fork/31337/Token:default");
+    assert_eq!(new_deployments[0]["contractName"], "Token");
+    assert_eq!(new_deployments[0]["changeType"], "added");
+    assert_eq!(
+        parsed["modifiedDeployments"].as_array().map(Vec::len),
+        Some(0),
+        "wrapped store keys should not appear as modified deployments"
+    );
 }
 
 // ── fork exit restores registry ───────────────────────────────────────────────
