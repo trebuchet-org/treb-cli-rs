@@ -667,22 +667,11 @@ pub async fn run_anvil_logs(
         );
     }
 
-    // Print Go-matching header: cyan bold clipboard emoji + instance name + optional follow hint.
-    let follow_hint = if follow { " (Ctrl+C to exit)" } else { "" };
-    println!(
-        "{} {}",
-        styled(emoji::CLIPBOARD, color::STAGE),
-        styled(
-            &format!("Showing anvil '{instance_name}' logs{follow_hint}:"),
-            color::STAGE,
-        ),
-    );
+    // Print Go-matching header for both `logs` and `logs --follow`.
     let display_path = human_display_path(&cwd, &log_path);
-    println!(
-        "   {} {}",
-        styled("Log file:", color::GRAY),
-        styled(&display_path.display().to_string(), color::GRAY),
-    );
+    let (header_line, log_file_line) = anvil_logs_header_lines(&instance_name, display_path);
+    println!("{} {}", styled(emoji::CLIPBOARD, color::STAGE), styled(&header_line, color::STAGE),);
+    println!("{}", styled(&log_file_line, color::GRAY));
     println!();
 
     if follow {
@@ -693,6 +682,13 @@ pub async fn run_anvil_logs(
         print!("{contents}");
         Ok(())
     }
+}
+
+fn anvil_logs_header_lines(instance_name: &str, display_path: &Path) -> (String, String) {
+    (
+        format!("Showing anvil '{instance_name}' logs (Ctrl+C to exit):"),
+        format!("Log file: {}", display_path.display()),
+    )
 }
 
 /// Resolve the log file path for an instance, checking fork state first then falling
@@ -1463,6 +1459,15 @@ mod tests {
     #[test]
     fn resolve_instance_name_explicit_overrides_network() {
         assert_eq!(resolve_instance_name(Some("my-node"), Some("mainnet")), "my-node");
+    }
+
+    #[test]
+    fn anvil_logs_header_lines_match_go_format() {
+        let (header, log_file) =
+            anvil_logs_header_lines("mainnet", Path::new(".treb/anvil-mainnet.log"));
+
+        assert_eq!(header, "Showing anvil 'mainnet' logs (Ctrl+C to exit):");
+        assert_eq!(log_file, "Log file: .treb/anvil-mainnet.log");
     }
 
     // ── pid/log file path tests ──────────────────────────────────────────

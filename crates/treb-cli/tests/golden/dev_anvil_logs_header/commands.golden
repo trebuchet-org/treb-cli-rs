@@ -1,0 +1,6 @@
+=== cmd 0: [dev anvil logs --network mainnet] ===
+📋 Showing anvil 'mainnet' logs (Ctrl+C to exit):
+Log file: .treb/anvil-mainnet.log
+
+first log line
+second log line

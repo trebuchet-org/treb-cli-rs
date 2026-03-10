@@ -6,6 +6,7 @@
 mod framework;
 
 use chrono::{TimeZone, Utc};
+use std::fs;
 use treb_core::types::fork::ForkEntry;
 use treb_registry::ForkStateStore;
 
@@ -47,6 +48,13 @@ fn seed_anvil_status(project_root: &std::path::Path) {
     let treb_dir = project_root.join(".treb");
     let mut store = ForkStateStore::new(&treb_dir);
     store.insert_active_fork(sample_anvil_entry(&treb_dir)).unwrap();
+}
+
+/// Pre-populate fork state with one tracked Anvil instance and a sample log file.
+fn seed_anvil_logs(project_root: &std::path::Path) {
+    let treb_dir = project_root.join(".treb");
+    seed_anvil_status(project_root);
+    fs::write(treb_dir.join("anvil-mainnet.log"), "first log line\nsecond log line\n").unwrap();
 }
 
 // ── dev anvil status: no instances ──────────────────────────────────────
@@ -100,6 +108,24 @@ fn dev_anvil_status_json() {
         .test(&["dev", "anvil", "status", "--json"])
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(UptimeNormalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+// ── dev anvil logs ───────────────────────────────────────────────────────
+
+/// `treb dev anvil logs` should print the same Go-format header as follow mode
+/// and render the log-file line without extra indentation.
+#[test]
+fn dev_anvil_logs_header() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("dev_anvil_logs_header")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_anvil_logs(ctx.path()))
+        .test(&["dev", "anvil", "logs", "--network", "mainnet"])
+        .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
 }
