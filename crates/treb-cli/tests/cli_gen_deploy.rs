@@ -327,7 +327,9 @@ fn gen_deploy_human_success_block_is_printed_to_stdout() {
     let tmp = setup_project();
 
     let output = treb()
+        .env("NO_COLOR", "1")
         .args([
+            "--no-color",
             "gen-deploy",
             "Counter",
             "--proxy",
@@ -345,7 +347,8 @@ fn gen_deploy_human_success_block_is_printed_to_stdout() {
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert!(
-        stdout.starts_with("\n✅ Generated deployment script: script/DeployCounter_uups.s.sol\n")
+        stdout.starts_with("\n✅ Generated deployment script: script/DeployCounter_uups.s.sol\n"),
+        "stdout should start with success message;\nstdout:\n{stdout}"
     );
     assert!(
         stdout.contains("This script will deploy both the implementation and proxy contracts.")
@@ -369,7 +372,9 @@ fn gen_deploy_library_guidance_matches_strategy() {
     let tmp = setup_project();
 
     let create_output = treb()
+        .env("NO_COLOR", "1")
         .args([
+            "--no-color",
             "gen-deploy",
             "MathLib",
             "--strategy",
@@ -386,13 +391,16 @@ fn gen_deploy_library_guidance_matches_strategy() {
     let create_stdout = String::from_utf8_lossy(&create_output.stdout);
     assert!(
         create_stdout
-            .starts_with("\n✅ Generated deployment script: script/DeployMathLib_create.s.sol\n")
+            .starts_with("\n✅ Generated deployment script: script/DeployMathLib_create.s.sol\n"),
+        "stdout should start with success message;\nstdout:\n{create_stdout}"
     );
     assert!(!create_stdout.contains("CREATE2 for deterministic addresses."));
     assert!(!create_stdout.contains("CREATE3 for deterministic addresses."));
 
     let create2_output = treb()
+        .env("NO_COLOR", "1")
         .args([
+            "--no-color",
             "gen-deploy",
             "MathLib",
             "--strategy",
@@ -413,7 +421,9 @@ fn gen_deploy_library_guidance_matches_strategy() {
     );
 
     let create3_output = treb()
+        .env("NO_COLOR", "1")
         .args([
+            "--no-color",
             "gen-deploy",
             "MathLib",
             "--strategy",
