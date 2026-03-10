@@ -1,5 +1,4 @@
 === cmd 0: [migrate config --yes] ===
-Backup written to: <PROJECT_ROOT>/treb.toml.bak-<UNIX_TIME>
 ✓ treb.toml written successfully
 
 Next steps:
@@ -7,6 +6,5 @@ Next steps:
   2. Remove [profile.*.treb.*] sections from foundry.toml
   3. Run `treb config show` to verify your config is loaded correctly
 🔍 Detecting config format...
-🔄 Converting v1 config to v2...
-Warning: treb.toml already exists and will be overwritten.
-💾 Creating backup...
+Warning: No treb.toml found — migrating senders from foundry.toml (deprecated location).
+🔄 Converting foundry.toml senders to v2 config...

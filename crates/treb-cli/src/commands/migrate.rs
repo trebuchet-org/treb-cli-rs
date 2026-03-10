@@ -109,13 +109,8 @@ async fn run_config(
             }
 
             if !json {
-                eprintln!(
-                    "{}",
-                    output::format_warning_banner(
-                        "\u{26a0}\u{fe0f}",
-                        "No treb.toml found \u{2014} migrating senders from foundry.toml (deprecated location)."
-                    )
-                );
+                let warning = "Warning: No treb.toml found \u{2014} migrating senders from foundry.toml (deprecated location).";
+                eprintln!("{}", styled(warning, color::WARNING));
                 output::print_stage("\u{1f504}", "Converting foundry.toml senders to v2 config...");
             }
 

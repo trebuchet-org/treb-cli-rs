@@ -1,0 +1,11 @@
+[accounts.deployer]
+type = "private_key"
+address = "0xDeployerAddr"
+
+[namespace.default]
+profile = "default"
+
+[namespace.default.senders]
+deployer = "deployer"
+
+[fork]
