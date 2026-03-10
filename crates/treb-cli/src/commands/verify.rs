@@ -264,6 +264,7 @@ pub async fn run(
     retries: u32,
     delay: u64,
     json: bool,
+    non_interactive: bool,
 ) -> anyhow::Result<()> {
     // Validate all verifier values.
     for v in verifiers {
@@ -305,6 +306,7 @@ pub async fn run(
             retries,
             delay,
             json,
+            non_interactive,
             &cwd,
         )
         .await;
@@ -319,7 +321,7 @@ pub async fn run(
         Some(q) => q,
         None => {
             let deployments: Vec<_> = registry.list_deployments().into_iter().cloned().collect();
-            fuzzy_select_deployment_id(&deployments)
+            fuzzy_select_deployment_id(&deployments, non_interactive)
                 .map_err(|e| anyhow::anyhow!("{e}"))?
                 .ok_or_else(|| anyhow::anyhow!("no deployment selected"))?
         }
@@ -533,6 +535,7 @@ async fn run_batch(
     retries: u32,
     delay: u64,
     json: bool,
+    non_interactive: bool,
     cwd: &std::path::Path,
 ) -> anyhow::Result<()> {
     let mut registry = Registry::open(cwd).context("failed to open registry")?;
@@ -567,10 +570,14 @@ async fn run_batch(
     // Interactive selection is only available when the shared non-interactive
     // mode checks say prompts are safe to render; otherwise verify all
     // candidates.
-    let candidate_ids: Vec<String> = if is_non_interactive(false) {
+    let candidate_ids: Vec<String> = if is_non_interactive(non_interactive) {
         candidate_deployments.iter().map(|d| d.id.clone()).collect()
     } else {
-        multiselect_deployments(&candidate_deployments, "Select deployments to verify")
+        multiselect_deployments(
+            &candidate_deployments,
+            "Select deployments to verify",
+            non_interactive,
+        )
             .map_err(|e| anyhow::anyhow!("{e}"))?
             .into_iter()
             .map(|d| d.id.clone())

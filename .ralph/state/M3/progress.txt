@@ -1,6 +1,7 @@
 # Ralph Progress Log
 ## Codebase Patterns
 - When a clap flag becomes global in `crates/treb-cli/src/main.rs`, mirror it in `crates/treb-cli/build.rs` and refresh the affected `tests/golden/help_*` snapshots because the option propagates into root and subcommand help.
+- When a command relies on `ui::selector` or destructive prompt-skipping logic, pass `Cli.non_interactive` all the way down; `is_non_interactive(false)` only honors env/TTY fallbacks and silently ignores the parsed global flag.
 
 Started: Tue Mar 10 05:21:40 PM CET 2026
 ---
@@ -15,4 +16,16 @@ Started: Tue Mar 10 05:21:40 PM CET 2026
   - `cargo test -p treb-cli` includes extensive golden and e2e coverage; even parser-only CLI changes should expect snapshot churn before the full package test run goes green.
   - Useful context (e.g., "the evaluation panel is in component X")
   - Parser acceptance for root/global flags is covered cleanly in `crates/treb-cli/src/main.rs` unit tests via `parse_cli_from(...)`, which exercises the same normalized clap entry point used by `main()`.
+---
+## 2026-03-10 20:08:33 CET - P5-US-002
+- Wired the global `non_interactive` flag through `show`, `tag`, `verify`, `prune`, and `reset`, updated shared selector helpers to accept the parsed flag, and made `run` pass the same value into network selection so interactive helpers consistently respect the global clap flag.
+- Files changed: `crates/treb-cli/src/main.rs`, `crates/treb-cli/src/commands/show.rs`, `crates/treb-cli/src/commands/tag.rs`, `crates/treb-cli/src/commands/verify.rs`, `crates/treb-cli/src/commands/prune.rs`, `crates/treb-cli/src/commands/reset.rs`, `crates/treb-cli/src/commands/run.rs`, `crates/treb-cli/src/ui/selector.rs`, `crates/treb-cli/tests/integration_prune.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+  - Shared UI helpers like `ui::selector::*` are intentionally generic and do not see clap state unless the command passes `non_interactive` explicitly.
+  - Destructive commands (`prune`, `reset`) and selection-based commands (`show`, `tag`, `verify`) each own their non-interactive branching, so global flag regressions need both command-level wiring and helper-level plumbing.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+  - Searching for `is_non_interactive(false)` only catches direct detector calls; commands that route through selector helpers can still ignore the global flag until those helper signatures are updated too.
+  - Useful context (e.g., "the evaluation panel is in component X")
+  - `crates/treb-cli/tests/integration_prune.rs` is a good fit for end-to-end confirmation-skipping coverage because it seeds a small registry and asserts both stdout and post-run registry state.
 ---

@@ -125,16 +125,16 @@ fn networks_resolves_dotenv_rpc_urls() {
         .pre_setup_hook({
             let rpc_url = rpc_url.clone();
             move |ctx| {
-            std::fs::write(
-                ctx.path().join("foundry.toml"),
-                r#"[profile.default]
+                std::fs::write(
+                    ctx.path().join("foundry.toml"),
+                    r#"[profile.default]
 src = "src"
 
 [rpc_endpoints]
 test = "${TEST_RPC_URL}"
 "#,
-            )
-            .unwrap();
+                )
+                .unwrap();
                 std::fs::write(ctx.path().join(".env"), format!("TEST_RPC_URL={rpc_url}\n"))
                     .unwrap();
             }

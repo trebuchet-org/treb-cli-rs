@@ -62,6 +62,18 @@ Store files to update:
 **User stories:** 7
 **Dependencies:** none
 
+**Learnings from implementation:**
+- Store migration is mechanical: swap to `read_versioned_file()` on load, `write_versioned_file()` on save, and remove any extra `with_file_lock()` wrapper — `write_versioned_file()` owns the lock internally.
+- Versioned I/O helpers live in `crates/treb-registry/src/io.rs` (`VersionedStore<T>`, `read_versioned_file()`, `write_versioned_file()`). New stores (e.g., addressbook in Phase 9) should use these directly.
+- Deterministic store output requires two things: (1) sort map keys into `BTreeMap` before writing, and (2) for secondary indexes with `Vec<String>` values, sort those vectors too — hash-map iteration order causes nondeterministic JSON otherwise.
+- `ForkStateStore` uses a separate serializable persistence view to sort `forks` while preserving `history` in recency order — the runtime `HashMap` is never mutated for persistence.
+- `seed_registry()` in `crates/treb-cli/tests/helpers/mod.rs` intentionally writes legacy bare-map fixtures so that mutating CLI tests verify the automatic upgrade to wrapped `{"_format":"treb-v1","entries":...}` format. Do not "fix" these fixtures.
+- Removing a Clap subcommand requires updating both the command enum in `commands/*` and any helper matchers in `main.rs` (e.g., JSON-mode flag detection), or the workspace won't compile.
+- The CLI integration test framework has a default `.treb/` artifact list (`framework/cleanup.rs`, `framework/integration_test.rs`) — when store files are added or removed, this list must be updated or unrelated golden tests break.
+- Registry-only changes validate fastest with `cargo check -p treb-registry` + `cargo test -p treb-registry` before running wider workspace checks.
+- Golden migrate test coverage now belongs only to `migrate config`; command-removal behavior is better tested with direct `assert_cmd` assertions than golden snapshots.
+- **Superseded by Phase 2:** The `{"_format":"treb-v1","entries":...}` wrapper was removed from the write path in favor of bare JSON for Go compatibility. `write_versioned_file()` now writes bare maps. The read path still accepts the legacy wrapper.
+
 ---
 
 ## Phase 2 -- Go Registry Coexistence Verification
@@ -89,6 +101,23 @@ With `registry.json` no longer blocking, verify that all store files (`deploymen
 **User stories:** 5
 **Dependencies:** Phase 1
 
+**Notes from Phase 1:**
+- `registry.json` is now fully ignored by Rust code — Go coexistence for that file is already solved. Focus testing on the actual store files (`deployments.json`, `transactions.json`, `safe-txs.json`, etc.).
+- Rust store files now write the `{"_format":"treb-v1","entries":...}` wrapper. Go does not write this wrapper. Verify Go CLI can still read Rust-written wrapped files (Go should ignore unknown top-level keys or treat the file as unparseable — test both directions).
+- `seed_registry()` writes bare-map fixtures, which is the same format Go produces. Use this for Go-compatibility test baselines.
+- The `.treb/` artifact list in the test framework was updated in Phase 1 to exclude `registry.json` — no further changes needed there for Phase 2.
+
+**Learnings from implementation:**
+- **Write path changed to bare JSON**: `write_versioned_file()` now writes bare `map[string]T` JSON instead of the `{"_format":"treb-v1","entries":...}` wrapper. This was necessary because Go cannot read the wrapped format. The `read_versioned_file()` and `read_versioned_file_compat()` functions still accept the legacy wrapper for backward compatibility with older Rust-written files.
+- Go-compat fixtures live in `crates/treb-registry/tests/fixtures/go-compat/` as bare JSON maps sourced from `~/projects/mento-deployments-v2/.treb/`. Current fixture set: 13 deployments, 10 transactions, 8 safe transactions.
+- The live Go fixture data does not include populated deployment tags or `executedAt` on safe transactions — those edge cases are covered via augmented entries and the existing `crates/treb-core/tests/fixtures/deployments_map.json`.
+- `chrono::DateTime<Utc>` serialization normalizes offset timestamps (e.g., `+02:00`) to `Z` suffix without changing the instant. Round-trip tests must compare parsed `DateTime<Utc>` values or instant equivalence, never literal RFC3339 strings.
+- Recursive JSON key-set comparison is the reliable assertion style for proving Rust writes preserve the Go JSON tag schema, while still allowing value updates.
+- Serde model types must NOT use `#[serde(deny_unknown_fields)]` — a regression test in `go_compat_deserialize.rs` scans source files to enforce this, ensuring forward compatibility with any Go fields Rust does not yet model.
+- CLI integration tests can seed Go-created registry data using `seed_go_compat_registry()` from `crates/treb-cli/tests/helpers/mod.rs`, which copies fixtures into `.treb/` and rebuilds `lookup.json`.
+- When the write format changes, persisted artifact goldens under `crates/treb-cli/tests/golden/` will break — normalize those snapshots alongside the format change, not as separate follow-up work.
+- `seed_registry()` now writes the legacy bare `deployments_map.json` fixture; use a mutating CLI command (e.g., `tag --add`) to verify that the write path produces Go-compatible bare JSON output.
+
 ---
 
 ## Phase 3 -- Environment Variable Resolution and Config Display
@@ -115,6 +144,16 @@ The Rust CLI fails to resolve `${VAR}` patterns in foundry.toml RPC endpoints, c
 
 **User stories:** 6
 **Dependencies:** none
+
+**Learnings from implementation:**
+- `foundry_config::Config::load_with_root()` preserves raw `${VAR}` text in RPC endpoint strings — treb must call `expand_env_vars()` after loading the config, not before. The expansion happens inside `treb_config::rpc_endpoints()`.
+- `extract_treb_senders_from_foundry()` parses raw TOML custom sections into `SenderConfig`, so env var expansion must run _after_ deserialization — reuse `trebfile::expand_sender_config_env_vars()` to stay aligned with `treb.toml` sender handling.
+- CLI commands that bypass `treb_config::resolve_config()` and call `load_foundry_config()` directly (e.g., `networks`) must call `treb_config::load_dotenv(project_root)` first, otherwise `.env`-backed RPC and sender values stay unresolved. This is a recurring pattern — any new command that reads `foundry.toml` directly needs the same treatment.
+- `config show` sender output uses Go-style plain aligned rows (not `comfy_table`), sorted by role. The formatter is a standalone function with unit tests in `commands/config.rs`.
+- A lightweight loopback JSON-RPC server (binds port 0, responds to `eth_chainId`) is enough for `networks` golden tests — no Anvil dependency needed. Combine with an `extra_normalizer` that rewrites `http://127.0.0.1:<port>` to keep golden files deterministic.
+- `output::print_json()` sorts object keys deterministically; golden snapshot expectations for `--json` output must match that sorted key order.
+- Dotenv-backed integration tests work by overwriting fixture `treb.toml` and `.env` in a `pre_setup_hook`; `treb_config::resolve_config()` already loads `.env` / `.env.local`, so process env injection is unnecessary and should be avoided.
+- The `project` fixture can be repurposed for config env-resolution coverage by overwriting `treb.toml` in a `pre_setup_hook` before `treb init`.
 
 ---
 
@@ -146,6 +185,14 @@ Align command names, subcommand structure, and aliases with the Go CLI to ensure
 
 **User stories:** 6
 **Dependencies:** none
+
+**Notes from Phase 1:**
+- When restructuring Clap commands (e.g., `gen-deploy` → `gen deploy`), update both the command enum definition and all match arms in `main.rs` that reference it (JSON-mode detection, non-interactive detection, etc.) — partial updates cause compile failures.
+- Golden test coverage for removed/renamed commands should use direct `assert_cmd` assertions rather than golden snapshots (learned from `migrate registry` removal).
+
+**Notes from Phase 3:**
+- Phase 3 changed `config show` sender rendering in `commands/config.rs` to inline aligned rows. When adding `config` default-to-`show` behavior, the output format is already Go-aligned — no further rendering changes needed.
+- Several `config show` golden snapshots were refreshed in Phase 3 (`config_show_default`, `config_set_show_round_trip`, `config_remove_show_round_trip`, `config_show_resolves_dotenv_sender_address`). Account for these when updating golden files for help text changes.
 
 ---
 
@@ -202,6 +249,10 @@ The Go CLI's `show`, `list`, and `tag` commands have filtering/scoping flags tha
 
 **User stories:** 5
 **Dependencies:** Phase 2 (registry must be loadable with Go data)
+
+**Notes from Phase 2:**
+- Go-compat test infrastructure is available: use `seed_go_compat_registry()` from `crates/treb-cli/tests/helpers/mod.rs` to seed `.treb/` with Go-created fixture data for testing new query flags against realistic registry content.
+- The `cli_go_registry_compat.rs` test file demonstrates the pattern for verifying CLI commands against Go-created data — follow the same approach for new flag tests.
 
 ---
 
@@ -290,6 +341,20 @@ Implement the `addressbook` command that is entirely missing from the Rust CLI. 
 **User stories:** 7
 **Dependencies:** Phase 1 (store patterns), Phase 3 (network resolution)
 
+**Notes from Phase 1:**
+- The new addressbook store should follow the established store pattern: `read_versioned_file()` on load, `write_versioned_file()` on save, `BTreeMap` sorting before persistence. See `crates/treb-registry/src/io.rs` for the helpers and any existing store (e.g., `store/deployments.rs`) for the pattern.
+- Register the new store module in `store/mod.rs` and expose through `registry.rs` facade, following the same wiring as other stores.
+
+**Notes from Phase 2 (supersedes Phase 1 wrapper advice):**
+- `write_versioned_file()` now writes **bare JSON**, not the `{"_format":"treb-v1","entries":...}` wrapper. The addressbook store should write bare `map[string]T` JSON for Go compatibility. The read path still accepts both bare and legacy wrapped format.
+- If Go also writes `addressbook.json`, use the same Go-compat fixture pattern: copy a production slice into `crates/treb-registry/tests/fixtures/go-compat/` and add store-load + round-trip tests in `go_compat_deserialize.rs`.
+- Do NOT use `#[serde(deny_unknown_fields)]` on addressbook types — the existing regression test in `go_compat_deserialize.rs` enforces this across all registry/core model sources.
+
+**Notes from Phase 3:**
+- If the `addressbook` command resolves network/chain from config (for scoping entries), it goes through `treb_config::resolve_config()` which already loads `.env` / `.env.local` — no extra dotenv call needed. But if it reads `foundry.toml` directly (e.g., for chain ID lookup), call `treb_config::load_dotenv(cwd)` first.
+- Human output should use inline aligned columns (matching the Go-style `NAME  ADDRESS` format) — follow the same pattern as the `config show` sender renderer in `commands/config.rs`, not `comfy_table`.
+- Integration tests covering chain-scoped addressbook entries can reuse the `pre_setup_hook` pattern to overwrite `.env` with a test chain ID, same as the `config_show_resolves_dotenv_sender_address` golden test.
+
 ---
 
 ## Phase 10 -- Register and Sync Flag Alignment
@@ -313,6 +378,14 @@ Minor flag differences on `register` and `sync` that affect production workflows
 
 **User stories:** 4
 **Dependencies:** Phase 2 (registry coexistence), Phase 3 (config resolution)
+
+**Notes from Phase 2:**
+- Go-compat test infrastructure is available: `seed_go_compat_registry()` seeds `.treb/` with Go-created fixture data. Use this to verify `register` and `sync` against realistic Go-originated registry content.
+- Registry write path now produces bare JSON — `register` and `sync` mutations will output Go-readable files without any wrapper.
+
+**Notes from Phase 3:**
+- `register` already had a unit test that was updated in Phase 3 to match `${VAR}` expansion semantics when env vars are unset (empty-string expansion). If `register` derives network from config, ensure `load_dotenv()` runs before `load_foundry_config()` so `.env`-backed RPC endpoints resolve correctly — follow the same pattern applied to `networks` in Phase 3.
+- `sync` likely reads foundry.toml for network resolution. If it bypasses `resolve_config()`, it needs the explicit `load_dotenv(cwd)` → `load_foundry_config()` sequence established in Phase 3.
 
 ---
 

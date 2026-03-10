@@ -28,7 +28,11 @@ struct VerificationDisplay<'a> {
     verified_at: Option<&'a chrono::DateTime<chrono::Utc>>,
 }
 
-pub async fn run(deployment_query: Option<String>, json: bool) -> anyhow::Result<()> {
+pub async fn run(
+    deployment_query: Option<String>,
+    json: bool,
+    non_interactive: bool,
+) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
 
     if !cwd.join("foundry.toml").exists() {
@@ -55,7 +59,7 @@ pub async fn run(deployment_query: Option<String>, json: bool) -> anyhow::Result
         Some(q) => q,
         None => {
             let deployments: Vec<_> = registry.list_deployments().into_iter().cloned().collect();
-            fuzzy_select_deployment_id(&deployments)
+            fuzzy_select_deployment_id(&deployments, non_interactive)
                 .map_err(|e| anyhow::anyhow!("{e}"))?
                 .ok_or_else(|| anyhow::anyhow!("no deployment selected"))?
         }

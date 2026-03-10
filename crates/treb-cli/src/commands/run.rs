@@ -318,7 +318,9 @@ pub async fn run(
             .map_err(|e| anyhow::anyhow!("failed to load foundry config: {e}"))?;
         let mut names: Vec<String> = endpoints.keys().cloned().collect();
         names.sort();
-        fuzzy_select_network(&names).map_err(|e| anyhow::anyhow!("{e}"))?.map(|s| s.to_string())
+        fuzzy_select_network(&names, non_interactive)
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .map(|s| s.to_string())
     } else {
         network
     };

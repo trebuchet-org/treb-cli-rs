@@ -837,7 +837,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             )
             .await?
         }
-        Commands::Show { deployment, json } => commands::show::run(deployment, json).await?,
+        Commands::Show { deployment, json } => {
+            commands::show::run(deployment, json, non_interactive).await?
+        }
         Commands::Init { force } => commands::init::run(force).await?,
         Commands::Config { subcommand } => match subcommand {
             ConfigSubcommand::Show { json } => commands::config::show(json).await?,
@@ -887,11 +889,12 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 retries,
                 delay,
                 json,
+                non_interactive,
             )
             .await?
         }
         Commands::Tag { deployment, add, remove, json } => {
-            commands::tag::run(deployment, add, remove, json).await?
+            commands::tag::run(deployment, add, remove, json, non_interactive).await?
         }
         Commands::Register {
             tx_hash,
@@ -969,8 +972,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             )
             .await?
         }
-        Commands::Prune(args) => commands::prune::run(args).await?,
-        Commands::Reset(args) => commands::reset::run(args).await?,
+        Commands::Prune(args) => commands::prune::run(args, non_interactive).await?,
+        Commands::Reset(args) => commands::reset::run(args, non_interactive).await?,
         Commands::Migrate { subcommand } => commands::migrate::run(subcommand).await?,
         Commands::Fork { subcommand } => commands::fork::run(subcommand).await?,
         Commands::Dev { subcommand } => commands::dev::run(subcommand).await?,

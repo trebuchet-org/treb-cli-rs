@@ -77,7 +77,7 @@ pub struct ResetArgs {
 // ── run ───────────────────────────────────────────────────────────────────────
 
 /// Entry point for `treb reset`.
-pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
+pub async fn run(args: ResetArgs, non_interactive: bool) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
 
     if !cwd.join("foundry.toml").exists() {
@@ -237,7 +237,7 @@ pub async fn run(args: ResetArgs) -> anyhow::Result<()> {
     }
 
     // Confirm.
-    let skip_confirmation = args.yes || crate::ui::interactive::is_non_interactive(false);
+    let skip_confirmation = args.yes || crate::ui::interactive::is_non_interactive(non_interactive);
     if skip_confirmation {
         if !args.json {
             println!("Running in non-interactive mode. Proceeding with reset...");
