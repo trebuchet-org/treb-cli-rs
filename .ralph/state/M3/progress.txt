@@ -2,6 +2,7 @@
 ## Codebase Patterns
 - When a clap flag becomes global in `crates/treb-cli/src/main.rs`, mirror it in `crates/treb-cli/build.rs` and refresh the affected `tests/golden/help_*` snapshots because the option propagates into root and subcommand help.
 - When a command relies on `ui::selector` or destructive prompt-skipping logic, pass `Cli.non_interactive` all the way down; `is_non_interactive(false)` only honors env/TTY fallbacks and silently ignores the parsed global flag.
+- `crates/treb-cli/src/ui/interactive.rs` treats `TREB_NON_INTERACTIVE=1|true` as opt-in, while `CI` remains a separate `true`-only switch; keep those env semantics distinct when refactoring prompt detection.
 
 Started: Tue Mar 10 05:21:40 PM CET 2026
 ---
@@ -28,4 +29,15 @@ Started: Tue Mar 10 05:21:40 PM CET 2026
   - Searching for `is_non_interactive(false)` only catches direct detector calls; commands that route through selector helpers can still ignore the global flag until those helper signatures are updated too.
   - Useful context (e.g., "the evaluation panel is in component X")
   - `crates/treb-cli/tests/integration_prune.rs` is a good fit for end-to-end confirmation-skipping coverage because it seeds a small registry and asserts both stdout and post-run registry state.
+---
+## 2026-03-10 20:37:25 CET - P5-US-003
+- Implemented `TREB_NON_INTERACTIVE=1` support in the shared non-interactive detector while preserving case-insensitive `true` handling and rejecting `0`/`false`.
+- Files changed: `crates/treb-cli/src/ui/interactive.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+  - The env parsing contract for prompt suppression lives in `crates/treb-cli/src/ui/interactive.rs`; focused unit tests there are the fastest way to pin accepted truthy and falsey values without touching command-level coverage.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+  - `TREB_NON_INTERACTIVE` and `CI` do not share identical truth tables: only the former accepts `"1"`, while both env vars stay case-insensitive for `"true"`.
+  - Useful context (e.g., "the evaluation panel is in component X")
+  - `cargo test -p treb-cli` already exercises `integration_non_interactive.rs`, so a detector-only change still gets end-to-end regression coverage even when the story only requires unit-test updates.
 ---
