@@ -96,3 +96,4 @@ cargo clippy --workspace --all-targets        # lint
 - **Secondary index ordering**: When a persisted registry index stores `Vec<String>` ID lists inside maps, sort those vectors before saving or returning rebuilt data so lookup file round-trips stay deterministic
 - **Registry metadata file**: Rust registry code should not create or read `.treb/registry.json`; that filename is reserved for Go/Solidity registry data, so tests should assert only on actual store files plus `config.local.json`
 - **Config ownership**: Only `treb-config` parses config files; other crates consume resolved config
+- **Env var expansion reuse**: When `foundry.toml` or `treb.toml` strings need `${VAR}` resolution, reuse `treb_config::expand_env_vars()` instead of duplicating expansion logic so unset vars and mixed literals behave consistently

@@ -1,91 +1,99 @@
 {
   "project": "treb-cli-rs",
-  "branchName": "feat/M3-P02-go-registry-coexistence-verification",
-  "description": "Verify that the Rust CLI's registry stores are fully compatible with the Go CLI's registry format, enabling both CLIs to operate on the same .treb/ directory without data corruption. Fix the write path to output bare JSON maps instead of the wrapped format that breaks Go's json.Unmarshal.",
+  "branchName": "feat/M3-P03-environment-variable-resolution-and-config-display",
+  "description": "Add ${VAR} expansion to foundry.toml RPC endpoints and sender configs, wire .env loading into the networks command, and update config show to display resolved sender addresses in an inline format matching the Go CLI.",
   "userStories": [
     {
-      "id": "P2-US-001",
-      "title": "Create Go Registry Test Fixtures from Production Data",
-      "description": "As a developer, I want representative Go-created registry fixtures in the Rust test suite so that I can verify cross-CLI compatibility against real production data.",
+      "id": "P3-US-001",
+      "title": "Add ${VAR} Expansion to foundry.toml RPC Endpoints",
+      "description": "As a developer, I want ${VAR} patterns in foundry.toml [rpc_endpoints] to be expanded from environment variables so that the networks command can resolve chain IDs for endpoints defined with env var URLs.",
       "acceptanceCriteria": [
-        "crates/treb-registry/tests/fixtures/go-compat/deployments.json exists with 10-15 representative Go-created deployment entries",
-        "crates/treb-registry/tests/fixtures/go-compat/transactions.json exists with 10-15 representative Go-created transaction entries",
-        "crates/treb-registry/tests/fixtures/go-compat/safe-txs.json exists with 5-10 representative Go-created safe transaction entries",
-        "All fixtures are bare JSON maps (no _format wrapper), matching Go output format",
-        "Fixtures cover: SINGLETON, PROXY, LIBRARY types; CREATE, CREATE2, CREATE3 methods; null vs populated tags; null vs populated proxyInfo; present vs absent safeContext; present vs absent executedAt; timezone-offset timestamps",
-        "cargo check -p treb-registry passes"
+        "rpc_endpoints() returns resolved URLs when env vars are set (e.g., ${MAINNET_RPC_URL} becomes the actual URL)",
+        "Unset env vars expand to empty string (matching existing expand_env_vars() behavior)",
+        "URLs without ${VAR} patterns pass through unchanged",
+        "Reuses the existing expand_env_vars() function from trebfile.rs (no duplicate implementation)",
+        "Unit tests: RPC URL with ${VAR} expands correctly; URL without vars is unchanged; mixed URL with partial vars expands correctly",
+        "cargo test -p treb-config passes"
       ],
       "priority": 1,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "P2-US-002",
-      "title": "Verify and Fix Rust Deserialization of Go-Created Store Files",
-      "description": "As a developer, I want unit tests that load each Go-compat fixture file into the corresponding Rust store and verify all entries deserialize without errors, so that I can catch and fix any field mismatches.",
+      "id": "P3-US-002",
+      "title": "Add ${VAR} Expansion to foundry.toml Sender and Etherscan Configs",
+      "description": "As a developer, I want ${VAR} patterns in foundry.toml [profile.*.treb.senders.*] fields to be expanded so that config show displays resolved sender addresses instead of raw ${VAR} placeholders.",
       "acceptanceCriteria": [
-        "Test go_compat_deployments_deserialize loads all entries from Go fixture without errors",
-        "Test go_compat_transactions_deserialize loads all entries from Go fixture without errors",
-        "Test go_compat_safe_txs_deserialize loads all entries from Go fixture without errors",
-        "Tests verify entry count matches expected fixture size",
-        "Tests spot-check at least 2 entries per file for correct field values (address, chainId, status, etc.)",
-        "Timezone-offset timestamps (e.g. 2026-03-09T18:05:36.422290725+01:00) parse correctly",
-        "cargo test -p treb-registry passes",
-        "cargo clippy -p treb-registry passes"
+        "Sender configs extracted from foundry.toml have ${VAR} patterns expanded in all string fields (address, private_key, safe, signer, derivation_path, governor, timelock, proposer)",
+        "Unit test: foundry.toml with address = \"${MY_ADDR}\" resolves to the env var value",
+        "Unit test: foundry.toml without env vars is unchanged",
+        "Existing tests continue to pass (they use literal values, no env vars)",
+        "cargo test -p treb-config passes"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P2-US-003",
-      "title": "Fix Rust Write Path for Go-Compatible Output",
-      "description": "As a developer, I want write_versioned_file() to output bare JSON maps instead of the _format/entries wrapper so that files written by the Rust CLI remain readable by the Go CLI.",
+      "id": "P3-US-003",
+      "title": "Wire .env Loading into the networks Command",
+      "description": "As a developer, I want the networks command to load .env/.env.local files before parsing foundry.toml so that env vars defined only in .env files are available for RPC URL expansion.",
       "acceptanceCriteria": [
-        "write_versioned_file() writes bare JSON maps (sorted BTreeMap, 2-space indent, trailing newline) with no _format or entries wrapper",
-        "read_versioned_file() still reads both wrapped format (backward compat) and bare format",
-        "File locking behavior unchanged — write_versioned_file() still acquires exclusive lock",
-        "Store round-trip test: write via write_versioned_file(), read back via read_versioned_file(), data matches",
-        "Backward compat test: files with {\"_format\":\"treb-v1\",\"entries\":{...}} written by earlier Rust versions still load correctly",
-        "cargo test -p treb-registry passes",
-        "cargo clippy -p treb-registry passes"
+        "treb networks resolves chain IDs for networks whose RPC URLs use ${VAR} when the var is defined in .env",
+        "The has_unresolved_env_vars() check no longer triggers for URLs that have been expanded",
+        "URLs that remain unresolved (env var not in .env and not in environment) still show unresolved env var status",
+        "Integration test: project with .env containing TEST_RPC_URL=http://localhost:8545 and foundry.toml with test = \"${TEST_RPC_URL}\" — networks shows resolved URL",
+        "cargo test -p treb-cli passes"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P2-US-004",
-      "title": "Verify Round-Trip Compatibility and Document Field Gaps",
-      "description": "As a developer, I want to verify the full round-trip (load Go fixtures, modify via Rust, save, verify Go-parseable output) and document any field gaps between Go and Rust representations.",
+      "id": "P3-US-004",
+      "title": "Update config show to Display Resolved Sender Addresses with Inline Format",
+      "description": "As a developer, I want config show to display senders as inline aligned rows (role, type, address) instead of a comfy_table box so that the output matches the Go CLI format.",
       "acceptanceCriteria": [
-        "Test go_compat_deployments_round_trip: load Go fixture, modify, save, verify bare JSON output with all expected keys and no extra keys",
-        "Test go_compat_transactions_round_trip: same pattern",
-        "Test go_compat_safe_txs_round_trip: same pattern",
-        "Output JSON keys match Go JSON tags exactly (verified by comparing key sets)",
-        "No Rust type uses #[serde(deny_unknown_fields)]",
-        "Any compatibility gaps are documented in code comments on the relevant type definitions",
-        "cargo test -p treb-registry passes",
-        "cargo clippy -p treb-registry passes"
+        "Senders display as aligned inline text, one per line, with role, type, and address columns",
+        "Format: <role>  <type>  <address> with reasonable column alignment (widest role name + 2 spaces padding)",
+        "Empty address fields display as empty (no placeholder text)",
+        "Output is sorted alphabetically by role name (existing behavior preserved)",
+        "JSON output (config show --json) is unchanged",
+        "cargo test -p treb-cli passes"
       ],
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P2-US-005",
-      "title": "CLI Integration Tests with Go Registry Data",
-      "description": "As a developer, I want CLI integration tests that verify list, show, and tag commands work correctly against Go-created registry data end-to-end.",
+      "id": "P3-US-005",
+      "title": "Update networks --json to Include Resolved Chain IDs",
+      "description": "As a developer, I want networks --json to include chainId fields for resolved endpoints so that programmatic consumers can access chain ID data.",
       "acceptanceCriteria": [
-        "Integration test: list against Go registry data shows correct deployment count and names",
-        "Integration test: show <id> against Go registry data displays correct deployment details",
-        "Integration test: tag --add core <id> modifies a Go-created deployment and the resulting deployments.json is still a bare JSON map (Go-compatible)",
-        "Lookup index (.treb/lookup.json) is correctly built from Go-created deployments",
-        "All integration tests pass with cargo test -p treb-cli",
-        "cargo clippy --workspace --all-targets passes"
+        "networks --json includes \"chainId\": <number> for resolved endpoints",
+        "networks --json omits chainId for unresolved endpoints (existing behavior)",
+        "networks text output shows Chain ID: <number> for resolved endpoints",
+        "Golden test files updated to reflect new output format",
+        "All golden tests pass with cargo test -p treb-cli"
       ],
       "priority": 5,
-      "passes": true,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P3-US-006",
+      "title": "Update config show Golden Tests and Add Integration Test with Env Var Resolution",
+      "description": "As a developer, I want config show golden tests updated for the inline sender format and an integration test verifying end-to-end env var resolution so that the new format and env var behavior are fully validated.",
+      "acceptanceCriteria": [
+        "All config show golden tests reflect inline sender format",
+        "JSON golden tests are unchanged",
+        "Integration test seeds a .env file with TEST_ADDR=0x1234..., treb.toml with address = \"${TEST_ADDR}\", runs config show, and verifies the address appears in output",
+        "UPDATE_GOLDEN=1 cargo test -p treb-cli updates all affected golden files",
+        "cargo test -p treb-cli passes",
+        "cargo clippy --workspace --all-targets passes"
+      ],
+      "priority": 6,
+      "passes": false,
       "notes": ""
     }
   ]

@@ -8,7 +8,7 @@ use std::{collections::HashMap, path::Path};
 
 use treb_core::error::{Result, TrebError};
 
-use crate::SenderConfig;
+use crate::{SenderConfig, expand_env_vars};
 
 /// Load foundry configuration from the given project root.
 ///
@@ -65,12 +65,12 @@ pub fn extract_treb_senders_from_foundry(
 
 /// Extract RPC endpoint URLs from a loaded foundry config.
 ///
-/// Returns a map of endpoint alias to URL string. Environment variable
-/// references (e.g., `${API_KEY}`) are returned as-is without resolution.
+/// Returns a map of endpoint alias to URL string with `${VAR}` environment
+/// references expanded via [`crate::expand_env_vars`].
 pub fn rpc_endpoints(config: &foundry_config::Config) -> HashMap<String, String> {
     let mut endpoints = HashMap::new();
     for (name, endpoint) in config.rpc_endpoints.iter() {
-        endpoints.insert(name.clone(), endpoint.endpoint.to_string());
+        endpoints.insert(name.clone(), expand_env_vars(&endpoint.endpoint.to_string()));
     }
     endpoints
 }
@@ -202,5 +202,97 @@ sepolia = "https://sepolia.example.com"
         let eps = rpc_endpoints(&config);
         assert_eq!(eps.get("mainnet").unwrap(), "https://eth-mainnet.example.com");
         assert_eq!(eps.get("sepolia").unwrap(), "https://sepolia.example.com");
+    }
+
+    #[test]
+    fn rpc_endpoints_expand_env_var_urls() {
+        let tmp = TempDir::new().unwrap();
+        write_foundry_toml(
+            tmp.path(),
+            r#"
+[profile.default]
+src = "src"
+
+[rpc_endpoints]
+mainnet = "${TREB_TEST_MAINNET_RPC_URL_P3_US_001}"
+"#,
+        );
+        unsafe {
+            std::env::set_var(
+                "TREB_TEST_MAINNET_RPC_URL_P3_US_001",
+                "https://eth-mainnet.example.com",
+            )
+        };
+
+        let config = load_foundry_config(tmp.path()).unwrap();
+        let eps = rpc_endpoints(&config);
+
+        assert_eq!(eps.get("mainnet").unwrap(), "https://eth-mainnet.example.com");
+
+        unsafe { std::env::remove_var("TREB_TEST_MAINNET_RPC_URL_P3_US_001") };
+    }
+
+    #[test]
+    fn rpc_endpoints_leave_literal_urls_unchanged() {
+        let tmp = TempDir::new().unwrap();
+        write_foundry_toml(
+            tmp.path(),
+            r#"
+[profile.default]
+src = "src"
+
+[rpc_endpoints]
+sepolia = "https://sepolia.example.com"
+"#,
+        );
+
+        let config = load_foundry_config(tmp.path()).unwrap();
+        let eps = rpc_endpoints(&config);
+
+        assert_eq!(eps.get("sepolia").unwrap(), "https://sepolia.example.com");
+    }
+
+    #[test]
+    fn rpc_endpoints_expand_mixed_urls() {
+        let tmp = TempDir::new().unwrap();
+        write_foundry_toml(
+            tmp.path(),
+            r#"
+[profile.default]
+src = "src"
+
+[rpc_endpoints]
+alchemy = "https://eth-mainnet.g.alchemy.com/v2/${TREB_TEST_ALCHEMY_KEY_P3_US_001}"
+"#,
+        );
+        unsafe { std::env::set_var("TREB_TEST_ALCHEMY_KEY_P3_US_001", "secret-key") };
+
+        let config = load_foundry_config(tmp.path()).unwrap();
+        let eps = rpc_endpoints(&config);
+
+        assert_eq!(eps.get("alchemy").unwrap(), "https://eth-mainnet.g.alchemy.com/v2/secret-key");
+
+        unsafe { std::env::remove_var("TREB_TEST_ALCHEMY_KEY_P3_US_001") };
+    }
+
+    #[test]
+    fn rpc_endpoints_expand_unset_env_vars_to_empty_string() {
+        let tmp = TempDir::new().unwrap();
+        write_foundry_toml(
+            tmp.path(),
+            r#"
+[profile.default]
+src = "src"
+
+[rpc_endpoints]
+local = "http://localhost/${TREB_TEST_UNSET_RPC_SEGMENT_P3_US_001}"
+"#,
+        );
+        unsafe { std::env::remove_var("TREB_TEST_UNSET_RPC_SEGMENT_P3_US_001") };
+
+        let config = load_foundry_config(tmp.path()).unwrap();
+        let eps = rpc_endpoints(&config);
+
+        assert_eq!(eps.get("local").unwrap(), "http://localhost/");
     }
 }
