@@ -42,6 +42,8 @@ treb — deployment orchestration CLI for Foundry projects. Rust workspace with 
 
 **Golden command renames**: When a CLI command spelling changes, update both the invoking test cases in `crates/treb-cli/tests/integration_*.rs` and the matching `tests/golden/*/commands.golden` headers; the golden harness snapshots the argv list verbatim.
 
+**CLI help snapshots**: Help coverage lives in `crates/treb-cli/tests/integration_help.rs`. Root `treb --help` output is custom-built in `build_grouped_help()`, while subcommand `--help` text still comes from clap, so command-tree changes often need both root and subcommand help snapshots refreshed.
+
 **Test framework** (`crates/treb-cli/tests/framework/`):
 - `TrebRunner` — subprocess CLI execution
 - `TestContext` — high-level harness with anvil + workdir

@@ -5,6 +5,7 @@ Started: Tue Mar 10 03:36:50 PM CET 2026
 - When renaming a CLI command that has golden coverage, update both the `crates/treb-cli/tests/integration_*.rs` command argv and the matching `crates/treb-cli/tests/golden/*/commands.golden` header, because the harness snapshots the invoked argv verbatim.
 - For spelling-only CLI renames that need backward compatibility, keep the canonical subcommand name in `src/main.rs` and add the old spelling as a hidden clap alias there and in `build.rs`; that preserves parsing, root help, and generated shell completions without a second runtime handler.
 - For a command that should default to an existing subcommand without changing clap help/completion structure, normalize argv in `crates/treb-cli/src/main.rs` before clap parsing and skip that rewrite when `--help` is present.
+- Help regressions need coverage in both `treb --help` and subcommand `--help` snapshots: root help is custom-built in `build_grouped_help()`, while subcommand help still comes from clap and can drift independently.
 
 ---
 ## 2026-03-10 15:51:18 CET - P4-US-001
@@ -44,4 +45,14 @@ Started: Tue Mar 10 03:36:50 PM CET 2026
   - Patterns discovered: when clap help/completion shape should stay unchanged, argument normalization before parsing is simpler than restructuring the command enum around optional subcommands.
   - Gotchas encountered: `--help` must bypass that normalization or `treb config --help` turns into subcommand help instead of parent-command help.
   - Useful context: `cli_config.rs` is the right fast integration layer for asserting output equivalence between shorthand and explicit config invocations, while `src/main.rs` unit tests can pin `json_flag()` behavior.
+---
+## 2026-03-10 16:55:52 CET - P4-US-005
+- Updated CLI help text so grouped root help notes the `generate` alias for `gen`, and `config --help` now documents its default-to-`show` behavior with optional subcommand usage.
+- Added golden help coverage in `crates/treb-cli/tests/integration_help.rs` with new snapshots for root, `gen`, `completion`, and `config` help output, without touching unrelated golden files.
+- Added reusable help-snapshot guidance to `CLAUDE.md`.
+- Files changed: `crates/treb-cli/src/main.rs`, `crates/treb-cli/tests/integration_help.rs`, `crates/treb-cli/tests/golden/help_root/commands.golden`, `crates/treb-cli/tests/golden/help_gen/commands.golden`, `crates/treb-cli/tests/golden/help_completion/commands.golden`, `crates/treb-cli/tests/golden/help_config/commands.golden`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: root help compatibility details belong in `build_grouped_help()`, but subcommand help expectations are best pinned with dedicated golden snapshots because clap renders them on a separate path.
+  - Gotchas encountered: argument normalization can preserve runtime behavior while leaving help text stale, so default-subcommand changes need explicit `--help` coverage.
+  - Useful context: `crates/treb-cli/tests/integration_help.rs` now serves as the focused snapshot suite for help output changes tied to CLI naming and structure.
 ---

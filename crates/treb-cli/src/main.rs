@@ -172,6 +172,9 @@ enum Commands {
     ///
     /// The config defines default values for namespace and network that are used
     /// when these flags are not explicitly provided.
+    ///
+    /// When no subcommand is provided, behaves like `treb config show`.
+    #[command(override_usage = "treb-cli config [OPTIONS] [COMMAND]")]
     Config {
         #[command(subcommand)]
         subcommand: ConfigSubcommand,
@@ -634,7 +637,10 @@ fn build_grouped_help(cmd: &clap::Command) -> String {
         s.push('\n');
         for name in names {
             if let Some(sub) = cmd.find_subcommand(name) {
-                let about = sub.get_about().map(|a| a.to_string()).unwrap_or_default();
+                let mut about = sub.get_about().map(|a| a.to_string()).unwrap_or_default();
+                if *name == "gen" {
+                    about.push_str(" (alias: generate)");
+                }
                 s.push_str(&format!("  {name:<14}{about}\n"));
             } else if *name == "help" && !cmd.is_disable_help_subcommand_set() {
                 s.push_str(&format!("  {name:<14}{BUILTIN_HELP_SUBCOMMAND_ABOUT}\n"));
@@ -1042,6 +1048,7 @@ mod tests {
     fn grouped_help_lists_gen_not_gen_deploy() {
         let help = build_grouped_help(&Cli::command());
         assert!(help.contains("  gen"));
+        assert!(help.contains("(alias: generate)"));
         assert!(!help.contains("gen-deploy"));
     }
 
