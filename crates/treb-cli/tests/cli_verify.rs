@@ -119,10 +119,16 @@ fn verify_help_shows_all_flags() {
     assert!(stdout.contains("--namespace"), "help should show --namespace");
     assert!(stdout.contains("-n, --network"), "help should show -n, --network");
     assert!(stdout.contains("--verifier"), "help should show --verifier");
-    assert!(stdout.contains("--etherscan"), "help should show --etherscan");
-    assert!(stdout.contains("--blockscout"), "help should show --blockscout");
-    assert!(stdout.contains("--sourcify"), "help should show --sourcify");
+    assert!(stdout.contains("-e, --etherscan"), "help should show -e, --etherscan");
+    assert!(stdout.contains("-b, --blockscout"), "help should show -b, --blockscout");
+    assert!(stdout.contains("-s, --sourcify"), "help should show -s, --sourcify");
     assert!(stdout.contains("--verifier-url"), "help should show --verifier-url");
+    assert!(
+        stdout.contains("blockscout-verifier-url"),
+        "help should show the blockscout verifier URL alias"
+    );
+    assert!(stdout.contains("--contract-path"), "help should show --contract-path");
+    assert!(stdout.contains("--debug"), "help should show --debug");
     assert!(stdout.contains("--verifier-api-key"), "help should show --verifier-api-key");
     assert!(stdout.contains("--force"), "help should show --force");
     assert!(stdout.contains("--watch"), "help should show --watch");

@@ -4,6 +4,7 @@
 - For namespace/network-scoped deployment commands, define a dedicated `*Scope` helper that builds `DeploymentFilters`, pre-filters `Registry::list_deployments()`, uses `resolve_deployment_in_scope()` for direct queries, and reuses the same filtered slice for queryless interactive selection and empty-state/error messages.
 - For new `treb verify` runtime flags, thread the option through both the single and batch paths in `crates/treb-cli/src/commands/verify.rs`, and add unit coverage in `crates/treb-verify/src/lib.rs` because `build_verify_args()` owns the final forge verification input mapping.
 - For `treb verify` diagnostics, emit the Foundry command through `treb_verify::format_verify_command()` so single and batch flows stay in sync on the exact `forge verify-contract` stderr surface.
+- When a command’s clap help surface changes, add or refresh a dedicated `crates/treb-cli/tests/integration_help.rs` golden for that subcommand and validate it with `UPDATE_GOLDEN=1 cargo test -p treb-cli --test integration_help` instead of relying on root help snapshots alone.
 
 Started: Tue Mar 10 11:17:39 PM CET 2026
 ---
@@ -46,4 +47,14 @@ Started: Tue Mar 10 11:17:39 PM CET 2026
   - Patterns discovered (e.g., "this codebase uses X for Y"): verify diagnostics are easiest to keep consistent when the Foundry command formatter lives in `treb-verify`, alongside `build_verify_args()`.
   - Gotchas encountered (e.g., "don't forget to update Z when changing W"): debug output needs to sit immediately before `verify_args.run().await` in both loops; adding it only once misses multi-verifier batch attempts.
   - Useful context (e.g., "the evaluation panel is in component X"): the formatter only needs to render the subset of `VerifyArgs` that treb actually sets, which keeps debug output stable without depending on Foundry internals.
+---
+## 2026-03-11 00:06:49 CET - P8-US-005
+- Added a dedicated `help_verify` golden in `crates/treb-cli/tests/integration_help.rs` and refreshed snapshots for the full verify help surface, including the new short flags, scoped flags, `--contract-path`, `--debug`, and the blockscout verifier URL alias.
+- Expanded `crates/treb-cli/tests/cli_verify.rs` help assertions and added focused integration coverage in `crates/treb-cli/tests/integration_verify.rs` for `-e`, `-b`, `-s`, `-ebs`, and the combined extended verify flag surface on a network-free already-verified path.
+- Verified the story with `UPDATE_GOLDEN=1 cargo test -p treb-cli --test integration_help`, `cargo test -p treb-cli --test integration_help`, `cargo test -p treb-cli --test integration_verify`, `cargo test -p treb-cli --test cli_verify`, `cargo test --workspace --all-targets`, and `cargo clippy --workspace --all-targets`.
+- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `crates/treb-cli/tests/cli_verify.rs`, `crates/treb-cli/tests/integration_help.rs`, `crates/treb-cli/tests/integration_verify.rs`, `crates/treb-cli/tests/golden/help_verify/commands.golden`, `crates/treb-cli/tests/golden/verify_short_flags_accepted/commands.golden`, `crates/treb-cli/tests/golden/verify_extended_flag_surface_accepted/commands.golden`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y"): verify/help compatibility work is best locked down with both fast assertion tests (`cli_verify.rs`) and golden-backed subprocess coverage (`integration_help.rs`, `integration_verify.rs`) so clap rendering and runtime argv acceptance regressions are caught separately.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W"): `verify --help` shows the blockscout URL compatibility form as a clap alias under `--verifier-url`, so the golden needs to match the alias rendering rather than expecting a separate standalone option line.
+  - Useful context (e.g., "the evaluation panel is in component X"): an already-verified seeded deployment is a stable integration fixture for verify flag-surface tests because it proves parsing/dispatch without requiring explorer network access or Foundry verification side effects.
 ---

@@ -337,6 +337,52 @@ fn verify_already_verified_multi_shorthand() {
     run_integration_test(&test, &ctx);
 }
 
+/// Short verifier flags and their combined `-ebs` form should be accepted.
+#[test]
+fn verify_short_flags_accepted() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("verify_short_flags_accepted")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_verified_registry(ctx.path()))
+        .test(&["verify", "dep-verified", "-e"])
+        .test(&["verify", "dep-verified", "-b"])
+        .test(&["verify", "dep-verified", "-s"])
+        .test(&["verify", "dep-verified", "-ebs"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// The remaining verify flag additions should be accepted together on the happy skip path.
+#[test]
+fn verify_extended_flag_surface_accepted() {
+    let ctx = TestContext::new("minimal-project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("verify_extended_flag_surface_accepted")
+        .setup(&["init"])
+        .post_setup_hook(|ctx| seed_verified_registry(ctx.path()))
+        .test(&[
+            "verify",
+            "dep-verified",
+            "-b",
+            "--blockscout-verifier-url",
+            "https://example.com/api",
+            "--contract-path",
+            "./src/Counter.sol:Counter",
+            "--debug",
+            "--namespace",
+            "default",
+            "-n",
+            "mainnet",
+        ])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
 /// --all --json with no unverified deployments returns empty JSON array.
 #[test]
 fn verify_all_none_unverified_json() {

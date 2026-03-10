@@ -1,0 +1,2 @@
+=== cmd 0: [verify dep-verified -b --blockscout-verifier-url https://example.com/api --contract-path ./src/Counter.sol:Counter --debug --namespace default -n mainnet] ===
+Contract TestContract:v1 is already verified. Use --force to re-verify.
