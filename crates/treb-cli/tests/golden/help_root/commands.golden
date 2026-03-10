@@ -16,6 +16,7 @@ Main Commands:
 Management Commands:
   sync          Sync registry with on-chain state
   tag           Manage deployment tags
+  addressbook   Manage named addresses scoped by chain ID
   register      Register an existing contract deployment in the registry
   dev           Development utilities
   networks      List available networks from foundry.toml

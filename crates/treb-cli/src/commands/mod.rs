@@ -1,3 +1,4 @@
+pub mod addressbook;
 pub mod compose;
 pub mod config;
 pub mod dev;

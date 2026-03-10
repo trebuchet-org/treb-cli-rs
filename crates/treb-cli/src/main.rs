@@ -278,6 +278,18 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Manage named addresses scoped by chain ID
+    #[command(alias = "ab")]
+    Addressbook {
+        /// Deployment namespace
+        #[arg(long, short = 's')]
+        namespace: Option<String>,
+        /// Network name or chain ID
+        #[arg(long, short = 'n')]
+        network: Option<String>,
+        #[command(subcommand)]
+        subcommand: commands::addressbook::AddressbookSubcommand,
+    },
     /// Register an existing contract deployment in the registry
     ///
     /// Register a contract that was deployed outside of treb so it can be used
@@ -564,6 +576,7 @@ impl Commands {
             | Commands::Version { json, .. }
             | Commands::Networks { json, .. }
             | Commands::Compose { json, .. } => *json,
+            Commands::Addressbook { .. } => false,
             Commands::Gen { subcommand } => gen_subcommand_json_flag(subcommand),
             Commands::GenDeployCompat(args) => args.json,
             Commands::Config { subcommand } => {
@@ -684,7 +697,18 @@ fn build_grouped_help(cmd: &clap::Command) -> String {
         &mut s,
         cmd,
         "Management Commands:",
-        &["sync", "tag", "register", "dev", "networks", "prune", "reset", "config", "migrate"],
+        &[
+            "sync",
+            "tag",
+            "addressbook",
+            "register",
+            "dev",
+            "networks",
+            "prune",
+            "reset",
+            "config",
+            "migrate",
+        ],
     );
     s.push('\n');
     write_group(&mut s, cmd, "Additional Commands:", &["version", "completion", "help"]);
@@ -932,6 +956,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Commands::Tag { deployment, add, remove, network, namespace, json } => {
             commands::tag::run(deployment, add, remove, network, namespace, json, non_interactive)
                 .await?
+        }
+        Commands::Addressbook { namespace, network, subcommand } => {
+            commands::addressbook::run(namespace, network, subcommand).await?
         }
         Commands::Register {
             tx_hash,
@@ -1259,6 +1286,68 @@ mod tests {
                 assert_eq!(namespace.as_deref(), Some("production"));
             }
             _ => panic!("expected tag command"),
+        }
+    }
+
+    #[test]
+    fn addressbook_set_parses_with_scope_flags() {
+        let cli = parse_cli_from([
+            "treb",
+            "addressbook",
+            "-n",
+            "mainnet",
+            "-s",
+            "production",
+            "set",
+            "Treasury",
+            "0x1111111111111111111111111111111111111111",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Addressbook { namespace, network, subcommand } => {
+                assert_eq!(namespace.as_deref(), Some("production"));
+                assert_eq!(network.as_deref(), Some("mainnet"));
+                match subcommand {
+                    commands::addressbook::AddressbookSubcommand::Set { name, address } => {
+                        assert_eq!(name, "Treasury");
+                        assert_eq!(address, "0x1111111111111111111111111111111111111111");
+                    }
+                    _ => panic!("expected addressbook set subcommand"),
+                }
+            }
+            _ => panic!("expected addressbook command"),
+        }
+    }
+
+    #[test]
+    fn addressbook_alias_set_parses_identically() {
+        let cli = parse_cli_from([
+            "treb",
+            "ab",
+            "-n",
+            "1",
+            "-s",
+            "production",
+            "set",
+            "Treasury",
+            "0x1111111111111111111111111111111111111111",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Addressbook { namespace, network, subcommand } => {
+                assert_eq!(namespace.as_deref(), Some("production"));
+                assert_eq!(network.as_deref(), Some("1"));
+                match subcommand {
+                    commands::addressbook::AddressbookSubcommand::Set { name, address } => {
+                        assert_eq!(name, "Treasury");
+                        assert_eq!(address, "0x1111111111111111111111111111111111111111");
+                    }
+                    _ => panic!("expected addressbook set subcommand"),
+                }
+            }
+            _ => panic!("expected addressbook command"),
         }
     }
 

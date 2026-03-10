@@ -1,6 +1,7 @@
 # Ralph Progress Log
 ## Codebase Patterns
 - Nested map registry stores should sort both outer and inner maps into `BTreeMap`s before `write_versioned_file()` so bare JSON output stays deterministic.
+- Top-level CLI commands must stay in sync across `crates/treb-cli/src/main.rs`, `crates/treb-cli/build.rs`, and any manually maintained root-help goldens because clap parsing, shell completions, and grouped help are wired separately.
 
 Started: Wed Mar 11 12:14:13 AM CET 2026
 ---
@@ -12,4 +13,13 @@ Started: Wed Mar 11 12:14:13 AM CET 2026
   - Patterns discovered: `treb-registry` store files are written as bare JSON but must still load legacy wrapped `_format`/`entries` payloads through `read_versioned_file()`.
   - Gotchas encountered: `Registry::init()` should only create `.treb/` and must not eagerly materialize optional store files like `addressbook.json`.
   - Useful context: `Registry::open()` is the central place to instantiate and load new stores, and facade helpers belong directly on `Registry` alongside the other store delegates.
+---
+## 2026-03-11 00:34:35 CET - P9-US-002
+- Implemented the `treb addressbook` / `treb ab` command scaffold with `set`, `remove`, and `list` subcommands, plus a working `set` flow that validates `0x` addresses, resolves the effective chain ID from `--network` or config, and persists entries through the registry facade.
+- Wired the new top-level command into clap parsing, runtime dispatch, grouped root help, and shell completion generation, and added parser coverage for both `addressbook set` and `ab set`.
+- Files changed: `crates/treb-cli/build.rs`, `crates/treb-cli/src/commands/addressbook.rs`, `crates/treb-cli/src/commands/mod.rs`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/tests/golden/help_root/commands.golden`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: top-level CLI commands require parallel updates in clap derive definitions, `build.rs` completions, and grouped help snapshots because those surfaces are maintained independently.
+  - Gotchas encountered: changing `build_grouped_help()` will break `help_root` until the corresponding golden snapshot is refreshed.
+  - Useful context: addressbook chain resolution now lives in `crates/treb-cli/src/commands/addressbook.rs` and already supports both numeric chain IDs and Alloy named chains for reuse by `remove` and `list`.
 ---

@@ -27,6 +27,7 @@ fn build_cli() -> ClapCommand {
         .subcommand(build_config())
         .subcommand(build_verify())
         .subcommand(build_tag())
+        .subcommand(build_addressbook())
         .subcommand(build_register())
         .subcommand(build_sync())
         .subcommand(build_version())
@@ -269,6 +270,28 @@ fn build_tag() -> ClapCommand {
         .arg(Arg::new("network").long("network").short('n').help("Network name or chain ID"))
         .arg(Arg::new("namespace").long("namespace").short('s').help("Deployment namespace"))
         .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
+}
+
+fn build_addressbook() -> ClapCommand {
+    ClapCommand::new("addressbook")
+        .about("Manage named addresses scoped by chain ID")
+        .alias("ab")
+        .arg(Arg::new("network").long("network").short('n').help("Network name or chain ID"))
+        .arg(Arg::new("namespace").long("namespace").short('s').help("Deployment namespace"))
+        .subcommand(
+            ClapCommand::new("set")
+                .about("Set an addressbook entry for the current chain")
+                .arg(Arg::new("name").required(true).help("Entry name"))
+                .arg(Arg::new("address").required(true).help("Contract or account address")),
+        )
+        .subcommand(
+            ClapCommand::new("remove")
+                .about("Remove an addressbook entry for the current chain")
+                .arg(Arg::new("name").required(true).help("Entry name")),
+        )
+        .subcommand(
+            ClapCommand::new("list").about("List addressbook entries for the current chain"),
+        )
 }
 
 fn build_register() -> ClapCommand {
