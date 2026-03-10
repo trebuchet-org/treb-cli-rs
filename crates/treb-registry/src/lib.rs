@@ -14,12 +14,16 @@ pub use io::{VersionedStore, read_versioned_file, write_versioned_file};
 pub use lookup::LookupStore;
 pub use registry::Registry;
 pub use store::{
-    DeploymentStore, ForkStateStore, GovernorProposalStore, SafeTransactionStore, TransactionStore,
+    AddressbookStore, DeploymentStore, ForkStateStore, GovernorProposalStore, SafeTransactionStore,
+    TransactionStore,
     fork_state::{remove_snapshot, restore_registry, snapshot_registry},
 };
 pub use types::LookupIndex;
 
 // ── File-name constants ────────────────────────────────────────────────────
+
+/// File storing named addresses scoped by chain ID.
+pub const ADDRESSBOOK_FILE: &str = "addressbook.json";
 
 /// File storing the deployment map (`{id: Deployment}`).
 pub const DEPLOYMENTS_FILE: &str = "deployments.json";

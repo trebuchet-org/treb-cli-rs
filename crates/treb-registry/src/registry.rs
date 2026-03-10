@@ -13,7 +13,10 @@ use treb_core::{
 use crate::{
     REGISTRY_DIR,
     lookup::LookupStore,
-    store::{DeploymentStore, GovernorProposalStore, SafeTransactionStore, TransactionStore},
+    store::{
+        AddressbookStore, DeploymentStore, GovernorProposalStore, SafeTransactionStore,
+        TransactionStore,
+    },
     types::LookupIndex,
 };
 
@@ -25,6 +28,7 @@ use crate::{
 /// proposals, lookup index) and provides delegate methods for CRUD operations.
 /// Deployment mutations automatically trigger a lookup index rebuild.
 pub struct Registry {
+    addressbook: AddressbookStore,
     deployments: DeploymentStore,
     transactions: TransactionStore,
     safe_transactions: SafeTransactionStore,
@@ -41,6 +45,7 @@ impl Registry {
     pub fn open(project_root: &Path) -> Result<Self, TrebError> {
         let registry_dir = project_root.join(REGISTRY_DIR);
 
+        let mut addressbook = AddressbookStore::new(&registry_dir);
         let mut deployments = DeploymentStore::new(&registry_dir);
         let mut transactions = TransactionStore::new(&registry_dir);
         let mut safe_transactions = SafeTransactionStore::new(&registry_dir);
@@ -48,12 +53,20 @@ impl Registry {
         let lookup = LookupStore::new(&registry_dir);
 
         // Load existing data (no-ops if files don't exist).
+        addressbook.load()?;
         deployments.load()?;
         transactions.load()?;
         safe_transactions.load()?;
         governor_proposals.load()?;
 
-        Ok(Self { deployments, transactions, safe_transactions, governor_proposals, lookup })
+        Ok(Self {
+            addressbook,
+            deployments,
+            transactions,
+            safe_transactions,
+            governor_proposals,
+            lookup,
+        })
     }
 
     /// Initialise a new registry at `<project_root>/.treb/`.
@@ -65,6 +78,47 @@ impl Registry {
         std::fs::create_dir_all(&registry_dir)?;
 
         Self::open(project_root)
+    }
+
+    // ── Addressbook delegates ────────────────────────────────────────────
+
+    /// Load the addressbook store from disk, replacing any in-memory data.
+    pub fn load_addressbook(&mut self) -> Result<(), TrebError> {
+        self.addressbook.load()
+    }
+
+    /// Return an immutable reference to the addressbook store.
+    pub fn addressbook(&self) -> &AddressbookStore {
+        &self.addressbook
+    }
+
+    /// Return a mutable reference to the addressbook store.
+    pub fn addressbook_mut(&mut self) -> &mut AddressbookStore {
+        &mut self.addressbook
+    }
+
+    /// Set or replace an addressbook entry for the given chain.
+    pub fn set_addressbook_entry(
+        &mut self,
+        chain_id: &str,
+        name: &str,
+        address: &str,
+    ) -> Result<(), TrebError> {
+        self.addressbook.set_entry(chain_id, name, address)
+    }
+
+    /// Remove an addressbook entry for the given chain.
+    pub fn remove_addressbook_entry(
+        &mut self,
+        chain_id: &str,
+        name: &str,
+    ) -> Result<(), TrebError> {
+        self.addressbook.remove_entry(chain_id, name)
+    }
+
+    /// List all addressbook entries for the given chain, sorted by name.
+    pub fn list_addressbook_entries(&self, chain_id: &str) -> Vec<(String, String)> {
+        self.addressbook.list_entries(chain_id)
     }
 
     // ── Deployment delegates ─────────────────────────────────────────────
@@ -358,6 +412,10 @@ mod tests {
             !registry_dir.join("registry.json").exists(),
             "registry.json should not be created by init"
         );
+        assert!(
+            !registry_dir.join(crate::ADDRESSBOOK_FILE).exists(),
+            "addressbook.json should not be created by init"
+        );
     }
 
     #[test]
@@ -368,6 +426,7 @@ mod tests {
         assert_eq!(registry.deployment_count(), 0);
         assert_eq!(registry.transaction_count(), 0);
         assert_eq!(registry.safe_transaction_count(), 0);
+        assert!(registry.list_addressbook_entries("1").is_empty());
     }
 
     #[test]
@@ -546,5 +605,48 @@ mod tests {
         let registry2 = Registry::init(dir.path()).unwrap();
         assert_eq!(registry2.deployment_count(), 1);
         assert!(registry2.get_deployment("dep-1").is_some());
+    }
+
+    #[test]
+    fn addressbook_entries_round_trip_through_registry() {
+        let dir = TempDir::new().unwrap();
+        let mut registry = Registry::init(dir.path()).unwrap();
+
+        registry
+            .set_addressbook_entry("1", "Treasury", "0x1111111111111111111111111111111111111111")
+            .unwrap();
+        registry
+            .set_addressbook_entry("1", "Guardian", "0x2222222222222222222222222222222222222222")
+            .unwrap();
+
+        assert!(registry.addressbook().has_entry("1", "Treasury"));
+        assert_eq!(
+            registry.list_addressbook_entries("1"),
+            vec![
+                ("Guardian".to_string(), "0x2222222222222222222222222222222222222222".to_string()),
+                ("Treasury".to_string(), "0x1111111111111111111111111111111111111111".to_string()),
+            ]
+        );
+
+        let reopened = Registry::open(dir.path()).unwrap();
+        assert_eq!(reopened.list_addressbook_entries("1"), registry.list_addressbook_entries("1"));
+    }
+
+    #[test]
+    fn remove_addressbook_entry_cleans_up_empty_chain() {
+        let dir = TempDir::new().unwrap();
+        let mut registry = Registry::init(dir.path()).unwrap();
+
+        registry
+            .set_addressbook_entry("10", "Ops", "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            .unwrap();
+        registry.remove_addressbook_entry("10", "Ops").unwrap();
+
+        assert!(registry.list_addressbook_entries("10").is_empty());
+
+        let raw = fs::read_to_string(dir.path().join(REGISTRY_DIR).join(crate::ADDRESSBOOK_FILE))
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(value, serde_json::json!({}));
     }
 }

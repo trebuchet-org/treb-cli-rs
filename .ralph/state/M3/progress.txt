@@ -1,60 +1,15 @@
 # Ralph Progress Log
 ## Codebase Patterns
-- When adding or changing `treb` subcommand flags, keep the clap derive parser in `crates/treb-cli/src/main.rs` and the completion/help builder in `crates/treb-cli/build.rs` in lockstep, then pin the surface with focused `parse_cli_from(...)` tests in `src/main.rs`.
-- For namespace/network-scoped deployment commands, define a dedicated `*Scope` helper that builds `DeploymentFilters`, pre-filters `Registry::list_deployments()`, uses `resolve_deployment_in_scope()` for direct queries, and reuses the same filtered slice for queryless interactive selection and empty-state/error messages.
-- For new `treb verify` runtime flags, thread the option through both the single and batch paths in `crates/treb-cli/src/commands/verify.rs`, and add unit coverage in `crates/treb-verify/src/lib.rs` because `build_verify_args()` owns the final forge verification input mapping.
-- For `treb verify` diagnostics, emit the Foundry command through `treb_verify::format_verify_command()` so single and batch flows stay in sync on the exact `forge verify-contract` stderr surface.
-- When a command’s clap help surface changes, add or refresh a dedicated `crates/treb-cli/tests/integration_help.rs` golden for that subcommand and validate it with `UPDATE_GOLDEN=1 cargo test -p treb-cli --test integration_help` instead of relying on root help snapshots alone.
+- Nested map registry stores should sort both outer and inner maps into `BTreeMap`s before `write_versioned_file()` so bare JSON output stays deterministic.
 
-Started: Tue Mar 10 11:17:39 PM CET 2026
+Started: Wed Mar 11 12:14:13 AM CET 2026
 ---
-## 2026-03-10 23:24:03 CET - P8-US-001
-- Added `-e`, `-b`, and `-s` short flags to `treb verify` plus the visible `--blockscout-verifier-url` alias for `--verifier-url`.
-- Mirrored the verify flag surface in `crates/treb-cli/build.rs`, including the previously missing verifier boolean flags.
-- Added focused `parse_cli_from(...)` tests covering `-e`, `-b`, `-s`, combined `-ebs`, and the blockscout verifier URL alias.
-- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/build.rs`
+## 2026-03-11 00:22:16 CET - P9-US-001
+- Implemented `AddressbookStore` with nested chain-id to name-to-address persistence, bare/wrapped JSON loading, deterministic writes, CRUD helpers, and empty-chain cleanup.
+- Wired the store into `treb-registry` exports and the `Registry` facade with load/accessor/set/remove/list methods, plus init/open coverage to ensure `.treb/addressbook.json` is only created on first write.
+- Files changed: `CLAUDE.md`, `crates/treb-registry/src/lib.rs`, `crates/treb-registry/src/registry.rs`, `crates/treb-registry/src/store/addressbook.rs`, `crates/treb-registry/src/store/mod.rs`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
 - **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y"): verify command flag parity depends on updating both the derive parser and `build.rs`; one side can lag silently without focused parser tests.
-  - Gotchas encountered (e.g., "don't forget to update Z when changing W"): the package bin target is `treb-cli`, so targeted binary test runs should use `cargo test -p treb-cli --bin treb-cli ...`.
-  - Useful context (e.g., "the evaluation panel is in component X"): verifier shorthand flags are already wired in the runtime dispatch; Phase 8 story 1 only needed CLI surface and completion parity changes.
----
-## 2026-03-10 23:33:17 CET - P8-US-002
-- Added `--namespace` and `--network` / `-n` to `treb verify`, mirrored them in `crates/treb-cli/build.rs`, and threaded both flags through the verify command entrypoint.
-- Implemented `VerifyScope` in `crates/treb-cli/src/commands/verify.rs` so single-verify resolution, batch candidate selection, and queryless interactive selection all share the same namespace/network filtering and scoped empty-state/error messages.
-- Added parser coverage in `crates/treb-cli/src/main.rs`, verify-scope unit tests in `crates/treb-cli/src/commands/verify.rs`, and integration coverage in `crates/treb-cli/tests/integration_verify.rs` plus help assertions in `crates/treb-cli/tests/cli_verify.rs`.
-- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/build.rs`, `crates/treb-cli/src/commands/verify.rs`, `crates/treb-cli/tests/cli_verify.rs`, `crates/treb-cli/tests/integration_verify.rs`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y"): scoped deployment commands in `treb-cli` are cleanest when they centralize namespace/network formatting and filter construction in a small scope struct instead of duplicating message logic across single and batch paths.
-  - Gotchas encountered (e.g., "don't forget to update Z when changing W"): queryless scoped flows need the filtered deployment slice before calling selector helpers; otherwise non-interactive runs can surface generic TTY errors instead of the scoped "no deployments found" message.
-  - Useful context (e.g., "the evaluation panel is in component X"): verify batch mode auto-verifies all scoped candidates in non-interactive environments, so invalid-address fixtures are a cheap way to prove scope-limited registry updates without any network dependency.
----
-## 2026-03-10 23:41:42 CET - P8-US-003
-- Added `--contract-path` to `treb verify`, mirrored it in `crates/treb-cli/build.rs`, and pinned parsing in `crates/treb-cli/src/main.rs`.
-- Threaded `contract_path` through both the single and batch verify flows so every verifier build uses the same override-capable `VerifyOpts`.
-- Updated `crates/treb-verify/src/lib.rs` to prefer `--contract-path` over artifact-derived contract info, including the no-colon fallback to the deployment contract name.
-- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `CLAUDE.md`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/build.rs`, `crates/treb-cli/src/commands/verify.rs`, `crates/treb-verify/src/lib.rs`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y"): verify runtime flags should terminate in `treb_verify::build_verify_args()` tests, because that crate is the single translation layer into Foundry's `VerifyArgs`.
-  - Gotchas encountered (e.g., "don't forget to update Z when changing W"): adding a new verify option requires threading it through both single and batch verification loops; updating only one path compiles easily but leaves behavior inconsistent.
-  - Useful context (e.g., "the evaluation panel is in component X"): `--contract-path` follows Foundry's `path[:name]` shape, with missing `:name` falling back to the deployment's recorded `contract_name`.
----
-## 2026-03-10 23:52:58 CET - P8-US-004
-- Added `--debug` to `treb verify`, mirrored it in `crates/treb-cli/build.rs`, and pinned parsing in `crates/treb-cli/src/main.rs`.
-- Threaded `debug` through the single and batch verify execution paths so each verifier attempt can emit the underlying `forge verify-contract` command before execution.
-- Added `treb_verify::format_verify_command()` plus unit coverage in `crates/treb-verify/src/lib.rs` to keep the debug stderr surface deterministic and shared across verify flows.
-- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `CLAUDE.md`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/build.rs`, `crates/treb-cli/src/commands/verify.rs`, `crates/treb-verify/src/lib.rs`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y"): verify diagnostics are easiest to keep consistent when the Foundry command formatter lives in `treb-verify`, alongside `build_verify_args()`.
-  - Gotchas encountered (e.g., "don't forget to update Z when changing W"): debug output needs to sit immediately before `verify_args.run().await` in both loops; adding it only once misses multi-verifier batch attempts.
-  - Useful context (e.g., "the evaluation panel is in component X"): the formatter only needs to render the subset of `VerifyArgs` that treb actually sets, which keeps debug output stable without depending on Foundry internals.
----
-## 2026-03-11 00:06:49 CET - P8-US-005
-- Added a dedicated `help_verify` golden in `crates/treb-cli/tests/integration_help.rs` and refreshed snapshots for the full verify help surface, including the new short flags, scoped flags, `--contract-path`, `--debug`, and the blockscout verifier URL alias.
-- Expanded `crates/treb-cli/tests/cli_verify.rs` help assertions and added focused integration coverage in `crates/treb-cli/tests/integration_verify.rs` for `-e`, `-b`, `-s`, `-ebs`, and the combined extended verify flag surface on a network-free already-verified path.
-- Verified the story with `UPDATE_GOLDEN=1 cargo test -p treb-cli --test integration_help`, `cargo test -p treb-cli --test integration_help`, `cargo test -p treb-cli --test integration_verify`, `cargo test -p treb-cli --test cli_verify`, `cargo test --workspace --all-targets`, and `cargo clippy --workspace --all-targets`.
-- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `crates/treb-cli/tests/cli_verify.rs`, `crates/treb-cli/tests/integration_help.rs`, `crates/treb-cli/tests/integration_verify.rs`, `crates/treb-cli/tests/golden/help_verify/commands.golden`, `crates/treb-cli/tests/golden/verify_short_flags_accepted/commands.golden`, `crates/treb-cli/tests/golden/verify_extended_flag_surface_accepted/commands.golden`
-- **Learnings for future iterations:**
-  - Patterns discovered (e.g., "this codebase uses X for Y"): verify/help compatibility work is best locked down with both fast assertion tests (`cli_verify.rs`) and golden-backed subprocess coverage (`integration_help.rs`, `integration_verify.rs`) so clap rendering and runtime argv acceptance regressions are caught separately.
-  - Gotchas encountered (e.g., "don't forget to update Z when changing W"): `verify --help` shows the blockscout URL compatibility form as a clap alias under `--verifier-url`, so the golden needs to match the alias rendering rather than expecting a separate standalone option line.
-  - Useful context (e.g., "the evaluation panel is in component X"): an already-verified seeded deployment is a stable integration fixture for verify flag-surface tests because it proves parsing/dispatch without requiring explorer network access or Foundry verification side effects.
+  - Patterns discovered: `treb-registry` store files are written as bare JSON but must still load legacy wrapped `_format`/`entries` payloads through `read_versioned_file()`.
+  - Gotchas encountered: `Registry::init()` should only create `.treb/` and must not eagerly materialize optional store files like `addressbook.json`.
+  - Useful context: `Registry::open()` is the central place to instantiate and load new stores, and facade helpers belong directly on `Registry` alongside the other store delegates.
 ---
