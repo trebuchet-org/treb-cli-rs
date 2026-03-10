@@ -1,6 +1,7 @@
 # Ralph Progress Log
 ## Codebase Patterns
 - Registry store files should use `read_versioned_file()` for backward-compatible reads and `write_versioned_file()` for locked atomic writes to the `{"_format":"treb-v1","entries":...}` wrapper format.
+- Map-backed registry stores should sort entries into a `BTreeMap` before `write_versioned_file()` so wrapped JSON stays deterministic for tests and diffs.
 - Registry-only changes should be validated with `cargo check -p treb-registry` and `cargo test -p treb-registry` before running broader workspace checks.
 
 Started: Tue Mar 10 09:50:03 AM CET 2026
@@ -21,4 +22,13 @@ Started: Tue Mar 10 09:50:03 AM CET 2026
 - **Learnings for future iterations:**
   - The Ralph state for the active phase is stored under `.ralph/current/` via a symlink to `.ralph/state/<phase>/`, so PRD/progress edits should be treated as the phase state of record.
   - For registry-only stories, the fastest useful validation loop is `cargo check -p treb-registry` plus `cargo test -p treb-registry` before wider workspace checks become necessary.
+---
+## 2026-03-10 10:15:29 CET - P1-US-002
+- Updated `DeploymentStore` to load through `read_versioned_file()` and save through `write_versioned_file()`, preserving deterministic key ordering by sorting into a `BTreeMap` before writing.
+- Added deployment-store tests for legacy bare-map loads, wrapped-format loads, and wrapped-on-save output; updated the registry golden integration test to expect wrapped `deployments.json`.
+- Files changed: `crates/treb-registry/src/store/deployments.rs`, `crates/treb-registry/src/registry.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Deployment-store migration is a helper swap: `read_versioned_file()` on load, `write_versioned_file()` on save, and no extra `with_file_lock()` wrapper around writes.
+  - When existing bare-map fixtures are still the source of truth, store-level migration tests should compare saved output against a wrapped `{"_format": ..., "entries": fixture}` value rather than rewriting the fixtures.
+  - Registry integration tests can stay partially migrated by updating only the expectations for the specific store file changed in that story.
 ---

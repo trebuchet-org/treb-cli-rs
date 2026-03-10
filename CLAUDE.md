@@ -81,4 +81,5 @@ cargo clippy --workspace --all-targets        # lint
 - **Non-interactive**: Detected via: `--non-interactive` flag, `TREB_NON_INTERACTIVE=1`, `CI=true`, stdin not TTY, stdout not TTY
 - **Store pattern**: Each registry store has PathBuf + HashMap + load/save with fs2 file lock + CRUD + sorted list
 - **Versioned store files**: Registry store JSON can be wrapped as `{"_format":"treb-v1","entries":...}`; use `read_versioned_file()` for backward-compatible reads and `write_versioned_file()` for locked atomic writes
+- **Deterministic store writes**: Map-backed registry stores should sort into a `BTreeMap` before `write_versioned_file()` so wrapped JSON remains stable for tests and diffs
 - **Config ownership**: Only `treb-config` parses config files; other crates consume resolved config
