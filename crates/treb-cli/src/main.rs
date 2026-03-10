@@ -681,28 +681,45 @@ where
 {
     let mut args: Vec<OsString> = args.into_iter().map(Into::into).collect();
 
-    if should_default_config_to_show(&args) {
-        args.insert(2, OsString::from("show"));
+    if let Some(index) = config_show_insertion_index(&args) {
+        args.insert(index, OsString::from("show"));
     }
 
     args
 }
 
-fn should_default_config_to_show(args: &[OsString]) -> bool {
-    if args.get(1).map(OsString::as_os_str) != Some(OsStr::new("config")) {
-        return false;
+fn config_show_insertion_index(args: &[OsString]) -> Option<usize> {
+    let mut config_index = 1;
+    while let Some(arg) = args.get(config_index) {
+        if arg == OsStr::new("--") {
+            return None;
+        }
+
+        if matches!(arg.to_str(), Some("-h" | "--help" | "-V" | "--version")) {
+            return None;
+        }
+
+        if !arg.to_string_lossy().starts_with('-') {
+            break;
+        }
+
+        config_index += 1;
     }
 
-    let rest = &args[2..];
+    if args.get(config_index).map(OsString::as_os_str) != Some(OsStr::new("config")) {
+        return None;
+    }
+
+    let rest = &args[(config_index + 1)..];
     if rest.is_empty() {
-        return true;
+        return Some(config_index + 1);
     }
 
     if rest.iter().any(|arg| matches!(arg.to_str(), Some("-h" | "--help"))) {
-        return false;
+        return None;
     }
 
-    !rest.iter().any(|arg| !arg.to_string_lossy().starts_with('-'))
+    (!rest.iter().any(|arg| !arg.to_string_lossy().starts_with('-'))).then_some(config_index + 1)
 }
 
 fn parse_cli_from<I, T>(args: I) -> Result<Cli, clap::Error>
@@ -1067,6 +1084,29 @@ mod tests {
         match cli.command {
             Commands::Config { subcommand: ConfigSubcommand::Show { json } } => assert!(json),
             _ => panic!("expected bare config --json to normalize to config show --json"),
+        }
+    }
+
+    #[test]
+    fn config_command_defaults_to_show_after_root_flag() {
+        let cli = parse_cli_from(["treb", "--no-color", "config"]).unwrap();
+        assert!(cli.no_color);
+
+        match cli.command {
+            Commands::Config { subcommand: ConfigSubcommand::Show { json } } => assert!(!json),
+            _ => panic!("expected --no-color config to normalize to config show"),
+        }
+    }
+
+    #[test]
+    fn config_command_defaults_to_show_with_json_after_root_flag() {
+        let cli = parse_cli_from(["treb", "--no-color", "config", "--json"]).unwrap();
+        assert!(cli.no_color);
+        assert!(cli.command.json_flag());
+
+        match cli.command {
+            Commands::Config { subcommand: ConfigSubcommand::Show { json } } => assert!(json),
+            _ => panic!("expected --no-color config --json to normalize to config show --json"),
         }
     }
 
