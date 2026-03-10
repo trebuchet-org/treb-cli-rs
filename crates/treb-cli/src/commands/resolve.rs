@@ -3,6 +3,8 @@
 //! Provides [`resolve_deployment`] which resolves a user-supplied query string
 //! to a single [`Deployment`] using a 5-strategy resolution cascade.
 
+use std::collections::HashSet;
+
 use anyhow::bail;
 use treb_core::types::Deployment;
 use treb_registry::{Registry, types::LookupIndex};
@@ -22,16 +24,44 @@ pub fn resolve_deployment<'a>(
     registry: &'a Registry,
     lookup: &LookupIndex,
 ) -> anyhow::Result<&'a Deployment> {
+    resolve_deployment_with_scope(query, registry, lookup, None)
+}
+
+/// Resolve a deployment query while restricting matches to a pre-filtered scope.
+pub fn resolve_deployment_in_scope<'a>(
+    query: &str,
+    registry: &'a Registry,
+    lookup: &LookupIndex,
+    scope: &[&'a Deployment],
+) -> anyhow::Result<&'a Deployment> {
+    let allowed_ids: HashSet<&str> =
+        scope.iter().map(|deployment| deployment.id.as_str()).collect();
+    resolve_deployment_with_scope(query, registry, lookup, Some(&allowed_ids))
+}
+
+fn resolve_deployment_with_scope<'a>(
+    query: &str,
+    registry: &'a Registry,
+    lookup: &LookupIndex,
+    allowed_ids: Option<&HashSet<&str>>,
+) -> anyhow::Result<&'a Deployment> {
+    let is_allowed =
+        |deployment_id: &str| allowed_ids.is_none_or(|ids| ids.contains(deployment_id));
+
     // 1. Exact full ID
     if let Some(d) = registry.get_deployment(query) {
-        return Ok(d);
+        if is_allowed(&d.id) {
+            return Ok(d);
+        }
     }
 
     // 2. Address (starts with 0x)
     if query.starts_with("0x") || query.starts_with("0X") {
         if let Some(id) = lookup.find_by_address(query) {
-            if let Some(d) = registry.get_deployment(id) {
-                return Ok(d);
+            if is_allowed(id) {
+                if let Some(d) = registry.get_deployment(id) {
+                    return Ok(d);
+                }
             }
         }
         bail!(
@@ -44,6 +74,7 @@ pub fn resolve_deployment<'a>(
         if let Some(ids) = lookup.find_by_name(name) {
             let matches: Vec<&Deployment> = ids
                 .iter()
+                .filter(|id| is_allowed(id))
                 .filter_map(|id| registry.get_deployment(id))
                 .filter(|d| d.label == label)
                 .collect();
@@ -61,7 +92,7 @@ pub fn resolve_deployment<'a>(
             .into_iter()
             .filter(|d| {
                 let prefix = format!("{}/{}", d.namespace, d.contract_name);
-                prefix.eq_ignore_ascii_case(query)
+                prefix.eq_ignore_ascii_case(query) && is_allowed(&d.id)
             })
             .collect();
         return resolve_candidates(&matches, query);
@@ -69,8 +100,11 @@ pub fn resolve_deployment<'a>(
 
     // 5. Contract name (case-insensitive)
     if let Some(ids) = lookup.find_by_name(query) {
-        let matches: Vec<&Deployment> =
-            ids.iter().filter_map(|id| registry.get_deployment(id)).collect();
+        let matches: Vec<&Deployment> = ids
+            .iter()
+            .filter(|id| is_allowed(id))
+            .filter_map(|id| registry.get_deployment(id))
+            .collect();
         return resolve_candidates(&matches, query);
     }
 
@@ -266,6 +300,39 @@ mod tests {
         assert!(err.contains("ambiguous"));
         assert!(err.contains("mainnet/42220/FPMM:v3.0.0"));
         assert!(err.contains("testnet/11155111/FPMM:v2.0.0"));
+    }
+
+    #[test]
+    fn resolve_in_scope_filters_ambiguous_contract_name() {
+        let (_tmp, registry) = setup_registry();
+        let lookup = registry.load_lookup_index().unwrap();
+        let scoped: Vec<_> = registry
+            .list_deployments()
+            .into_iter()
+            .filter(|deployment| deployment.namespace == "testnet")
+            .collect();
+
+        let result = resolve_deployment_in_scope("FPMM", &registry, &lookup, &scoped);
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().id, "testnet/11155111/FPMM:v2.0.0");
+    }
+
+    #[test]
+    fn resolve_in_scope_rejects_exact_id_outside_scope() {
+        let (_tmp, registry) = setup_registry();
+        let lookup = registry.load_lookup_index().unwrap();
+        let scoped: Vec<_> = registry
+            .list_deployments()
+            .into_iter()
+            .filter(|deployment| deployment.namespace == "testnet")
+            .collect();
+
+        let result =
+            resolve_deployment_in_scope("mainnet/42220/FPMM:v3.0.0", &registry, &lookup, &scoped);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("no deployment found matching"));
     }
 
     #[test]

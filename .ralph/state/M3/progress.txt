@@ -1,5 +1,6 @@
 ## Codebase Patterns
 - For CLI flag changes in `crates/treb-cli`, keep the derive parser in `src/main.rs`, the shell completion builder in `build.rs`, and a focused `parse_cli_from(...)` regression test in sync.
+- For scoped deployment queries in CLI commands, filter `Registry::list_deployments()` with `commands::list::filter_deployments()` and resolve the user query with `commands::resolve::resolve_deployment_in_scope()` so namespace/network/fork filters affect ambiguity resolution consistently.
 
 # Ralph Progress Log
 Started: Tue Mar 10 09:09:42 PM CET 2026
@@ -15,4 +16,16 @@ Started: Tue Mar 10 09:09:42 PM CET 2026
     Negative `parse_cli_from(...)` tests should use `match` rather than `unwrap_err()` unless the parsed `Cli` type implements `Debug`.
   - Useful context (e.g., "the evaluation panel is in component X")
     `Commands::Show` can safely accept parser-only fields before runtime wiring by matching with `..` in the main command dispatch.
+---
+## 2026-03-10 21:31:07 CET - P6-US-002
+- Wired `treb show` runtime resolution through namespace, network, and `--no-fork` filters, including scoped interactive selection and filtered no-match error context.
+- Added scoped resolution support in `commands::resolve` and end-to-end CLI coverage for namespace, network, combined JSON, and no-fork filtering behavior.
+- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `CLAUDE.md`, `crates/treb-cli/src/commands/resolve.rs`, `crates/treb-cli/src/commands/show.rs`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/tests/cli_list_show.rs`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    Query-scoped command behavior is easiest to keep consistent by reusing `commands::list::filter_deployments()` for the candidate set and layering command-specific resolution on top of that filtered slice.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    `resolve_deployment()` resolves against the whole registry, so scoped commands need `resolve_deployment_in_scope()` or they will stay ambiguous even when filters should narrow the result to one deployment.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    Focused binary tests in `crates/treb-cli/tests/cli_list_show.rs` are sufficient to cover `show` runtime filtering without touching golden snapshots because the existing clap/help surface for `show` was already in place.
 ---

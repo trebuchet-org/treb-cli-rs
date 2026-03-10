@@ -852,8 +852,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             )
             .await?
         }
-        Commands::Show { deployment, json, .. } => {
-            commands::show::run(deployment, json, non_interactive).await?
+        Commands::Show { deployment, namespace, network, no_fork, json } => {
+            commands::show::run(deployment, namespace, network, no_fork, json, non_interactive)
+                .await?
         }
         Commands::Init { force } => commands::init::run(force).await?,
         Commands::Config { subcommand } => match subcommand {

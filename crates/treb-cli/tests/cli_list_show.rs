@@ -94,6 +94,53 @@ fn make_list_deployment(namespace: &str, chain_id: u64, contract_name: &str) -> 
     }
 }
 
+fn make_show_deployment(
+    namespace: &str,
+    chain_id: u64,
+    contract_name: &str,
+    label: &str,
+    address: &str,
+) -> Deployment {
+    let ts = Utc::now();
+
+    Deployment {
+        id: format!("{namespace}/{chain_id}/{contract_name}:{label}"),
+        namespace: namespace.to_string(),
+        chain_id,
+        contract_name: contract_name.to_string(),
+        label: label.to_string(),
+        address: address.to_string(),
+        deployment_type: DeploymentType::Singleton,
+        transaction_id: format!("tx-{namespace}-{chain_id}-{contract_name}"),
+        deployment_strategy: DeploymentStrategy {
+            method: DeploymentMethod::Create,
+            salt: String::new(),
+            init_code_hash: String::new(),
+            factory: String::new(),
+            constructor_args: String::new(),
+            entropy: String::new(),
+        },
+        proxy_info: None,
+        artifact: ArtifactInfo {
+            path: "contracts/Test.sol".to_string(),
+            compiler_version: "0.8.24".to_string(),
+            bytecode_hash: "0xabc".to_string(),
+            script_path: "script/Deploy.s.sol".to_string(),
+            git_commit: "abc123".to_string(),
+        },
+        verification: VerificationInfo {
+            status: VerificationStatus::Unverified,
+            etherscan_url: String::new(),
+            verified_at: None,
+            reason: String::new(),
+            verifiers: HashMap::new(),
+        },
+        tags: None,
+        created_at: ts,
+        updated_at: ts,
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // treb list
 // ═══════════════════════════════════════════════════════════════════════════
@@ -511,4 +558,186 @@ fn show_non_proxy_deployment_hides_proxy_info() {
         !stdout.contains("Proxy Information"),
         "non-proxy deployment should not show Proxy Information section"
     );
+}
+
+#[test]
+fn show_namespace_filter_scopes_ambiguous_contract_lookup() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_custom_deployments(
+        &tmp,
+        [
+            make_show_deployment(
+                "mainnet",
+                42220,
+                "Counter",
+                "v1",
+                "0x0000000000000000000000000000000000000001",
+            ),
+            make_show_deployment(
+                "staging",
+                42220,
+                "Counter",
+                "v1",
+                "0x0000000000000000000000000000000000000002",
+            ),
+        ],
+    );
+
+    treb()
+        .args(["show", "--namespace", "mainnet", "Counter"])
+        .env("NO_COLOR", "1")
+        .current_dir(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Deployment: mainnet/42220/Counter:v1"))
+        .stdout(predicate::str::contains("Namespace: mainnet"))
+        .stdout(predicate::str::contains("Namespace: staging").not());
+}
+
+#[test]
+fn show_network_filter_scopes_ambiguous_contract_lookup() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_custom_deployments(
+        &tmp,
+        [
+            make_show_deployment(
+                "mainnet",
+                1,
+                "Counter",
+                "v1",
+                "0x0000000000000000000000000000000000000001",
+            ),
+            make_show_deployment(
+                "mainnet",
+                42220,
+                "Counter",
+                "v1",
+                "0x0000000000000000000000000000000000000002",
+            ),
+        ],
+    );
+
+    treb()
+        .args(["show", "--network", "42220", "Counter"])
+        .env("NO_COLOR", "1")
+        .current_dir(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Deployment: mainnet/42220/Counter:v1"))
+        .stdout(predicate::str::contains("Network: 42220"))
+        .stdout(predicate::str::contains("Network: 1").not());
+}
+
+#[test]
+fn show_no_fork_filter_excludes_fork_deployments() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_custom_deployments(
+        &tmp,
+        [
+            make_show_deployment(
+                "fork/42220",
+                42220,
+                "Counter",
+                "v1",
+                "0x0000000000000000000000000000000000000001",
+            ),
+            make_show_deployment(
+                "mainnet",
+                42220,
+                "Counter",
+                "v1",
+                "0x0000000000000000000000000000000000000002",
+            ),
+        ],
+    );
+
+    treb()
+        .args(["show", "--no-fork", "Counter"])
+        .env("NO_COLOR", "1")
+        .current_dir(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Deployment: mainnet/42220/Counter:v1"))
+        .stdout(predicate::str::contains("Namespace: mainnet"))
+        .stdout(predicate::str::contains("Namespace: fork/42220").not());
+}
+
+#[test]
+fn show_combined_filters_work_with_json_output() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_custom_deployments(
+        &tmp,
+        [
+            make_show_deployment(
+                "mainnet",
+                1,
+                "Counter",
+                "v1",
+                "0x0000000000000000000000000000000000000001",
+            ),
+            make_show_deployment(
+                "mainnet",
+                42220,
+                "Counter",
+                "v1",
+                "0x0000000000000000000000000000000000000002",
+            ),
+            make_show_deployment(
+                "fork/42220",
+                42220,
+                "Counter",
+                "v1",
+                "0x0000000000000000000000000000000000000003",
+            ),
+        ],
+    );
+
+    let output = treb()
+        .args([
+            "show",
+            "--namespace",
+            "mainnet",
+            "--network",
+            "42220",
+            "--no-fork",
+            "Counter",
+            "--json",
+        ])
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "treb show --json should exit 0");
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("show --json output should be valid json");
+    assert_eq!(json["deployment"]["id"], "mainnet/42220/Counter:v1");
+    assert_eq!(json["deployment"]["namespace"], "mainnet");
+    assert_eq!(json["deployment"]["chainId"], 42220);
+    assert!(
+        json.get("fork").is_none(),
+        "non-fork filtered result should not include fork=true: {json}"
+    );
+}
+
+#[test]
+fn show_filtered_no_match_includes_active_scope_in_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_custom_deployments(
+        &tmp,
+        [make_show_deployment(
+            "mainnet",
+            42220,
+            "Counter",
+            "v1",
+            "0x0000000000000000000000000000000000000001",
+        )],
+    );
+
+    treb()
+        .args(["show", "--namespace", "staging", "--network", "42220", "Counter"])
+        .current_dir(tmp.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("namespace 'staging'"))
+        .stderr(predicate::str::contains("network '42220'"));
 }

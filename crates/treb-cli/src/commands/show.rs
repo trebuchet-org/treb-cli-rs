@@ -1,6 +1,6 @@
 //! `treb show` command implementation.
 
-use std::{collections::HashMap, env};
+use std::{collections::HashMap, env, fmt::Write as _};
 
 use anyhow::{Context, bail};
 use owo_colors::{OwoColorize, Style};
@@ -8,7 +8,10 @@ use treb_core::types::{Deployment, VerificationStatus, VerifierStatus, contract_
 use treb_registry::Registry;
 
 use crate::{
-    commands::resolve::resolve_deployment,
+    commands::{
+        list::{DeploymentFilters, filter_deployments},
+        resolve::resolve_deployment_in_scope,
+    },
     output,
     ui::{badge, color, selector::fuzzy_select_deployment_id},
 };
@@ -30,6 +33,9 @@ struct VerificationDisplay<'a> {
 
 pub async fn run(
     deployment_query: Option<String>,
+    namespace: Option<String>,
+    network: Option<String>,
+    no_fork: bool,
     json: bool,
     non_interactive: bool,
 ) -> anyhow::Result<()> {
@@ -52,21 +58,32 @@ pub async fn run(
 
     let registry = Registry::open(&cwd).context("failed to open registry")?;
     let lookup = registry.load_lookup_index().context("failed to load lookup index")?;
-    let deployments = registry.list_deployments();
-    let impl_lookup = build_impl_lookup(&deployments);
+    let all_deployments = registry.list_deployments();
+    let impl_lookup = build_impl_lookup(&all_deployments);
+    let scope = ShowScope { namespace, network, no_fork };
+    let filters = scope.as_deployment_filters();
+    let filtered_deployments = filter_deployments(&all_deployments, &filters);
 
     let query = match deployment_query {
         Some(q) => q,
         None => {
-            let deployments: Vec<_> = registry.list_deployments().into_iter().cloned().collect();
+            if filtered_deployments.is_empty() {
+                bail!("{}", scope.no_deployments_message());
+            }
+
+            let deployments: Vec<_> =
+                filtered_deployments.iter().map(|deployment| (*deployment).clone()).collect();
             fuzzy_select_deployment_id(&deployments, non_interactive)
                 .map_err(|e| anyhow::anyhow!("{e}"))?
                 .ok_or_else(|| anyhow::anyhow!("no deployment selected"))?
         }
     };
 
-    let deployment =
-        normalize_deployment_for_show(resolve_deployment(&query, &registry, &lookup)?.clone());
+    let deployment = normalize_deployment_for_show(
+        resolve_deployment_in_scope(&query, &registry, &lookup, &filtered_deployments)
+            .map_err(|err| scope.decorate_resolution_error(&query, err))?
+            .clone(),
+    );
 
     if json {
         let is_fork = deployment.namespace.starts_with("fork/");
@@ -82,6 +99,69 @@ pub async fn run(
     }
 
     Ok(())
+}
+
+#[derive(Clone, Debug, Default)]
+struct ShowScope {
+    namespace: Option<String>,
+    network: Option<String>,
+    no_fork: bool,
+}
+
+impl ShowScope {
+    fn as_deployment_filters(&self) -> DeploymentFilters {
+        DeploymentFilters {
+            network: self.network.clone(),
+            namespace: self.namespace.clone(),
+            deployment_type: None,
+            tag: None,
+            contract: None,
+            label: None,
+            fork: false,
+            no_fork: self.no_fork,
+        }
+    }
+
+    fn context_suffix(&self) -> String {
+        let mut context = String::new();
+
+        if let Some(namespace) = &self.namespace {
+            let _ = write!(context, " in namespace '{namespace}'");
+        }
+
+        if let Some(network) = &self.network {
+            let _ = write!(context, " on network '{network}'");
+        }
+
+        if self.no_fork {
+            context.push_str(" excluding fork deployments");
+        }
+
+        context
+    }
+
+    fn no_deployments_message(&self) -> String {
+        format!(
+            "no deployments found{}\n\nRun `treb list` to see available deployments.",
+            self.context_suffix()
+        )
+    }
+
+    fn decorate_resolution_error(&self, query: &str, err: anyhow::Error) -> anyhow::Error {
+        if self.context_suffix().is_empty() {
+            return err;
+        }
+
+        let message = err.to_string();
+        if message.starts_with("no deployment found") {
+            anyhow::anyhow!(
+                "no deployment found matching '{query}'{}\n\nRun `treb list` to see available deployments.",
+                self.context_suffix()
+            )
+        } else {
+            err
+        }
+    }
 }
 
 /// Conditionally apply an owo-colors [`Style`] to text.
@@ -427,5 +507,38 @@ mod tests {
         assert_eq!(normalized.verification.status, VerificationStatus::Partial);
         assert_eq!(normalized.verification.etherscan_url, "https://etherscan.io/address/0x123");
         assert!(normalized.verification.verified_at.is_none());
+    }
+
+    #[test]
+    fn show_scope_context_suffix_orders_filters() {
+        let scope = ShowScope {
+            namespace: Some("mainnet".into()),
+            network: Some("42220".into()),
+            no_fork: true,
+        };
+
+        assert_eq!(
+            scope.context_suffix(),
+            " in namespace 'mainnet' on network '42220' excluding fork deployments"
+        );
+    }
+
+    #[test]
+    fn show_scope_rewrites_no_match_errors_with_filter_context() {
+        let scope = ShowScope {
+            namespace: Some("mainnet".into()),
+            network: Some("42220".into()),
+            no_fork: false,
+        };
+
+        let error = scope.decorate_resolution_error(
+            "Counter",
+            anyhow::anyhow!("no deployment found matching 'Counter'\n\nRun `treb list` to see available deployments."),
+        );
+
+        assert_eq!(
+            error.to_string(),
+            "no deployment found matching 'Counter' in namespace 'mainnet' on network '42220'\n\nRun `treb list` to see available deployments."
+        );
     }
 }
