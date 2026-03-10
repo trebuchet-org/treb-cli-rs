@@ -1,4 +1,7 @@
-use std::env;
+use std::{
+    env,
+    ffi::{OsStr, OsString},
+};
 
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use treb_cli::{commands, output, ui};
@@ -671,15 +674,54 @@ fn argv_requests_flag(flag: &str) -> bool {
     })
 }
 
+fn normalize_cli_args<I, T>(args: I) -> Vec<OsString>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString>,
+{
+    let mut args: Vec<OsString> = args.into_iter().map(Into::into).collect();
+
+    if should_default_config_to_show(&args) {
+        args.insert(2, OsString::from("show"));
+    }
+
+    args
+}
+
+fn should_default_config_to_show(args: &[OsString]) -> bool {
+    if args.get(1).map(OsString::as_os_str) != Some(OsStr::new("config")) {
+        return false;
+    }
+
+    let rest = &args[2..];
+    if rest.is_empty() {
+        return true;
+    }
+
+    if rest.iter().any(|arg| matches!(arg.to_str(), Some("-h" | "--help"))) {
+        return false;
+    }
+
+    !rest.iter().any(|arg| !arg.to_string_lossy().starts_with('-'))
+}
+
+fn parse_cli_from<I, T>(args: I) -> Result<Cli, clap::Error>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString>,
+{
+    let matches = build_grouped_command().try_get_matches_from(normalize_cli_args(args))?;
+    Ok(Cli::from_arg_matches(&matches).expect("bug: derive/builder arg mismatch"))
+}
+
 #[tokio::main]
 async fn main() {
     let no_color_requested = argv_requests_flag("--no-color");
     ui::color::color_enabled(no_color_requested);
 
     let json_requested = argv_requests_flag("--json");
-    let cmd = build_grouped_command();
-    let cli = match cmd.try_get_matches() {
-        Ok(matches) => Cli::from_arg_matches(&matches).expect("bug: derive/builder arg mismatch"),
+    let cli = match parse_cli_from(env::args_os()) {
+        Ok(cli) => cli,
         Err(err) => {
             if json_requested
                 && !matches!(
@@ -1006,5 +1048,33 @@ mod tests {
         let help = build_grouped_help(&Cli::command());
         assert!(help.contains("  completion"));
         assert!(!help.contains("completions"));
+    }
+
+    #[test]
+    fn config_command_defaults_to_show() {
+        let cli = parse_cli_from(["treb", "config"]).unwrap();
+        match cli.command {
+            Commands::Config { subcommand: ConfigSubcommand::Show { json } } => assert!(!json),
+            _ => panic!("expected bare config to normalize to config show"),
+        }
+    }
+
+    #[test]
+    fn config_command_defaults_to_show_with_json() {
+        let cli = parse_cli_from(["treb", "config", "--json"]).unwrap();
+        assert!(cli.command.json_flag());
+
+        match cli.command {
+            Commands::Config { subcommand: ConfigSubcommand::Show { json } } => assert!(json),
+            _ => panic!("expected bare config --json to normalize to config show --json"),
+        }
+    }
+
+    #[test]
+    fn config_help_does_not_normalize_to_show() {
+        match parse_cli_from(["treb", "config", "--help"]) {
+            Ok(_) => panic!("expected config --help to return clap help output"),
+            Err(err) => assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp),
+        }
     }
 }

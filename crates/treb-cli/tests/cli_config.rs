@@ -36,6 +36,24 @@ fn config_show_displays_namespace_and_network() {
 }
 
 #[test]
+fn config_defaults_to_show_output() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project(&tmp);
+
+    let bare = treb().args(["config"]).current_dir(tmp.path()).output().expect("run treb config");
+    let explicit = treb()
+        .args(["config", "show"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("run treb config show");
+
+    assert!(bare.status.success(), "treb config should succeed");
+    assert!(explicit.status.success(), "treb config show should succeed");
+    assert_eq!(bare.stdout, explicit.stdout);
+    assert_eq!(bare.stderr, explicit.stderr);
+}
+
+#[test]
 fn config_show_json_is_valid() {
     let tmp = tempfile::tempdir().unwrap();
     init_project(&tmp);
@@ -58,6 +76,32 @@ fn config_show_json_is_valid() {
     assert!(obj.contains_key("configSource"));
     assert!(obj.contains_key("projectRoot"));
     assert!(obj.contains_key("senders"));
+}
+
+#[test]
+fn config_json_defaults_to_show_json() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project(&tmp);
+
+    let bare = treb()
+        .args(["config", "--json"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("failed to run treb config --json");
+    let explicit = treb()
+        .args(["config", "show", "--json"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("failed to run treb config show --json");
+
+    assert!(bare.status.success(), "treb config --json should succeed");
+    assert!(explicit.status.success(), "treb config show --json should succeed");
+    assert_eq!(bare.stdout, explicit.stdout);
+    assert_eq!(bare.stderr, explicit.stderr);
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&bare.stdout).expect("output is not valid JSON");
+    assert_eq!(json["namespace"], "default");
 }
 
 #[test]
