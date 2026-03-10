@@ -6,6 +6,7 @@ Started: Tue Mar 10 03:36:50 PM CET 2026
 - For spelling-only CLI renames that need backward compatibility, keep the canonical subcommand name in `src/main.rs` and add the old spelling as a hidden clap alias there and in `build.rs`; that preserves parsing, root help, and generated shell completions without a second runtime handler.
 - For a command that should default to an existing subcommand without changing clap help/completion structure, normalize argv in `crates/treb-cli/src/main.rs` before clap parsing and skip that rewrite when `--help` is present.
 - Help regressions need coverage in both `treb --help` and subcommand `--help` snapshots: root help is custom-built in `build_grouped_help()`, while subcommand help still comes from clap and can drift independently.
+- For CLI renames that must preserve legacy entrypoints, keep one focused binary suite in `crates/treb-cli/tests/cli_compatibility_aliases.rs` that compares canonical and compatibility stdout directly; use feature-specific suites for deeper behavior, not for alias parity alone.
 
 ---
 ## 2026-03-10 15:51:18 CET - P4-US-001
@@ -55,4 +56,13 @@ Started: Tue Mar 10 03:36:50 PM CET 2026
   - Patterns discovered: root help compatibility details belong in `build_grouped_help()`, but subcommand help expectations are best pinned with dedicated golden snapshots because clap renders them on a separate path.
   - Gotchas encountered: argument normalization can preserve runtime behavior while leaving help text stale, so default-subcommand changes need explicit `--help` coverage.
   - Useful context: `crates/treb-cli/tests/integration_help.rs` now serves as the focused snapshot suite for help output changes tied to CLI naming and structure.
+---
+## 2026-03-10 17:02:55 CET - P4-US-006
+- Added a focused binary compatibility suite in `crates/treb-cli/tests/cli_compatibility_aliases.rs` to pin `gen deploy`/`generate deploy`/`gen-deploy`, `completion`/`completions`, and bare `config` parity in one place.
+- Recorded the reusable alias-regression testing pattern in `CLAUDE.md`, then verified the story with `cargo fmt --check`, `cargo check -p treb-cli`, and `cargo test -p treb-cli`.
+- Files changed: `crates/treb-cli/tests/cli_compatibility_aliases.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: compatibility stories are easier to maintain when canonical and legacy invocations are compared in one dedicated binary-level suite instead of scattering alias assertions across feature tests.
+  - Gotchas encountered: raw stdout byte comparisons catch alias drift more reliably than matching only a sentinel substring, especially for JSON-producing commands.
+  - Useful context: `cli_compatibility_aliases.rs` reuses lightweight fixture setup for `gen deploy` and `config`, so future alias additions can usually be covered there without touching the golden harness.
 ---

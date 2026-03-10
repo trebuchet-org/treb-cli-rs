@@ -100,7 +100,7 @@
         "`cargo check -p treb-cli` passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]
