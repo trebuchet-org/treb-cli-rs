@@ -51,6 +51,8 @@ treb — deployment orchestration CLI for Foundry projects. Rust workspace with 
 
 **Registry compat test seeding**: `crates/treb-cli/tests/helpers/mod.rs::seed_registry()` writes the legacy bare `deployments_map.json` fixture into `.treb/deployments.json`; use a mutating CLI command such as `tag --add` when you need to verify that a write path upgrades legacy store files to the wrapped `{"_format":"treb-v1","entries":...}` shape.
 
+**Go registry compat fixtures**: `crates/treb-registry/tests/fixtures/go-compat/` stores bare `map[string]T` JSON for cross-CLI registry tests. Prefer subsets from `/home/sol/projects/mento-deployments-v2/.treb/`; the current local snapshot does not include populated deployment tags or `executedAt` on safe transactions, so keep those edge cases explicit when refreshing the fixture set.
+
 **Anvil spawning references**:
 - `crates/treb-cli/tests/e2e/mod.rs` — `spawn_anvil_or_skip()` for workflow tests that need a transient node and must skip cleanly in restricted environments
 - `crates/treb-cli/tests/framework/anvil_node.rs` — `AnvilNode::spawn()` / `spawn_with_config()` for integration tests that manage named nodes through `TestContext`
