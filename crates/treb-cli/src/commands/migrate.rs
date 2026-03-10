@@ -6,9 +6,9 @@
 
 use std::{
     collections::HashMap,
-    env,
+    env, fs,
     io::IsTerminal,
-    path::Path,
+    path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -18,7 +18,9 @@ use treb_config::{
     AccountConfig, NamespaceRoles, TrebConfigFormat, detect_treb_config_format,
     extract_treb_senders_from_foundry, load_treb_config_v1, serialize_treb_config_v2,
 };
-use treb_registry::REGISTRY_DIR;
+use treb_registry::{
+    REGISTRY_DIR, detect_legacy_registry_store_files, rename_legacy_registry_store_files,
+};
 
 use owo_colors::OwoColorize;
 
@@ -523,16 +525,95 @@ fn convert_foundry_senders_to_v2(
 
 // ── run_registry ──────────────────────────────────────────────────────────────
 
-async fn run_registry(project_root: &Path, _dry_run: bool) -> anyhow::Result<()> {
+fn registry_dirs_for_migration(registry_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    let mut dirs = vec![registry_dir.to_path_buf()];
+    let snapshots_dir = registry_dir.join("snapshots");
+
+    if snapshots_dir.is_dir() {
+        let mut snapshot_dirs = Vec::new();
+        for entry in fs::read_dir(&snapshots_dir)
+            .with_context(|| format!("failed to read {}", snapshots_dir.display()))?
+        {
+            let entry = entry.with_context(|| {
+                format!("failed to read snapshot entry in {}", snapshots_dir.display())
+            })?;
+            let path = entry.path();
+            if path.is_dir() {
+                snapshot_dirs.push(path);
+            }
+        }
+        snapshot_dirs.sort();
+        dirs.extend(snapshot_dirs);
+    }
+
+    Ok(dirs)
+}
+
+fn pending_legacy_registry_renames(registry_dir: &Path) -> anyhow::Result<Vec<(PathBuf, PathBuf)>> {
+    let mut pending = Vec::new();
+    for dir in registry_dirs_for_migration(registry_dir)? {
+        pending.extend(detect_legacy_registry_store_files(&dir));
+    }
+    pending.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(pending)
+}
+
+fn display_registry_path(path: &Path, project_root: &Path) -> String {
+    path.strip_prefix(project_root).unwrap_or(path).display().to_string()
+}
+
+async fn run_registry(project_root: &Path, dry_run: bool) -> anyhow::Result<()> {
     if !project_root.join(REGISTRY_DIR).exists() {
         bail!("project not initialized — .treb/ directory not found\n\nRun `treb init` first.");
     }
 
-    output::print_stage("\u{1f50d}", "Checking registry migration status...");
+    let registry_dir = project_root.join(REGISTRY_DIR);
+
+    output::print_stage(emoji::MAGNIFYING_GLASS, "Checking registry migration status...");
+
+    let pending = pending_legacy_registry_renames(&registry_dir)?;
+    if pending.is_empty() {
+        output::print_stage(
+            emoji::CHECK,
+            "Registry store files upgrade automatically on save; no migration step is required.",
+        );
+        return Ok(());
+    }
+
+    let noun = if pending.len() == 1 { "file" } else { "files" };
+
+    if dry_run {
+        output::print_stage(
+            emoji::CLIPBOARD,
+            &format!("Found {} legacy registry store {noun} that would be renamed:", pending.len()),
+        );
+        for (old_path, new_path) in pending {
+            eprintln!(
+                "  {} -> {}",
+                display_registry_path(&old_path, project_root),
+                display_registry_path(&new_path, project_root)
+            );
+        }
+        return Ok(());
+    }
+
+    let mut renamed = Vec::new();
+    for dir in registry_dirs_for_migration(&registry_dir)? {
+        renamed.extend(rename_legacy_registry_store_files(&dir)?);
+    }
+
     output::print_stage(
-        "\u{2705}",
-        "Registry store files upgrade automatically on save; no migration step is required.",
+        emoji::CHECK,
+        &format!("Renamed {} legacy registry store {noun}.", renamed.len()),
     );
+    for (old_path, new_path) in renamed {
+        eprintln!(
+            "  {} -> {}",
+            display_registry_path(&old_path, project_root),
+            display_registry_path(&new_path, project_root)
+        );
+    }
+
     Ok(())
 }
 

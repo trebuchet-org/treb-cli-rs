@@ -72,6 +72,24 @@ pub fn read_versioned_file<T: DeserializeOwned + Default>(path: &Path) -> Result
     deserialize_value(path, value)
 }
 
+/// Read a versioned store file, falling back to the legacy filename when the
+/// current filename does not exist yet.
+pub fn read_versioned_file_compat<T: DeserializeOwned + Default>(
+    path: &Path,
+) -> Result<T, TrebError> {
+    if path.exists() {
+        return read_versioned_file(path);
+    }
+
+    if let Some(legacy_path) = crate::legacy_registry_store_path(path) {
+        if legacy_path.exists() {
+            return read_versioned_file(&legacy_path);
+        }
+    }
+
+    Ok(T::default())
+}
+
 /// Atomically write `value` as 2-space-indented JSON with a trailing newline.
 ///
 /// Creates parent directories if they don't exist. Writes to a temporary file

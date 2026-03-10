@@ -9,7 +9,7 @@ use treb_core::{TrebError, types::SafeTransaction};
 
 use crate::{
     SAFE_TXS_FILE,
-    io::{read_versioned_file, write_versioned_file},
+    io::{read_versioned_file_compat, write_versioned_file},
 };
 
 /// CRUD store for safe transactions, persisted as a
@@ -29,7 +29,7 @@ impl SafeTransactionStore {
 
     /// Load safe transactions from disk, replacing any in-memory data.
     pub fn load(&mut self) -> Result<(), TrebError> {
-        self.data = read_versioned_file(&self.path)?;
+        self.data = read_versioned_file_compat(&self.path)?;
         Ok(())
     }
 

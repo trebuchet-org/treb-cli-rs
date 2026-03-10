@@ -232,9 +232,11 @@ mod tests {
     use chrono::Utc;
     use tempfile::TempDir;
     use treb_core::types::{
-        ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, TransactionStatus,
-        VerificationInfo, VerificationStatus,
+        ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, ProposalStatus,
+        TransactionStatus, VerificationInfo, VerificationStatus,
     };
+
+    use crate::io::{VersionedStore, write_json_file};
 
     // ── Test helpers ─────────────────────────────────────────────────────
 
@@ -323,6 +325,26 @@ mod tests {
         }
     }
 
+    fn make_governor_proposal(id: &str, proposed_at_offset_secs: i64) -> GovernorProposal {
+        let base = chrono::DateTime::parse_from_rfc3339("2026-03-02T19:30:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let ts = base + chrono::Duration::seconds(proposed_at_offset_secs);
+        GovernorProposal {
+            proposal_id: id.to_string(),
+            governor_address: "0xGovernor".to_string(),
+            timelock_address: String::new(),
+            chain_id: 1,
+            status: ProposalStatus::Pending,
+            transaction_ids: vec![],
+            proposed_by: "0xProposer".to_string(),
+            proposed_at: ts,
+            description: String::new(),
+            executed_at: None,
+            execution_tx_hash: String::new(),
+        }
+    }
+
     // ── Integration tests ────────────────────────────────────────────────
 
     #[test]
@@ -364,6 +386,33 @@ mod tests {
         assert_eq!(registry.deployment_count(), 0);
         assert_eq!(registry.transaction_count(), 0);
         assert_eq!(registry.safe_transaction_count(), 0);
+    }
+
+    #[test]
+    fn open_reads_legacy_safe_and_governor_store_filenames() {
+        let dir = TempDir::new().unwrap();
+        let registry_dir = dir.path().join(REGISTRY_DIR);
+        fs::create_dir_all(&registry_dir).unwrap();
+
+        let mut safe_txs = HashMap::new();
+        safe_txs.insert("0xlegacy".to_string(), make_safe_transaction("0xlegacy", 10));
+        write_json_file(&registry_dir.join("safe_txs.json"), &VersionedStore::new(safe_txs))
+            .unwrap();
+
+        let mut governor_proposals = HashMap::new();
+        governor_proposals.insert("prop-1".to_string(), make_governor_proposal("prop-1", 20));
+        write_json_file(
+            &registry_dir.join("governor_proposals.json"),
+            &VersionedStore::new(governor_proposals),
+        )
+        .unwrap();
+
+        let registry = Registry::open(dir.path()).unwrap();
+
+        assert_eq!(registry.safe_transaction_count(), 1);
+        assert_eq!(registry.governor_proposal_count(), 1);
+        assert!(registry.get_safe_transaction("0xlegacy").is_some());
+        assert!(registry.get_governor_proposal("prop-1").is_some());
     }
 
     #[test]

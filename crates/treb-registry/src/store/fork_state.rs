@@ -14,7 +14,7 @@ use treb_core::{
 use crate::{
     DEPLOYMENTS_FILE, FORK_STATE_FILE, GOVERNOR_PROPOSALS_FILE, LOOKUP_FILE, SAFE_TXS_FILE,
     TRANSACTIONS_FILE,
-    io::{read_versioned_file, write_versioned_file},
+    io::{read_versioned_file_compat, write_versioned_file},
 };
 
 /// Registry JSON files that are snapshotted/restored during fork mode.
@@ -63,6 +63,10 @@ pub fn snapshot_registry(registry_dir: &Path, snapshot_dir: &Path) -> Result<(),
         let src = registry_dir.join(file);
         if src.exists() {
             fs::copy(&src, snapshot_dir.join(file))?;
+        } else if let Some(legacy_src) = crate::legacy_registry_store_path(&src) {
+            if legacy_src.exists() {
+                fs::copy(&legacy_src, snapshot_dir.join(file))?;
+            }
         }
     }
     Ok(())
@@ -84,6 +88,13 @@ pub fn restore_registry(snapshot_dir: &Path, registry_dir: &Path) -> Result<(), 
         let registry_file = registry_dir.join(file);
         if snapshot_file.exists() {
             fs::copy(&snapshot_file, &registry_file)?;
+        } else if let Some(legacy_snapshot_file) = crate::legacy_registry_store_path(&snapshot_file)
+        {
+            if legacy_snapshot_file.exists() {
+                fs::copy(&legacy_snapshot_file, &registry_file)?;
+            } else if registry_file.exists() {
+                fs::remove_file(&registry_file)?;
+            }
         } else if registry_file.exists() {
             fs::remove_file(&registry_file)?;
         }
@@ -116,7 +127,7 @@ impl ForkStateStore {
 
     /// Load fork state from disk, replacing any in-memory data.
     pub fn load(&mut self) -> Result<(), TrebError> {
-        self.data = read_versioned_file(&self.path)?;
+        self.data = read_versioned_file_compat(&self.path)?;
         Ok(())
     }
 
@@ -351,6 +362,22 @@ mod tests {
         assert!(!snap_path.join(SAFE_TXS_FILE).exists());
     }
 
+    #[test]
+    fn snapshot_copies_legacy_safe_transactions_file_using_current_name() {
+        let reg_dir = TempDir::new().unwrap();
+        let snap_dir = TempDir::new().unwrap();
+        let snap_path = snap_dir.path().join("snapshot");
+
+        fs::write(reg_dir.path().join("safe_txs.json"), r#"{"legacy": true}"#).unwrap();
+
+        snapshot_registry(reg_dir.path(), &snap_path).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(snap_path.join(SAFE_TXS_FILE)).unwrap(),
+            r#"{"legacy": true}"#
+        );
+    }
+
     // ── restore_registry tests ──────────────────────────────────────────
 
     #[test]
@@ -387,6 +414,22 @@ mod tests {
         assert!(
             reg_dir.path().join(TRANSACTIONS_FILE).exists(),
             "restore should still copy files that do exist in the snapshot"
+        );
+    }
+
+    #[test]
+    fn restore_reads_legacy_snapshot_filename() {
+        let reg_dir = TempDir::new().unwrap();
+        let snap_dir = TempDir::new().unwrap();
+
+        fs::write(reg_dir.path().join(SAFE_TXS_FILE), r#"{"new": true}"#).unwrap();
+        fs::write(snap_dir.path().join("safe_txs.json"), r#"{"legacy": true}"#).unwrap();
+
+        restore_registry(snap_dir.path(), reg_dir.path()).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(reg_dir.path().join(SAFE_TXS_FILE)).unwrap(),
+            r#"{"legacy": true}"#
         );
     }
 
@@ -648,6 +691,22 @@ mod tests {
     fn load_reads_wrapped_format() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join(FORK_STATE_FILE);
+        let mut state = ForkState::default();
+        state.forks.insert("mainnet".into(), sample_fork_entry("mainnet"));
+        state.history.push(sample_history_entry("enter", "mainnet"));
+
+        write_json_file(&path, &VersionedStore::new(state.clone())).unwrap();
+
+        let mut store = ForkStateStore::new(dir.path());
+        store.load().unwrap();
+
+        assert_eq!(store.data(), &state);
+    }
+
+    #[test]
+    fn load_reads_legacy_fork_state_filename() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("fork-state.json");
         let mut state = ForkState::default();
         state.forks.insert("mainnet".into(), sample_fork_entry("mainnet"));
         state.history.push(sample_history_entry("enter", "mainnet"));
