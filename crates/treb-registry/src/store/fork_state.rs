@@ -720,7 +720,7 @@ mod tests {
     }
 
     #[test]
-    fn save_writes_wrapped_format() {
+    fn save_writes_bare_format() {
         let dir = TempDir::new().unwrap();
         let mut store = ForkStateStore::new(dir.path());
 
@@ -728,9 +728,10 @@ mod tests {
         store.add_history(sample_history_entry("enter", "mainnet")).unwrap();
 
         let saved: serde_json::Value = read_json_file(&dir.path().join(FORK_STATE_FILE)).unwrap();
-        assert_eq!(saved["_format"], STORE_FORMAT);
-        assert!(saved["entries"]["forks"].get("mainnet").is_some());
-        assert_eq!(saved["entries"]["history"][0]["action"], "enter");
+        assert!(saved.get("_format").is_none());
+        assert!(saved.get("entries").is_none());
+        assert!(saved["forks"].get("mainnet").is_some());
+        assert_eq!(saved["history"][0]["action"], "enter");
     }
 
     #[test]

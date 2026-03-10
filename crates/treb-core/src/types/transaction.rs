@@ -15,6 +15,11 @@ use super::enums::TransactionStatus;
 // ---------------------------------------------------------------------------
 
 /// A blockchain transaction record.
+///
+/// Go registry fixtures can encode `createdAt` with a non-UTC RFC3339 offset.
+/// Rust normalizes that timestamp into `DateTime<Utc>` and writes it back as
+/// the same instant in UTC, so compatibility checks should compare instants
+/// rather than raw timestamp strings.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Transaction {

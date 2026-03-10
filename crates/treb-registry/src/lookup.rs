@@ -161,10 +161,7 @@ mod tests {
         VerificationStatus,
     };
 
-    use crate::{
-        STORE_FORMAT,
-        io::{VersionedStore, read_json_file, write_json_file},
-    };
+    use crate::io::{VersionedStore, read_json_file, write_json_file};
 
     /// Helper to create a minimal deployment with configurable fields for
     /// lookup testing.
@@ -364,7 +361,7 @@ mod tests {
     }
 
     #[test]
-    fn save_writes_wrapped_format() {
+    fn save_writes_bare_format() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join(LOOKUP_FILE);
         let store = LookupStore::new(dir.path());
@@ -372,11 +369,12 @@ mod tests {
         store.save(&sample_lookup_index()).unwrap();
 
         let saved: serde_json::Value = read_json_file(&path).unwrap();
-        assert_eq!(saved["_format"], STORE_FORMAT);
-        assert_eq!(saved["entries"]["byName"]["factory"], serde_json::json!(["dep-1", "dep-2"]));
-        assert_eq!(saved["entries"]["byAddress"]["0xaaa"], "dep-1");
-        assert_eq!(saved["entries"]["byAddress"]["0xbbb"], "dep-2");
-        assert_eq!(saved["entries"]["byTag"]["core"], serde_json::json!(["dep-1", "dep-2"]));
+        assert!(saved.get("_format").is_none());
+        assert!(saved.get("entries").is_none());
+        assert_eq!(saved["byName"]["factory"], serde_json::json!(["dep-1", "dep-2"]));
+        assert_eq!(saved["byAddress"]["0xaaa"], "dep-1");
+        assert_eq!(saved["byAddress"]["0xbbb"], "dep-2");
+        assert_eq!(saved["byTag"]["core"], serde_json::json!(["dep-1", "dep-2"]));
     }
 
     #[test]
@@ -404,7 +402,7 @@ mod tests {
     }
 
     #[test]
-    fn rebuild_writes_wrapped_format() {
+    fn rebuild_writes_bare_format() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join(LOOKUP_FILE);
         let store = LookupStore::new(dir.path());
@@ -422,11 +420,12 @@ mod tests {
         store.rebuild(&deployments).unwrap();
 
         let saved: serde_json::Value = read_json_file(&path).unwrap();
-        assert_eq!(saved["_format"], STORE_FORMAT);
-        assert_eq!(saved["entries"]["byName"]["factory"], serde_json::json!(["dep-1", "dep-2"]));
-        assert_eq!(saved["entries"]["byTag"]["core"], serde_json::json!(["dep-1", "dep-2"]));
-        assert_eq!(saved["entries"]["byAddress"]["0xaaa"], "dep-1");
-        assert_eq!(saved["entries"]["byAddress"]["0xbbb"], "dep-2");
+        assert!(saved.get("_format").is_none());
+        assert!(saved.get("entries").is_none());
+        assert_eq!(saved["byName"]["factory"], serde_json::json!(["dep-1", "dep-2"]));
+        assert_eq!(saved["byTag"]["core"], serde_json::json!(["dep-1", "dep-2"]));
+        assert_eq!(saved["byAddress"]["0xaaa"], "dep-1");
+        assert_eq!(saved["byAddress"]["0xbbb"], "dep-2");
     }
 
     #[test]

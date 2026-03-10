@@ -13,6 +13,11 @@ use super::enums::TransactionStatus;
 // ---------------------------------------------------------------------------
 
 /// A Safe multisig transaction record.
+///
+/// Go registry fixtures may use offset RFC3339 strings for `proposedAt` and
+/// `executedAt`. Rust deserializes those into `DateTime<Utc>` and serializes
+/// them back in UTC, so cross-CLI checks should treat timestamp offsets as a
+/// representation detail instead of a schema difference.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SafeTransaction {
@@ -51,6 +56,9 @@ pub struct SafeTxData {
 // ---------------------------------------------------------------------------
 
 /// A confirmation on a Safe transaction.
+///
+/// Confirmation timestamps follow the same offset-normalization behavior as
+/// the parent safe transaction timestamps during Rust round trips.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Confirmation {

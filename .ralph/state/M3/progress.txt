@@ -1,83 +1,54 @@
 # Ralph Progress Log
+Started: Tue Mar 10 12:34:35 PM CET 2026
 ## Codebase Patterns
-- Registry store files should use `read_versioned_file()` for backward-compatible reads and `write_versioned_file()` for locked atomic writes to the `{"_format":"treb-v1","entries":...}` wrapper format.
-- Map-backed registry stores should sort entries into a `BTreeMap` before `write_versioned_file()` so wrapped JSON stays deterministic for tests and diffs.
-- `ForkStateStore` should persist through a sorted wrapper view of `forks` while keeping the `history` vector order intact, so `fork.json` remains deterministic without changing recency semantics.
-- Secondary-index stores that persist `Vec<String>` ID lists should sort those vectors before saving or returning rebuilt data, otherwise hash-map iteration can make the JSON output nondeterministic.
-- Registry-only changes should be validated with `cargo check -p treb-registry` and `cargo test -p treb-registry` before running broader workspace checks.
-- Rust registry code should not create or read `.treb/registry.json`; treat that filename as external Go/Solidity registry data and only assert on actual store files plus `config.local.json`.
-- `crates/treb-cli/tests/helpers::seed_registry()` intentionally writes the legacy bare deployments fixture, so mutating CLI tests can use it to verify automatic upgrade to wrapped `{"_format":"treb-v1","entries":...}` store files without bespoke fixtures.
-
-Started: Tue Mar 10 09:50:03 AM CET 2026
+- Go registry compatibility fixtures belong in `crates/treb-registry/tests/fixtures/go-compat/` as bare JSON maps; prefer production slices from `/home/sol/projects/mento-deployments-v2/.treb/` and call out any extra edge-case coverage when the live snapshot does not exercise it.
+- For `treb-registry` cross-CLI store tests, seed a temp registry dir with the raw fixture bytes under the real store filename and call `Store::load()` so the compatibility coverage exercises the actual read path; compare offset timestamps after converting them to `DateTime<Utc>`.
+- `write_versioned_file()` now writes bare JSON for Go compatibility, while `read_versioned_file()` and `read_versioned_file_compat()` must keep accepting legacy `{"_format":"treb-v1","entries":...}` payloads; persistence tests should assert the top-level bare object directly.
+- Go-fixture round-trip assertions should compare recursive JSON key sets and timestamp instants, not literal RFC3339 strings, because `chrono::DateTime<Utc>` rewrites source offsets to `Z` on save without changing the represented instant.
+- CLI golden snapshots of persisted `.treb/*.json` artifacts must also use the bare-map registry format; if an older golden still contains `_format`/`entries`, normalize it to `.entries // .` before relying on the failure diff.
 ---
-## 2026-03-10 09:53:46 CET - P1-US-001
-- Added `STORE_FORMAT`, generic `VersionedStore<T>`, and shared `read_versioned_file()` / `write_versioned_file()` helpers in `treb-registry`.
-- Added registry I/O tests covering wrapped serialization, wrapped and bare-map reads, missing-file defaults, wrapped writes, and advisory lock behavior; updated root guidance in `CLAUDE.md`.
-- Files changed: `crates/treb-registry/src/io.rs`, `crates/treb-registry/src/lib.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-10 12:56 CET - P2-US-001
+- Added bare Go-compat fixture maps for deployments (11 entries), transactions (10 entries), and safe transactions (8 entries) under `crates/treb-registry/tests/fixtures/go-compat/`.
+- Files changed: `crates/treb-registry/tests/fixtures/go-compat/deployments.json`, `crates/treb-registry/tests/fixtures/go-compat/transactions.json`, `crates/treb-registry/tests/fixtures/go-compat/safe-txs.json`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
 - **Learnings for future iterations:**
-  - Registry store versioning belongs in the shared I/O layer so individual stores can migrate with mechanical helper swaps.
-  - `write_versioned_file()` should own the `with_file_lock()` call; later store migrations should not wrap it in an extra lock.
-  - `read_versioned_file()` accepts both wrapped and legacy bare JSON, which is the compatibility path for upgrading existing registry files.
+  - Current `mento-deployments-v2/.treb/` data covers CREATE/CREATE2/CREATE3, LIBRARY/PROXY/SINGLETON, safeContext, and offset timestamps, but it does not include populated deployment tags or `executedAt` on safe transactions.
+  - Tagged deployment coverage comes from the existing Go-generated `crates/treb-core/tests/fixtures/deployments_map.json` entry, and `executedAt` coverage uses a production-derived safe transaction augmented to match Go's `sync_registry` write shape.
+  - `cargo check -p treb-registry` passes with the new fixture set.
 ---
-## 2026-03-10 10:01:20 CET - P1-US-001
-- Verified the existing `VersionedStore<T>` / `read_versioned_file()` / `write_versioned_file()` implementation already on this branch and restored the PRD status for `P1-US-001`.
-- Re-ran targeted registry validation: `cargo check -p treb-registry` and `cargo test -p treb-registry` both passed.
-- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-10 13:17 CET - P2-US-002
+- Added fixture-driven store-load compatibility tests for deployments, transactions, and safe transactions in `crates/treb-registry/tests/go_compat_deserialize.rs`, each seeding the raw Go JSON into a temp registry dir and verifying the real `Store::load()` path.
+- Verified fixture counts and spot-checked representative entries across all three stores, including proxy metadata, safe context, operation payloads, queued vs executed safe transactions, and timezone-offset timestamps parsed into UTC.
+- Files changed: `crates/treb-registry/tests/go_compat_deserialize.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
 - **Learnings for future iterations:**
-  - The Ralph state for the active phase is stored under `.ralph/current/` via a symlink to `.ralph/state/<phase>/`, so PRD/progress edits should be treated as the phase state of record.
-  - For registry-only stories, the fastest useful validation loop is `cargo check -p treb-registry` plus `cargo test -p treb-registry` before wider workspace checks become necessary.
+  - The current go-compat fixture set is 13 deployments, 10 transactions, and 8 safe transactions; use explicit count assertions so fixture drift is visible in tests.
+  - Store-level compatibility coverage should copy fixture bytes to the actual registry filename and call `load()` instead of deserializing the map directly, otherwise the read-path compatibility logic is not exercised.
+  - Offset timestamps from the Go registry round-trip cleanly through `chrono` once normalized to `DateTime<Utc>`, so UTC comparisons are the stable assertion style here.
+  - `cargo test -p treb-registry` and `cargo clippy -p treb-registry --all-targets -- -D warnings` pass for this story.
 ---
-## 2026-03-10 10:15:29 CET - P1-US-002
-- Updated `DeploymentStore` to load through `read_versioned_file()` and save through `write_versioned_file()`, preserving deterministic key ordering by sorting into a `BTreeMap` before writing.
-- Added deployment-store tests for legacy bare-map loads, wrapped-format loads, and wrapped-on-save output; updated the registry golden integration test to expect wrapped `deployments.json`.
-- Files changed: `crates/treb-registry/src/store/deployments.rs`, `crates/treb-registry/src/registry.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-10 13:26 CET - P2-US-003
+- Changed `write_versioned_file()` to keep the existing advisory lock and atomic temp-file write, but persist bare JSON instead of the legacy `_format`/`entries` wrapper.
+- Updated `treb-registry` persistence tests across `io.rs`, the registry facade, lookup index, and all store modules so round-trips now assert bare JSON output while legacy wrapped payloads still load through the read path.
+- Files changed: `crates/treb-registry/src/io.rs`, `crates/treb-registry/src/lookup.rs`, `crates/treb-registry/src/registry.rs`, `crates/treb-registry/src/store/deployments.rs`, `crates/treb-registry/src/store/fork_state.rs`, `crates/treb-registry/src/store/governor_proposals.rs`, `crates/treb-registry/src/store/safe_transactions.rs`, `crates/treb-registry/src/store/transactions.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
 - **Learnings for future iterations:**
-  - Deployment-store migration is a helper swap: `read_versioned_file()` on load, `write_versioned_file()` on save, and no extra `with_file_lock()` wrapper around writes.
-  - When existing bare-map fixtures are still the source of truth, store-level migration tests should compare saved output against a wrapped `{"_format": ..., "entries": fixture}` value rather than rewriting the fixtures.
-  - Registry integration tests can stay partially migrated by updating only the expectations for the specific store file changed in that story.
+  - Go compatibility now depends on the write path staying bare; backward compatibility belongs in `read_versioned_file()` and `read_versioned_file_compat()`, not in persisted output.
+  - The helper-level `io.rs` tests cover the lock wait, trailing newline, indentation, and read-after-write round trip for `write_versioned_file()`, so future persistence changes should start there before touching individual stores.
+  - `cargo test -p treb-registry` and `cargo clippy -p treb-registry --all-targets -- -D warnings` pass for this story.
 ---
-## 2026-03-10 10:48:33 CET - P1-US-003
-- Updated `LookupStore` to load through `read_versioned_file()` and save through `write_versioned_file()`, with deterministic persisted ordering for `byName`, `byAddress`, and `byTag`.
-- Added lookup-store tests covering legacy bare-map loads, wrapped-format loads, wrapped-on-save output, and wrapped output from `rebuild()`.
-- Files changed: `crates/treb-registry/src/lookup.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-10 13:34 CET - P2-US-004
+- Added Go-fixture round-trip tests in `crates/treb-registry/tests/go_compat_deserialize.rs` for deployments, transactions, and safe transactions, each loading the Go-created file, mutating it through the Rust store, and asserting bare JSON output with identical recursive key sets.
+- Added a compatibility regression test that scans the registry/core model sources to ensure no serde type opts into `deny_unknown_fields`, and documented the timestamp-offset normalization gap on the relevant Rust type definitions.
+- Files changed: `crates/treb-registry/tests/go_compat_deserialize.rs`, `crates/treb-core/src/types/deployment.rs`, `crates/treb-core/src/types/transaction.rs`, `crates/treb-core/src/types/safe_transaction.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
 - **Learnings for future iterations:**
-  - `LookupIndex` needs both sorted map keys and sorted ID vectors to keep `lookup.json` deterministic because deployments are collected from `HashMap` iteration.
-  - Normalizing lookup vectors in both `build_lookup_index()` and `LookupStore::load()` keeps rebuild/save/load round-trips stable even when legacy files or callers provide unsorted lists.
-  - For versioned-lookup tests, asserting through `serde_json::Value` is enough to verify the wrapper shape without depending on serialized key order strings.
+  - Rust preserves Go registry timestamps by instant, but `DateTime<Utc>` serialization normalizes source offsets to `Z`, so round-trip tests should compare parsed instants instead of raw timestamp strings.
+  - Recursive JSON key-set comparisons are the reliable way to prove Rust writes keep the Go JSON tag schema intact while still allowing value updates.
+  - `cargo test -p treb-registry` and `cargo clippy -p treb-registry --all-targets -- -D warnings` pass for this story.
 ---
-## 2026-03-10 11:04:22 CET - P1-US-004
-- Updated `TransactionStore`, `SafeTransactionStore`, and `GovernorProposalStore` to load through `read_versioned_file()` and save through `write_versioned_file()`, sorting each in-memory `HashMap` into a `BTreeMap` before persistence so wrapped JSON stays deterministic.
-- Added bare-map load, wrapped-format load, and wrapped-on-save tests for all three stores; updated the registry golden integration test to expect wrapped `transactions.json` and `safe-txs.json`.
-- Files changed: `crates/treb-registry/src/store/transactions.rs`, `crates/treb-registry/src/store/safe_transactions.rs`, `crates/treb-registry/src/store/governor_proposals.rs`, `crates/treb-registry/src/registry.rs`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-10 13:51 CET - P2-US-005
+- Added CLI integration coverage for Go-created deployment data in `crates/treb-cli/tests/cli_go_registry_compat.rs`, verifying `treb list --json` sees all 13 seeded deployments, `treb show` resolves proxy details through the rebuilt lookup index, and Go-created tags remain queryable.
+- Added a reusable `seed_go_compat_registry()` helper, updated the tag integration test to assert `tag --add core` preserves a bare `deployments.json`, and refreshed stale CLI golden artifacts that still expected wrapped registry files.
+- Files changed: `crates/treb-cli/tests/cli_go_registry_compat.rs`, `crates/treb-cli/tests/helpers/mod.rs`, `crates/treb-cli/tests/integration_tag.rs`, `crates/treb-cli/tests/golden/register_basic/deployments.golden`, `crates/treb-cli/tests/golden/run_basic/deployments.golden`, `crates/treb-cli/tests/golden/run_basic/transactions.golden`, `crates/treb-cli/tests/golden/run_debug/deployments.golden`, `crates/treb-cli/tests/golden/run_debug/transactions.golden`, `crates/treb-cli/tests/golden/run_governor_human/deployments.golden`, `crates/treb-cli/tests/golden/run_governor_human/governor-txs.golden`, `crates/treb-cli/tests/golden/run_governor_human/transactions.golden`, `crates/treb-cli/tests/golden/run_governor_verbose/governor-txs.golden`, `crates/treb-cli/tests/golden/run_multi_operation/deployments.golden`, `crates/treb-cli/tests/golden/run_multi_operation/transactions.golden`, `crates/treb-cli/tests/golden/run_verbose/deployments.golden`, `crates/treb-cli/tests/golden/run_verbose/transactions.golden`, `crates/treb-cli/tests/golden/sync_governor_clean/governor-txs.golden`, `crates/treb-cli/tests/golden/sync_governor_human/governor-txs.golden`, `crates/treb-cli/tests/golden/sync_governor_json/governor-txs.golden`, `crates/treb-cli/tests/golden/sync_governor_json/transactions.golden`, `crates/treb-cli/tests/golden/sync_governor_missing_rpc_human/governor-txs.golden`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
 - **Learnings for future iterations:**
-  - Transaction-family store migration follows the same mechanical pattern as deployments: `read_versioned_file()` on load, `write_versioned_file()` on save, and no extra `with_file_lock()` wrapper.
-  - Bare fixture files can remain the source of truth for transaction and safe-transaction tests; assert against wrapped saved output instead of rewriting the fixtures.
-  - Registry integration expectations can remain mixed during the migration, but each store file’s assertion must flip to the wrapped `{"_format":"treb-v1","entries":...}` shape as soon as that store migrates.
----
-## 2026-03-10 11:14:44 CET - P1-US-005
-- Updated `ForkStateStore` to load through `read_versioned_file()` and save through `write_versioned_file()`, persisting `forks` through a sorted wrapper view so wrapped `fork.json` stays deterministic.
-- Added fork-state tests covering legacy bare-state loads, wrapped-format loads, wrapped-on-save output, and snapshot/restore preservation for wrapped registry files; added reusable fork-state persistence guidance to `CLAUDE.md`.
-- Files changed: `crates/treb-registry/src/store/fork_state.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
-- **Learnings for future iterations:**
-  - `ForkStateStore` can read wrapped files directly into `ForkState`, but saving should go through a separate serializable view so `forks` can be sorted without changing the runtime `HashMap`.
-  - Fork history order is meaningful; keep the `history` vector in recency order even while normalizing the persisted `forks` map.
-  - `snapshot_registry()` and `restore_registry()` are format-agnostic byte copies, so wrapped-file coverage can use lightweight `serde_json::Value` fixtures instead of full typed store payloads.
----
-## 2026-03-10 11:33:25 CET - P1-US-006
-- Removed `RegistryMeta`, `MetaStore`, `REGISTRY_FILE`, `REGISTRY_VERSION`, and the `migrations.rs` module from `treb-registry`; `Registry::init()` now only creates `.treb/`, and `Registry::open()` ignores any existing `registry.json`.
-- Updated CLI/tests to match the metadata removal: init/reset assertions no longer expect `.treb/registry.json`, the integration framework no longer snapshots it by default, and `treb migrate registry` now acts as a temporary no-op compatibility status until the next story removes the subcommand.
-- Files changed: `crates/treb-registry/src/lib.rs`, `crates/treb-registry/src/registry.rs`, `crates/treb-registry/src/types.rs`, `crates/treb-registry/src/migrations.rs`, `crates/treb-cli/src/commands/migrate.rs`, `crates/treb-cli/tests/cli_init.rs`, `crates/treb-cli/tests/cli_prune_reset_migrate.rs`, `crates/treb-cli/tests/e2e_registry_consistency.rs`, `crates/treb-cli/tests/framework/cleanup.rs`, `crates/treb-cli/tests/framework/integration_test.rs`, `crates/treb-cli/tests/framework_context.rs`, `crates/treb-cli/tests/golden/migrate_registry_dry_run_up_to_date/commands.golden`, `crates/treb-cli/tests/golden/migrate_registry_up_to_date/commands.golden`, `crates/treb-cli/tests/integration_init.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
-- **Learnings for future iterations:**
-  - `.treb/registry.json` belongs to external Go/Solidity registry data now; Rust init/open/reset flows should never synthesize it or validate its contents.
-  - When a removed registry-crate API is still referenced by `treb-cli`, keeping the CLI path as a narrow no-op shim preserves workspace compileability without prematurely taking the next story.
-  - The CLI integration framework’s default `.treb/` artifact list must exclude `registry.json` once Rust metadata ownership is removed, or unrelated init-style goldens will fail.
----
-## 2026-03-10 12:18:42 CET - P1-US-007
-- Removed the `treb migrate registry` CLI subcommand, its legacy rename implementation, and the now-dead registry rename exports; updated README/MIGRATION guidance to reflect automatic on-save store upgrades instead of a dedicated registry migration command.
-- Replaced registry-migration coverage with direct CLI assertions that `migrate --help` no longer mentions `registry`, `migrate registry` fails as an unknown subcommand, and a real mutating `tag --add` flow upgrades a legacy bare `deployments.json` file to the wrapped `{"_format":"treb-v1","entries":...}` format.
-- Files changed: `crates/treb-cli/src/commands/migrate.rs`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/tests/cli_prune_reset_migrate.rs`, `crates/treb-cli/tests/integration_migrate.rs`, `crates/treb-cli/tests/integration_tag.rs`, `crates/treb-cli/tests/golden/migrate_registry_dry_run_up_to_date/commands.golden`, `crates/treb-cli/tests/golden/migrate_registry_up_to_date/commands.golden`, `crates/treb-registry/src/lib.rs`, `README.md`, `MIGRATION.md`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
-- **Learnings for future iterations:**
-  - Removing a Clap subcommand requires updating both the enum in `commands/*` and any helper matchers in `main.rs`, or JSON-mode flag detection will stop compiling.
-  - The CLI’s legacy-registry compatibility story is now “read old file names when present and rewrite in the new wrapped format on normal saves,” so tests should exercise a real write path instead of a dedicated migrate command.
-  - Golden migrate coverage now belongs only to `migrate config`; command-removal behavior is better covered with direct assert_cmd tests than with golden snapshots.
+  - `treb-cli` compatibility tests can seed Go-created deployments by copying the bare fixture into `.treb/deployments.json` and rebuilding `lookup.json`; list/show/tag then exercise the same compatibility path the real CLI uses.
+  - When the bare write-path changes, persisted artifact goldens under `crates/treb-cli/tests/golden/` can fail long after the core change lands; normalize those snapshots alongside the new tests instead of treating the failures as unrelated regressions.
+  - `cargo test -p treb-cli --quiet` and `cargo clippy --workspace --all-targets -- -D warnings` pass for this story.
 ---

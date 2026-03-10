@@ -525,36 +525,15 @@ mod tests {
 
         let saved_deps_raw = fs::read_to_string(treb_dir.join(crate::DEPLOYMENTS_FILE)).unwrap();
         let saved_deps: serde_json::Value = serde_json::from_str(&saved_deps_raw).unwrap();
-        assert_eq!(
-            saved_deps,
-            serde_json::json!({
-                "_format": crate::STORE_FORMAT,
-                "entries": deployments_value,
-            }),
-            "deployments golden file round-trip"
-        );
+        assert_eq!(saved_deps, deployments_value, "deployments golden file round-trip");
 
         let saved_txs_raw = fs::read_to_string(treb_dir.join(crate::TRANSACTIONS_FILE)).unwrap();
         let saved_txs: serde_json::Value = serde_json::from_str(&saved_txs_raw).unwrap();
-        assert_eq!(
-            saved_txs,
-            serde_json::json!({
-                "_format": crate::STORE_FORMAT,
-                "entries": transactions_value,
-            }),
-            "transactions golden file round-trip"
-        );
+        assert_eq!(saved_txs, transactions_value, "transactions golden file round-trip");
 
         let saved_stxs_raw = fs::read_to_string(treb_dir.join(crate::SAFE_TXS_FILE)).unwrap();
         let saved_stxs: serde_json::Value = serde_json::from_str(&saved_stxs_raw).unwrap();
-        assert_eq!(
-            saved_stxs,
-            serde_json::json!({
-                "_format": crate::STORE_FORMAT,
-                "entries": safe_txs_value,
-            }),
-            "safe transactions golden file round-trip"
-        );
+        assert_eq!(saved_stxs, safe_txs_value, "safe transactions golden file round-trip");
     }
 
     #[test]

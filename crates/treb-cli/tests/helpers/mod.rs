@@ -4,6 +4,21 @@
 
 use std::path::Path;
 
+fn seed_registry_from_fixture(project_root: &Path, fixture_path: &Path) {
+    let fixture_json =
+        std::fs::read_to_string(fixture_path).expect("registry fixture should exist");
+
+    // Write deployments directly to .treb/deployments.json.
+    let deployments_path = project_root.join(".treb/deployments.json");
+    std::fs::write(&deployments_path, &fixture_json)
+        .expect("should write deployments.json to .treb/");
+
+    // Rebuild the lookup index using the registry API.
+    let registry =
+        treb_registry::Registry::open(project_root).expect("registry should open after seeding");
+    registry.rebuild_lookup_index().expect("lookup index rebuild should succeed");
+}
+
 /// Seed the registry with fixture deployments from `deployments_map.json`.
 ///
 /// Reads the deployments fixture from `treb-core/tests/fixtures/`, writes it
@@ -20,16 +35,15 @@ use std::path::Path;
 pub fn seed_registry(project_root: &Path) {
     let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../treb-core/tests/fixtures/deployments_map.json");
-    let fixture_json =
-        std::fs::read_to_string(&fixture_path).expect("deployments_map.json fixture should exist");
+    seed_registry_from_fixture(project_root, &fixture_path);
+}
 
-    // Write deployments directly to .treb/deployments.json.
-    let deployments_path = project_root.join(".treb/deployments.json");
-    std::fs::write(&deployments_path, &fixture_json)
-        .expect("should write deployments.json to .treb/");
-
-    // Rebuild the lookup index using the registry API.
-    let registry =
-        treb_registry::Registry::open(project_root).expect("registry should open after seeding");
-    registry.rebuild_lookup_index().expect("lookup index rebuild should succeed");
+/// Seed the registry with Go-created compatibility fixtures.
+///
+/// Writes the bare JSON map from `treb-registry/tests/fixtures/go-compat/`
+/// into `.treb/deployments.json` and rebuilds the lookup index.
+pub fn seed_go_compat_registry(project_root: &Path) {
+    let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../treb-registry/tests/fixtures/go-compat/deployments.json");
+    seed_registry_from_fixture(project_root, &fixture_path);
 }

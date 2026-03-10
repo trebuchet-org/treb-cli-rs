@@ -1,37 +1,34 @@
 {
-  "_format": "treb-v1",
-  "entries": {
-    "tx-<ID>": {
-      "id": "tx-<ID>",
-      "chainId": 31337,
-      "hash": "",
-      "status": "SIMULATED",
-      "sender": "0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38",
-      "nonce": 0,
-      "deployments": [
-        "default/31337/Counter:CounterA",
-        "default/31337/Counter:CounterB"
-      ],
-      "operations": [
-        {
-          "type": "DEPLOY",
-          "target": "0xd9003177dC465aAA89e20678675dca7FA5f5CAD5",
-          "method": "CREATE",
-          "result": {
-            "address": "0xd9003177dC465aAA89e20678675dca7FA5f5CAD5"
-          }
-        },
-        {
-          "type": "DEPLOY",
-          "target": "0x143514cFa5E66eC945bB19A024627c8bdE524156",
-          "method": "CREATE",
-          "result": {
-            "address": "0x143514cFa5E66eC945bB19A024627c8bdE524156"
-          }
+  "tx-<ID>": {
+    "id": "tx-<ID>",
+    "chainId": 31337,
+    "hash": "",
+    "status": "SIMULATED",
+    "sender": "0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38",
+    "nonce": 0,
+    "deployments": [
+      "default/31337/Counter:CounterA",
+      "default/31337/Counter:CounterB"
+    ],
+    "operations": [
+      {
+        "type": "DEPLOY",
+        "target": "0xd9003177dC465aAA89e20678675dca7FA5f5CAD5",
+        "method": "CREATE",
+        "result": {
+          "address": "0xd9003177dC465aAA89e20678675dca7FA5f5CAD5"
         }
-      ],
-      "environment": "default",
-      "createdAt": "<TIMESTAMP>"
-    }
+      },
+      {
+        "type": "DEPLOY",
+        "target": "0x143514cFa5E66eC945bB19A024627c8bdE524156",
+        "method": "CREATE",
+        "result": {
+          "address": "0x143514cFa5E66eC945bB19A024627c8bdE524156"
+        }
+      }
+    ],
+    "environment": "default",
+    "createdAt": "<TIMESTAMP>"
   }
 }

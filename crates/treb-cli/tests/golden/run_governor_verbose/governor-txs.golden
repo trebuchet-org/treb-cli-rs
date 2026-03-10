@@ -1,17 +1,14 @@
 {
-  "_format": "treb-v1",
-  "entries": {
-    "42": {
-      "proposalId": "42",
-      "governorAddress": "0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa",
-      "timelockAddress": "0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB",
-      "chainId": 31337,
-      "status": "pending",
-      "transactionIds": [
-        "tx-<ID>"
-      ],
-      "proposedBy": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-      "proposedAt": "<TIMESTAMP>"
-    }
+  "42": {
+    "proposalId": "42",
+    "governorAddress": "0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa",
+    "timelockAddress": "0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB",
+    "chainId": 31337,
+    "status": "pending",
+    "transactionIds": [
+      "tx-<ID>"
+    ],
+    "proposedBy": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "proposedAt": "<TIMESTAMP>"
   }
 }

@@ -43,7 +43,7 @@ pub fn read_json_file_or_default<T: DeserializeOwned + Default>(
     read_json_file(path)
 }
 
-/// Read a versioned store file, accepting both wrapped and legacy bare JSON.
+/// Read a versioned store file, accepting both legacy wrapped and bare JSON.
 ///
 /// Returns `T::default()` when the file does not exist or a wrapped payload is
 /// incompatible/corrupt.
@@ -110,13 +110,10 @@ pub fn write_json_file<T: Serialize>(path: &Path, value: &T) -> Result<(), TrebE
     Ok(())
 }
 
-/// Atomically write `entries` under the versioned store wrapper while holding
-/// the store's advisory file lock.
+/// Atomically write `entries` as bare JSON while holding the store's advisory
+/// file lock.
 pub fn write_versioned_file<T: Serialize>(path: &Path, entries: &T) -> Result<(), TrebError> {
-    with_file_lock(path, || {
-        let wrapped = VersionedStore::new(entries);
-        write_json_file(path, &wrapped)
-    })
+    with_file_lock(path, || write_json_file(path, entries))
 }
 
 /// RAII guard that releases an exclusive advisory lock on drop.
@@ -363,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn write_versioned_file_writes_wrapped_json() {
+    fn write_versioned_file_writes_bare_json() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("versioned.json");
 
@@ -372,9 +369,30 @@ mod tests {
 
         write_versioned_file(&path, &map).unwrap();
 
+        let raw = fs::read_to_string(&path).unwrap();
+        assert!(raw.ends_with('\n'), "JSON should end with trailing newline");
+        assert!(raw.contains("  \"evens\""), "JSON should use 2-space indentation");
+        assert!(!raw.contains("\"_format\""), "write path should not reintroduce wrapper");
+        assert!(!raw.contains("\"entries\""), "write path should not reintroduce wrapper");
+
         let json: serde_json::Value = read_json_file(&path).unwrap();
-        assert_eq!(json["_format"], crate::STORE_FORMAT);
-        assert_eq!(json["entries"]["evens"], serde_json::json!([2, 4, 6]));
+        assert_eq!(json, serde_json::json!({ "evens": [2, 4, 6] }));
+    }
+
+    #[test]
+    fn write_versioned_file_round_trips_with_read_versioned_file() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("versioned-round-trip.json");
+
+        let mut map = std::collections::BTreeMap::new();
+        map.insert("evens".to_string(), vec![2, 4, 6]);
+        map.insert("odds".to_string(), vec![1, 3, 5]);
+
+        write_versioned_file(&path, &map).unwrap();
+
+        let loaded: std::collections::BTreeMap<String, Vec<u32>> =
+            read_versioned_file(&path).unwrap();
+        assert_eq!(loaded, map);
     }
 
     #[test]
