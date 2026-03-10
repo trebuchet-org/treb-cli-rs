@@ -8,8 +8,12 @@ fn treb() -> assert_cmd::Command {
 }
 
 #[test]
-fn completion_bash_exits_zero_and_contains_treb() {
-    treb().args(["completion", "bash"]).assert().success().stdout(predicate::str::contains("treb"));
+fn completion_bash_exits_zero_and_contains_legacy_completions_subcommand() {
+    treb()
+        .args(["completion", "bash"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("treb").and(predicate::str::contains("completions")));
 }
 
 #[test]

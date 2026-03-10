@@ -1,4 +1,4 @@
-use std::process::Command;
+use std::{path::Path, process::Command};
 
 use clap::{Arg, ArgAction, Command as ClapCommand};
 use clap_complete::{Shell, generate_to};
@@ -33,6 +33,7 @@ fn build_cli() -> ClapCommand {
         .subcommand(build_fork())
         .subcommand(build_dev())
         .subcommand(build_completion_cmd())
+        .subcommand(build_completions_compat())
 }
 
 fn build_run() -> ClapCommand {
@@ -557,14 +558,26 @@ fn build_dev() -> ClapCommand {
 }
 
 fn build_completion_cmd() -> ClapCommand {
-    ClapCommand::new("completion")
-        .alias("completions")
-        .about("Generate shell completion scripts")
-        .arg(
-            Arg::new("shell")
-                .required(true)
-                .help("Shell type (bash, zsh, fish, elvish, powershell)"),
-        )
+    ClapCommand::new("completion").about("Generate shell completion scripts").arg(
+        Arg::new("shell").required(true).help("Shell type (bash, zsh, fish, elvish, powershell)"),
+    )
+}
+
+fn build_completions_compat() -> ClapCommand {
+    ClapCommand::new("completions").hide(true).about("Generate shell completion scripts").arg(
+        Arg::new("shell").required(true).help("Shell type (bash, zsh, fish, elvish, powershell)"),
+    )
+}
+
+fn assert_bash_completion_contains_legacy_subcommand(path: &Path) {
+    let script = std::fs::read_to_string(path).unwrap_or_else(|err| {
+        panic!("failed to read generated bash completion script {}: {err}", path.display())
+    });
+    assert!(
+        script.contains("completions"),
+        "generated bash completion script {} is missing the legacy 'completions' subcommand",
+        path.display()
+    );
 }
 
 fn workspace_foundry_version() -> Option<String> {
@@ -645,9 +658,13 @@ fn main() {
     };
     let completions_dir = std::path::Path::new(&outdir).join("completions");
     if std::fs::create_dir_all(&completions_dir).is_ok() {
-        let mut cmd = build_cli();
         for shell in [Shell::Bash, Shell::Zsh, Shell::Fish, Shell::Elvish] {
-            let _ = generate_to(shell, &mut cmd, "treb", &completions_dir);
+            let mut cmd = build_cli();
+            if let Ok(path) = generate_to(shell, &mut cmd, "treb", &completions_dir) {
+                if matches!(shell, Shell::Bash) {
+                    assert_bash_completion_contains_legacy_subcommand(&path);
+                }
+            }
         }
     }
 }

@@ -454,8 +454,13 @@ enum Commands {
     ///   treb completion bash >> ~/.bashrc
     ///   treb completion zsh > ~/.zsh/completions/_treb
     ///   treb completion fish > ~/.config/fish/completions/treb.fish
-    #[command(verbatim_doc_comment, alias = "completions")]
+    #[command(verbatim_doc_comment)]
     Completion {
+        /// Shell type: bash, zsh, fish, elvish, or powershell
+        shell: String,
+    },
+    #[command(name = "completions", hide = true)]
+    CompletionCompat {
         /// Shell type: bash, zsh, fish, elvish, or powershell
         shell: String,
     },
@@ -538,7 +543,9 @@ impl Commands {
             Commands::Fork { subcommand } => fork_subcommand_json_flag(subcommand),
             Commands::Dev { subcommand } => dev_subcommand_json_flag(subcommand),
             Commands::Migrate { subcommand } => migrate_subcommand_json_flag(subcommand),
-            Commands::Init { .. } | Commands::Completion { .. } => false,
+            Commands::Init { .. }
+            | Commands::Completion { .. }
+            | Commands::CompletionCompat { .. } => false,
         }
     }
 }
@@ -904,7 +911,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Commands::Migrate { subcommand } => commands::migrate::run(subcommand).await?,
         Commands::Fork { subcommand } => commands::fork::run(subcommand).await?,
         Commands::Dev { subcommand } => commands::dev::run(subcommand).await?,
-        Commands::Completion { shell } => {
+        Commands::Completion { shell } | Commands::CompletionCompat { shell } => {
             use clap_complete::{Shell, generate};
             use std::{io, str::FromStr};
 
@@ -989,8 +996,8 @@ mod tests {
 
         let compat = Cli::try_parse_from(["treb", "completions", "zsh"]).unwrap();
         match compat.command {
-            Commands::Completion { shell } => assert_eq!(shell, "zsh"),
-            _ => panic!("expected completions alias to resolve to completion"),
+            Commands::CompletionCompat { shell } => assert_eq!(shell, "zsh"),
+            _ => panic!("expected hidden completions compatibility command"),
         }
     }
 
