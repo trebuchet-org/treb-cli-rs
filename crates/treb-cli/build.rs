@@ -137,6 +137,14 @@ fn build_list() -> ClapCommand {
 fn build_show() -> ClapCommand {
     ClapCommand::new("show")
         .about("Show detailed information about a specific deployment")
+        .arg(Arg::new("namespace").long("namespace").help("Deployment namespace"))
+        .arg(Arg::new("network").long("network").help("Network name or chain ID"))
+        .arg(
+            Arg::new("no-fork")
+                .long("no-fork")
+                .action(ArgAction::SetTrue)
+                .help("Hide fork deployments"),
+        )
         .arg(Arg::new("deployment").help("Deployment identifier; omit to select interactively"))
         .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
 }
