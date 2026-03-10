@@ -1,6 +1,6 @@
 # Master Plan: CLI Compatibility and Drop-in Parity with Go
 
-Make the Rust `treb-cli` a true drop-in replacement for the Go `treb` by fixing registry compatibility, aligning command surface (names, flags, aliases, positional args), resolving broken env var handling, and adding the missing `addressbook` command. Based on side-by-side exploratory testing at `~/projects/mento-deployments-v2` with both CLIs installed.
+Make the Rust `treb-cli` a true drop-in replacement for the Go `treb` by removing the incompatible registry meta/migration system, fixing registry compatibility, aligning command surface (names, flags, aliases, positional args), resolving broken env var handling, and adding the missing `addressbook` command. Based on side-by-side exploratory testing at `~/projects/mento-deployments-v2` with both CLIs installed.
 
 **Discovery document:** `plans/2026-03-10-exploratory-testing-comparison.md`
 **Reference codebase:** `../treb-cli` (Go CLI)
@@ -10,39 +10,88 @@ Make the Rust `treb-cli` a true drop-in replacement for the Go `treb` by fixing 
 
 ---
 
-## Phase 1 -- Registry Format Coexistence
+## Phase 1 -- Remove Registry Meta and Migration System
 
-Critical blocker. The Rust CLI cannot read any Go-created `.treb/` directory because `registry.json` formats differ. Go writes a `SolidityRegistry` map (`{chainId: {namespace: {name: address}}}`), while Rust expects `RegistryMeta` (`{version, createdAt, updatedAt}`). This blocks `list`, `show`, `tag`, and all registry-dependent commands in any project previously used with the Go CLI.
+The Rust CLI has a `registry.json` metadata file (`RegistryMeta` with `version`, `createdAt`, `updatedAt`) and a migration runner (`migrations.rs`) that were built for future schema evolution. In practice, this system conflicts with the Go CLI which uses `registry.json` for a completely different purpose (Solidity Registry address map). The migration system adds complexity for a problem that doesn't exist yet.
 
-The fix must allow the two CLIs to coexist on the same project — both reading and writing to the same `.treb/` directory without corrupting each other's data.
+**What to remove:**
+- `RegistryMeta` struct and `MetaStore` from `registry.rs`
+- `migrations.rs` module entirely (including `run_migrations`, `MigrationReport`, all migration functions)
+- `REGISTRY_FILE` and `REGISTRY_VERSION` constants from `lib.rs`
+- The `registry.json` file from `Registry::init()` creation
+- The version check from `Registry::open()`
+- The `treb migrate registry` CLI subcommand
+- All tests related to registry meta and migrations
+
+**What to add instead:**
+Following Foundry's pattern (`foundry-compilers` uses a `"_format"` field in each cache file), add a `"_format": "treb-v1"` field to every store JSON file. This is written on save but **not checked on load** — if a future schema change makes deserialization fail, the code simply treats it as an empty/corrupt file (same as Foundry's implicit invalidation). No migration runner, no version comparison code.
+
+Store files to update:
+- `deployments.json` — currently a bare `HashMap<String, Deployment>`, wrap in `{"_format": "treb-v1", "entries": {...}}`
+- `transactions.json` — same wrapping pattern
+- `safe-txs.json` — same wrapping pattern
+- `governor-txs.json` — same wrapping pattern
+- `fork.json` — same wrapping pattern
+- `lookup.json` — same wrapping pattern
+
+**Backward compatibility:** On load, if the file is a bare map (no `_format` wrapper), read it as-is (pre-wrapper format). On save, always write the wrapped format. This ensures seamless upgrade from existing Rust CLI registries.
+
+**Rust files to modify:**
+- `crates/treb-registry/src/registry.rs` — remove `MetaStore`, version check from `open()`, `registry.json` creation from `init()`
+- `crates/treb-registry/src/migrations.rs` — delete entirely
+- `crates/treb-registry/src/types.rs` — remove `RegistryMeta`, add `VersionedStore<T>` wrapper
+- `crates/treb-registry/src/lib.rs` — remove `REGISTRY_FILE`, `REGISTRY_VERSION`, `migrations` module
+- `crates/treb-registry/src/store/deployments.rs` — use `VersionedStore` wrapper on save, accept both formats on load
+- `crates/treb-registry/src/store/transactions.rs` — same
+- `crates/treb-registry/src/store/safe_transactions.rs` — same
+- `crates/treb-registry/src/store/governor_proposals.rs` — same
+- `crates/treb-registry/src/store/fork_state.rs` — same
+- `crates/treb-registry/src/io.rs` — potentially add versioned read/write helpers
+- `crates/treb-cli/src/commands/migrate.rs` — remove `registry` subcommand
+
+**Deliverables**
+- `registry.json` no longer created or read by Rust CLI
+- `migrations.rs` deleted, `treb migrate registry` subcommand removed
+- All store files write `{"_format": "treb-v1", "entries": {...}}` on save
+- All store files accept both bare map and wrapped format on load (backward compat)
+- `Registry::open()` works in directories with Go's `registry.json` (simply ignores it)
+- `Registry::init()` no longer creates `registry.json`
+- All existing tests pass (update or remove migration tests)
+- New tests: verify round-trip with bare map format (pre-wrapper), verify `_format` field is written
+
+**User stories:** 7
+**Dependencies:** none
+
+---
+
+## Phase 2 -- Go Registry Coexistence Verification
+
+With `registry.json` no longer blocking, verify that all store files (`deployments.json`, `transactions.json`, `safe-txs.json`) are actually compatible between Go and Rust CLIs. Test against a real Go-created `.treb/` directory.
 
 **Go source files to reference:**
-- `internal/registry/registry.go` — Go registry format: SolidityRegistry map structure
 - `internal/registry/deployments.go` — Go deployments.json format
 - `internal/registry/transactions.go` — Go transactions.json format
 - `internal/registry/safe.go` — Go safe-txs.json format
 
 **Rust files to modify:**
-- `crates/treb-registry/src/types.rs` — `RegistryMeta` deserialization (tolerate missing `version`)
-- `crates/treb-registry/src/store/registry_meta.rs` (or equivalent) — load/save logic
-- `crates/treb-registry/src/store/deployment.rs` — verify deployments.json compatibility
-- `crates/treb-registry/src/store/transaction.rs` — verify transactions.json compatibility
-- `crates/treb-registry/src/store/safe_tx.rs` — verify safe-txs.json compatibility
+- `crates/treb-registry/src/store/deployments.rs` — fix any deserialization gaps
+- `crates/treb-registry/src/store/transactions.rs` — fix any deserialization gaps
+- `crates/treb-registry/src/store/safe_transactions.rs` — fix any deserialization gaps
+- `crates/treb-core/src/types/` — fix any field mismatches in domain types
 
 **Deliverables**
-- Rust CLI loads successfully in a Go-created `.treb/` directory
-- `registry.json` parsing either: (a) detects Go format and creates/uses a separate Rust meta file, or (b) makes `version` field optional with auto-migration
-- `deployments.json`, `transactions.json`, `safe-txs.json` read correctly from Go-written files
-- Rust writes remain compatible with Go CLI reads
-- Integration test verifying round-trip: Go writes → Rust reads → Rust writes → Go reads
-- All registry-dependent commands (`list`, `show`, `tag`, etc.) work in Go-created projects
+- Copy `.treb/` from `~/projects/mento-deployments-v2` as a test fixture
+- `list`, `show`, `tag` all work against Go-created registry
+- Rust writes remain compatible with Go CLI reads (no field additions that break Go)
+- Document any fields Go writes that Rust ignores (use `#[serde(flatten)]` or `deny_unknown_fields` audit)
+- Integration test with real Go registry data
 
-**User stories:** 6
-**Dependencies:** none
+**User stories:** 5
+**Dependencies:** Phase 1
 
 ---
 
-## Phase 2 -- Environment Variable Resolution and Config Display
+## Phase 3 -- Environment Variable Resolution and Config Display
 
 The Rust CLI fails to resolve `${VAR}` patterns in foundry.toml RPC endpoints, causing `networks` to show errors for all networks and `config show` to display empty sender addresses. The Go CLI resolves these via `.env` file loading and environment variable expansion.
 
@@ -69,7 +118,7 @@ The Rust CLI fails to resolve `${VAR}` patterns in foundry.toml RPC endpoints, c
 
 ---
 
-## Phase 3 -- Command Naming, Aliases, and Structure
+## Phase 4 -- Command Naming, Aliases, and Structure
 
 Align command names, subcommand structure, and aliases with the Go CLI to ensure scripts and documentation targeting the Go CLI work unmodified with the Rust CLI.
 
@@ -100,7 +149,7 @@ Align command names, subcommand structure, and aliases with the Go CLI to ensure
 
 ---
 
-## Phase 4 -- Global Non-Interactive Flag and Short Flags
+## Phase 5 -- Global Non-Interactive Flag and Short Flags
 
 The Go CLI has `--non-interactive` as a global flag inherited by every command. The Rust CLI only has it on `run` and `compose`. Several commands also lack the `-s`/`-n` short flags that Go provides.
 
@@ -113,7 +162,7 @@ The Go CLI has `--non-interactive` as a global flag inherited by every command. 
 - `crates/treb-cli/src/main.rs` — add `--non-interactive` as global CLI option
 - `crates/treb-cli/src/commands/list.rs` — add `-s` for namespace, `-n` for network
 - `crates/treb-cli/src/commands/tag.rs` — add `-s` for namespace, `-n` for network
-- `crates/treb-cli/src/commands/show.rs` — add namespace, network flags (see Phase 5)
+- `crates/treb-cli/src/commands/show.rs` — add namespace, network flags (see Phase 6)
 - All command run() functions — read global non-interactive flag
 
 **Deliverables**
@@ -129,7 +178,7 @@ The Go CLI has `--non-interactive` as a global flag inherited by every command. 
 
 ---
 
-## Phase 5 -- Deployment Query Flags (show, list, tag)
+## Phase 6 -- Deployment Query Flags (show, list, tag)
 
 The Go CLI's `show`, `list`, and `tag` commands have filtering/scoping flags that the Rust CLI lacks. These are needed for multi-namespace and multi-network workflows.
 
@@ -152,11 +201,11 @@ The Go CLI's `show`, `list`, and `tag` commands have filtering/scoping flags tha
 - Golden file updates
 
 **User stories:** 5
-**Dependencies:** Phase 1 (registry must be loadable)
+**Dependencies:** Phase 2 (registry must be loadable with Go data)
 
 ---
 
-## Phase 6 -- Fork Command Positional Arguments
+## Phase 7 -- Fork Command Positional Arguments
 
 The Go CLI accepts network as a positional argument for fork subcommands (`fork enter <network>`, `fork exit [network]`, etc.). The Rust CLI requires `--network` flag. For drop-in parity, Rust should accept both forms.
 
@@ -184,7 +233,7 @@ Also, Go uses `--url` for external fork connection while Rust uses `--rpc-url`. 
 
 ---
 
-## Phase 7 -- Verify Command Flag Parity
+## Phase 8 -- Verify Command Flag Parity
 
 The verify command is missing several flags needed for production verification workflows. The Go CLI supports namespace/network scoping, debug mode, and manual contract path specification.
 
@@ -209,7 +258,7 @@ The verify command is missing several flags needed for production verification w
 
 ---
 
-## Phase 8 -- Addressbook Command
+## Phase 9 -- Addressbook Command
 
 Implement the `addressbook` command that is entirely missing from the Rust CLI. The addressbook manages named addresses scoped to chain ID, stored in `.treb/addressbook.json`. The Go CLI provides `list`, `set`, `remove` subcommands with `ab` alias.
 
@@ -239,11 +288,11 @@ Implement the `addressbook` command that is entirely missing from the Rust CLI. 
 - Golden file tests
 
 **User stories:** 7
-**Dependencies:** Phase 1 (registry store patterns), Phase 2 (network resolution)
+**Dependencies:** Phase 1 (store patterns), Phase 3 (network resolution)
 
 ---
 
-## Phase 9 -- Register and Sync Flag Alignment
+## Phase 10 -- Register and Sync Flag Alignment
 
 Minor flag differences on `register` and `sync` that affect production workflows. The Go CLI derives network/namespace from config while the Rust CLI may require explicit flags.
 
@@ -263,11 +312,11 @@ Minor flag differences on `register` and `sync` that affect production workflows
 - Verify `register` and `sync` work without explicit `--network` in Go-created projects
 
 **User stories:** 4
-**Dependencies:** Phase 1 (registry), Phase 2 (config resolution)
+**Dependencies:** Phase 2 (registry coexistence), Phase 3 (config resolution)
 
 ---
 
-## Phase 10 -- Error Messages, Version Format, and Help Text
+## Phase 11 -- Error Messages, Version Format, and Help Text
 
 Polish remaining surface-level differences: error message format, version string format, and help text consistency.
 
@@ -297,18 +346,21 @@ Polish remaining surface-level differences: error message format, version string
 ## Dependency Graph (ASCII)
 
 ```
-Phase 1 (registry compat) ──┬──> Phase 5 (show/list/tag flags)
-                             ├──> Phase 8 (addressbook)
-                             └──> Phase 9 (register/sync flags)
+Phase 1 (remove registry meta) ──> Phase 2 (Go coexistence verify)
+                                                 │
+                                                 ├──> Phase 6 (show/list/tag flags)
+                                                 └──> Phase 10 (register/sync flags)
 
-Phase 2 (env var resolution) ──> Phase 8 (addressbook)
-                              └──> Phase 9 (register/sync flags)
+Phase 3 (env var resolution) ──┬──> Phase 9 (addressbook)
+                               └──> Phase 10 (register/sync flags)
 
-Phase 3 (naming/aliases)         [independent]
-Phase 4 (global flags)           [independent]
-Phase 6 (fork positional args)   [independent]
-Phase 7 (verify flags)           [independent]
-Phase 10 (error/version format)  [independent]
+Phase 1 (store patterns) ──> Phase 9 (addressbook)
+
+Phase 4 (naming/aliases)         [independent]
+Phase 5 (global flags)           [independent]
+Phase 7 (fork positional args)   [independent]
+Phase 8 (verify flags)           [independent]
+Phase 11 (error/version format)  [independent]
 ```
 
 ---
@@ -317,14 +369,15 @@ Phase 10 (error/version format)  [independent]
 
 | Phase | Title | Stories | Depends On |
 |------:|-------|--------:|------------|
-| 1 | Registry Format Coexistence | 6 | -- |
-| 2 | Environment Variable Resolution and Config Display | 6 | -- |
-| 3 | Command Naming, Aliases, and Structure | 6 | -- |
-| 4 | Global Non-Interactive Flag and Short Flags | 5 | -- |
-| 5 | Deployment Query Flags (show, list, tag) | 5 | 1 |
-| 6 | Fork Command Positional Arguments | 5 | -- |
-| 7 | Verify Command Flag Parity | 5 | -- |
-| 8 | Addressbook Command | 7 | 1, 2 |
-| 9 | Register and Sync Flag Alignment | 4 | 1, 2 |
-| 10 | Error Messages, Version Format, and Help Text | 4 | -- |
-| **Total** | | **53** | |
+| 1 | Remove Registry Meta and Migration System | 7 | -- |
+| 2 | Go Registry Coexistence Verification | 5 | 1 |
+| 3 | Environment Variable Resolution and Config Display | 6 | -- |
+| 4 | Command Naming, Aliases, and Structure | 6 | -- |
+| 5 | Global Non-Interactive Flag and Short Flags | 5 | -- |
+| 6 | Deployment Query Flags (show, list, tag) | 5 | 2 |
+| 7 | Fork Command Positional Arguments | 5 | -- |
+| 8 | Verify Command Flag Parity | 5 | -- |
+| 9 | Addressbook Command | 7 | 1, 3 |
+| 10 | Register and Sync Flag Alignment | 4 | 2, 3 |
+| 11 | Error Messages, Version Format, and Help Text | 4 | -- |
+| **Total** | | **57** | |
