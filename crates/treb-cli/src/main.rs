@@ -1,6 +1,6 @@
 use std::env;
 
-use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use treb_cli::{commands, output, ui};
 use treb_core::types::DeploymentType;
 
@@ -327,30 +327,13 @@ enum Commands {
         json: bool,
     },
     /// Generate deployment scripts
-    ///
-    /// Generate deployment scripts for contracts and libraries.
-    ///
-    /// This command creates template scripts using treb-sol's base contracts.
-    /// The generated scripts handle both direct deployments and common proxy patterns.
-    GenDeploy {
-        /// Contract name or artifact identifier (e.g., Counter or src/Counter.sol:Counter)
-        artifact: String,
-        /// Deployment strategy: create, create2, create3
-        #[arg(long)]
-        strategy: Option<String>,
-        /// Proxy pattern: erc1967, uups, transparent, beacon
-        #[arg(long)]
-        proxy: Option<String>,
-        /// Custom proxy contract name (for non-standard proxy implementations)
-        #[arg(long)]
-        proxy_contract: Option<String>,
-        /// Output file path (default: script/Deploy<Name>.s.sol)
-        #[arg(long)]
-        output: Option<String>,
-        /// Output as JSON instead of writing a file
-        #[arg(long)]
-        json: bool,
+    #[command(visible_alias = "generate")]
+    Gen {
+        #[command(subcommand)]
+        subcommand: GenSubcommand,
     },
+    #[command(name = "gen-deploy", hide = true)]
+    GenDeployCompat(GenDeployArgs),
     /// Execute orchestrated deployments from a YAML configuration
     ///
     /// Execute multiple deployment scripts in dependency order based on a YAML
@@ -500,6 +483,37 @@ enum ConfigSubcommand {
     },
 }
 
+#[derive(Subcommand)]
+enum GenSubcommand {
+    /// Generate deployment scripts for contracts and libraries.
+    ///
+    /// This command creates template scripts using treb-sol's base contracts.
+    /// The generated scripts handle both direct deployments and common proxy patterns.
+    #[command(verbatim_doc_comment)]
+    Deploy(GenDeployArgs),
+}
+
+#[derive(Args)]
+struct GenDeployArgs {
+    /// Contract name or artifact identifier (e.g., Counter or src/Counter.sol:Counter)
+    artifact: String,
+    /// Deployment strategy: create, create2, create3
+    #[arg(long)]
+    strategy: Option<String>,
+    /// Proxy pattern: erc1967, uups, transparent, beacon
+    #[arg(long)]
+    proxy: Option<String>,
+    /// Custom proxy contract name (for non-standard proxy implementations)
+    #[arg(long)]
+    proxy_contract: Option<String>,
+    /// Output file path (default: script/Deploy<Name>.s.sol)
+    #[arg(long)]
+    output: Option<String>,
+    /// Output as JSON instead of writing a file
+    #[arg(long)]
+    json: bool,
+}
+
 impl Commands {
     /// Returns `true` when the parsed subcommand includes `--json`.
     fn json_flag(&self) -> bool {
@@ -513,8 +527,9 @@ impl Commands {
             | Commands::Sync { json, .. }
             | Commands::Version { json, .. }
             | Commands::Networks { json, .. }
-            | Commands::GenDeploy { json, .. }
             | Commands::Compose { json, .. } => *json,
+            Commands::Gen { subcommand } => gen_subcommand_json_flag(subcommand),
+            Commands::GenDeployCompat(args) => args.json,
             Commands::Config { subcommand } => {
                 matches!(subcommand, ConfigSubcommand::Show { json: true })
             }
@@ -525,6 +540,12 @@ impl Commands {
             Commands::Migrate { subcommand } => migrate_subcommand_json_flag(subcommand),
             Commands::Init { .. } | Commands::Completions { .. } => false,
         }
+    }
+}
+
+fn gen_subcommand_json_flag(subcommand: &GenSubcommand) -> bool {
+    match subcommand {
+        GenSubcommand::Deploy(args) => args.json,
     }
 }
 
@@ -615,7 +636,7 @@ fn build_grouped_help(cmd: &clap::Command) -> String {
         &mut s,
         cmd,
         "Main Commands:",
-        &["init", "list", "show", "gen-deploy", "run", "verify", "compose", "fork"],
+        &["init", "list", "show", "gen", "run", "verify", "compose", "fork"],
     );
     s.push('\n');
     write_group(
@@ -834,17 +855,10 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         }
         Commands::Version { json } => commands::version::run(json).await?,
         Commands::Networks { json } => commands::networks::run(json).await?,
-        Commands::GenDeploy { artifact, strategy, proxy, proxy_contract, output, json } => {
-            commands::gen_deploy::run(
-                &artifact,
-                strategy.as_deref(),
-                proxy.as_deref(),
-                proxy_contract.as_deref(),
-                output.as_deref(),
-                json,
-            )
-            .await?
-        }
+        Commands::Gen { subcommand } => match subcommand {
+            GenSubcommand::Deploy(args) => run_gen_deploy_command(args).await?,
+        },
+        Commands::GenDeployCompat(args) => run_gen_deploy_command(args).await?,
         Commands::Compose {
             file,
             network,
@@ -906,4 +920,62 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+async fn run_gen_deploy_command(args: GenDeployArgs) -> anyhow::Result<()> {
+    commands::gen_deploy::run(
+        &args.artifact,
+        args.strategy.as_deref(),
+        args.proxy.as_deref(),
+        args.proxy_contract.as_deref(),
+        args.output.as_deref(),
+        args.json,
+    )
+    .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gen_deploy_nested_command_sets_json_flag() {
+        let cli = Cli::try_parse_from(["treb", "gen", "deploy", "Counter", "--json"]).unwrap();
+        assert!(cli.command.json_flag());
+
+        match cli.command {
+            Commands::Gen { subcommand: GenSubcommand::Deploy(args) } => {
+                assert_eq!(args.artifact, "Counter");
+                assert!(args.json);
+            }
+            _ => panic!("expected nested gen deploy command"),
+        }
+    }
+
+    #[test]
+    fn gen_command_aliases_parse() {
+        let cli = Cli::try_parse_from(["treb", "generate", "deploy", "Counter"]).unwrap();
+        match cli.command {
+            Commands::Gen { subcommand: GenSubcommand::Deploy(args) } => {
+                assert_eq!(args.artifact, "Counter");
+            }
+            _ => panic!("expected generate alias to resolve to gen deploy"),
+        }
+
+        let compat = Cli::try_parse_from(["treb", "gen-deploy", "Counter", "--json"]).unwrap();
+        match compat.command {
+            Commands::GenDeployCompat(args) => {
+                assert_eq!(args.artifact, "Counter");
+                assert!(args.json);
+            }
+            _ => panic!("expected hidden gen-deploy compatibility command"),
+        }
+    }
+
+    #[test]
+    fn grouped_help_lists_gen_not_gen_deploy() {
+        let help = build_grouped_help(&Cli::command());
+        assert!(help.contains("  gen"));
+        assert!(!help.contains("gen-deploy"));
+    }
 }

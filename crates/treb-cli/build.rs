@@ -24,7 +24,8 @@ fn build_cli() -> ClapCommand {
         .subcommand(build_sync())
         .subcommand(build_version())
         .subcommand(build_networks())
-        .subcommand(build_gen_deploy())
+        .subcommand(build_gen())
+        .subcommand(build_gen_deploy_compat())
         .subcommand(build_compose())
         .subcommand(build_prune())
         .subcommand(build_reset())
@@ -274,9 +275,8 @@ fn build_networks() -> ClapCommand {
         .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
 }
 
-fn build_gen_deploy() -> ClapCommand {
-    ClapCommand::new("gen-deploy")
-        .about("Generate deployment scripts from templates")
+fn with_gen_deploy_args(cmd: ClapCommand) -> ClapCommand {
+    cmd.about("Generate deployment scripts from templates")
         .arg(Arg::new("artifact").help("Contract name or artifact identifier"))
         .arg(
             Arg::new("strategy")
@@ -296,6 +296,17 @@ fn build_gen_deploy() -> ClapCommand {
                 .action(ArgAction::SetTrue)
                 .help("Output as JSON instead of writing a file"),
         )
+}
+
+fn build_gen() -> ClapCommand {
+    ClapCommand::new("gen")
+        .about("Generate deployment scripts")
+        .visible_alias("generate")
+        .subcommand(with_gen_deploy_args(ClapCommand::new("deploy")))
+}
+
+fn build_gen_deploy_compat() -> ClapCommand {
+    with_gen_deploy_args(ClapCommand::new("gen-deploy").hide(true))
 }
 
 fn build_compose() -> ClapCommand {

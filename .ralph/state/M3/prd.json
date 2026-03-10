@@ -1,99 +1,106 @@
 {
   "project": "treb-cli-rs",
-  "branchName": "feat/M3-P03-environment-variable-resolution-and-config-display",
-  "description": "Add ${VAR} expansion to foundry.toml RPC endpoints and sender configs, wire .env loading into the networks command, and update config show to display resolved sender addresses in an inline format matching the Go CLI.",
+  "branchName": "feat/M3-P04-command-naming-aliases-and-structure",
+  "description": "Align Rust CLI command names, subcommand structure, and aliases with the Go CLI so existing scripts, CI pipelines, and documentation work unmodified. Restructure gen-deploy as gen deploy, rename completions to completion, make config default to show, and add hidden backward-compat aliases.",
   "userStories": [
     {
-      "id": "P3-US-001",
-      "title": "Add ${VAR} Expansion to foundry.toml RPC Endpoints",
-      "description": "As a developer, I want ${VAR} patterns in foundry.toml [rpc_endpoints] to be expanded from environment variables so that the networks command can resolve chain IDs for endpoints defined with env var URLs.",
+      "id": "P4-US-001",
+      "title": "Restructure gen-deploy as gen deploy Nested Subcommand",
+      "description": "As a CLI user, I want to use `treb gen deploy` and `treb generate deploy` so that scripts targeting the Go CLI work with the Rust CLI.",
       "acceptanceCriteria": [
-        "rpc_endpoints() returns resolved URLs when env vars are set (e.g., ${MAINNET_RPC_URL} becomes the actual URL)",
-        "Unset env vars expand to empty string (matching existing expand_env_vars() behavior)",
-        "URLs without ${VAR} patterns pass through unchanged",
-        "Reuses the existing expand_env_vars() function from trebfile.rs (no duplicate implementation)",
-        "Unit tests: RPC URL with ${VAR} expands correctly; URL without vars is unchanged; mixed URL with partial vars expands correctly",
-        "cargo test -p treb-config passes"
+        "`treb gen deploy Counter` produces the same output as current `treb gen-deploy Counter`",
+        "`treb generate deploy Counter` works identically (visible alias on gen parent)",
+        "`treb gen-deploy Counter` still works via hidden backward-compat alias",
+        "`treb gen deploy Counter --json` produces valid JSON output",
+        "`treb gen deploy Counter --strategy create2` works with all existing flags",
+        "`Commands::json_flag()` returns true for `Gen { Deploy { json: true } }`",
+        "Help grouping shows `gen` (not `gen-deploy`) under Main Commands",
+        "`cargo check -p treb-cli` passes with no errors"
       ],
       "priority": 1,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "P3-US-002",
-      "title": "Add ${VAR} Expansion to foundry.toml Sender and Etherscan Configs",
-      "description": "As a developer, I want ${VAR} patterns in foundry.toml [profile.*.treb.senders.*] fields to be expanded so that config show displays resolved sender addresses instead of raw ${VAR} placeholders.",
+      "id": "P4-US-002",
+      "title": "Update gen-deploy Golden Tests and Test File for New Syntax",
+      "description": "As a developer, I want golden tests and test files updated to use `gen deploy` syntax so that the test suite passes after the command restructure.",
       "acceptanceCriteria": [
-        "Sender configs extracted from foundry.toml have ${VAR} patterns expanded in all string fields (address, private_key, safe, signer, derivation_path, governor, timelock, proposer)",
-        "Unit test: foundry.toml with address = \"${MY_ADDR}\" resolves to the env var value",
-        "Unit test: foundry.toml without env vars is unchanged",
-        "Existing tests continue to pass (they use literal values, no env vars)",
-        "cargo test -p treb-config passes"
+        "All `commands.golden` files under `crates/treb-cli/tests/golden/gen_deploy_*` use `gen deploy` syntax",
+        "All test invocations in `crates/treb-cli/tests/cli_gen_deploy.rs` use `[\"gen\", \"deploy\", ...]` args",
+        "`cargo test -p treb-cli` passes — all gen-deploy golden tests pass",
+        "Golden `.expected` files are updated via `UPDATE_GOLDEN=1` to reflect any help text changes",
+        "`cargo check -p treb-cli` passes"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P3-US-003",
-      "title": "Wire .env Loading into the networks Command",
-      "description": "As a developer, I want the networks command to load .env/.env.local files before parsing foundry.toml so that env vars defined only in .env files are available for RPC URL expansion.",
+      "id": "P4-US-003",
+      "title": "Rename completions Command to completion",
+      "description": "As a CLI user, I want to use `treb completion` (singular) so that shell setup instructions from Go CLI documentation work with the Rust CLI.",
       "acceptanceCriteria": [
-        "treb networks resolves chain IDs for networks whose RPC URLs use ${VAR} when the var is defined in .env",
-        "The has_unresolved_env_vars() check no longer triggers for URLs that have been expanded",
-        "URLs that remain unresolved (env var not in .env and not in environment) still show unresolved env var status",
-        "Integration test: project with .env containing TEST_RPC_URL=http://localhost:8545 and foundry.toml with test = \"${TEST_RPC_URL}\" — networks shows resolved URL",
-        "cargo test -p treb-cli passes"
+        "`treb completion bash` generates valid bash completions",
+        "`treb completion zsh`, `treb completion fish`, `treb completion elvish` all work",
+        "`treb completions bash` still works via hidden backward-compat alias",
+        "Help text shows `completion` (not `completions`) under Additional Commands",
+        "All tests in `cli_completions.rs` pass with updated command name",
+        "`cargo check -p treb-cli` passes"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P3-US-004",
-      "title": "Update config show to Display Resolved Sender Addresses with Inline Format",
-      "description": "As a developer, I want config show to display senders as inline aligned rows (role, type, address) instead of a comfy_table box so that the output matches the Go CLI format.",
+      "id": "P4-US-004",
+      "title": "Make config Default to show When No Subcommand Given",
+      "description": "As a CLI user, I want `treb config` with no subcommand to display resolved configuration so that it matches Go CLI behavior.",
       "acceptanceCriteria": [
-        "Senders display as aligned inline text, one per line, with role, type, and address columns",
-        "Format: <role>  <type>  <address> with reasonable column alignment (widest role name + 2 spaces padding)",
-        "Empty address fields display as empty (no placeholder text)",
-        "Output is sorted alphabetically by role name (existing behavior preserved)",
-        "JSON output (config show --json) is unchanged",
-        "cargo test -p treb-cli passes"
+        "`treb config` (no args) produces the same output as `treb config show`",
+        "`treb config --json` produces the same output as `treb config show --json`",
+        "`treb config show` still works explicitly",
+        "`treb config set` and `treb config remove` still work unchanged",
+        "`Commands::json_flag()` returns true for bare `config --json`",
+        "Existing config golden tests still pass",
+        "`cargo check -p treb-cli` passes"
       ],
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P3-US-005",
-      "title": "Update networks --json to Include Resolved Chain IDs",
-      "description": "As a developer, I want networks --json to include chainId fields for resolved endpoints so that programmatic consumers can access chain ID data.",
+      "id": "P4-US-005",
+      "title": "Update Help Text Golden Tests for All Command Changes",
+      "description": "As a developer, I want help text golden snapshots updated so they reflect the renamed and restructured commands from US-001 through US-004.",
       "acceptanceCriteria": [
-        "networks --json includes \"chainId\": <number> for resolved endpoints",
-        "networks --json omits chainId for unresolved endpoints (existing behavior)",
-        "networks text output shows Chain ID: <number> for resolved endpoints",
-        "Golden test files updated to reflect new output format",
-        "All golden tests pass with cargo test -p treb-cli"
+        "Help text shows `gen` (with `generate` alias noted) under Main Commands",
+        "Help text shows `completion` under Additional Commands",
+        "`config` help text reflects optional subcommand / default-to-show behavior",
+        "All golden tests pass: `cargo test -p treb-cli`",
+        "No unintended changes to non-help golden snapshots",
+        "`cargo check -p treb-cli` passes"
       ],
       "priority": 5,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P3-US-006",
-      "title": "Update config show Golden Tests and Add Integration Test with Env Var Resolution",
-      "description": "As a developer, I want config show golden tests updated for the inline sender format and an integration test verifying end-to-end env var resolution so that the new format and env var behavior are fully validated.",
+      "id": "P4-US-006",
+      "title": "Add Integration Tests for Aliases and Backward Compatibility",
+      "description": "As a developer, I want explicit integration tests for every alias form and backward-compatible invocation so that future refactors cannot accidentally break them.",
       "acceptanceCriteria": [
-        "All config show golden tests reflect inline sender format",
-        "JSON golden tests are unchanged",
-        "Integration test seeds a .env file with TEST_ADDR=0x1234..., treb.toml with address = \"${TEST_ADDR}\", runs config show, and verifies the address appears in output",
-        "UPDATE_GOLDEN=1 cargo test -p treb-cli updates all affected golden files",
-        "cargo test -p treb-cli passes",
-        "cargo clippy --workspace --all-targets passes"
+        "Test: `treb gen deploy Counter --json` succeeds and produces valid JSON",
+        "Test: `treb generate deploy Counter --json` succeeds with identical output to `gen deploy`",
+        "Test: `treb gen-deploy Counter --json` succeeds with identical output (backward compat)",
+        "Test: `treb completion bash` exits 0 and produces shell completion output",
+        "Test: `treb completions bash` exits 0 (backward compat)",
+        "Test: `treb config` (no subcommand) exits 0 and produces config output",
+        "All tests pass: `cargo test -p treb-cli`",
+        "`cargo check -p treb-cli` passes"
       ],
       "priority": 6,
-      "passes": true,
+      "passes": false,
       "notes": ""
     }
   ]

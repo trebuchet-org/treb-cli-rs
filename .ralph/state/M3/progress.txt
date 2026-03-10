@@ -1,65 +1,15 @@
 # Ralph Progress Log
-Started: Tue Mar 10 02:02:08 PM CET 2026
+Started: Tue Mar 10 03:36:50 PM CET 2026
 ## Codebase Patterns
-- Foundry RPC endpoint parsing should reuse `treb_config::expand_env_vars()` after `foundry_config::Config::load_with_root()` because Foundry preserves `${VAR}` placeholders in endpoint strings.
-- Raw `foundry.toml` sender tables should reuse `trebfile::expand_sender_config_env_vars()` after TOML deserialization so `SenderConfig` field expansion matches `treb.toml`.
-- CLI commands that read `foundry.toml` directly instead of going through `treb_config::resolve_config()` must call `treb_config::load_dotenv(project_root)` first so `.env`-backed RPC and sender values are available before config parsing.
-- `treb config show` sender output is Go-style plain text, not `comfy_table`: keep rows sorted by role and preserve `--json` output when adjusting that command.
-- CLI golden tests that need a resolved RPC endpoint can use a tiny loopback JSON-RPC server plus an `extra_normalizer` for `http://127.0.0.1:<port>` instead of relying on fixed ports or Anvil.
-- `config show` integration tests can cover dotenv-backed sender resolution by overwriting fixture `treb.toml` and `.env` in a `pre_setup_hook`; `treb_config::resolve_config()` already loads dotenv files, so process env injection is unnecessary.
+- When changing CLI command names or nesting in `crates/treb-cli/src/main.rs`, also update `build_grouped_help()` there and `crates/treb-cli/build.rs`; root help and generated shell completions are maintained separately from the derive parser.
+
 ---
-## 2026-03-10 14:08 CET - P3-US-001
-- Implemented `${VAR}` expansion for `foundry.toml` RPC endpoints by reusing `expand_env_vars()` inside `treb_config::rpc_endpoints()`.
-- Added unit coverage for full env-var URLs, literal URLs, mixed literal/env-var URLs, and unset vars expanding to empty strings.
-- Files changed: `crates/treb-config/src/foundry.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-10 15:51:18 CET - P4-US-001
+- Implemented nested `treb gen deploy` parsing with a visible `treb generate` alias, while keeping hidden backward-compatible `treb gen-deploy` routing to the same runtime handler and JSON-flag detection.
+- Added focused parser/help coverage in `crates/treb-cli/src/main.rs` and a real-binary integration test in `crates/treb-cli/tests/cli_gen_deploy.rs` to verify `gen deploy`, `generate deploy`, and `gen-deploy` produce identical JSON output.
+- Files changed: `crates/treb-cli/src/main.rs`, `crates/treb-cli/build.rs`, `crates/treb-cli/tests/cli_gen_deploy.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
 - **Learnings for future iterations:**
-  - `foundry_config::Config::load_with_root()` preserves raw `${VAR}` text for RPC endpoints, so treb must resolve those placeholders after loading the config.
-  - Reusing `expand_env_vars()` keeps `${VAR}` behavior aligned between `treb.toml` account parsing and `foundry.toml` RPC endpoint parsing.
-  - `cargo test -p treb-config` passes for this story.
----
-## 2026-03-10 14:12 CET - P3-US-002
-- Implemented `${VAR}` expansion for `foundry.toml` treb sender configs by running parsed `SenderConfig` values through the existing sender-field expansion helper.
-- Added unit tests covering env-var expansion across sender string fields and confirming literal foundry sender values remain unchanged.
-- Files changed: `crates/treb-config/src/foundry.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
-- **Learnings for future iterations:**
-  - `extract_treb_senders_from_foundry()` parses raw TOML custom sections, so env var expansion must happen after deserializing into `SenderConfig`.
-  - Reusing `trebfile::expand_sender_config_env_vars()` keeps `foundry.toml` sender handling aligned with `treb.toml` account parsing across address, signer, safe, governor, timelock, proposer, private key, and derivation path fields.
-  - `cargo test -p treb-config` passes for this story.
----
-## 2026-03-10 14:22 CET - P3-US-003
-- Implemented `.env` / `.env.local` loading in `treb networks` before `foundry.toml` parsing so `${VAR}` RPC endpoints resolve through the normal `treb_config::rpc_endpoints()` path.
-- Added a golden integration test covering a `.env`-backed `${TEST_RPC_URL}` endpoint and confirming `networks --json` reports the resolved URL instead of `unresolved env var`.
-- Updated the stale `register` unit test to match the branch's existing `${VAR}` expansion semantics when env vars are unset, keeping `cargo test -p treb-cli` green.
-- Files changed: `crates/treb-cli/src/commands/networks.rs`, `crates/treb-cli/tests/integration_networks.rs`, `crates/treb-cli/tests/golden/networks_resolves_dotenv_rpc_urls/commands.golden`, `crates/treb-cli/src/commands/register.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
-- **Learnings for future iterations:**
-  - `treb networks` bypasses `treb_config::resolve_config()`, so dotenv loading has to happen explicitly in the command before `load_foundry_config()`.
-  - In the CLI test harness, `.env` coverage for `networks` can be validated deterministically through `--json` output by asserting the expanded `rpcUrl` and a non-`unresolved env var` status.
-  - `cargo test -p treb-cli` passes for this story.
----
-## 2026-03-10 14:45 CET - P3-US-004
-- Replaced `treb config show` sender rendering with inline aligned `role  type  address` rows sorted by role, matching the Go-style human output while leaving `--json` unchanged.
-- Added unit coverage for the inline formatter’s sorting, alignment, and empty-sender behavior, and refreshed the existing `config show` golden snapshots to match the new text output.
-- Files changed: `crates/treb-cli/src/commands/config.rs`, `crates/treb-cli/tests/integration_config.rs`, `crates/treb-cli/tests/golden/config_show_default/commands.golden`, `crates/treb-cli/tests/golden/config_set_show_round_trip/commands.golden`, `crates/treb-cli/tests/golden/config_remove_show_round_trip/commands.golden`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
-- **Learnings for future iterations:**
-  - `config show` human output should stay as plain aligned rows rather than reintroducing `comfy_table`, because the branch is matching the Go CLI’s config display format.
-  - The sender formatter should sort roles before rendering and omit placeholder text for missing addresses; JSON tests still guard the unchanged machine-readable path.
-  - `cargo check -p treb-cli` and `cargo test -p treb-cli` pass for this story.
----
-## 2026-03-10 14:55 CET - P3-US-005
-- Updated the `networks_resolves_dotenv_rpc_urls` golden scenario to stand up a deterministic local JSON-RPC endpoint, verify human output prints `Chain ID: 31337`, and verify `networks --json` includes `chainId` for the resolved endpoint.
-- Added a reusable test-only RPC URL normalizer so the dynamic loopback port does not churn golden files, and documented that pattern in `CLAUDE.md`.
-- Files changed: `crates/treb-cli/tests/integration_networks.rs`, `crates/treb-cli/tests/golden/networks_resolves_dotenv_rpc_urls/commands.golden`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
-- **Learnings for future iterations:**
-  - `treb-cli` JSON goldens use `output::print_json()`, which sorts object keys deterministically; snapshot expectations should match that sorted key order.
-  - A lightweight loopback JSON-RPC server is enough to cover resolved `eth_chainId` behavior in `networks` tests without depending on Anvil startup.
-  - `cargo test -p treb-cli` passes for this story.
----
-## 2026-03-10 15:08 CET - P3-US-006
-- Added a `config show` golden integration scenario that seeds `.env`, overwrites `treb.toml` with `address = "${TEST_ADDR}"`, and snapshots the resolved sender address in human output.
-- Documented the reusable dotenv-backed `config show` test pattern in `CLAUDE.md` and cleaned up the sender row sort helper to satisfy workspace clippy.
-- Files changed: `crates/treb-cli/tests/integration_config.rs`, `crates/treb-cli/tests/golden/config_show_resolves_dotenv_sender_address/commands.golden`, `crates/treb-cli/src/commands/config.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
-- **Learnings for future iterations:**
-  - `config show` already resolves `.env` / `.env.local` through `treb_config::resolve_config()`, so end-to-end sender env-var coverage belongs in integration tests rather than new command plumbing.
-  - The `project` fixture can be repurposed for config env-resolution coverage by overwriting `treb.toml` in a `pre_setup_hook` before `treb init`.
-  - `cargo test -p treb-cli` and `cargo clippy --workspace --all-targets` pass for this story.
+  - Patterns discovered: `treb-cli` keeps clap parsing in `src/main.rs`, but grouped root help is manually assembled in `build_grouped_help()` and shell completions come from the separate builder in `build.rs`.
+  - Gotchas encountered: changing command structure in only one of those locations leaves parsing, `treb --help`, and generated completions out of sync.
+  - Useful context: the hidden compatibility form can reuse the same `Args` struct as the nested subcommand, which keeps runtime handling and JSON flag behavior aligned.
 ---

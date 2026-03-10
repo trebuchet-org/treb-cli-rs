@@ -289,6 +289,28 @@ fn gen_deploy_json_output_has_expected_fields() {
 }
 
 #[test]
+fn gen_deploy_nested_command_and_aliases_match_json_output() {
+    let tmp = setup_project();
+
+    let run = |args: &[&str]| -> Vec<u8> {
+        let output =
+            treb().args(args).current_dir(tmp.path()).output().expect("command should run");
+
+        assert!(output.status.success(), "command should succeed for args: {args:?}");
+        let _: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+        output.stdout
+    };
+
+    let nested = run(&["gen", "deploy", "Counter", "--strategy", "create2", "--json"]);
+    let alias = run(&["generate", "deploy", "Counter", "--strategy", "create2", "--json"]);
+    let compat = run(&["gen-deploy", "Counter", "--strategy", "create2", "--json"]);
+
+    assert_eq!(nested, alias, "generate alias should match gen deploy output");
+    assert_eq!(nested, compat, "gen-deploy compatibility command should match gen deploy output");
+}
+
+#[test]
 fn gen_deploy_json_output_with_proxy() {
     let tmp = setup_project();
 
