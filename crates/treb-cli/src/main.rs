@@ -24,6 +24,7 @@ fn parse_deployment_type(s: &str) -> Result<DeploymentType, String> {
 #[derive(Parser)]
 #[command(
     name = "treb",
+    bin_name = "treb",
     version,
     about,
     long_about = "Trebuchet (treb) orchestrates Foundry script execution for deterministic smart contract deployments using CreateX factory contracts."
@@ -174,7 +175,7 @@ enum Commands {
     /// when these flags are not explicitly provided.
     ///
     /// When no subcommand is provided, behaves like `treb config show`.
-    #[command(override_usage = "treb-cli config [OPTIONS] [COMMAND]")]
+    #[command(override_usage = "treb config [OPTIONS] [COMMAND]")]
     Config {
         #[command(subcommand)]
         subcommand: ConfigSubcommand,
@@ -604,7 +605,7 @@ fn anvil_subcommand_json_flag(subcommand: &commands::dev::AnvilSubcommand) -> bo
 /// derived `Cli::command()`, hides all subcommands from the default rendering, and
 /// injects a custom grouped help text via `after_help` with a custom `help_template`.
 fn build_grouped_command() -> clap::Command {
-    let mut cmd = Cli::command();
+    let mut cmd = Cli::command().bin_name("treb");
 
     // Build grouped help text from subcommand metadata before hiding them
     let grouped_help = build_grouped_help(&cmd);
@@ -1122,6 +1123,22 @@ mod tests {
         match parse_cli_from(["treb", "config", "--help"]) {
             Ok(_) => panic!("expected config --help to return clap help output"),
             Err(err) => assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp),
+        }
+    }
+
+    #[test]
+    fn subcommand_help_uses_treb_bin_name() {
+        for args in [
+            ["treb-cli", "config", "--help"],
+            ["treb-cli", "gen", "--help"],
+            ["treb-cli", "completion", "--help"],
+        ] {
+            let err = build_grouped_command().try_get_matches_from(args).unwrap_err();
+            assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
+
+            let output = err.to_string();
+            assert!(output.contains("Usage: treb "), "unexpected help output: {output}");
+            assert!(!output.contains("Usage: treb-cli "), "unexpected help output: {output}");
         }
     }
 }

@@ -1,7 +1,7 @@
 === cmd 0: [gen --help] ===
 Generate deployment scripts
 
-Usage: treb-cli gen [OPTIONS] <COMMAND>
+Usage: treb gen [OPTIONS] <COMMAND>
 
 Commands:
   deploy  Generate deployment scripts for contracts and libraries.

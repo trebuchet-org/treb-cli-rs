@@ -8,7 +8,7 @@ explicitly provided.
 
 When no subcommand is provided, behaves like `treb config show`.
 
-Usage: treb-cli config [OPTIONS] [COMMAND]
+Usage: treb config [OPTIONS] [COMMAND]
 
 Commands:
   show    Show the resolved configuration

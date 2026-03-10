@@ -10,7 +10,7 @@ Examples:
   treb completion zsh > ~/.zsh/completions/_treb
   treb completion fish > ~/.config/fish/completions/treb.fish
 
-Usage: treb-cli completion [OPTIONS] <SHELL>
+Usage: treb completion [OPTIONS] <SHELL>
 
 Arguments:
   <SHELL>
