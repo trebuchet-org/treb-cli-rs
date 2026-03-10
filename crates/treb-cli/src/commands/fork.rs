@@ -1037,8 +1037,6 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
     // Structured data for JSON output (Go-matching schema).
     let mut new_deployments_json: Vec<ForkDiffEntryJson> = Vec::new();
     let mut modified_deployments_json: Vec<ForkDiffEntryJson> = Vec::new();
-    let mut has_changes = false;
-
     for &file_name in &diff_files {
         let current_path = treb_dir.join(file_name);
         let snapshot_path = snapshot_dir.join(file_name);
@@ -1067,21 +1065,14 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
                 _ => continue, // unchanged
             };
 
-            has_changes = true;
-
             // Collect deployment entries for JSON output.
-            if is_deployments {
-                // Use current data for added/modified, snapshot data for removed.
-                let data = in_current.or(in_snapshot).unwrap();
-                let contract_name = data
-                    .get("contractName")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
+            if is_deployments && (change_type == "added" || change_type == "modified") {
+                let data = in_current.unwrap();
+                let contract_name =
+                    data.get("contractName").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let address =
                     data.get("address").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let dtype =
-                    data.get("type").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let dtype = data.get("type").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let json_entry = ForkDiffEntryJson {
                     address: address.clone(),
                     change_type: change_type.to_string(),
@@ -1119,6 +1110,9 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
     }
 
     if json {
+        let has_changes = !new_deployments_json.is_empty()
+            || !modified_deployments_json.is_empty()
+            || new_transactions > 0;
         let result = ForkDiffResultJson {
             has_changes,
             modified_deployments: modified_deployments_json,

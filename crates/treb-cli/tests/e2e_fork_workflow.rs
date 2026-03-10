@@ -123,16 +123,11 @@ async fn e2e_fork_enter_deploy_diff_revert_exit() {
     )
     .await;
     assert_eq!(diff["network"].as_str(), Some("anvil-31337"));
-    assert_eq!(
-        diff["hasChanges"].as_bool(),
-        Some(true),
-        "diff must have changes after deployment"
-    );
+    assert_eq!(diff["hasChanges"].as_bool(), Some(true), "diff must have changes after deployment");
     let new_deps = diff["newDeployments"].as_array().expect("newDeployments must be an array");
     assert!(
         new_deps.iter().any(|d| {
-            d["changeType"].as_str() == Some("added")
-                && d["id"].as_str() == Some(dep_id.as_str())
+            d["changeType"].as_str() == Some("added") && d["id"].as_str() == Some(dep_id.as_str())
         }),
         "diff must show the fork-only deployment as added in newDeployments"
     );

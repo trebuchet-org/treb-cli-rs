@@ -1,14 +1,7 @@
 === cmd 0: [fork diff --network mainnet --json] ===
 {
   "hasChanges": true,
-  "modifiedDeployments": [
-    {
-      "address": "0xccc",
-      "changeType": "removed",
-      "id": "Removed_2",
-      "type": ""
-    }
-  ],
+  "modifiedDeployments": [],
   "network": "mainnet",
   "newDeployments": [
     {
