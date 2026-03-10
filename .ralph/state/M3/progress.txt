@@ -3,6 +3,7 @@
 - For scoped deployment queries in CLI commands, filter `Registry::list_deployments()` with `commands::list::filter_deployments()` and resolve the user query with `commands::resolve::resolve_deployment_in_scope()` so namespace/network/fork filters affect ambiguity resolution consistently.
 - For scoped commands that support interactive deployment selection, pass the filtered deployment slice into `fuzzy_select_deployment_id()` too; otherwise the prompt can offer out-of-scope deployments even when typed queries are scoped correctly.
 - For clap help changes that are specific to one command, add or refresh a dedicated `help_<command>` golden in `crates/treb-cli/tests/integration_help.rs`; root `treb --help` snapshots do not catch all subcommand help drift.
+- For scoped CLI behavior in `crates/treb-cli/tests/integration_*.rs`, prefer direct `TestContext` subprocess assertions plus ad hoc `Registry::insert_deployment()` setup when the shared fixtures do not include the ambiguous namespace/network combinations you need; keep goldens for formatting-heavy coverage.
 
 # Ralph Progress Log
 Started: Tue Mar 10 09:09:42 PM CET 2026
@@ -54,4 +55,16 @@ Started: Tue Mar 10 09:09:42 PM CET 2026
     Root `treb --help` can remain stable while clap-generated subcommand help changes, so snapshotting only `help_root` is not enough for new per-command flags.
   - Useful context (e.g., "the evaluation panel is in component X")
     `UPDATE_GOLDEN=1 cargo test -p treb-cli --test integration_help help_show` is sufficient to create or refresh a single help snapshot without broader golden churn.
+---
+## 2026-03-10 22:02:50 CET - P6-US-005
+- Added integration coverage for scoped `show` filtering across namespace, network, no-fork, and combined JSON cases, including success and no-match assertions.
+- Added integration coverage for scoped `tag` show/add/remove behavior plus a filtered no-match case, using subprocess execution and seeded/custom registry setup through the existing test harness.
+- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `CLAUDE.md`, `crates/treb-cli/tests/integration_show.rs`, `crates/treb-cli/tests/integration_tag.rs`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y")
+    The `integration_*.rs` suites can mix golden-backed scenarios with direct `TestContext` assertions, which is cleaner for scope-specific success/error checks than snapshotting every filtered branch.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W")
+    The shared seeded registry fixture is useful for real-world fork coverage, but it does not include ambiguous namespace/network variants; scoped resolution tests often need extra deployments inserted directly into a temp registry.
+  - Useful context (e.g., "the evaluation panel is in component X")
+    `NO_COLOR=1` keeps scoped human-output assertions stable in direct subprocess tests, while `show --json` assertions can read `Assert::get_output().stdout` without introducing new goldens.
 ---

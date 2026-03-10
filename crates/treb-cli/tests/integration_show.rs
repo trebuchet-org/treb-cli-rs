@@ -3,11 +3,78 @@
 mod framework;
 mod helpers;
 
+use std::collections::HashMap;
+
+use chrono::Utc;
 use framework::{
     context::TestContext,
     integration_test::{IntegrationTest, run_integration_test},
     normalizer::PathNormalizer,
 };
+use predicates::prelude::*;
+use treb_core::types::{
+    ArtifactInfo, Deployment, DeploymentMethod, DeploymentStrategy, DeploymentType,
+    VerificationInfo, VerificationStatus,
+};
+
+fn init_project_with_custom_deployments(
+    ctx: &TestContext,
+    deployments: impl IntoIterator<Item = Deployment>,
+) {
+    ctx.run(["init"]).success();
+
+    let mut registry = treb_registry::Registry::open(ctx.path()).expect("registry should open");
+    for deployment in deployments {
+        registry.insert_deployment(deployment).expect("deployment insert should succeed");
+    }
+}
+
+fn make_show_deployment(
+    namespace: &str,
+    chain_id: u64,
+    contract_name: &str,
+    label: &str,
+    address: &str,
+) -> Deployment {
+    let ts = Utc::now();
+
+    Deployment {
+        id: format!("{namespace}/{chain_id}/{contract_name}:{label}"),
+        namespace: namespace.to_string(),
+        chain_id,
+        contract_name: contract_name.to_string(),
+        label: label.to_string(),
+        address: address.to_string(),
+        deployment_type: DeploymentType::Singleton,
+        transaction_id: format!("tx-{namespace}-{chain_id}-{contract_name}"),
+        deployment_strategy: DeploymentStrategy {
+            method: DeploymentMethod::Create,
+            salt: String::new(),
+            init_code_hash: String::new(),
+            factory: String::new(),
+            constructor_args: String::new(),
+            entropy: String::new(),
+        },
+        proxy_info: None,
+        artifact: ArtifactInfo {
+            path: "contracts/Test.sol".to_string(),
+            compiler_version: "0.8.24".to_string(),
+            bytecode_hash: "0xabc".to_string(),
+            script_path: "script/Deploy.s.sol".to_string(),
+            git_commit: "abc123".to_string(),
+        },
+        verification: VerificationInfo {
+            status: VerificationStatus::Unverified,
+            etherscan_url: String::new(),
+            verified_at: None,
+            reason: String::new(),
+            verifiers: HashMap::new(),
+        },
+        tags: None,
+        created_at: ts,
+        updated_at: ts,
+    }
+}
 
 /// Show by full deployment ID displays all section headers.
 #[test]
@@ -145,4 +212,136 @@ fn show_uninitialized() {
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
+}
+
+#[test]
+fn show_namespace_filter_scopes_resolution_and_errors_outside_scope() {
+    let ctx = TestContext::new("project");
+    init_project_with_custom_deployments(
+        &ctx,
+        [
+            make_show_deployment(
+                "mainnet",
+                42220,
+                "Counter",
+                "v1",
+                "0x0000000000000000000000000000000000000001",
+            ),
+            make_show_deployment(
+                "staging",
+                42220,
+                "Counter",
+                "v1",
+                "0x0000000000000000000000000000000000000002",
+            ),
+        ],
+    );
+
+    ctx.run_with_env(["show", "--namespace", "mainnet", "Counter"], [("NO_COLOR", "1")])
+        .success()
+        .stdout(predicate::str::contains("Deployment: mainnet/42220/Counter:v1"))
+        .stdout(predicate::str::contains("Namespace: mainnet"))
+        .stdout(predicate::str::contains("Namespace: staging").not());
+
+    ctx.run(["show", "--namespace", "prod", "Counter"]).failure().stderr(predicate::str::contains(
+        "no deployment found matching 'Counter' in namespace 'prod'",
+    ));
+}
+
+#[test]
+fn show_network_filter_scopes_resolution_and_errors_outside_scope() {
+    let ctx = TestContext::new("project");
+    init_project_with_custom_deployments(
+        &ctx,
+        [
+            make_show_deployment(
+                "mainnet",
+                1,
+                "Counter",
+                "v1",
+                "0x0000000000000000000000000000000000000001",
+            ),
+            make_show_deployment(
+                "mainnet",
+                42220,
+                "Counter",
+                "v1",
+                "0x0000000000000000000000000000000000000002",
+            ),
+        ],
+    );
+
+    ctx.run_with_env(["show", "--network", "42220", "Counter"], [("NO_COLOR", "1")])
+        .success()
+        .stdout(predicate::str::contains("Deployment: mainnet/42220/Counter:v1"))
+        .stdout(predicate::str::contains("Network: 42220"))
+        .stdout(predicate::str::contains("Network: 1").not());
+
+    ctx.run(["show", "--network", "11155111", "Counter"]).failure().stderr(
+        predicate::str::contains("no deployment found matching 'Counter' on network '11155111'"),
+    );
+}
+
+#[test]
+fn show_no_fork_filter_excludes_fork_deployments() {
+    let ctx = TestContext::new("project");
+    ctx.run(["init"]).success();
+    helpers::seed_registry(ctx.path());
+
+    ctx.run(["show", "MockToken"]).success();
+
+    ctx.run(["show", "--no-fork", "MockToken"]).failure().stderr(predicate::str::contains(
+        "no deployment found matching 'MockToken' excluding fork deployments",
+    ));
+}
+
+#[test]
+fn show_combined_filters_json_returns_only_the_matching_deployment() {
+    let ctx = TestContext::new("project");
+    init_project_with_custom_deployments(
+        &ctx,
+        [
+            make_show_deployment(
+                "mainnet",
+                1,
+                "Counter",
+                "v1",
+                "0x0000000000000000000000000000000000000001",
+            ),
+            make_show_deployment(
+                "mainnet",
+                42220,
+                "Counter",
+                "v1",
+                "0x0000000000000000000000000000000000000002",
+            ),
+            make_show_deployment(
+                "fork/42220",
+                42220,
+                "Counter",
+                "v1",
+                "0x0000000000000000000000000000000000000003",
+            ),
+        ],
+    );
+
+    let assert = ctx
+        .run([
+            "show",
+            "--namespace",
+            "mainnet",
+            "--network",
+            "42220",
+            "--no-fork",
+            "--json",
+            "Counter",
+        ])
+        .success();
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&assert.get_output().stdout).expect("show output should be json");
+    assert_eq!(json["deployment"]["id"], "mainnet/42220/Counter:v1");
+    assert_eq!(json["deployment"]["namespace"], "mainnet");
+    assert_eq!(json["deployment"]["chainId"], 42220);
+    assert!(json.get("fork").is_none(), "combined filters should exclude fork deployments");
 }

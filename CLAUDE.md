@@ -61,6 +61,8 @@ treb — deployment orchestration CLI for Foundry projects. Rust workspace with 
 
 **Registry compat test seeding**: `crates/treb-cli/tests/helpers/mod.rs::seed_registry()` writes the legacy bare `deployments_map.json` fixture into `.treb/deployments.json`; use a mutating CLI command such as `tag --add` when you need to verify that a write path preserves Go-compatible bare JSON output instead of reintroducing the legacy wrapper.
 
+**Scoped CLI integration coverage**: For namespace/network/fork filter behavior in `crates/treb-cli/tests/integration_*.rs`, prefer direct `TestContext` subprocess assertions plus local `Registry::insert_deployment()` setup when the shared fixture does not provide the ambiguous deployments you need. Keep goldens for formatting-heavy output, and use focused assertions for scope-specific success/error cases.
+
 **CLI registry artifact goldens**: Golden files that snapshot persisted `.treb/*.json` artifacts in `crates/treb-cli/tests/golden/` must match the current bare-map registry format. If an older snapshot still contains `_format`/`entries`, rewrite it to the bare object before trusting the test result.
 
 **CLI RPC golden tests**: When a golden test needs a resolved RPC endpoint, prefer a tiny loopback JSON-RPC listener plus an `extra_normalizer` that rewrites `http://127.0.0.1:<port>` instead of depending on a fixed port or a full Anvil instance.

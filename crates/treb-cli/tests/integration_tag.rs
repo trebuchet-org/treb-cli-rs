@@ -3,14 +3,80 @@
 mod framework;
 mod helpers;
 
-use std::fs;
+use std::{collections::HashMap, fs};
 
+use chrono::Utc;
 use framework::{
     context::TestContext,
     integration_test::{IntegrationTest, run_integration_test},
     normalizer::PathNormalizer,
 };
+use predicates::prelude::*;
+use treb_core::types::{
+    ArtifactInfo, Deployment, DeploymentMethod, DeploymentStrategy, DeploymentType,
+    VerificationInfo, VerificationStatus,
+};
 use treb_registry::{read_versioned_file, write_versioned_file};
+
+fn init_project_with_custom_deployments(
+    ctx: &TestContext,
+    deployments: impl IntoIterator<Item = Deployment>,
+) {
+    ctx.run(["init"]).success();
+
+    let mut registry = treb_registry::Registry::open(ctx.path()).expect("registry should open");
+    for deployment in deployments {
+        registry.insert_deployment(deployment).expect("deployment insert should succeed");
+    }
+}
+
+fn make_tag_deployment(
+    namespace: &str,
+    chain_id: u64,
+    contract_name: &str,
+    label: &str,
+    address: &str,
+    tags: Option<Vec<&str>>,
+) -> Deployment {
+    let ts = Utc::now();
+
+    Deployment {
+        id: format!("{namespace}/{chain_id}/{contract_name}:{label}"),
+        namespace: namespace.to_string(),
+        chain_id,
+        contract_name: contract_name.to_string(),
+        label: label.to_string(),
+        address: address.to_string(),
+        deployment_type: DeploymentType::Singleton,
+        transaction_id: format!("tx-{namespace}-{chain_id}-{contract_name}"),
+        deployment_strategy: DeploymentStrategy {
+            method: DeploymentMethod::Create,
+            salt: String::new(),
+            init_code_hash: String::new(),
+            factory: String::new(),
+            constructor_args: String::new(),
+            entropy: String::new(),
+        },
+        proxy_info: None,
+        artifact: ArtifactInfo {
+            path: "contracts/Test.sol".to_string(),
+            compiler_version: "0.8.24".to_string(),
+            bytecode_hash: "0xabc".to_string(),
+            script_path: "script/Deploy.s.sol".to_string(),
+            git_commit: "abc123".to_string(),
+        },
+        verification: VerificationInfo {
+            status: VerificationStatus::Unverified,
+            etherscan_url: String::new(),
+            verified_at: None,
+            reason: String::new(),
+            verifiers: HashMap::new(),
+        },
+        tags: tags.map(|entries| entries.into_iter().map(str::to_string).collect()),
+        created_at: ts,
+        updated_at: ts,
+    }
+}
 
 /// Seed the registry and pre-add a "v3-release" tag to the FPMM:v3.0.0 deployment.
 /// Used by remove and duplicate-add tests that need a tag already present.
@@ -229,4 +295,130 @@ fn tag_uninitialized() {
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
+}
+
+#[test]
+fn tag_show_namespace_scope_resolves_the_filtered_deployment() {
+    let ctx = TestContext::new("project");
+    init_project_with_custom_deployments(
+        &ctx,
+        [
+            make_tag_deployment(
+                "mainnet",
+                42220,
+                "Counter",
+                "v1",
+                "0x0000000000000000000000000000000000001111",
+                Some(vec!["stable"]),
+            ),
+            make_tag_deployment(
+                "staging",
+                42220,
+                "Counter",
+                "v1",
+                "0x0000000000000000000000000000000000002222",
+                Some(vec!["beta"]),
+            ),
+        ],
+    );
+
+    ctx.run_with_env(["tag", "--namespace", "mainnet", "Counter"], [("NO_COLOR", "1")])
+        .success()
+        .stdout(predicate::str::contains("mainnet/42220/Counter:v1"))
+        .stdout(predicate::str::contains("stable"))
+        .stdout(predicate::str::contains("beta").not());
+}
+
+#[test]
+fn tag_add_namespace_and_network_scope_only_updates_the_matching_deployment() {
+    let ctx = TestContext::new("project");
+    init_project_with_custom_deployments(
+        &ctx,
+        [
+            make_tag_deployment(
+                "mainnet",
+                42220,
+                "Counter",
+                "v1",
+                "0x0000000000000000000000000000000000001111",
+                None,
+            ),
+            make_tag_deployment(
+                "mainnet",
+                1,
+                "Counter",
+                "v1",
+                "0x0000000000000000000000000000000000002222",
+                None,
+            ),
+        ],
+    );
+
+    ctx.run(["tag", "--add", "v2", "-s", "mainnet", "-n", "42220", "Counter"])
+        .success()
+        .stdout(predicate::str::contains("mainnet/42220/Counter:v1"));
+
+    let registry = treb_registry::Registry::open(ctx.path()).expect("registry should open");
+    assert_eq!(
+        registry.get_deployment("mainnet/42220/Counter:v1").unwrap().tags,
+        Some(vec!["v2".to_string()])
+    );
+    assert_eq!(registry.get_deployment("mainnet/1/Counter:v1").unwrap().tags, None);
+}
+
+#[test]
+fn tag_remove_namespace_scope_only_updates_the_matching_deployment() {
+    let ctx = TestContext::new("project");
+    init_project_with_custom_deployments(
+        &ctx,
+        [
+            make_tag_deployment(
+                "mainnet",
+                42220,
+                "Counter",
+                "v1",
+                "0x0000000000000000000000000000000000001111",
+                Some(vec!["v2"]),
+            ),
+            make_tag_deployment(
+                "staging",
+                42220,
+                "Counter",
+                "v1",
+                "0x0000000000000000000000000000000000002222",
+                Some(vec!["v2"]),
+            ),
+        ],
+    );
+
+    ctx.run(["tag", "--remove", "v2", "--namespace", "mainnet", "Counter"])
+        .success()
+        .stdout(predicate::str::contains("mainnet/42220/Counter:v1"));
+
+    let registry = treb_registry::Registry::open(ctx.path()).expect("registry should open");
+    assert_eq!(registry.get_deployment("mainnet/42220/Counter:v1").unwrap().tags, None);
+    assert_eq!(
+        registry.get_deployment("staging/42220/Counter:v1").unwrap().tags,
+        Some(vec!["v2".to_string()])
+    );
+}
+
+#[test]
+fn tag_network_scope_errors_when_the_match_is_outside_the_filter() {
+    let ctx = TestContext::new("project");
+    init_project_with_custom_deployments(
+        &ctx,
+        [make_tag_deployment(
+            "mainnet",
+            42220,
+            "Counter",
+            "v1",
+            "0x0000000000000000000000000000000000001111",
+            None,
+        )],
+    );
+
+    ctx.run(["tag", "--network", "1", "Counter"])
+        .failure()
+        .stderr(predicate::str::contains("no deployment found matching 'Counter' on network '1'"));
 }
