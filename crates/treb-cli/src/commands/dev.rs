@@ -1,6 +1,7 @@
 //! `treb dev` subcommands — manage local Anvil development nodes.
 
 use std::{
+    collections::HashMap,
     env, fs,
     path::{Path, PathBuf},
 };
@@ -180,8 +181,9 @@ async fn run_anvil_start_with_entry(
     let log_file_path = log_file_path(&treb_dir, &instance_name);
     let display_log_file_path = human_display_path(&cwd, &log_file_path);
 
-    // Deploy CreateX factory (non-fatal — show warning on failure).
-    let createx_ok = deploy_createx(&anvil).await.is_ok();
+    deploy_createx(&anvil).await.with_context(|| {
+        format!("failed to deploy CreateX for Anvil instance '{}' at {}", instance_name, rpc_url)
+    })?;
 
     // Print styled start output (matches Go CLI format).
     println!(
@@ -199,24 +201,16 @@ async fn run_anvil_start_with_entry(
         )
     );
     println!("{}", styled(&format!("{} RPC URL: {}", emoji::GLOBE, rpc_url), color::BLUE));
-    if createx_ok {
-        println!(
-            "{}",
-            styled(
-                &format!(
-                    "{} CreateX factory deployed at 0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed",
-                    emoji::CHECK
-                ),
-                color::GREEN,
-            )
-        );
-    } else {
-        println!(
-            "{}",
-            styled(&format!("{}  Warning: Failed to deploy CreateX", emoji::WARNING), color::RED,)
-        );
-        println!("{}", styled("Deployments may fail without CreateX factory", color::YELLOW));
-    }
+    println!(
+        "{}",
+        styled(
+            &format!(
+                "{} CreateX factory deployed at 0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed",
+                emoji::CHECK
+            ),
+            color::GREEN,
+        )
+    );
 
     // Write PID file.
     let pid = std::process::id();
@@ -336,6 +330,9 @@ pub async fn run_anvil_stop(network: Option<String>, name: Option<String>) -> an
     };
 
     let mut removed = Vec::new();
+    let instance_name_counts = tracked_instance_name_counts(
+        targets.iter().map(|(_, instance_name, _)| instance_name.as_str()),
+    );
     for (net, instance_name, port) in &targets {
         if !is_port_reachable(*port).await {
             if instance_name == net {
@@ -393,14 +390,20 @@ pub async fn run_anvil_stop(network: Option<String>, name: Option<String>) -> an
         }
         println!("{}", styled("No stale fork state entries found.", color::YELLOW));
     } else {
-        for (_net, instance_name) in &removed {
-            println!(
-                "{}",
-                styled(
-                    &format!("{} Stopped anvil node '{instance_name}'", emoji::CHECK),
-                    color::GREEN,
+        for (net, instance_name) in &removed {
+            let show_network =
+                instance_name_counts.get(instance_name).copied().unwrap_or_default() > 1;
+            let message = if show_network {
+                format!(
+                    "{} Stopped anvil node '{}' for network '{}'",
+                    emoji::CHECK,
+                    instance_name,
+                    net
                 )
-            );
+            } else {
+                format!("{} Stopped anvil node '{}'", emoji::CHECK, instance_name)
+            };
+            println!("{}", styled(&message, color::GREEN));
         }
     }
 
@@ -527,6 +530,8 @@ pub async fn run_anvil_status(
             .collect()
     };
     sort_tracked_anvil_entries(&mut forks);
+    let instance_name_counts =
+        tracked_instance_name_counts(forks.iter().map(|entry| entry.resolved_instance_name()));
 
     let now = Utc::now();
 
@@ -561,13 +566,15 @@ pub async fn run_anvil_status(
     for (i, entry) in forks.iter().enumerate() {
         let instance_name = entry.resolved_instance_name();
         let running = is_port_reachable(entry.port).await;
+        let show_network = instance_name_counts.get(instance_name).copied().unwrap_or_default() > 1;
+        let header = if show_network {
+            format!("Anvil Status ('{instance_name}' on '{}'):", entry.network)
+        } else {
+            format!("Anvil Status ('{instance_name}'):")
+        };
 
         // Cyan bold header: 📊 Anvil Status ('NAME'):
-        println!(
-            "{} {}",
-            emoji::CHART,
-            styled(&format!("Anvil Status ('{instance_name}'):"), color::STAGE),
-        );
+        println!("{} {}", emoji::CHART, styled(&header, color::STAGE),);
 
         if running {
             // Green status with PID
@@ -818,6 +825,16 @@ fn sort_tracked_anvil_entries(entries: &mut Vec<&ForkEntry>) {
             .cmp(&right.network)
             .then_with(|| left.resolved_instance_name().cmp(right.resolved_instance_name()))
     });
+}
+
+fn tracked_instance_name_counts<'a>(
+    instance_names: impl IntoIterator<Item = &'a str>,
+) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for instance_name in instance_names {
+        *counts.entry(instance_name.to_string()).or_insert(0) += 1;
+    }
+    counts
 }
 
 fn resolve_named_anvil_entries<'a>(
