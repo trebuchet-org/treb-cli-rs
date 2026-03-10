@@ -1,4 +1,4 @@
-//! Integration tests for `treb completions` and long-form `--help` output.
+//! Integration tests for `treb completion` and long-form `--help` output.
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
@@ -8,7 +8,39 @@ fn treb() -> assert_cmd::Command {
 }
 
 #[test]
-fn completions_bash_exits_zero_and_contains_treb() {
+fn completion_bash_exits_zero_and_contains_legacy_completions_subcommand() {
+    treb()
+        .args(["completion", "bash"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("treb").and(predicate::str::contains("completions")));
+}
+
+#[test]
+fn completion_zsh_exits_zero_and_contains_treb() {
+    treb().args(["completion", "zsh"]).assert().success().stdout(predicate::str::contains("treb"));
+}
+
+#[test]
+fn completion_fish_exits_zero_and_contains_complete_c_treb() {
+    treb()
+        .args(["completion", "fish"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("complete -c treb"));
+}
+
+#[test]
+fn completion_elvish_exits_zero_and_contains_treb() {
+    treb()
+        .args(["completion", "elvish"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("treb"));
+}
+
+#[test]
+fn completions_alias_bash_exits_zero_and_contains_treb() {
     treb()
         .args(["completions", "bash"])
         .assert()
@@ -17,31 +49,8 @@ fn completions_bash_exits_zero_and_contains_treb() {
 }
 
 #[test]
-fn completions_zsh_exits_zero_and_contains_treb() {
-    treb().args(["completions", "zsh"]).assert().success().stdout(predicate::str::contains("treb"));
-}
-
-#[test]
-fn completions_fish_exits_zero_and_contains_complete_c_treb() {
-    treb()
-        .args(["completions", "fish"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("complete -c treb"));
-}
-
-#[test]
-fn completions_elvish_exits_zero_and_contains_treb() {
-    treb()
-        .args(["completions", "elvish"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("treb"));
-}
-
-#[test]
-fn completions_unsupported_shell_exits_nonzero() {
-    treb().args(["completions", "tcsh"]).assert().failure();
+fn completion_unsupported_shell_exits_nonzero() {
+    treb().args(["completion", "tcsh"]).assert().failure();
 }
 
 #[test]

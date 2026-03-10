@@ -1,4 +1,4 @@
-=== cmd 0: [gen-deploy Counter --strategy create2 --output script/DeployCounter_create2.s.sol] ===
+=== cmd 0: [gen deploy Counter --strategy create2 --output script/DeployCounter_create2.s.sol] ===
 
 ✅ Generated deployment script: script/DeployCounter_create2.s.sol
 

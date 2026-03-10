@@ -1,65 +1,68 @@
 # Ralph Progress Log
-Started: Tue Mar 10 02:02:08 PM CET 2026
+Started: Tue Mar 10 03:36:50 PM CET 2026
 ## Codebase Patterns
-- Foundry RPC endpoint parsing should reuse `treb_config::expand_env_vars()` after `foundry_config::Config::load_with_root()` because Foundry preserves `${VAR}` placeholders in endpoint strings.
-- Raw `foundry.toml` sender tables should reuse `trebfile::expand_sender_config_env_vars()` after TOML deserialization so `SenderConfig` field expansion matches `treb.toml`.
-- CLI commands that read `foundry.toml` directly instead of going through `treb_config::resolve_config()` must call `treb_config::load_dotenv(project_root)` first so `.env`-backed RPC and sender values are available before config parsing.
-- `treb config show` sender output is Go-style plain text, not `comfy_table`: keep rows sorted by role and preserve `--json` output when adjusting that command.
-- CLI golden tests that need a resolved RPC endpoint can use a tiny loopback JSON-RPC server plus an `extra_normalizer` for `http://127.0.0.1:<port>` instead of relying on fixed ports or Anvil.
-- `config show` integration tests can cover dotenv-backed sender resolution by overwriting fixture `treb.toml` and `.env` in a `pre_setup_hook`; `treb_config::resolve_config()` already loads dotenv files, so process env injection is unnecessary.
+- When changing CLI command names or nesting in `crates/treb-cli/src/main.rs`, also update `build_grouped_help()` there and `crates/treb-cli/build.rs`; root help and generated shell completions are maintained separately from the derive parser.
+- When renaming a CLI command that has golden coverage, update both the `crates/treb-cli/tests/integration_*.rs` command argv and the matching `crates/treb-cli/tests/golden/*/commands.golden` header, because the harness snapshots the invoked argv verbatim.
+- For spelling-only CLI renames that need backward compatibility, keep the canonical subcommand name in `src/main.rs` and add the old spelling as a hidden clap alias there and in `build.rs`; that preserves parsing, root help, and generated shell completions without a second runtime handler.
+- For a command that should default to an existing subcommand without changing clap help/completion structure, normalize argv in `crates/treb-cli/src/main.rs` before clap parsing and skip that rewrite when `--help` is present.
+- Help regressions need coverage in both `treb --help` and subcommand `--help` snapshots: root help is custom-built in `build_grouped_help()`, while subcommand help still comes from clap and can drift independently.
+- For CLI renames that must preserve legacy entrypoints, keep one focused binary suite in `crates/treb-cli/tests/cli_compatibility_aliases.rs` that compares canonical and compatibility stdout directly; use feature-specific suites for deeper behavior, not for alias parity alone.
+
 ---
-## 2026-03-10 14:08 CET - P3-US-001
-- Implemented `${VAR}` expansion for `foundry.toml` RPC endpoints by reusing `expand_env_vars()` inside `treb_config::rpc_endpoints()`.
-- Added unit coverage for full env-var URLs, literal URLs, mixed literal/env-var URLs, and unset vars expanding to empty strings.
-- Files changed: `crates/treb-config/src/foundry.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-10 15:51:18 CET - P4-US-001
+- Implemented nested `treb gen deploy` parsing with a visible `treb generate` alias, while keeping hidden backward-compatible `treb gen-deploy` routing to the same runtime handler and JSON-flag detection.
+- Added focused parser/help coverage in `crates/treb-cli/src/main.rs` and a real-binary integration test in `crates/treb-cli/tests/cli_gen_deploy.rs` to verify `gen deploy`, `generate deploy`, and `gen-deploy` produce identical JSON output.
+- Files changed: `crates/treb-cli/src/main.rs`, `crates/treb-cli/build.rs`, `crates/treb-cli/tests/cli_gen_deploy.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
 - **Learnings for future iterations:**
-  - `foundry_config::Config::load_with_root()` preserves raw `${VAR}` text for RPC endpoints, so treb must resolve those placeholders after loading the config.
-  - Reusing `expand_env_vars()` keeps `${VAR}` behavior aligned between `treb.toml` account parsing and `foundry.toml` RPC endpoint parsing.
-  - `cargo test -p treb-config` passes for this story.
+  - Patterns discovered: `treb-cli` keeps clap parsing in `src/main.rs`, but grouped root help is manually assembled in `build_grouped_help()` and shell completions come from the separate builder in `build.rs`.
+  - Gotchas encountered: changing command structure in only one of those locations leaves parsing, `treb --help`, and generated completions out of sync.
+  - Useful context: the hidden compatibility form can reuse the same `Args` struct as the nested subcommand, which keeps runtime handling and JSON flag behavior aligned.
 ---
-## 2026-03-10 14:12 CET - P3-US-002
-- Implemented `${VAR}` expansion for `foundry.toml` treb sender configs by running parsed `SenderConfig` values through the existing sender-field expansion helper.
-- Added unit tests covering env-var expansion across sender string fields and confirming literal foundry sender values remain unchanged.
-- Files changed: `crates/treb-config/src/foundry.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-10 16:02:10 CET - P4-US-002
+- Updated the primary gen-deploy integration coverage to invoke `treb gen deploy ...` in both `crates/treb-cli/tests/cli_gen_deploy.rs` and `crates/treb-cli/tests/integration_gen_deploy.rs`, while keeping the dedicated compatibility assertion for `gen-deploy`.
+- Rewrote every `crates/treb-cli/tests/golden/gen_deploy_*/commands.golden` command header to the nested `gen deploy` syntax so the golden snapshots match the current argv.
+- Added reusable guidance about golden command renames to `CLAUDE.md`.
+- Files changed: `crates/treb-cli/tests/cli_gen_deploy.rs`, `crates/treb-cli/tests/integration_gen_deploy.rs`, `crates/treb-cli/tests/golden/gen_deploy_*/commands.golden`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
 - **Learnings for future iterations:**
-  - `extract_treb_senders_from_foundry()` parses raw TOML custom sections, so env var expansion must happen after deserializing into `SenderConfig`.
-  - Reusing `trebfile::expand_sender_config_env_vars()` keeps `foundry.toml` sender handling aligned with `treb.toml` account parsing across address, signer, safe, governor, timelock, proposer, private key, and derivation path fields.
-  - `cargo test -p treb-config` passes for this story.
+  - Patterns discovered: command argv for golden integration tests live in two places, the Rust test builders and the `commands.golden` snapshot headers.
+  - Gotchas encountered: updating only the executable test args or only the golden headers leaves `integration_gen_deploy` failing even when the command itself still works.
+  - Useful context: `cli_gen_deploy.rs` is the higher-level binary integration suite, while `integration_gen_deploy.rs` is the golden harness that feeds `tests/golden/gen_deploy_*`.
 ---
-## 2026-03-10 14:22 CET - P3-US-003
-- Implemented `.env` / `.env.local` loading in `treb networks` before `foundry.toml` parsing so `${VAR}` RPC endpoints resolve through the normal `treb_config::rpc_endpoints()` path.
-- Added a golden integration test covering a `.env`-backed `${TEST_RPC_URL}` endpoint and confirming `networks --json` reports the resolved URL instead of `unresolved env var`.
-- Updated the stale `register` unit test to match the branch's existing `${VAR}` expansion semantics when env vars are unset, keeping `cargo test -p treb-cli` green.
-- Files changed: `crates/treb-cli/src/commands/networks.rs`, `crates/treb-cli/tests/integration_networks.rs`, `crates/treb-cli/tests/golden/networks_resolves_dotenv_rpc_urls/commands.golden`, `crates/treb-cli/src/commands/register.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-10 16:12:48 CET - P4-US-003
+- Renamed the canonical shell completion command to `treb completion`, updated the grouped root help entry and command examples, and kept `treb completions` working as a hidden backward-compatible alias through the same clap command.
+- Mirrored the hidden alias in `crates/treb-cli/build.rs` so generated shell completion scripts stay in sync with the runtime parser, then expanded `crates/treb-cli/tests/cli_completions.rs` and `src/main.rs` unit coverage to assert both spellings and the singular help label.
+- Files changed: `crates/treb-cli/src/main.rs`, `crates/treb-cli/build.rs`, `crates/treb-cli/tests/cli_completions.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
 - **Learnings for future iterations:**
-  - `treb networks` bypasses `treb_config::resolve_config()`, so dotenv loading has to happen explicitly in the command before `load_foundry_config()`.
-  - In the CLI test harness, `.env` coverage for `networks` can be validated deterministically through `--json` output by asserting the expanded `rpcUrl` and a non-`unresolved env var` status.
-  - `cargo test -p treb-cli` passes for this story.
+  - Patterns discovered: a spelling-only CLI rename can stay on one runtime code path by making the new name canonical and attaching the old spelling as a hidden clap alias.
+  - Gotchas encountered: if that hidden alias is added only in `src/main.rs`, generated shell completions drift because `crates/treb-cli/build.rs` maintains a separate command tree.
+  - Useful context: `cli_completions.rs` is the fast binary-level integration suite for shell completion behavior, while `src/main.rs` unit tests are the right place to pin parser aliases and grouped-help labels.
 ---
-## 2026-03-10 14:45 CET - P3-US-004
-- Replaced `treb config show` sender rendering with inline aligned `role  type  address` rows sorted by role, matching the Go-style human output while leaving `--json` unchanged.
-- Added unit coverage for the inline formatter’s sorting, alignment, and empty-sender behavior, and refreshed the existing `config show` golden snapshots to match the new text output.
-- Files changed: `crates/treb-cli/src/commands/config.rs`, `crates/treb-cli/tests/integration_config.rs`, `crates/treb-cli/tests/golden/config_show_default/commands.golden`, `crates/treb-cli/tests/golden/config_set_show_round_trip/commands.golden`, `crates/treb-cli/tests/golden/config_remove_show_round_trip/commands.golden`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-10 16:32:49 CET - P4-US-004
+- Implemented bare `treb config` and `treb config --json` support by normalizing argv to `config show` before clap parsing, while leaving `config show`, `config set`, `config remove`, and `config --help` behavior intact.
+- Added parser/unit coverage in `crates/treb-cli/src/main.rs`, plus binary integration checks in `crates/treb-cli/tests/cli_config.rs` that compare bare `config` output directly against explicit `config show` in both human and JSON modes.
+- Added the reusable default-subcommand parsing pattern to `CLAUDE.md`.
+- Files changed: `crates/treb-cli/src/main.rs`, `crates/treb-cli/tests/cli_config.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
 - **Learnings for future iterations:**
-  - `config show` human output should stay as plain aligned rows rather than reintroducing `comfy_table`, because the branch is matching the Go CLI’s config display format.
-  - The sender formatter should sort roles before rendering and omit placeholder text for missing addresses; JSON tests still guard the unchanged machine-readable path.
-  - `cargo check -p treb-cli` and `cargo test -p treb-cli` pass for this story.
+  - Patterns discovered: when clap help/completion shape should stay unchanged, argument normalization before parsing is simpler than restructuring the command enum around optional subcommands.
+  - Gotchas encountered: `--help` must bypass that normalization or `treb config --help` turns into subcommand help instead of parent-command help.
+  - Useful context: `cli_config.rs` is the right fast integration layer for asserting output equivalence between shorthand and explicit config invocations, while `src/main.rs` unit tests can pin `json_flag()` behavior.
 ---
-## 2026-03-10 14:55 CET - P3-US-005
-- Updated the `networks_resolves_dotenv_rpc_urls` golden scenario to stand up a deterministic local JSON-RPC endpoint, verify human output prints `Chain ID: 31337`, and verify `networks --json` includes `chainId` for the resolved endpoint.
-- Added a reusable test-only RPC URL normalizer so the dynamic loopback port does not churn golden files, and documented that pattern in `CLAUDE.md`.
-- Files changed: `crates/treb-cli/tests/integration_networks.rs`, `crates/treb-cli/tests/golden/networks_resolves_dotenv_rpc_urls/commands.golden`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-10 16:55:52 CET - P4-US-005
+- Updated CLI help text so grouped root help notes the `generate` alias for `gen`, and `config --help` now documents its default-to-`show` behavior with optional subcommand usage.
+- Added golden help coverage in `crates/treb-cli/tests/integration_help.rs` with new snapshots for root, `gen`, `completion`, and `config` help output, without touching unrelated golden files.
+- Added reusable help-snapshot guidance to `CLAUDE.md`.
+- Files changed: `crates/treb-cli/src/main.rs`, `crates/treb-cli/tests/integration_help.rs`, `crates/treb-cli/tests/golden/help_root/commands.golden`, `crates/treb-cli/tests/golden/help_gen/commands.golden`, `crates/treb-cli/tests/golden/help_completion/commands.golden`, `crates/treb-cli/tests/golden/help_config/commands.golden`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
 - **Learnings for future iterations:**
-  - `treb-cli` JSON goldens use `output::print_json()`, which sorts object keys deterministically; snapshot expectations should match that sorted key order.
-  - A lightweight loopback JSON-RPC server is enough to cover resolved `eth_chainId` behavior in `networks` tests without depending on Anvil startup.
-  - `cargo test -p treb-cli` passes for this story.
+  - Patterns discovered: root help compatibility details belong in `build_grouped_help()`, but subcommand help expectations are best pinned with dedicated golden snapshots because clap renders them on a separate path.
+  - Gotchas encountered: argument normalization can preserve runtime behavior while leaving help text stale, so default-subcommand changes need explicit `--help` coverage.
+  - Useful context: `crates/treb-cli/tests/integration_help.rs` now serves as the focused snapshot suite for help output changes tied to CLI naming and structure.
 ---
-## 2026-03-10 15:08 CET - P3-US-006
-- Added a `config show` golden integration scenario that seeds `.env`, overwrites `treb.toml` with `address = "${TEST_ADDR}"`, and snapshots the resolved sender address in human output.
-- Documented the reusable dotenv-backed `config show` test pattern in `CLAUDE.md` and cleaned up the sender row sort helper to satisfy workspace clippy.
-- Files changed: `crates/treb-cli/tests/integration_config.rs`, `crates/treb-cli/tests/golden/config_show_resolves_dotenv_sender_address/commands.golden`, `crates/treb-cli/src/commands/config.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-10 17:02:55 CET - P4-US-006
+- Added a focused binary compatibility suite in `crates/treb-cli/tests/cli_compatibility_aliases.rs` to pin `gen deploy`/`generate deploy`/`gen-deploy`, `completion`/`completions`, and bare `config` parity in one place.
+- Recorded the reusable alias-regression testing pattern in `CLAUDE.md`, then verified the story with `cargo fmt --check`, `cargo check -p treb-cli`, and `cargo test -p treb-cli`.
+- Files changed: `crates/treb-cli/tests/cli_compatibility_aliases.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
 - **Learnings for future iterations:**
-  - `config show` already resolves `.env` / `.env.local` through `treb_config::resolve_config()`, so end-to-end sender env-var coverage belongs in integration tests rather than new command plumbing.
-  - The `project` fixture can be repurposed for config env-resolution coverage by overwriting `treb.toml` in a `pre_setup_hook` before `treb init`.
-  - `cargo test -p treb-cli` and `cargo clippy --workspace --all-targets` pass for this story.
+  - Patterns discovered: compatibility stories are easier to maintain when canonical and legacy invocations are compared in one dedicated binary-level suite instead of scattering alias assertions across feature tests.
+  - Gotchas encountered: raw stdout byte comparisons catch alias drift more reliably than matching only a sentinel substring, especially for JSON-producing commands.
+  - Useful context: `cli_compatibility_aliases.rs` reuses lightweight fixture setup for `gen deploy` and `config`, so future alias additions can usually be covered there without touching the golden harness.
 ---

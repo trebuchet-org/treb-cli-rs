@@ -40,6 +40,12 @@ treb — deployment orchestration CLI for Foundry projects. Rust workspace with 
 
 **Golden file tests**: 175 snapshots in `crates/treb-cli/tests/golden/`. CLI tests compare normalized output against `.expected` files. Update with `UPDATE_GOLDEN=1`.
 
+**Golden command renames**: When a CLI command spelling changes, update both the invoking test cases in `crates/treb-cli/tests/integration_*.rs` and the matching `tests/golden/*/commands.golden` headers; the golden harness snapshots the argv list verbatim.
+
+**CLI help snapshots**: Help coverage lives in `crates/treb-cli/tests/integration_help.rs`. Root `treb --help` output is custom-built in `build_grouped_help()`, while subcommand `--help` text still comes from clap, so command-tree changes often need both root and subcommand help snapshots refreshed.
+
+**CLI alias compatibility coverage**: When a rename keeps backward-compatible spellings or shorthand forms, add or extend `crates/treb-cli/tests/cli_compatibility_aliases.rs` with byte-for-byte stdout comparisons across the canonical and legacy invocations. Keep the feature-specific suites for richer behavior, but pin alias parity in one focused binary-level test file.
+
 **Test framework** (`crates/treb-cli/tests/framework/`):
 - `TrebRunner` — subprocess CLI execution
 - `TestContext` — high-level harness with anvil + workdir
@@ -92,6 +98,9 @@ cargo clippy --workspace --all-targets        # lint
 - **Errors**: `TrebError` variants as `#[error("category error: {0}")] Category(String)`
 - **Color**: Respects `NO_COLOR` env and `TERM=dumb`; per-command override via `--no-color`; palette in `ui/color.rs`
 - **JSON output**: `--json` flag on read commands; deterministic via recursive key sorting in `print_json()`
+- **CLI command tree sync**: When renaming or nesting commands in `crates/treb-cli/src/main.rs`, update both `build_grouped_help()` there and `crates/treb-cli/build.rs`; grouped root help and generated shell completions are maintained separately from the derive parser
+- **CLI backward-compat aliases**: For spelling-only command renames, prefer keeping the new canonical subcommand in `crates/treb-cli/src/main.rs` with a hidden `alias`, then mirror that alias in `crates/treb-cli/build.rs` so generated shell completions still accept the legacy spelling
+- **CLI default subcommands**: When one command should behave like an existing subcommand without changing that command's help/completion tree, normalize argv in `crates/treb-cli/src/main.rs` before clap parsing instead of reshaping the clap enum; keep `--help` unnormalized so parent help remains stable
 - **Non-interactive**: Detected via: `--non-interactive` flag, `TREB_NON_INTERACTIVE=1`, `CI=true`, stdin not TTY, stdout not TTY
 - **Store pattern**: Each registry store has PathBuf + HashMap + load/save with fs2 file lock + CRUD + sorted list
 - **Versioned store files**: Registry store JSON is now written as bare JSON, but `read_versioned_file()` and `read_versioned_file_compat()` must continue to accept legacy wrapped `{"_format":"treb-v1","entries":...}` payloads for backward compatibility

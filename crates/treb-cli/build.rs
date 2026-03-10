@@ -1,4 +1,4 @@
-use std::process::Command;
+use std::{path::Path, process::Command};
 
 use clap::{Arg, ArgAction, Command as ClapCommand};
 use clap_complete::{Shell, generate_to};
@@ -24,14 +24,16 @@ fn build_cli() -> ClapCommand {
         .subcommand(build_sync())
         .subcommand(build_version())
         .subcommand(build_networks())
-        .subcommand(build_gen_deploy())
+        .subcommand(build_gen())
+        .subcommand(build_gen_deploy_compat())
         .subcommand(build_compose())
         .subcommand(build_prune())
         .subcommand(build_reset())
         .subcommand(build_migrate())
         .subcommand(build_fork())
         .subcommand(build_dev())
-        .subcommand(build_completions_cmd())
+        .subcommand(build_completion_cmd())
+        .subcommand(build_completions_compat())
 }
 
 fn build_run() -> ClapCommand {
@@ -274,9 +276,8 @@ fn build_networks() -> ClapCommand {
         .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
 }
 
-fn build_gen_deploy() -> ClapCommand {
-    ClapCommand::new("gen-deploy")
-        .about("Generate deployment scripts from templates")
+fn with_gen_deploy_args(cmd: ClapCommand) -> ClapCommand {
+    cmd.about("Generate deployment scripts from templates")
         .arg(Arg::new("artifact").help("Contract name or artifact identifier"))
         .arg(
             Arg::new("strategy")
@@ -296,6 +297,17 @@ fn build_gen_deploy() -> ClapCommand {
                 .action(ArgAction::SetTrue)
                 .help("Output as JSON instead of writing a file"),
         )
+}
+
+fn build_gen() -> ClapCommand {
+    ClapCommand::new("gen")
+        .about("Generate deployment scripts")
+        .visible_alias("generate")
+        .subcommand(with_gen_deploy_args(ClapCommand::new("deploy")))
+}
+
+fn build_gen_deploy_compat() -> ClapCommand {
+    with_gen_deploy_args(ClapCommand::new("gen-deploy").hide(true))
 }
 
 fn build_compose() -> ClapCommand {
@@ -545,10 +557,27 @@ fn build_dev() -> ClapCommand {
     )
 }
 
-fn build_completions_cmd() -> ClapCommand {
-    ClapCommand::new("completions").about("Generate shell completion scripts").arg(
+fn build_completion_cmd() -> ClapCommand {
+    ClapCommand::new("completion").about("Generate shell completion scripts").arg(
         Arg::new("shell").required(true).help("Shell type (bash, zsh, fish, elvish, powershell)"),
     )
+}
+
+fn build_completions_compat() -> ClapCommand {
+    ClapCommand::new("completions").hide(true).about("Generate shell completion scripts").arg(
+        Arg::new("shell").required(true).help("Shell type (bash, zsh, fish, elvish, powershell)"),
+    )
+}
+
+fn assert_bash_completion_contains_legacy_subcommand(path: &Path) {
+    let script = std::fs::read_to_string(path).unwrap_or_else(|err| {
+        panic!("failed to read generated bash completion script {}: {err}", path.display())
+    });
+    assert!(
+        script.contains("completions"),
+        "generated bash completion script {} is missing the legacy 'completions' subcommand",
+        path.display()
+    );
 }
 
 fn workspace_foundry_version() -> Option<String> {
@@ -629,9 +658,13 @@ fn main() {
     };
     let completions_dir = std::path::Path::new(&outdir).join("completions");
     if std::fs::create_dir_all(&completions_dir).is_ok() {
-        let mut cmd = build_cli();
         for shell in [Shell::Bash, Shell::Zsh, Shell::Fish, Shell::Elvish] {
-            let _ = generate_to(shell, &mut cmd, "treb", &completions_dir);
+            let mut cmd = build_cli();
+            if let Ok(path) = generate_to(shell, &mut cmd, "treb", &completions_dir) {
+                if matches!(shell, Shell::Bash) {
+                    assert_bash_completion_contains_legacy_subcommand(&path);
+                }
+            }
         }
     }
 }

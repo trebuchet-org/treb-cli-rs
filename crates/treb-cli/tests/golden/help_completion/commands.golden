@@ -1,0 +1,24 @@
+=== cmd 0: [completion --help] ===
+Generate shell completion scripts
+
+Outputs a shell completion script for the specified shell to stdout.
+Source the output in your shell profile to enable tab-completion for
+all treb commands and flags.
+
+Examples:
+  treb completion bash >> ~/.bashrc
+  treb completion zsh > ~/.zsh/completions/_treb
+  treb completion fish > ~/.config/fish/completions/treb.fish
+
+Usage: treb completion [OPTIONS] <SHELL>
+
+Arguments:
+  <SHELL>
+          Shell type: bash, zsh, fish, elvish, or powershell
+
+Options:
+      --no-color
+          Disable colored output (also respected via NO_COLOR env var)
+
+  -h, --help
+          Print help (see a summary with '-h')

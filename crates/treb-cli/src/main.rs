@@ -1,6 +1,9 @@
-use std::env;
+use std::{
+    env,
+    ffi::{OsStr, OsString},
+};
 
-use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use treb_cli::{commands, output, ui};
 use treb_core::types::DeploymentType;
 
@@ -21,6 +24,7 @@ fn parse_deployment_type(s: &str) -> Result<DeploymentType, String> {
 #[derive(Parser)]
 #[command(
     name = "treb",
+    bin_name = "treb",
     version,
     about,
     long_about = "Trebuchet (treb) orchestrates Foundry script execution for deterministic smart contract deployments using CreateX factory contracts."
@@ -169,6 +173,9 @@ enum Commands {
     ///
     /// The config defines default values for namespace and network that are used
     /// when these flags are not explicitly provided.
+    ///
+    /// When no subcommand is provided, behaves like `treb config show`.
+    #[command(override_usage = "treb config [OPTIONS] [COMMAND]")]
     Config {
         #[command(subcommand)]
         subcommand: ConfigSubcommand,
@@ -327,30 +334,13 @@ enum Commands {
         json: bool,
     },
     /// Generate deployment scripts
-    ///
-    /// Generate deployment scripts for contracts and libraries.
-    ///
-    /// This command creates template scripts using treb-sol's base contracts.
-    /// The generated scripts handle both direct deployments and common proxy patterns.
-    GenDeploy {
-        /// Contract name or artifact identifier (e.g., Counter or src/Counter.sol:Counter)
-        artifact: String,
-        /// Deployment strategy: create, create2, create3
-        #[arg(long)]
-        strategy: Option<String>,
-        /// Proxy pattern: erc1967, uups, transparent, beacon
-        #[arg(long)]
-        proxy: Option<String>,
-        /// Custom proxy contract name (for non-standard proxy implementations)
-        #[arg(long)]
-        proxy_contract: Option<String>,
-        /// Output file path (default: script/Deploy<Name>.s.sol)
-        #[arg(long)]
-        output: Option<String>,
-        /// Output as JSON instead of writing a file
-        #[arg(long)]
-        json: bool,
+    #[command(visible_alias = "generate")]
+    Gen {
+        #[command(subcommand)]
+        subcommand: GenSubcommand,
     },
+    #[command(name = "gen-deploy", hide = true)]
+    GenDeployCompat(GenDeployArgs),
     /// Execute orchestrated deployments from a YAML configuration
     ///
     /// Execute multiple deployment scripts in dependency order based on a YAML
@@ -468,11 +458,16 @@ enum Commands {
     /// all treb commands and flags.
     ///
     /// Examples:
-    ///   treb completions bash >> ~/.bashrc
-    ///   treb completions zsh > ~/.zsh/completions/_treb
-    ///   treb completions fish > ~/.config/fish/completions/treb.fish
+    ///   treb completion bash >> ~/.bashrc
+    ///   treb completion zsh > ~/.zsh/completions/_treb
+    ///   treb completion fish > ~/.config/fish/completions/treb.fish
     #[command(verbatim_doc_comment)]
-    Completions {
+    Completion {
+        /// Shell type: bash, zsh, fish, elvish, or powershell
+        shell: String,
+    },
+    #[command(name = "completions", hide = true)]
+    CompletionCompat {
         /// Shell type: bash, zsh, fish, elvish, or powershell
         shell: String,
     },
@@ -500,6 +495,37 @@ enum ConfigSubcommand {
     },
 }
 
+#[derive(Subcommand)]
+enum GenSubcommand {
+    /// Generate deployment scripts for contracts and libraries.
+    ///
+    /// This command creates template scripts using treb-sol's base contracts.
+    /// The generated scripts handle both direct deployments and common proxy patterns.
+    #[command(verbatim_doc_comment)]
+    Deploy(GenDeployArgs),
+}
+
+#[derive(Args)]
+struct GenDeployArgs {
+    /// Contract name or artifact identifier (e.g., Counter or src/Counter.sol:Counter)
+    artifact: String,
+    /// Deployment strategy: create, create2, create3
+    #[arg(long)]
+    strategy: Option<String>,
+    /// Proxy pattern: erc1967, uups, transparent, beacon
+    #[arg(long)]
+    proxy: Option<String>,
+    /// Custom proxy contract name (for non-standard proxy implementations)
+    #[arg(long)]
+    proxy_contract: Option<String>,
+    /// Output file path (default: script/Deploy<Name>.s.sol)
+    #[arg(long)]
+    output: Option<String>,
+    /// Output as JSON instead of writing a file
+    #[arg(long)]
+    json: bool,
+}
+
 impl Commands {
     /// Returns `true` when the parsed subcommand includes `--json`.
     fn json_flag(&self) -> bool {
@@ -513,8 +539,9 @@ impl Commands {
             | Commands::Sync { json, .. }
             | Commands::Version { json, .. }
             | Commands::Networks { json, .. }
-            | Commands::GenDeploy { json, .. }
             | Commands::Compose { json, .. } => *json,
+            Commands::Gen { subcommand } => gen_subcommand_json_flag(subcommand),
+            Commands::GenDeployCompat(args) => args.json,
             Commands::Config { subcommand } => {
                 matches!(subcommand, ConfigSubcommand::Show { json: true })
             }
@@ -523,8 +550,16 @@ impl Commands {
             Commands::Fork { subcommand } => fork_subcommand_json_flag(subcommand),
             Commands::Dev { subcommand } => dev_subcommand_json_flag(subcommand),
             Commands::Migrate { subcommand } => migrate_subcommand_json_flag(subcommand),
-            Commands::Init { .. } | Commands::Completions { .. } => false,
+            Commands::Init { .. }
+            | Commands::Completion { .. }
+            | Commands::CompletionCompat { .. } => false,
         }
+    }
+}
+
+fn gen_subcommand_json_flag(subcommand: &GenSubcommand) -> bool {
+    match subcommand {
+        GenSubcommand::Deploy(args) => args.json,
     }
 }
 
@@ -570,7 +605,7 @@ fn anvil_subcommand_json_flag(subcommand: &commands::dev::AnvilSubcommand) -> bo
 /// derived `Cli::command()`, hides all subcommands from the default rendering, and
 /// injects a custom grouped help text via `after_help` with a custom `help_template`.
 fn build_grouped_command() -> clap::Command {
-    let mut cmd = Cli::command();
+    let mut cmd = Cli::command().bin_name("treb");
 
     // Build grouped help text from subcommand metadata before hiding them
     let grouped_help = build_grouped_help(&cmd);
@@ -603,7 +638,10 @@ fn build_grouped_help(cmd: &clap::Command) -> String {
         s.push('\n');
         for name in names {
             if let Some(sub) = cmd.find_subcommand(name) {
-                let about = sub.get_about().map(|a| a.to_string()).unwrap_or_default();
+                let mut about = sub.get_about().map(|a| a.to_string()).unwrap_or_default();
+                if *name == "gen" {
+                    about.push_str(" (alias: generate)");
+                }
                 s.push_str(&format!("  {name:<14}{about}\n"));
             } else if *name == "help" && !cmd.is_disable_help_subcommand_set() {
                 s.push_str(&format!("  {name:<14}{BUILTIN_HELP_SUBCOMMAND_ABOUT}\n"));
@@ -615,7 +653,7 @@ fn build_grouped_help(cmd: &clap::Command) -> String {
         &mut s,
         cmd,
         "Main Commands:",
-        &["init", "list", "show", "gen-deploy", "run", "verify", "compose", "fork"],
+        &["init", "list", "show", "gen", "run", "verify", "compose", "fork"],
     );
     s.push('\n');
     write_group(
@@ -625,7 +663,7 @@ fn build_grouped_help(cmd: &clap::Command) -> String {
         &["sync", "tag", "register", "dev", "networks", "prune", "reset", "config", "migrate"],
     );
     s.push('\n');
-    write_group(&mut s, cmd, "Additional Commands:", &["version", "completions", "help"]);
+    write_group(&mut s, cmd, "Additional Commands:", &["version", "completion", "help"]);
 
     // Remove trailing newline so the template controls spacing
     if s.ends_with('\n') {
@@ -643,15 +681,71 @@ fn argv_requests_flag(flag: &str) -> bool {
     })
 }
 
+fn normalize_cli_args<I, T>(args: I) -> Vec<OsString>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString>,
+{
+    let mut args: Vec<OsString> = args.into_iter().map(Into::into).collect();
+
+    if let Some(index) = config_show_insertion_index(&args) {
+        args.insert(index, OsString::from("show"));
+    }
+
+    args
+}
+
+fn config_show_insertion_index(args: &[OsString]) -> Option<usize> {
+    let mut config_index = 1;
+    while let Some(arg) = args.get(config_index) {
+        if arg == OsStr::new("--") {
+            return None;
+        }
+
+        if matches!(arg.to_str(), Some("-h" | "--help" | "-V" | "--version")) {
+            return None;
+        }
+
+        if !arg.to_string_lossy().starts_with('-') {
+            break;
+        }
+
+        config_index += 1;
+    }
+
+    if args.get(config_index).map(OsString::as_os_str) != Some(OsStr::new("config")) {
+        return None;
+    }
+
+    let rest = &args[(config_index + 1)..];
+    if rest.is_empty() {
+        return Some(config_index + 1);
+    }
+
+    if rest.iter().any(|arg| matches!(arg.to_str(), Some("-h" | "--help"))) {
+        return None;
+    }
+
+    (!rest.iter().any(|arg| !arg.to_string_lossy().starts_with('-'))).then_some(config_index + 1)
+}
+
+fn parse_cli_from<I, T>(args: I) -> Result<Cli, clap::Error>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString>,
+{
+    let matches = build_grouped_command().try_get_matches_from(normalize_cli_args(args))?;
+    Ok(Cli::from_arg_matches(&matches).expect("bug: derive/builder arg mismatch"))
+}
+
 #[tokio::main]
 async fn main() {
     let no_color_requested = argv_requests_flag("--no-color");
     ui::color::color_enabled(no_color_requested);
 
     let json_requested = argv_requests_flag("--json");
-    let cmd = build_grouped_command();
-    let cli = match cmd.try_get_matches() {
-        Ok(matches) => Cli::from_arg_matches(&matches).expect("bug: derive/builder arg mismatch"),
+    let cli = match parse_cli_from(env::args_os()) {
+        Ok(cli) => cli,
         Err(err) => {
             if json_requested
                 && !matches!(
@@ -834,17 +928,10 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         }
         Commands::Version { json } => commands::version::run(json).await?,
         Commands::Networks { json } => commands::networks::run(json).await?,
-        Commands::GenDeploy { artifact, strategy, proxy, proxy_contract, output, json } => {
-            commands::gen_deploy::run(
-                &artifact,
-                strategy.as_deref(),
-                proxy.as_deref(),
-                proxy_contract.as_deref(),
-                output.as_deref(),
-                json,
-            )
-            .await?
-        }
+        Commands::Gen { subcommand } => match subcommand {
+            GenSubcommand::Deploy(args) => run_gen_deploy_command(args).await?,
+        },
+        Commands::GenDeployCompat(args) => run_gen_deploy_command(args).await?,
         Commands::Compose {
             file,
             network,
@@ -890,7 +977,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Commands::Migrate { subcommand } => commands::migrate::run(subcommand).await?,
         Commands::Fork { subcommand } => commands::fork::run(subcommand).await?,
         Commands::Dev { subcommand } => commands::dev::run(subcommand).await?,
-        Commands::Completions { shell } => {
+        Commands::Completion { shell } | Commands::CompletionCompat { shell } => {
             use clap_complete::{Shell, generate};
             use std::{io, str::FromStr};
 
@@ -906,4 +993,152 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+async fn run_gen_deploy_command(args: GenDeployArgs) -> anyhow::Result<()> {
+    commands::gen_deploy::run(
+        &args.artifact,
+        args.strategy.as_deref(),
+        args.proxy.as_deref(),
+        args.proxy_contract.as_deref(),
+        args.output.as_deref(),
+        args.json,
+    )
+    .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gen_deploy_nested_command_sets_json_flag() {
+        let cli = Cli::try_parse_from(["treb", "gen", "deploy", "Counter", "--json"]).unwrap();
+        assert!(cli.command.json_flag());
+
+        match cli.command {
+            Commands::Gen { subcommand: GenSubcommand::Deploy(args) } => {
+                assert_eq!(args.artifact, "Counter");
+                assert!(args.json);
+            }
+            _ => panic!("expected nested gen deploy command"),
+        }
+    }
+
+    #[test]
+    fn gen_command_aliases_parse() {
+        let cli = Cli::try_parse_from(["treb", "generate", "deploy", "Counter"]).unwrap();
+        match cli.command {
+            Commands::Gen { subcommand: GenSubcommand::Deploy(args) } => {
+                assert_eq!(args.artifact, "Counter");
+            }
+            _ => panic!("expected generate alias to resolve to gen deploy"),
+        }
+
+        let compat = Cli::try_parse_from(["treb", "gen-deploy", "Counter", "--json"]).unwrap();
+        match compat.command {
+            Commands::GenDeployCompat(args) => {
+                assert_eq!(args.artifact, "Counter");
+                assert!(args.json);
+            }
+            _ => panic!("expected hidden gen-deploy compatibility command"),
+        }
+    }
+
+    #[test]
+    fn grouped_help_lists_gen_not_gen_deploy() {
+        let help = build_grouped_help(&Cli::command());
+        assert!(help.contains("  gen"));
+        assert!(help.contains("(alias: generate)"));
+        assert!(!help.contains("gen-deploy"));
+    }
+
+    #[test]
+    fn completion_command_aliases_parse() {
+        let cli = Cli::try_parse_from(["treb", "completion", "bash"]).unwrap();
+        match cli.command {
+            Commands::Completion { shell } => assert_eq!(shell, "bash"),
+            _ => panic!("expected completion command"),
+        }
+
+        let compat = Cli::try_parse_from(["treb", "completions", "zsh"]).unwrap();
+        match compat.command {
+            Commands::CompletionCompat { shell } => assert_eq!(shell, "zsh"),
+            _ => panic!("expected hidden completions compatibility command"),
+        }
+    }
+
+    #[test]
+    fn grouped_help_lists_completion_not_completions() {
+        let help = build_grouped_help(&Cli::command());
+        assert!(help.contains("  completion"));
+        assert!(!help.contains("completions"));
+    }
+
+    #[test]
+    fn config_command_defaults_to_show() {
+        let cli = parse_cli_from(["treb", "config"]).unwrap();
+        match cli.command {
+            Commands::Config { subcommand: ConfigSubcommand::Show { json } } => assert!(!json),
+            _ => panic!("expected bare config to normalize to config show"),
+        }
+    }
+
+    #[test]
+    fn config_command_defaults_to_show_with_json() {
+        let cli = parse_cli_from(["treb", "config", "--json"]).unwrap();
+        assert!(cli.command.json_flag());
+
+        match cli.command {
+            Commands::Config { subcommand: ConfigSubcommand::Show { json } } => assert!(json),
+            _ => panic!("expected bare config --json to normalize to config show --json"),
+        }
+    }
+
+    #[test]
+    fn config_command_defaults_to_show_after_root_flag() {
+        let cli = parse_cli_from(["treb", "--no-color", "config"]).unwrap();
+        assert!(cli.no_color);
+
+        match cli.command {
+            Commands::Config { subcommand: ConfigSubcommand::Show { json } } => assert!(!json),
+            _ => panic!("expected --no-color config to normalize to config show"),
+        }
+    }
+
+    #[test]
+    fn config_command_defaults_to_show_with_json_after_root_flag() {
+        let cli = parse_cli_from(["treb", "--no-color", "config", "--json"]).unwrap();
+        assert!(cli.no_color);
+        assert!(cli.command.json_flag());
+
+        match cli.command {
+            Commands::Config { subcommand: ConfigSubcommand::Show { json } } => assert!(json),
+            _ => panic!("expected --no-color config --json to normalize to config show --json"),
+        }
+    }
+
+    #[test]
+    fn config_help_does_not_normalize_to_show() {
+        match parse_cli_from(["treb", "config", "--help"]) {
+            Ok(_) => panic!("expected config --help to return clap help output"),
+            Err(err) => assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp),
+        }
+    }
+
+    #[test]
+    fn subcommand_help_uses_treb_bin_name() {
+        for args in [
+            ["treb-cli", "config", "--help"],
+            ["treb-cli", "gen", "--help"],
+            ["treb-cli", "completion", "--help"],
+        ] {
+            let err = build_grouped_command().try_get_matches_from(args).unwrap_err();
+            assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
+
+            let output = err.to_string();
+            assert!(output.contains("Usage: treb "), "unexpected help output: {output}");
+            assert!(!output.contains("Usage: treb-cli "), "unexpected help output: {output}");
+        }
+    }
 }

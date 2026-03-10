@@ -1,4 +1,4 @@
-=== cmd 0: [gen-deploy Counter --proxy beacon --output script/DeployCounter_beacon.s.sol] ===
+=== cmd 0: [gen deploy Counter --proxy beacon --output script/DeployCounter_beacon.s.sol] ===
 
 ✅ Generated deployment script: script/DeployCounter_beacon.s.sol
 This script will deploy both the implementation and proxy contracts.

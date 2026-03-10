@@ -1,0 +1,24 @@
+=== cmd 0: [config --help] ===
+Manage treb local config
+
+Manage treb local config stored in .treb/config.local.json
+
+The config defines default values for namespace and network that are used when these flags are not
+explicitly provided.
+
+When no subcommand is provided, behaves like `treb config show`.
+
+Usage: treb config [OPTIONS] [COMMAND]
+
+Commands:
+  show    Show the resolved configuration
+  set     Set a config value
+  remove  Remove a config value
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+      --no-color
+          Disable colored output (also respected via NO_COLOR env var)
+
+  -h, --help
+          Print help (see a summary with '-h')

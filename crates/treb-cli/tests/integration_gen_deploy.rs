@@ -1,4 +1,4 @@
-//! Golden-file integration tests for `treb gen-deploy`.
+//! Golden-file integration tests for `treb gen deploy`.
 //!
 //! Tests exercise CREATE, CREATE2, CREATE3 strategies, library deployment,
 //! no-constructor contracts, JSON output, proxy variants (ERC1967, UUPS,
@@ -26,7 +26,8 @@ fn gen_deploy_create() {
 
     let test = IntegrationTest::new("gen_deploy_create")
         .test(&[
-            "gen-deploy",
+            "gen",
+            "deploy",
             "Counter",
             "--strategy",
             "create",
@@ -51,7 +52,8 @@ fn gen_deploy_create_no_constructor() {
 
     let test = IntegrationTest::new("gen_deploy_create_no_constructor")
         .test(&[
-            "gen-deploy",
+            "gen",
+            "deploy",
             "SimpleContract",
             "--strategy",
             "create",
@@ -76,7 +78,8 @@ fn gen_deploy_create_library() {
 
     let test = IntegrationTest::new("gen_deploy_create_library")
         .test(&[
-            "gen-deploy",
+            "gen",
+            "deploy",
             "MathLib",
             "--strategy",
             "create",
@@ -101,7 +104,8 @@ fn gen_deploy_create2() {
 
     let test = IntegrationTest::new("gen_deploy_create2")
         .test(&[
-            "gen-deploy",
+            "gen",
+            "deploy",
             "Counter",
             "--strategy",
             "create2",
@@ -126,7 +130,8 @@ fn gen_deploy_create3() {
 
     let test = IntegrationTest::new("gen_deploy_create3")
         .test(&[
-            "gen-deploy",
+            "gen",
+            "deploy",
             "Counter",
             "--strategy",
             "create3",
@@ -150,7 +155,7 @@ fn gen_deploy_json() {
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("gen_deploy_json")
-        .test(&["gen-deploy", "Counter", "--json"])
+        .test(&["gen", "deploy", "Counter", "--json"])
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(CompilerOutputNormalizer));
 
@@ -170,7 +175,8 @@ fn gen_deploy_erc1967() {
 
     let test = IntegrationTest::new("gen_deploy_erc1967")
         .test(&[
-            "gen-deploy",
+            "gen",
+            "deploy",
             "Counter",
             "--proxy",
             "erc1967",
@@ -195,7 +201,8 @@ fn gen_deploy_uups() {
 
     let test = IntegrationTest::new("gen_deploy_uups")
         .test(&[
-            "gen-deploy",
+            "gen",
+            "deploy",
             "Counter",
             "--proxy",
             "uups",
@@ -220,7 +227,8 @@ fn gen_deploy_transparent() {
 
     let test = IntegrationTest::new("gen_deploy_transparent")
         .test(&[
-            "gen-deploy",
+            "gen",
+            "deploy",
             "Counter",
             "--proxy",
             "transparent",
@@ -245,7 +253,8 @@ fn gen_deploy_beacon() {
 
     let test = IntegrationTest::new("gen_deploy_beacon")
         .test(&[
-            "gen-deploy",
+            "gen",
+            "deploy",
             "Counter",
             "--proxy",
             "beacon",
@@ -270,7 +279,8 @@ fn gen_deploy_create2_uups() {
 
     let test = IntegrationTest::new("gen_deploy_create2_uups")
         .test(&[
-            "gen-deploy",
+            "gen",
+            "deploy",
             "Counter",
             "--strategy",
             "create2",
@@ -297,7 +307,8 @@ fn gen_deploy_custom_proxy_contract() {
 
     let test = IntegrationTest::new("gen_deploy_custom_proxy_contract")
         .test(&[
-            "gen-deploy",
+            "gen",
+            "deploy",
             "Counter",
             "--proxy",
             "erc1967",
@@ -324,7 +335,7 @@ fn gen_deploy_error_missing_contract() {
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("gen_deploy_error_missing_contract")
-        .test(&["gen-deploy", "NonExistentContract"])
+        .test(&["gen", "deploy", "NonExistentContract"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(CompilerOutputNormalizer));
@@ -341,7 +352,7 @@ fn gen_deploy_error_invalid_strategy() {
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("gen_deploy_error_invalid_strategy")
-        .test(&["gen-deploy", "Counter", "--strategy", "invalid"])
+        .test(&["gen", "deploy", "Counter", "--strategy", "invalid"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(CompilerOutputNormalizer));
@@ -358,7 +369,7 @@ fn gen_deploy_error_invalid_proxy() {
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("gen_deploy_error_invalid_proxy")
-        .test(&["gen-deploy", "Counter", "--proxy", "invalid"])
+        .test(&["gen", "deploy", "Counter", "--proxy", "invalid"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(CompilerOutputNormalizer));
@@ -375,7 +386,7 @@ fn gen_deploy_error_library_proxy() {
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("gen_deploy_error_library_proxy")
-        .test(&["gen-deploy", "MathLib", "--proxy", "erc1967"])
+        .test(&["gen", "deploy", "MathLib", "--proxy", "erc1967"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(CompilerOutputNormalizer));
