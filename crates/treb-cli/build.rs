@@ -13,6 +13,13 @@ fn build_cli() -> ClapCommand {
                 .global(true)
                 .help("Disable colored output"),
         )
+        .arg(
+            Arg::new("non-interactive")
+                .long("non-interactive")
+                .action(ArgAction::SetTrue)
+                .global(true)
+                .help("Skip interactive confirmation prompts"),
+        )
         .subcommand(build_run())
         .subcommand(build_list())
         .subcommand(build_show())
@@ -91,12 +98,6 @@ fn build_run() -> ClapCommand {
         .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
         .arg(Arg::new("env").long("env").num_args(1).help("Set environment variables (KEY=VALUE)"))
         .arg(Arg::new("target-contract").long("target-contract").help("Target contract to run"))
-        .arg(
-            Arg::new("non-interactive")
-                .long("non-interactive")
-                .action(ArgAction::SetTrue)
-                .help("Skip interactive confirmation prompts"),
-        )
 }
 
 fn build_list() -> ClapCommand {
@@ -363,12 +364,6 @@ fn build_compose() -> ClapCommand {
         )
         .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
         .arg(Arg::new("env").long("env").num_args(1).help("Set environment variables (KEY=VALUE)"))
-        .arg(
-            Arg::new("non-interactive")
-                .long("non-interactive")
-                .action(ArgAction::SetTrue)
-                .help("Skip interactive confirmation prompts"),
-        )
 }
 
 fn build_prune() -> ClapCommand {

@@ -34,6 +34,11 @@ struct Cli {
     #[arg(long, global = true)]
     no_color: bool,
 
+    /// Skip interactive prompts (also enabled via TREB_NON_INTERACTIVE=1, CI=true, or non-TTY
+    /// stdin/stdout)
+    #[arg(long, global = true)]
+    non_interactive: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -100,10 +105,6 @@ enum Commands {
         /// Target contract to run (when multiple contracts in script)
         #[arg(long)]
         target_contract: Option<String>,
-        /// Skip interactive prompts (also enabled via TREB_NON_INTERACTIVE=1, CI=true, or non-TTY
-        /// stdin/stdout)
-        #[arg(long)]
-        non_interactive: bool,
     },
     /// List deployments from registry
     ///
@@ -398,10 +399,6 @@ enum Commands {
         /// Set environment variables (KEY=VALUE, repeatable)
         #[arg(long, num_args = 1)]
         env: Vec<String>,
-        /// Skip interactive prompts (also enabled via TREB_NON_INTERACTIVE=1, CI=true, or non-TTY
-        /// stdin/stdout)
-        #[arg(long)]
-        non_interactive: bool,
     },
     /// Prune registry entries that no longer exist on-chain
     ///
@@ -780,7 +777,9 @@ async fn main() {
 }
 
 async fn run(cli: Cli) -> anyhow::Result<()> {
-    match cli.command {
+    let Cli { command, non_interactive, .. } = cli;
+
+    match command {
         Commands::Run {
             script,
             sig,
@@ -799,7 +798,6 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             json,
             env,
             target_contract,
-            non_interactive,
         } => {
             commands::run::run(
                 &script,
@@ -949,7 +947,6 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             dump_command,
             json,
             env,
-            non_interactive,
         } => {
             commands::compose::run(
                 file,
@@ -1123,6 +1120,41 @@ mod tests {
         match parse_cli_from(["treb", "config", "--help"]) {
             Ok(_) => panic!("expected config --help to return clap help output"),
             Err(err) => assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp),
+        }
+    }
+
+    #[test]
+    fn non_interactive_is_accepted_before_run_subcommand() {
+        let cli =
+            parse_cli_from(["treb", "--non-interactive", "run", "script/Deploy.s.sol"]).unwrap();
+        assert!(cli.non_interactive);
+
+        match cli.command {
+            Commands::Run { script, .. } => assert_eq!(script, "script/Deploy.s.sol"),
+            _ => panic!("expected run command"),
+        }
+    }
+
+    #[test]
+    fn non_interactive_is_accepted_after_run_subcommand() {
+        let cli =
+            parse_cli_from(["treb", "run", "--non-interactive", "script/Deploy.s.sol"]).unwrap();
+        assert!(cli.non_interactive);
+
+        match cli.command {
+            Commands::Run { script, .. } => assert_eq!(script, "script/Deploy.s.sol"),
+            _ => panic!("expected run command"),
+        }
+    }
+
+    #[test]
+    fn non_interactive_is_accepted_on_list() {
+        let cli = parse_cli_from(["treb", "--non-interactive", "list"]).unwrap();
+        assert!(cli.non_interactive);
+
+        match cli.command {
+            Commands::List { .. } => {}
+            _ => panic!("expected list command"),
         }
     }
 
