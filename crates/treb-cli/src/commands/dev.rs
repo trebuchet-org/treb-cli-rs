@@ -8,12 +8,20 @@ use std::{
 use anyhow::{Context, bail};
 use chrono::Utc;
 use clap::Subcommand;
+use owo_colors::{OwoColorize, Style};
 use tokio::net::TcpStream;
 use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
 use treb_forge::{anvil::AnvilConfig, createx::deploy_createx};
 use treb_registry::ForkStateStore;
 
+use crate::ui::{color, emoji};
+
 const TREB_DIR: &str = ".treb";
+
+/// Apply a color style when color is enabled, plain text otherwise.
+fn styled(text: &str, style: Style) -> String {
+    if color::is_color_enabled() { format!("{}", text.style(style)) } else { text.to_string() }
+}
 
 // ── Subcommand enums ─────────────────────────────────────────────────────────
 
@@ -167,15 +175,58 @@ async fn run_anvil_start_with_entry(
     let actual_port = anvil.port();
     let chain_id = anvil.chain_id();
 
-    println!("Anvil node started at {rpc_url}");
-
-    // Deploy CreateX factory.
-    deploy_createx(&anvil).await.map_err(|e| anyhow::anyhow!("{e}"))?;
-    println!("CreateX factory deployed at 0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed");
-
-    // Write PID file.
+    // Compute paths early for styled output.
     let pid_file_path = pid_file_path(&treb_dir, &instance_name);
     let log_file_path = log_file_path(&treb_dir, &instance_name);
+
+    // Deploy CreateX factory (non-fatal — show warning on failure).
+    let createx_ok = deploy_createx(&anvil).await.is_ok();
+
+    // Print styled start output (matches Go CLI format).
+    println!(
+        "{}",
+        styled(
+            &format!("{} Anvil node '{}' started successfully", emoji::CHECK, instance_name),
+            color::GREEN,
+        )
+    );
+    println!(
+        "{}",
+        styled(
+            &format!("{} Logs: {}", emoji::CLIPBOARD, log_file_path.display()),
+            color::YELLOW,
+        )
+    );
+    println!(
+        "{}",
+        styled(&format!("{} RPC URL: {}", emoji::GLOBE, rpc_url), color::BLUE)
+    );
+    if createx_ok {
+        println!(
+            "{}",
+            styled(
+                &format!(
+                    "{} CreateX factory deployed at 0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed",
+                    emoji::CHECK
+                ),
+                color::GREEN,
+            )
+        );
+    } else {
+        println!(
+            "{}",
+            styled(
+                &format!("{}  Warning: Failed to deploy CreateX", emoji::WARNING),
+                color::RED,
+            )
+        );
+        println!(
+            "{}",
+            styled("Deployments may fail without CreateX factory", color::YELLOW)
+        );
+    }
+
+    // Write PID file.
     let pid = std::process::id();
     fs::create_dir_all(&treb_dir).ok();
     fs::write(&pid_file_path, pid.to_string())
@@ -203,14 +254,16 @@ async fn run_anvil_start_with_entry(
             }
             Err(e) => {
                 // Non-fatal: revert will just skip the EVM revert step.
-                println!("Warning: could not take initial EVM snapshot: {e}");
+                println!(
+                    "{}",
+                    styled(
+                        &format!("{}  Warning: could not take initial EVM snapshot: {e}", emoji::WARNING),
+                        color::YELLOW,
+                    )
+                );
             }
         }
-
-        println!("Fork state updated for network '{net}' (port {actual_port}).");
     }
-
-    println!("Press Ctrl+C (or send SIGTERM) to stop.");
 
     // Block until SIGINT or SIGTERM.
     shutdown_signal.wait().await;
