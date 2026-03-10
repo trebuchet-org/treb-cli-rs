@@ -202,6 +202,12 @@ enum Commands {
     Verify {
         /// Deployment identifier (full ID, name, address, name:label, or namespace/name)
         deployment: Option<String>,
+        /// Deployment namespace
+        #[arg(long)]
+        namespace: Option<String>,
+        /// Network name or chain ID
+        #[arg(long, short = 'n')]
+        network: Option<String>,
         /// Verify all unverified deployments
         #[arg(long)]
         all: bool,
@@ -864,6 +870,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         },
         Commands::Verify {
             deployment,
+            namespace,
+            network,
             all,
             verifier,
             etherscan,
@@ -896,6 +904,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
 
             commands::verify::run(
                 deployment,
+                namespace,
+                network,
                 all,
                 &verifiers,
                 verifier_url,
@@ -1366,6 +1376,34 @@ mod tests {
             Commands::Verify { deployment, verifier_url, .. } => {
                 assert_eq!(deployment.as_deref(), Some("Counter"));
                 assert_eq!(verifier_url.as_deref(), Some("https://example.com/api"));
+            }
+            _ => panic!("expected verify command"),
+        }
+    }
+
+    #[test]
+    fn verify_namespace_flag_parses() {
+        let cli = parse_cli_from(["treb", "verify", "Counter", "--namespace", "staging"]).unwrap();
+
+        match cli.command {
+            Commands::Verify { deployment, namespace, network, .. } => {
+                assert_eq!(deployment.as_deref(), Some("Counter"));
+                assert_eq!(namespace.as_deref(), Some("staging"));
+                assert_eq!(network, None);
+            }
+            _ => panic!("expected verify command"),
+        }
+    }
+
+    #[test]
+    fn verify_network_short_flag_parses() {
+        let cli = parse_cli_from(["treb", "verify", "Counter", "-n", "mainnet"]).unwrap();
+
+        match cli.command {
+            Commands::Verify { deployment, namespace, network, .. } => {
+                assert_eq!(deployment.as_deref(), Some("Counter"));
+                assert_eq!(namespace, None);
+                assert_eq!(network.as_deref(), Some("mainnet"));
             }
             _ => panic!("expected verify command"),
         }

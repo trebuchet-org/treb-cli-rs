@@ -1,6 +1,7 @@
 # Ralph Progress Log
 ## Codebase Patterns
 - When adding or changing `treb` subcommand flags, keep the clap derive parser in `crates/treb-cli/src/main.rs` and the completion/help builder in `crates/treb-cli/build.rs` in lockstep, then pin the surface with focused `parse_cli_from(...)` tests in `src/main.rs`.
+- For namespace/network-scoped deployment commands, define a dedicated `*Scope` helper that builds `DeploymentFilters`, pre-filters `Registry::list_deployments()`, uses `resolve_deployment_in_scope()` for direct queries, and reuses the same filtered slice for queryless interactive selection and empty-state/error messages.
 
 Started: Tue Mar 10 11:17:39 PM CET 2026
 ---
@@ -13,4 +14,14 @@ Started: Tue Mar 10 11:17:39 PM CET 2026
   - Patterns discovered (e.g., "this codebase uses X for Y"): verify command flag parity depends on updating both the derive parser and `build.rs`; one side can lag silently without focused parser tests.
   - Gotchas encountered (e.g., "don't forget to update Z when changing W"): the package bin target is `treb-cli`, so targeted binary test runs should use `cargo test -p treb-cli --bin treb-cli ...`.
   - Useful context (e.g., "the evaluation panel is in component X"): verifier shorthand flags are already wired in the runtime dispatch; Phase 8 story 1 only needed CLI surface and completion parity changes.
+---
+## 2026-03-10 23:33:17 CET - P8-US-002
+- Added `--namespace` and `--network` / `-n` to `treb verify`, mirrored them in `crates/treb-cli/build.rs`, and threaded both flags through the verify command entrypoint.
+- Implemented `VerifyScope` in `crates/treb-cli/src/commands/verify.rs` so single-verify resolution, batch candidate selection, and queryless interactive selection all share the same namespace/network filtering and scoped empty-state/error messages.
+- Added parser coverage in `crates/treb-cli/src/main.rs`, verify-scope unit tests in `crates/treb-cli/src/commands/verify.rs`, and integration coverage in `crates/treb-cli/tests/integration_verify.rs` plus help assertions in `crates/treb-cli/tests/cli_verify.rs`.
+- Files changed: `.ralph/current/prd.json`, `.ralph/current/progress.txt`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/build.rs`, `crates/treb-cli/src/commands/verify.rs`, `crates/treb-cli/tests/cli_verify.rs`, `crates/treb-cli/tests/integration_verify.rs`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y"): scoped deployment commands in `treb-cli` are cleanest when they centralize namespace/network formatting and filter construction in a small scope struct instead of duplicating message logic across single and batch paths.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W"): queryless scoped flows need the filtered deployment slice before calling selector helpers; otherwise non-interactive runs can surface generic TTY errors instead of the scoped "no deployments found" message.
+  - Useful context (e.g., "the evaluation panel is in component X"): verify batch mode auto-verifies all scoped candidates in non-interactive environments, so invalid-address fixtures are a cheap way to prove scope-limited registry updates without any network dependency.
 ---

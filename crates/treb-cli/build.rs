@@ -183,6 +183,8 @@ fn build_verify() -> ClapCommand {
     ClapCommand::new("verify")
         .about("Verify deployed contracts on block explorers")
         .arg(Arg::new("deployment").help("Deployment identifier; omit to select interactively"))
+        .arg(Arg::new("namespace").long("namespace").help("Deployment namespace"))
+        .arg(Arg::new("network").long("network").short('n').help("Network name or chain ID"))
         .arg(
             Arg::new("all")
                 .long("all")

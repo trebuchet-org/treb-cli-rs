@@ -116,6 +116,8 @@ fn verify_help_shows_all_flags() {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(stdout.contains("--all"), "help should show --all");
+    assert!(stdout.contains("--namespace"), "help should show --namespace");
+    assert!(stdout.contains("-n, --network"), "help should show -n, --network");
     assert!(stdout.contains("--verifier"), "help should show --verifier");
     assert!(stdout.contains("--etherscan"), "help should show --etherscan");
     assert!(stdout.contains("--blockscout"), "help should show --blockscout");
