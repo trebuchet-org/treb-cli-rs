@@ -8,7 +8,7 @@ use framework::{
     normalizer::PathNormalizer,
 };
 
-/// Fresh init creates .treb/ with config.local.json and registry.json.
+/// Fresh init creates .treb/ with config.local.json.
 #[test]
 fn init_fresh() {
     let ctx = TestContext::new("project");
@@ -21,7 +21,6 @@ fn init_fresh() {
         })
         .test(&["init"])
         .output_artifact(".treb/config.local.json")
-        .output_artifact(".treb/registry.json")
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);

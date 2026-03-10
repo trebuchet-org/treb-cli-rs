@@ -437,10 +437,9 @@ fn migrate_config_already_v2_outputs_message_and_no_file_changes() {
 // ── treb migrate registry ─────────────────────────────────────────────────────
 
 #[test]
-fn migrate_registry_dry_run_on_current_version_outputs_up_to_date() {
+fn migrate_registry_dry_run_reports_noop() {
     let tmp = tempfile::tempdir().unwrap();
     fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
-    // Initialize registry at the current version.
     let _registry = treb_registry::Registry::init(tmp.path()).unwrap();
 
     treb()
@@ -448,5 +447,5 @@ fn migrate_registry_dry_run_on_current_version_outputs_up_to_date() {
         .current_dir(tmp.path())
         .assert()
         .success()
-        .stderr(predicate::str::contains("up to date"));
+        .stderr(predicate::str::contains("no migration step is required"));
 }

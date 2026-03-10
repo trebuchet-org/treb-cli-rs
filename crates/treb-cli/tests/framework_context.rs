@@ -19,12 +19,15 @@ fn treb_init_creates_treb_directory_structure() {
 
     ctx.run(["init"]).success();
 
-    // init should recreate .treb/ with registry files.
+    // init should recreate .treb/ with local config only.
     assert!(ctx.treb_dir().exists(), ".treb/ should exist after init");
-    assert!(ctx.treb_dir().join("registry.json").exists(), "registry.json should exist after init");
     assert!(
         ctx.treb_dir().join("config.local.json").exists(),
         "config.local.json should exist after init"
+    );
+    assert!(
+        !ctx.treb_dir().join("registry.json").exists(),
+        "registry.json should not be created after init"
     );
 }
 

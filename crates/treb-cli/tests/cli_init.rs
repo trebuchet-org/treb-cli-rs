@@ -27,10 +27,10 @@ fn init_creates_treb_directory_with_correct_files() {
         .stdout(predicate::str::contains("Next steps:"))
         .stdout(predicate::str::contains("treb config show"));
 
-    // Verify registry.json exists with the current version.
-    let registry_json = fs::read_to_string(tmp.path().join(".treb/registry.json")).unwrap();
-    let registry: serde_json::Value = serde_json::from_str(&registry_json).unwrap();
-    assert_eq!(registry["version"], treb_registry::REGISTRY_VERSION);
+    assert!(
+        !tmp.path().join(".treb/registry.json").exists(),
+        "init should not create registry.json metadata"
+    );
 
     // Verify config.local.json has defaults.
     let config_json = fs::read_to_string(tmp.path().join(".treb/config.local.json")).unwrap();
@@ -98,8 +98,11 @@ fn init_force_resets_local_config() {
     assert_eq!(config_val["namespace"], "default");
     assert_eq!(config_val["network"], "");
 
-    // Registry data should still exist.
-    assert!(tmp.path().join(".treb/registry.json").exists());
+    assert!(tmp.path().join(".treb").exists());
+    assert!(
+        !tmp.path().join(".treb/registry.json").exists(),
+        "init --force should not create registry.json metadata"
+    );
 }
 
 #[cfg(unix)]

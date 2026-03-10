@@ -5,6 +5,7 @@
 - `ForkStateStore` should persist through a sorted wrapper view of `forks` while keeping the `history` vector order intact, so `fork.json` remains deterministic without changing recency semantics.
 - Secondary-index stores that persist `Vec<String>` ID lists should sort those vectors before saving or returning rebuilt data, otherwise hash-map iteration can make the JSON output nondeterministic.
 - Registry-only changes should be validated with `cargo check -p treb-registry` and `cargo test -p treb-registry` before running broader workspace checks.
+- Rust registry code should not create or read `.treb/registry.json`; treat that filename as external Go/Solidity registry data and only assert on actual store files plus `config.local.json`.
 
 Started: Tue Mar 10 09:50:03 AM CET 2026
 ---
@@ -60,4 +61,13 @@ Started: Tue Mar 10 09:50:03 AM CET 2026
   - `ForkStateStore` can read wrapped files directly into `ForkState`, but saving should go through a separate serializable view so `forks` can be sorted without changing the runtime `HashMap`.
   - Fork history order is meaningful; keep the `history` vector in recency order even while normalizing the persisted `forks` map.
   - `snapshot_registry()` and `restore_registry()` are format-agnostic byte copies, so wrapped-file coverage can use lightweight `serde_json::Value` fixtures instead of full typed store payloads.
+---
+## 2026-03-10 11:33:25 CET - P1-US-006
+- Removed `RegistryMeta`, `MetaStore`, `REGISTRY_FILE`, `REGISTRY_VERSION`, and the `migrations.rs` module from `treb-registry`; `Registry::init()` now only creates `.treb/`, and `Registry::open()` ignores any existing `registry.json`.
+- Updated CLI/tests to match the metadata removal: init/reset assertions no longer expect `.treb/registry.json`, the integration framework no longer snapshots it by default, and `treb migrate registry` now acts as a temporary no-op compatibility status until the next story removes the subcommand.
+- Files changed: `crates/treb-registry/src/lib.rs`, `crates/treb-registry/src/registry.rs`, `crates/treb-registry/src/types.rs`, `crates/treb-registry/src/migrations.rs`, `crates/treb-cli/src/commands/migrate.rs`, `crates/treb-cli/tests/cli_init.rs`, `crates/treb-cli/tests/cli_prune_reset_migrate.rs`, `crates/treb-cli/tests/e2e_registry_consistency.rs`, `crates/treb-cli/tests/framework/cleanup.rs`, `crates/treb-cli/tests/framework/integration_test.rs`, `crates/treb-cli/tests/framework_context.rs`, `crates/treb-cli/tests/golden/migrate_registry_dry_run_up_to_date/commands.golden`, `crates/treb-cli/tests/golden/migrate_registry_up_to_date/commands.golden`, `crates/treb-cli/tests/integration_init.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - `.treb/registry.json` belongs to external Go/Solidity registry data now; Rust init/open/reset flows should never synthesize it or validate its contents.
+  - When a removed registry-crate API is still referenced by `treb-cli`, keeping the CLI path as a narrow no-op shim preserves workspace compileability without prematurely taking the next story.
+  - The CLI integration framework’s default `.treb/` artifact list must exclude `registry.json` once Rust metadata ownership is removed, or unrelated init-style goldens will fail.
 ---

@@ -59,7 +59,7 @@ mod tests {
 
         // Artifact directories that should be removed.
         fs::create_dir_all(root.join(".treb")).unwrap();
-        fs::write(root.join(".treb/registry.json"), "{}").unwrap();
+        fs::write(root.join(".treb/deployments.json"), "{}").unwrap();
         fs::create_dir_all(root.join("broadcast")).unwrap();
         fs::write(root.join("broadcast/run-latest.json"), "{}").unwrap();
         fs::create_dir_all(root.join("cache")).unwrap();

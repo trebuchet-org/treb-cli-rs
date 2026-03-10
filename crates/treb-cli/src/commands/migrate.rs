@@ -1,7 +1,8 @@
 //! `treb migrate` command implementation.
 //!
 //! Handles config format detection and v1→v2 conversion (`treb migrate config`)
-//! and versioned registry schema migrations (`treb migrate registry`).
+//! plus a legacy registry-migration compatibility entrypoint
+//! (`treb migrate registry`).
 
 use std::{
     collections::HashMap,
@@ -17,7 +18,7 @@ use treb_config::{
     AccountConfig, NamespaceRoles, TrebConfigFormat, detect_treb_config_format,
     extract_treb_senders_from_foundry, load_treb_config_v1, serialize_treb_config_v2,
 };
-use treb_registry::{REGISTRY_DIR, REGISTRY_VERSION, run_migrations};
+use treb_registry::REGISTRY_DIR;
 
 use owo_colors::OwoColorize;
 
@@ -55,10 +56,10 @@ pub enum MigrateSubcommand {
         #[arg(long)]
         cleanup_foundry: bool,
     },
-    /// Apply versioned registry schema migrations
+    /// Report that registry migrations are no longer required
     ///
-    /// Runs all pending schema migrations on the deployment registry. Use
-    /// `--dry-run` to list pending migrations without applying them.
+    /// Registry store files upgrade in place when they are rewritten, so this
+    /// command only reports that there is nothing to migrate.
     Registry {
         /// Simulate execution without making changes
         #[arg(long)]
@@ -522,56 +523,15 @@ fn convert_foundry_senders_to_v2(
 
 // ── run_registry ──────────────────────────────────────────────────────────────
 
-async fn run_registry(project_root: &Path, dry_run: bool) -> anyhow::Result<()> {
-    if !project_root.join(".treb").exists() {
+async fn run_registry(project_root: &Path, _dry_run: bool) -> anyhow::Result<()> {
+    if !project_root.join(REGISTRY_DIR).exists() {
         bail!("project not initialized — .treb/ directory not found\n\nRun `treb init` first.");
     }
 
-    use treb_registry::{REGISTRY_FILE, io::read_json_file, types::RegistryMeta};
-
-    output::print_stage("\u{1f50d}", "Checking registry version...");
-
-    let registry_dir = project_root.join(REGISTRY_DIR);
-    let meta_path = registry_dir.join(REGISTRY_FILE);
-
-    let current_version = if meta_path.exists() {
-        let meta: RegistryMeta = read_json_file(&meta_path)
-            .map_err(|e| anyhow::anyhow!("failed to read registry.json: {e}"))?;
-        meta.version
-    } else {
-        REGISTRY_VERSION
-    };
-
-    if current_version > REGISTRY_VERSION {
-        bail!(
-            "registry version {} is newer than supported version {}; please upgrade treb",
-            current_version,
-            REGISTRY_VERSION
-        );
-    }
-
-    if current_version == REGISTRY_VERSION {
-        output::print_stage(
-            "\u{2705}",
-            &format!("Registry is up to date (version {REGISTRY_VERSION})."),
-        );
-        return Ok(());
-    }
-
-    if dry_run {
-        println!(
-            "Registry is at version {current_version}; would migrate to version {REGISTRY_VERSION}."
-        );
-        return Ok(());
-    }
-
-    let report = run_migrations(&registry_dir)?;
+    output::print_stage("\u{1f50d}", "Checking registry migration status...");
     output::print_stage(
         "\u{2705}",
-        &format!(
-            "Registry migrated to version {}. Applied: {:?}",
-            report.current_version, report.applied
-        ),
+        "Registry store files upgrade automatically on save; no migration step is required.",
     );
     Ok(())
 }
@@ -890,39 +850,22 @@ derivation_path = "m/44'/60'/0'/0/0"
         assert_eq!(v2.accounts["ledger_signer"].type_, Some(SenderType::Ledger));
     }
 
-    // ── run_migrations ────────────────────────────────────────────────────────
+    // ── run_registry ──────────────────────────────────────────────────────────
 
-    #[test]
-    fn run_migrations_on_uptodate_registry_returns_empty_report() {
+    #[tokio::test]
+    async fn run_registry_is_noop_for_initialized_project() {
         let dir = TempDir::new().unwrap();
-        // Create foundry.toml + .treb/
-        std::fs::write(dir.path().join("foundry.toml"), "[profile.default]\n").unwrap();
-        let _ = treb_registry::Registry::init(dir.path()).unwrap();
+        std::fs::create_dir_all(dir.path().join(REGISTRY_DIR)).unwrap();
 
-        let registry_dir = dir.path().join(treb_registry::REGISTRY_DIR);
-        let report = run_migrations(&registry_dir).unwrap();
-        assert!(report.applied.is_empty());
-        assert_eq!(report.current_version, REGISTRY_VERSION);
+        run_registry(dir.path(), false).await.unwrap();
     }
 
-    #[test]
-    fn run_migrations_newer_version_returns_error() {
-        use treb_registry::{
-            REGISTRY_DIR, REGISTRY_FILE, io::write_json_file, types::RegistryMeta,
-        };
-
+    #[tokio::test]
+    async fn run_registry_requires_initialized_project() {
         let dir = TempDir::new().unwrap();
-        let registry_dir = dir.path().join(REGISTRY_DIR);
-        std::fs::create_dir_all(&registry_dir).unwrap();
 
-        let mut meta = RegistryMeta::new();
-        meta.version = REGISTRY_VERSION + 1;
-        write_json_file(&registry_dir.join(REGISTRY_FILE), &meta).unwrap();
-
-        let result = run_migrations(&registry_dir);
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("newer than supported"), "got: {msg}");
+        let err = run_registry(dir.path(), false).await.unwrap_err();
+        assert!(err.to_string().contains("project not initialized"), "got: {err}");
     }
 
     #[test]
