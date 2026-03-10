@@ -1,4 +1,4 @@
-=== cmd 0: [fork enter --network localhost] ===
+=== cmd 0: [fork enter localhost] ===
 Entered fork mode for network 'localhost'.
 
   Network:      localhost

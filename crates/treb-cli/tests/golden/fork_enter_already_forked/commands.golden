@@ -1,2 +1,2 @@
-=== cmd 0: [fork enter --network mainnet] ===
+=== cmd 0: [fork enter mainnet] ===
 Error: network 'mainnet' is already forked; run `treb fork exit --network mainnet` first

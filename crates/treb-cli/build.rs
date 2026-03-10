@@ -1,6 +1,6 @@
 use std::{path::Path, process::Command};
 
-use clap::{Arg, ArgAction, Command as ClapCommand};
+use clap::{Arg, ArgAction, ArgGroup, Command as ClapCommand};
 use clap_complete::{Shell, generate_to};
 
 fn build_cli() -> ClapCommand {
@@ -475,8 +475,31 @@ fn build_fork() -> ClapCommand {
         .subcommand(
             ClapCommand::new("enter")
                 .about("Enter fork mode for a network: snapshot registry and record fork state")
-                .arg(Arg::new("network").long("network").required(true).help("Network name"))
-                .arg(Arg::new("rpc-url").long("rpc-url").help("Upstream RPC URL to fork"))
+                .arg(
+                    Arg::new("network")
+                        .value_name("NETWORK")
+                        .conflicts_with("network-flag")
+                        .help("Network name"),
+                )
+                .arg(
+                    Arg::new("network-flag")
+                        .long("network")
+                        .value_name("NETWORK")
+                        .conflicts_with("network")
+                        .help("Network name"),
+                )
+                .group(
+                    ArgGroup::new("enter-network")
+                        .args(["network", "network-flag"])
+                        .required(true)
+                        .multiple(false),
+                )
+                .arg(
+                    Arg::new("rpc-url")
+                        .long("rpc-url")
+                        .visible_alias("url")
+                        .help("Upstream RPC URL to fork"),
+                )
                 .arg(
                     Arg::new("fork-block-number")
                         .long("fork-block-number")
@@ -486,29 +509,65 @@ fn build_fork() -> ClapCommand {
         .subcommand(
             ClapCommand::new("exit")
                 .about("Exit fork mode: restore registry from snapshot and remove fork state")
+                .arg(Arg::new("network").value_name("NETWORK").help("Network name to exit"))
                 .arg(
-                    Arg::new("network").long("network").required(true).help("Network name to exit"),
+                    Arg::new("network-flag")
+                        .long("network")
+                        .value_name("NETWORK")
+                        .help("Network name to exit"),
+                )
+                .arg(
+                    Arg::new("all")
+                        .long("all")
+                        .action(ArgAction::SetTrue)
+                        .help("Exit all active forks"),
+                )
+                .group(
+                    ArgGroup::new("exit-network").args(["network", "network-flag"]).multiple(false),
                 ),
         )
         .subcommand(
             ClapCommand::new("revert")
                 .about("Revert the fork to its last snapshot")
-                .arg(Arg::new("network").long("network").help("Network name to revert"))
+                .arg(Arg::new("network").value_name("NETWORK").help("Network name to revert"))
+                .arg(
+                    Arg::new("network-flag")
+                        .long("network")
+                        .value_name("NETWORK")
+                        .help("Network name to revert"),
+                )
                 .arg(
                     Arg::new("all")
                         .long("all")
                         .action(ArgAction::SetTrue)
                         .help("Revert all active forks"),
+                )
+                .group(
+                    ArgGroup::new("revert-network")
+                        .args(["network", "network-flag"])
+                        .multiple(false),
                 ),
         )
         .subcommand(
             ClapCommand::new("restart")
                 .about("Restart the fork from a new block")
-                .arg(Arg::new("network").long("network").help("Network name to restart"))
+                .arg(Arg::new("network").value_name("NETWORK").help("Network name to restart"))
+                .arg(
+                    Arg::new("network-flag")
+                        .long("network")
+                        .value_name("NETWORK")
+                        .help("Network name to restart"),
+                )
                 .arg(
                     Arg::new("fork-block-number")
                         .long("fork-block-number")
                         .help("Fork block number to reset to"),
+                )
+                .group(
+                    ArgGroup::new("restart-network")
+                        .args(["network", "network-flag"])
+                        .required(true)
+                        .multiple(false),
                 ),
         )
         .subcommand(
@@ -519,7 +578,18 @@ fn build_fork() -> ClapCommand {
         .subcommand(
             ClapCommand::new("history")
                 .about("Show fork history")
-                .arg(Arg::new("network").long("network").help("Filter by network name"))
+                .arg(Arg::new("network").value_name("NETWORK").help("Filter by network name"))
+                .arg(
+                    Arg::new("network-flag")
+                        .long("network")
+                        .value_name("NETWORK")
+                        .help("Filter by network name"),
+                )
+                .group(
+                    ArgGroup::new("history-network")
+                        .args(["network", "network-flag"])
+                        .multiple(false),
+                )
                 .arg(
                     Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"),
                 ),
@@ -527,8 +597,18 @@ fn build_fork() -> ClapCommand {
         .subcommand(
             ClapCommand::new("diff")
                 .about("Diff current registry vs snapshot")
+                .arg(Arg::new("network").value_name("NETWORK").help("Network name to diff"))
                 .arg(
-                    Arg::new("network").long("network").required(true).help("Network name to diff"),
+                    Arg::new("network-flag")
+                        .long("network")
+                        .value_name("NETWORK")
+                        .help("Network name to diff"),
+                )
+                .group(
+                    ArgGroup::new("diff-network")
+                        .args(["network", "network-flag"])
+                        .required(true)
+                        .multiple(false),
                 )
                 .arg(
                     Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"),

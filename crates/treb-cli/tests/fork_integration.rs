@@ -550,6 +550,46 @@ async fn fork_enter_creates_state_and_snapshot() {
     drop(anvil);
 }
 
+/// `treb fork enter <network> --url <rpc>` should behave like the legacy
+/// `--network` / `--rpc-url` form and persist the resolved network and fork URL.
+#[tokio::test(flavor = "multi_thread")]
+async fn fork_enter_accepts_positional_network_and_url_alias() {
+    let Some(anvil) = spawn_anvil_or_skip().await else {
+        return;
+    };
+    let rpc_url = anvil.rpc_url().to_string();
+
+    let (root, treb_dir) = make_project();
+    let network = "testnet";
+
+    tokio::task::spawn_blocking({
+        let root_path = root.path().to_path_buf();
+        let rpc_url = rpc_url.clone();
+        let network = network.to_string();
+        move || {
+            treb()
+                .args(["fork", "enter", &network, "--url", &rpc_url])
+                .current_dir(&root_path)
+                .assert()
+                .success();
+        }
+    })
+    .await
+    .expect("fork enter task panicked");
+
+    let mut store = ForkStateStore::new(&treb_dir);
+    store.load().unwrap();
+    let entry = store
+        .get_active_fork(network)
+        .expect("active fork entry should exist for positional network form");
+
+    assert_eq!(entry.network, network);
+    assert_eq!(entry.fork_url, rpc_url, "fork_url should match the --url alias");
+    assert!(PathBuf::from(&entry.snapshot_dir).exists(), "snapshot directory should be created");
+
+    drop(anvil);
+}
+
 // ── signal handling: SIGTERM shuts down anvil cleanly ─────────────────────────
 
 /// On Unix, `treb dev anvil start` should respond to SIGTERM by shutting down

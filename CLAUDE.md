@@ -50,6 +50,8 @@ treb — deployment orchestration CLI for Foundry projects. Rust workspace with 
 
 **CLI alias compatibility coverage**: When a rename keeps backward-compatible spellings or shorthand forms, add or extend `crates/treb-cli/tests/cli_compatibility_aliases.rs` with byte-for-byte stdout comparisons across the canonical and legacy invocations. For registry-backed commands, seed a temp config project and compare raw stdout/stderr there instead of relying only on parser tests. Keep the feature-specific suites for richer behavior, but pin alias parity in one focused binary-level test file.
 
+**Fork alias parity fixtures**: For fork compatibility checks in `cli_compatibility_aliases.rs`, run each invocation against its own identically seeded temp project and share a multi-request loopback JSON-RPC server when the command needs live RPC. That keeps stdout/stderr byte-stable without snapshot normalizers or Anvil.
+
 **Test framework** (`crates/treb-cli/tests/framework/`):
 - `TrebRunner` — subprocess CLI execution
 - `TestContext` — high-level harness with anvil + workdir
@@ -66,6 +68,10 @@ treb — deployment orchestration CLI for Foundry projects. Rust workspace with 
 **CLI registry artifact goldens**: Golden files that snapshot persisted `.treb/*.json` artifacts in `crates/treb-cli/tests/golden/` must match the current bare-map registry format. If an older snapshot still contains `_format`/`entries`, rewrite it to the bare object before trusting the test result.
 
 **CLI RPC golden tests**: When a golden test needs a resolved RPC endpoint, prefer a tiny loopback JSON-RPC listener plus an `extra_normalizer` that rewrites `http://127.0.0.1:<port>` instead of depending on a fixed port or a full Anvil instance.
+
+**Fork argument-shape integration tests**: For fork parsing behavior that only needs subprocess assertions, prefer direct `TestContext::run(...)` checks in `crates/treb-cli/tests/integration_fork.rs`; use the local `spawn_json_rpc_server()` helper there for `fork enter` cases that need `eth_chainId`, and keep goldens for formatting-heavy output only.
+
+**Golden tests with gated fixtures**: If a golden test returns early when loopback sockets or Anvil are unavailable, `UPDATE_GOLDEN=1` will not rewrite its `commands.golden` header. When only the recorded argv changes, refresh that snapshot from an environment where the fixture runs or patch the header manually so the stored command stays aligned with the test case.
 
 **CLI config dotenv tests**: For `config show` coverage that needs `${VAR}` sender resolution, overwrite the fixture `treb.toml` and `.env` in a `pre_setup_hook` and snapshot the human output; `treb_config::resolve_config()` already loads `.env` / `.env.local`, so the test should not inject process env separately.
 
@@ -107,6 +113,7 @@ cargo clippy --workspace --all-targets        # lint
 - **CLI command tree sync**: When renaming or nesting commands in `crates/treb-cli/src/main.rs`, update both `build_grouped_help()` there and `crates/treb-cli/build.rs`; grouped root help and generated shell completions are maintained separately from the derive parser
 - **CLI backward-compat aliases**: For spelling-only command renames, prefer keeping the new canonical subcommand in `crates/treb-cli/src/main.rs` with a hidden `alias`, then mirror that alias in `crates/treb-cli/build.rs` so generated shell completions still accept the legacy spelling
 - **CLI short flags**: When adding or changing subcommand short options in `crates/treb-cli/src/main.rs`, mirror the shorthand in `crates/treb-cli/build.rs` and pin it with a focused `parse_cli_from(...)` or subcommand help assertion in `src/main.rs` tests so parser/help regressions are caught without relying on broader golden churn
+- **CLI dual-form args**: When a clap surface accepts both a positional argument and a long flag for the same concept, keep the derive parser and `crates/treb-cli/build.rs` in sync with matching conflicts/groups, and set `value_name` explicitly on any renamed flag field so help and error output show the user-facing placeholder instead of the internal field id. If `--all` can replace the network entirely, put the positional arg, long flag, and `--all` in the same exclusivity group so the bypass and conflict behavior stay aligned across both definitions.
 - **CLI default subcommands**: When one command should behave like an existing subcommand without changing that command's help/completion tree, normalize argv in `crates/treb-cli/src/main.rs` before clap parsing instead of reshaping the clap enum; keep `--help` unnormalized so parent help remains stable
 - **Non-interactive**: Detected via: `--non-interactive` flag, `TREB_NON_INTERACTIVE=1|true` (case-insensitive), `CI=true` (case-insensitive), stdin not TTY, stdout not TTY
 - **Non-interactive plumbing**: When a command reaches interactive helpers through `ui::selector` or destructive confirmation branches, thread `Cli.non_interactive` down explicitly; calling `is_non_interactive(false)` in those paths only preserves env/TTY fallbacks and drops the global clap flag.

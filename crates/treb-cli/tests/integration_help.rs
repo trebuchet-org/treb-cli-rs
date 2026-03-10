@@ -60,3 +60,12 @@ fn help_show() {
 
     run_integration_test(&test, &ctx);
 }
+
+/// `fork enter --help` should show the positional network form plus legacy aliases.
+#[test]
+fn help_fork_enter() {
+    let ctx = TestContext::new("minimal-project");
+    let test = IntegrationTest::new("help_fork_enter").test(&["fork", "enter", "--help"]);
+
+    run_integration_test(&test, &ctx);
+}
