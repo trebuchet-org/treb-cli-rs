@@ -2,6 +2,7 @@
 ## Codebase Patterns
 - Registry store files should use `read_versioned_file()` for backward-compatible reads and `write_versioned_file()` for locked atomic writes to the `{"_format":"treb-v1","entries":...}` wrapper format.
 - Map-backed registry stores should sort entries into a `BTreeMap` before `write_versioned_file()` so wrapped JSON stays deterministic for tests and diffs.
+- Secondary-index stores that persist `Vec<String>` ID lists should sort those vectors before saving or returning rebuilt data, otherwise hash-map iteration can make the JSON output nondeterministic.
 - Registry-only changes should be validated with `cargo check -p treb-registry` and `cargo test -p treb-registry` before running broader workspace checks.
 
 Started: Tue Mar 10 09:50:03 AM CET 2026
@@ -31,4 +32,13 @@ Started: Tue Mar 10 09:50:03 AM CET 2026
   - Deployment-store migration is a helper swap: `read_versioned_file()` on load, `write_versioned_file()` on save, and no extra `with_file_lock()` wrapper around writes.
   - When existing bare-map fixtures are still the source of truth, store-level migration tests should compare saved output against a wrapped `{"_format": ..., "entries": fixture}` value rather than rewriting the fixtures.
   - Registry integration tests can stay partially migrated by updating only the expectations for the specific store file changed in that story.
+---
+## 2026-03-10 10:48:33 CET - P1-US-003
+- Updated `LookupStore` to load through `read_versioned_file()` and save through `write_versioned_file()`, with deterministic persisted ordering for `byName`, `byAddress`, and `byTag`.
+- Added lookup-store tests covering legacy bare-map loads, wrapped-format loads, wrapped-on-save output, and wrapped output from `rebuild()`.
+- Files changed: `crates/treb-registry/src/lookup.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - `LookupIndex` needs both sorted map keys and sorted ID vectors to keep `lookup.json` deterministic because deployments are collected from `HashMap` iteration.
+  - Normalizing lookup vectors in both `build_lookup_index()` and `LookupStore::load()` keeps rebuild/save/load round-trips stable even when legacy files or callers provide unsorted lists.
+  - For versioned-lookup tests, asserting through `serde_json::Value` is enough to verify the wrapper shape without depending on serialized key order strings.
 ---
