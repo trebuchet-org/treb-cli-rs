@@ -202,6 +202,12 @@ enum Commands {
     Verify {
         /// Deployment identifier (full ID, name, address, name:label, or namespace/name)
         deployment: Option<String>,
+        /// Deployment namespace
+        #[arg(long)]
+        namespace: Option<String>,
+        /// Network name or chain ID
+        #[arg(long, short = 'n')]
+        network: Option<String>,
         /// Verify all unverified deployments
         #[arg(long)]
         all: bool,
@@ -209,17 +215,23 @@ enum Commands {
         #[arg(long, default_value = "etherscan")]
         verifier: String,
         /// Verify on Etherscan
-        #[arg(long)]
+        #[arg(long, short = 'e')]
         etherscan: bool,
         /// Verify on Blockscout
-        #[arg(long)]
+        #[arg(long, short = 'b')]
         blockscout: bool,
         /// Verify on Sourcify
-        #[arg(long)]
+        #[arg(long, short = 's')]
         sourcify: bool,
         /// Verifier API URL override
-        #[arg(long)]
+        #[arg(long, visible_alias = "blockscout-verifier-url")]
         verifier_url: Option<String>,
+        /// Contract path override (e.g. ./src/Counter.sol:Counter)
+        #[arg(long)]
+        contract_path: Option<String>,
+        /// Print the forge verify command before execution
+        #[arg(long)]
+        debug: bool,
         /// Verifier API key
         #[arg(long)]
         verifier_api_key: Option<String>,
@@ -864,12 +876,16 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         },
         Commands::Verify {
             deployment,
+            namespace,
+            network,
             all,
             verifier,
             etherscan,
             blockscout,
             sourcify,
             verifier_url,
+            contract_path,
+            debug,
             verifier_api_key,
             force,
             watch,
@@ -896,9 +912,13 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
 
             commands::verify::run(
                 deployment,
+                namespace,
+                network,
                 all,
                 &verifiers,
                 verifier_url,
+                contract_path,
+                debug,
                 verifier_api_key,
                 force,
                 watch,
@@ -1289,6 +1309,147 @@ mod tests {
 
         assert!(help.contains("-n, --network"), "unexpected help output: {help}");
         assert!(help.contains("-s, --namespace"), "unexpected help output: {help}");
+    }
+
+    #[test]
+    fn verify_etherscan_short_flag_parses() {
+        let cli = parse_cli_from(["treb", "verify", "Counter", "-e"]).unwrap();
+
+        match cli.command {
+            Commands::Verify { deployment, etherscan, blockscout, sourcify, .. } => {
+                assert_eq!(deployment.as_deref(), Some("Counter"));
+                assert!(etherscan);
+                assert!(!blockscout);
+                assert!(!sourcify);
+            }
+            _ => panic!("expected verify command"),
+        }
+    }
+
+    #[test]
+    fn verify_blockscout_short_flag_parses() {
+        let cli = parse_cli_from(["treb", "verify", "Counter", "-b"]).unwrap();
+
+        match cli.command {
+            Commands::Verify { deployment, etherscan, blockscout, sourcify, .. } => {
+                assert_eq!(deployment.as_deref(), Some("Counter"));
+                assert!(!etherscan);
+                assert!(blockscout);
+                assert!(!sourcify);
+            }
+            _ => panic!("expected verify command"),
+        }
+    }
+
+    #[test]
+    fn verify_sourcify_short_flag_parses() {
+        let cli = parse_cli_from(["treb", "verify", "Counter", "-s"]).unwrap();
+
+        match cli.command {
+            Commands::Verify { deployment, etherscan, blockscout, sourcify, .. } => {
+                assert_eq!(deployment.as_deref(), Some("Counter"));
+                assert!(!etherscan);
+                assert!(!blockscout);
+                assert!(sourcify);
+            }
+            _ => panic!("expected verify command"),
+        }
+    }
+
+    #[test]
+    fn verify_combined_short_flags_parse() {
+        let cli = parse_cli_from(["treb", "verify", "Counter", "-ebs"]).unwrap();
+
+        match cli.command {
+            Commands::Verify { deployment, etherscan, blockscout, sourcify, .. } => {
+                assert_eq!(deployment.as_deref(), Some("Counter"));
+                assert!(etherscan);
+                assert!(blockscout);
+                assert!(sourcify);
+            }
+            _ => panic!("expected verify command"),
+        }
+    }
+
+    #[test]
+    fn verify_blockscout_verifier_url_alias_parses() {
+        let cli = parse_cli_from([
+            "treb",
+            "verify",
+            "Counter",
+            "--blockscout-verifier-url",
+            "https://example.com/api",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Verify { deployment, verifier_url, .. } => {
+                assert_eq!(deployment.as_deref(), Some("Counter"));
+                assert_eq!(verifier_url.as_deref(), Some("https://example.com/api"));
+            }
+            _ => panic!("expected verify command"),
+        }
+    }
+
+    #[test]
+    fn verify_namespace_flag_parses() {
+        let cli = parse_cli_from(["treb", "verify", "Counter", "--namespace", "staging"]).unwrap();
+
+        match cli.command {
+            Commands::Verify { deployment, namespace, network, .. } => {
+                assert_eq!(deployment.as_deref(), Some("Counter"));
+                assert_eq!(namespace.as_deref(), Some("staging"));
+                assert_eq!(network, None);
+            }
+            _ => panic!("expected verify command"),
+        }
+    }
+
+    #[test]
+    fn verify_contract_path_flag_parses() {
+        let cli = parse_cli_from([
+            "treb",
+            "verify",
+            "CounterProxy",
+            "--contract-path",
+            "./src/Counter.sol:Counter",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Verify { deployment, contract_path, .. } => {
+                assert_eq!(deployment.as_deref(), Some("CounterProxy"));
+                assert_eq!(contract_path.as_deref(), Some("./src/Counter.sol:Counter"));
+            }
+            _ => panic!("expected verify command"),
+        }
+    }
+
+    #[test]
+    fn verify_debug_flag_parses() {
+        let cli = parse_cli_from(["treb", "verify", "Counter", "--debug"]).unwrap();
+
+        match cli.command {
+            Commands::Verify { deployment, debug, .. } => {
+                assert_eq!(deployment.as_deref(), Some("Counter"));
+                assert!(debug);
+            }
+            _ => panic!("expected verify command"),
+        }
+    }
+
+    #[test]
+    fn verify_network_short_flag_parses() {
+        let cli = parse_cli_from(["treb", "verify", "Counter", "-n", "mainnet"]).unwrap();
+
+        match cli.command {
+            Commands::Verify { deployment, namespace, network, .. } => {
+                assert_eq!(deployment.as_deref(), Some("Counter"));
+                assert_eq!(namespace, None);
+                assert_eq!(network.as_deref(), Some("mainnet"));
+            }
+            _ => panic!("expected verify command"),
+        }
     }
 
     #[test]

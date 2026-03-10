@@ -12,6 +12,8 @@ use treb_core::types::deployment::Deployment;
 pub struct VerifyOpts {
     pub verifier: String,
     pub verifier_url: Option<String>,
+    pub contract_path: Option<String>,
+    pub debug: bool,
     pub verifier_api_key: Option<String>,
     pub etherscan_api_key: Option<String>,
     pub rpc_url: Option<String>,
@@ -27,7 +29,11 @@ pub fn build_verify_args(deployment: &Deployment, opts: &VerifyOpts) -> Result<V
     let address = Address::from_str(&deployment.address)
         .map_err(|e| anyhow::anyhow!("invalid address '{}': {e}", deployment.address))?;
 
-    let contract_info = parse_contract_info(&deployment.artifact.path, &deployment.contract_name);
+    let contract_info = contract_info_from_opts(
+        opts.contract_path.as_deref(),
+        &deployment.artifact.path,
+        &deployment.contract_name,
+    );
 
     let constructor_args = if deployment.deployment_strategy.constructor_args.is_empty() {
         None
@@ -92,6 +98,56 @@ pub fn build_verify_args(deployment: &Deployment, opts: &VerifyOpts) -> Result<V
     })
 }
 
+/// Render the subset of `forge verify-contract` arguments that treb controls.
+pub fn format_verify_command(args: &VerifyArgs) -> String {
+    let mut command =
+        vec!["forge".to_string(), "verify-contract".to_string(), args.address.to_string()];
+
+    if let Some(contract) = &args.contract {
+        command.push(contract.to_string());
+    }
+    if let Some(constructor_args) =
+        args.constructor_args.as_deref().filter(|value| !value.is_empty())
+    {
+        push_flag_value(&mut command, "--constructor-args", constructor_args);
+    }
+    if let Some(compiler_version) = &args.compiler_version {
+        push_flag_value(&mut command, "--compiler-version", compiler_version.as_str());
+    }
+    if args.force {
+        command.push("--force".to_string());
+    }
+    if args.skip_is_verified_check {
+        command.push("--skip-is-verified-check".to_string());
+    }
+    if args.watch {
+        command.push("--watch".to_string());
+    }
+    if let Some(root) = &args.root {
+        push_flag_value(&mut command, "--root", root.display().to_string());
+    }
+    if args.etherscan.key.is_some() {
+        push_redacted_flag(&mut command, "--etherscan-api-key");
+    }
+    if let Some(chain) = args.etherscan.chain {
+        push_flag_value(&mut command, "--chain", chain.to_string());
+    }
+    if let Some(rpc_url) = &args.rpc.url {
+        push_flag_value(&mut command, "--rpc-url", rpc_url.as_str());
+    }
+    push_flag_value(&mut command, "--retries", args.retry.retries.to_string());
+    push_flag_value(&mut command, "--delay", args.retry.delay.to_string());
+    push_flag_value(&mut command, "--verifier", args.verifier.verifier.to_string());
+    if args.verifier.verifier_api_key.is_some() {
+        push_redacted_flag(&mut command, "--verifier-api-key");
+    }
+    if let Some(verifier_url) = &args.verifier.verifier_url {
+        push_flag_value(&mut command, "--verifier-url", verifier_url.as_str());
+    }
+
+    shell_join(&command)
+}
+
 /// Parse artifact path to extract source path for ContractInfo.
 ///
 /// Artifact path format: `out/<source_relative>/<ContractName>.json`
@@ -102,6 +158,51 @@ fn parse_contract_info(artifact_path: &str, contract_name: &str) -> ContractInfo
         .and_then(|rest| rest.rfind('/').map(|idx| rest[..idx].to_string()));
 
     ContractInfo { path, name: contract_name.to_string() }
+}
+
+fn contract_info_from_opts(
+    contract_path: Option<&str>,
+    artifact_path: &str,
+    contract_name: &str,
+) -> ContractInfo {
+    match contract_path {
+        Some(path_override) => parse_contract_path_override(path_override, contract_name),
+        None => parse_contract_info(artifact_path, contract_name),
+    }
+}
+
+fn parse_contract_path_override(contract_path: &str, default_contract_name: &str) -> ContractInfo {
+    let (path, name) = match contract_path.split_once(':') {
+        Some((path, name)) => (path.to_string(), name.to_string()),
+        None => (contract_path.to_string(), default_contract_name.to_string()),
+    };
+
+    ContractInfo { path: Some(path), name }
+}
+
+fn push_flag_value(command: &mut Vec<String>, flag: &str, value: impl Into<String>) {
+    command.push(flag.to_string());
+    command.push(value.into());
+}
+
+fn push_redacted_flag(command: &mut Vec<String>, flag: &str) {
+    push_flag_value(command, flag, "REDACTED");
+}
+
+fn shell_join(args: &[String]) -> String {
+    args.iter().map(|arg| shell_quote(arg)).collect::<Vec<_>>().join(" ")
+}
+
+fn shell_quote(arg: &str) -> String {
+    if !arg.is_empty()
+        && arg
+            .bytes()
+            .all(|byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'/' | b':' | b'.' | b'_' | b'-' | b'='))
+    {
+        return arg.to_string();
+    }
+
+    format!("'{}'", arg.replace('\'', r#"'"'"'"#))
 }
 
 /// Build an explorer URL for a verified contract based on the chain and verifier.
@@ -178,6 +279,8 @@ mod tests {
         VerifyOpts {
             verifier: "etherscan".into(),
             verifier_url: None,
+            contract_path: None,
+            debug: false,
             verifier_api_key: None,
             etherscan_api_key: None,
             rpc_url: None,
@@ -215,6 +318,43 @@ mod tests {
         let contract = args.contract.unwrap();
         assert_eq!(contract.name, "MyToken");
         assert_eq!(contract.path, Some("src/tokens/MyToken.sol".into()));
+    }
+
+    #[test]
+    fn contract_path_override_replaces_artifact_contract_info() {
+        let mut d = make_deployment();
+        d.contract_name = "CounterProxy".into();
+        let opts = VerifyOpts {
+            contract_path: Some("./src/Counter.sol:Counter".into()),
+            ..default_opts()
+        };
+
+        let args = build_verify_args(&d, &opts).unwrap();
+        let contract = args.contract.unwrap();
+        assert_eq!(contract.name, "Counter");
+        assert_eq!(contract.path, Some("./src/Counter.sol".into()));
+    }
+
+    #[test]
+    fn contract_path_without_colon_uses_deployment_contract_name() {
+        let mut d = make_deployment();
+        d.contract_name = "CounterProxy".into();
+        let opts = VerifyOpts { contract_path: Some("./src/Counter.sol".into()), ..default_opts() };
+
+        let args = build_verify_args(&d, &opts).unwrap();
+        let contract = args.contract.unwrap();
+        assert_eq!(contract.name, "CounterProxy");
+        assert_eq!(contract.path, Some("./src/Counter.sol".into()));
+    }
+
+    #[test]
+    fn falls_back_to_artifact_contract_info_when_contract_path_missing() {
+        let d = make_deployment();
+
+        let args = build_verify_args(&d, &default_opts()).unwrap();
+        let contract = args.contract.unwrap();
+        assert_eq!(contract.name, "Counter");
+        assert_eq!(contract.path, Some("Counter.sol".into()));
     }
 
     #[test]
@@ -336,6 +476,61 @@ mod tests {
         let args = build_verify_args(&d, &opts).unwrap();
         assert_eq!(args.verifier.verifier_api_key, Some("my-api-key".into()));
         assert_eq!(args.verifier.verifier_url, Some("https://custom-api.example.com".into()));
+    }
+
+    #[test]
+    fn formats_verify_command_with_treb_managed_flags() {
+        let d = make_deployment();
+        let opts = VerifyOpts {
+            contract_path: Some("./src/My Counter.sol:Counter".into()),
+            verifier: "blockscout".into(),
+            verifier_api_key: Some("my-api-key".into()),
+            verifier_url: Some("https://example.com/api".into()),
+            etherscan_api_key: Some("etherscan-key".into()),
+            rpc_url: Some("https://rpc.example.com".into()),
+            force: true,
+            watch: true,
+            retries: 10,
+            delay: 15,
+            ..default_opts()
+        };
+
+        let args = build_verify_args(&d, &opts).unwrap();
+        let command = format_verify_command(&args);
+
+        assert!(command.starts_with(&format!(
+            "forge verify-contract {} './src/My Counter.sol:Counter'",
+            args.address
+        )));
+        assert!(!command.contains("--contract"));
+        assert!(command.contains("--compiler-version 0.8.24"));
+        assert!(command.contains("--force"));
+        assert!(command.contains("--skip-is-verified-check"));
+        assert!(command.contains("--watch"));
+        assert!(command.contains("--root /tmp/test-project"));
+        assert!(command.contains("--etherscan-api-key REDACTED"));
+        assert!(!command.contains("etherscan-key"));
+        assert!(command.contains("--chain"));
+        assert!(command.contains("--rpc-url https://rpc.example.com"));
+        assert!(command.contains("--retries 10"));
+        assert!(command.contains("--delay 15"));
+        assert!(command.contains("--verifier blockscout"));
+        assert!(command.contains("--verifier-api-key REDACTED"));
+        assert!(!command.contains("my-api-key"));
+        assert!(command.contains("--verifier-url https://example.com/api"));
+    }
+
+    #[test]
+    fn formats_verify_command_omits_unset_optional_flags() {
+        let d = make_deployment();
+
+        let args = build_verify_args(&d, &default_opts()).unwrap();
+        let command = format_verify_command(&args);
+
+        assert!(!command.contains("--rpc-url"));
+        assert!(!command.contains("--watch"));
+        assert!(!command.contains("--verifier-url"));
+        assert!(!command.contains("--etherscan-api-key"));
     }
 
     #[test]

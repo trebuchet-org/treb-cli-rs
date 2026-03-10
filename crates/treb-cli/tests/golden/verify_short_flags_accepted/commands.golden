@@ -1,0 +1,11 @@
+=== cmd 0: [verify dep-verified -e] ===
+Contract TestContract:v1 is already verified. Use --force to re-verify.
+
+=== cmd 1: [verify dep-verified -b] ===
+Contract TestContract:v1 is already verified. Use --force to re-verify.
+
+=== cmd 2: [verify dep-verified -s] ===
+Contract TestContract:v1 is already verified. Use --force to re-verify.
+
+=== cmd 3: [verify dep-verified -ebs] ===
+Contract TestContract:v1 is already verified. Use --force to re-verify.

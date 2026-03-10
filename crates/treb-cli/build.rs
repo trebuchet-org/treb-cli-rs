@@ -183,6 +183,8 @@ fn build_verify() -> ClapCommand {
     ClapCommand::new("verify")
         .about("Verify deployed contracts on block explorers")
         .arg(Arg::new("deployment").help("Deployment identifier; omit to select interactively"))
+        .arg(Arg::new("namespace").long("namespace").help("Deployment namespace"))
+        .arg(Arg::new("network").long("network").short('n').help("Network name or chain ID"))
         .arg(
             Arg::new("all")
                 .long("all")
@@ -195,7 +197,44 @@ fn build_verify() -> ClapCommand {
                 .default_value("etherscan")
                 .help("Verification provider"),
         )
-        .arg(Arg::new("verifier-url").long("verifier-url").help("Verifier API URL override"))
+        .arg(
+            Arg::new("etherscan")
+                .long("etherscan")
+                .short('e')
+                .action(ArgAction::SetTrue)
+                .help("Verify on Etherscan"),
+        )
+        .arg(
+            Arg::new("blockscout")
+                .long("blockscout")
+                .short('b')
+                .action(ArgAction::SetTrue)
+                .help("Verify on Blockscout"),
+        )
+        .arg(
+            Arg::new("sourcify")
+                .long("sourcify")
+                .short('s')
+                .action(ArgAction::SetTrue)
+                .help("Verify on Sourcify"),
+        )
+        .arg(
+            Arg::new("verifier-url")
+                .long("verifier-url")
+                .visible_alias("blockscout-verifier-url")
+                .help("Verifier API URL override"),
+        )
+        .arg(
+            Arg::new("contract-path")
+                .long("contract-path")
+                .help("Contract path override (e.g. ./src/Counter.sol:Counter)"),
+        )
+        .arg(
+            Arg::new("debug")
+                .long("debug")
+                .action(ArgAction::SetTrue)
+                .help("Print the forge verify command before execution"),
+        )
         .arg(Arg::new("verifier-api-key").long("verifier-api-key").help("Verifier API key"))
         .arg(
             Arg::new("force")

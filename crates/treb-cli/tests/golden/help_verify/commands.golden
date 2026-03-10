@@ -1,0 +1,82 @@
+=== cmd 0: [verify --help] ===
+Verify contracts on block explorers
+
+Verify contracts on block explorers (Etherscan, Blockscout, and Sourcify)
+and update registry status.
+
+Examples:
+  treb verify Counter                      # Verify specific contract (all verifiers)
+  treb verify Counter -e                   # Verify on Etherscan only
+
+Usage: treb verify [OPTIONS] [DEPLOYMENT]
+
+Arguments:
+  [DEPLOYMENT]
+          Deployment identifier (full ID, name, address, name:label, or namespace/name)
+
+Options:
+      --namespace <NAMESPACE>
+          Deployment namespace
+
+      --no-color
+          Disable colored output (also respected via NO_COLOR env var)
+
+  -n, --network <NETWORK>
+          Network name or chain ID
+
+      --non-interactive
+          Skip interactive prompts (also enabled via TREB_NON_INTERACTIVE=1, CI=true, or non-TTY
+          stdin/stdout)
+
+      --all
+          Verify all unverified deployments
+
+      --verifier <VERIFIER>
+          Verification provider (etherscan, sourcify, blockscout)
+          
+          [default: etherscan]
+
+  -e, --etherscan
+          Verify on Etherscan
+
+  -b, --blockscout
+          Verify on Blockscout
+
+  -s, --sourcify
+          Verify on Sourcify
+
+      --verifier-url <VERIFIER_URL>
+          Verifier API URL override
+          
+          [aliases: --blockscout-verifier-url]
+
+      --contract-path <CONTRACT_PATH>
+          Contract path override (e.g. ./src/Counter.sol:Counter)
+
+      --debug
+          Print the forge verify command before execution
+
+      --verifier-api-key <VERIFIER_API_KEY>
+          Verifier API key
+
+      --force
+          Re-verify already verified contracts
+
+      --watch
+          Watch verification status until confirmed
+
+      --retries <RETRIES>
+          Number of retry attempts
+          
+          [default: 5]
+
+      --delay <DELAY>
+          Delay in seconds between retries
+          
+          [default: 5]
+
+      --json
+          Output as JSON
+
+  -h, --help
+          Print help (see a summary with '-h')

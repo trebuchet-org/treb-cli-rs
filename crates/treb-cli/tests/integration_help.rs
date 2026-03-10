@@ -61,6 +61,15 @@ fn help_show() {
     run_integration_test(&test, &ctx);
 }
 
+/// `verify --help` should snapshot the full flag-parity surface.
+#[test]
+fn help_verify() {
+    let ctx = TestContext::new("minimal-project");
+    let test = IntegrationTest::new("help_verify").test(&["verify", "--help"]);
+
+    run_integration_test(&test, &ctx);
+}
+
 /// `fork enter --help` should show the positional network form plus legacy aliases.
 #[test]
 fn help_fork_enter() {
