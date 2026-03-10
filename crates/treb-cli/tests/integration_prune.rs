@@ -197,6 +197,64 @@ fn prune_non_interactive_without_yes() {
     assert!(registry.get_transaction("tx-ok").is_some(), "tx-ok should remain");
 }
 
+/// `TREB_NON_INTERACTIVE=1` should skip prune confirmation the same way as `true`.
+#[test]
+fn prune_non_interactive_env_one_without_yes() {
+    let ctx = TestContext::new("minimal-project");
+
+    ctx.run(["init"]).success();
+    seed_prune_registry(ctx.path());
+
+    let assertion = ctx.run_with_env(["prune"], [("TREB_NON_INTERACTIVE", "1")]);
+    let stdout = String::from_utf8_lossy(&assertion.get_output().stdout).to_string();
+    assertion.success();
+
+    assert!(
+        stdout.contains("Running in non-interactive mode. Proceeding with prune..."),
+        "stdout should include the non-interactive proceed line: {stdout}"
+    );
+    assert!(
+        stdout.contains("✅ Successfully pruned 3 items."),
+        "stdout should report prune success: {stdout}"
+    );
+
+    let registry = Registry::open(ctx.path()).expect("registry should open after prune");
+    assert!(registry.get_deployment("dep-1").is_none(), "dep-1 should be pruned");
+    assert!(registry.get_deployment("dep-2").is_none(), "dep-2 should be pruned");
+    assert!(registry.get_transaction("tx-orphan").is_none(), "tx-orphan should be pruned");
+    assert!(registry.get_deployment("dep-ok").is_some(), "dep-ok should remain");
+    assert!(registry.get_transaction("tx-ok").is_some(), "tx-ok should remain");
+}
+
+/// Global --non-interactive should skip confirmation the same way as the env var.
+#[test]
+fn prune_global_non_interactive_without_yes() {
+    let ctx = TestContext::new("minimal-project");
+
+    ctx.run(["init"]).success();
+    seed_prune_registry(ctx.path());
+
+    let assertion = ctx.run(["--non-interactive", "prune"]);
+    let stdout = String::from_utf8_lossy(&assertion.get_output().stdout).to_string();
+    assertion.success();
+
+    assert!(
+        stdout.contains("Running in non-interactive mode. Proceeding with prune..."),
+        "stdout should include the non-interactive proceed line: {stdout}"
+    );
+    assert!(
+        stdout.contains("✅ Successfully pruned 3 items."),
+        "stdout should report prune success: {stdout}"
+    );
+
+    let registry = Registry::open(ctx.path()).expect("registry should open after prune");
+    assert!(registry.get_deployment("dep-1").is_none(), "dep-1 should be pruned");
+    assert!(registry.get_deployment("dep-2").is_none(), "dep-2 should be pruned");
+    assert!(registry.get_transaction("tx-orphan").is_none(), "tx-orphan should be pruned");
+    assert!(registry.get_deployment("dep-ok").is_some(), "dep-ok should remain");
+    assert!(registry.get_transaction("tx-ok").is_some(), "tx-ok should remain");
+}
+
 /// Clean registry outputs "Nothing to prune."
 #[test]
 fn prune_nothing() {

@@ -34,6 +34,7 @@ pub async fn run(
     add: Option<String>,
     remove: Option<String>,
     json: bool,
+    non_interactive: bool,
 ) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
 
@@ -59,7 +60,7 @@ pub async fn run(
         Some(q) => q,
         None => {
             let deployments: Vec<_> = registry.list_deployments().into_iter().cloned().collect();
-            fuzzy_select_deployment_id(&deployments)
+            fuzzy_select_deployment_id(&deployments, non_interactive)
                 .map_err(|e| anyhow::anyhow!("{e}"))?
                 .ok_or_else(|| anyhow::anyhow!("no deployment selected"))?
         }

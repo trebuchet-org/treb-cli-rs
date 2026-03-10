@@ -42,3 +42,12 @@ fn help_config() {
 
     run_integration_test(&test, &ctx);
 }
+
+/// `list --help` should surface the Go-compatible short filter flags.
+#[test]
+fn help_list() {
+    let ctx = TestContext::new("minimal-project");
+    let test = IntegrationTest::new("help_list").test(&["list", "--help"]);
+
+    run_integration_test(&test, &ctx);
+}

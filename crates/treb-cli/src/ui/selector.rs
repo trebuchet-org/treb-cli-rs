@@ -13,12 +13,13 @@ use super::interactive::is_non_interactive;
 pub fn fuzzy_select_deployment<'a>(
     deployments: &'a [Deployment],
     query: Option<&str>,
+    non_interactive: bool,
 ) -> Result<Option<&'a Deployment>> {
     if deployments.is_empty() {
         return Ok(None);
     }
 
-    if is_non_interactive(false) && query.is_none() {
+    if is_non_interactive(non_interactive) && query.is_none() {
         return Err(TrebError::Cli(
             "non-interactive mode: no deployment query supplied; \
              pass a deployment ID or run interactively"
@@ -56,12 +57,12 @@ pub fn fuzzy_select_deployment<'a>(
 ///
 /// Returns `Ok(None)` when the list is empty or the user aborts.
 /// Returns `Err(TrebError::Cli(...))` when not running in a TTY.
-pub fn fuzzy_select_network(networks: &[String]) -> Result<Option<&str>> {
+pub fn fuzzy_select_network(networks: &[String], non_interactive: bool) -> Result<Option<&str>> {
     if networks.is_empty() {
         return Ok(None);
     }
 
-    if is_non_interactive(false) {
+    if is_non_interactive(non_interactive) {
         return Err(TrebError::Cli(
             "non-interactive mode: pass --network explicitly or run interactively".into(),
         ));
@@ -83,8 +84,9 @@ pub fn fuzzy_select_network(networks: &[String]) -> Result<Option<&str>> {
 pub fn multiselect_deployments<'a>(
     deployments: &'a [Deployment],
     prompt: &str,
+    non_interactive: bool,
 ) -> Result<Vec<&'a Deployment>> {
-    if is_non_interactive(false) {
+    if is_non_interactive(non_interactive) {
         return Err(TrebError::Cli(
             "non-interactive mode: cannot display interactive multiselect".into(),
         ));
@@ -109,8 +111,11 @@ pub fn multiselect_deployments<'a>(
 ///
 /// Returns `Ok(None)` when the list is empty or the user aborts.
 /// Returns `Err(TrebError::Cli(...))` when not running in a TTY.
-pub fn fuzzy_select_deployment_id(deployments: &[Deployment]) -> Result<Option<String>> {
-    Ok(fuzzy_select_deployment(deployments, None)?.map(|d| d.id.clone()))
+pub fn fuzzy_select_deployment_id(
+    deployments: &[Deployment],
+    non_interactive: bool,
+) -> Result<Option<String>> {
+    Ok(fuzzy_select_deployment(deployments, None, non_interactive)?.map(|d| d.id.clone()))
 }
 
 /// Score-based fuzzy filter: returns indices of items that match `query`.
@@ -187,7 +192,7 @@ mod tests {
 
     #[test]
     fn empty_list_returns_ok_none() {
-        let result = fuzzy_select_deployment(&[], None);
+        let result = fuzzy_select_deployment(&[], None, false);
         assert!(matches!(result, Ok(None)));
     }
 
@@ -201,14 +206,14 @@ mod tests {
         }
         let d = make_deployment("id1", "Counter", "0xabc");
         let deployments = [d];
-        let result = fuzzy_select_deployment(&deployments, None);
+        let result = fuzzy_select_deployment(&deployments, None, false);
         assert!(matches!(result, Err(TrebError::Cli(_))));
     }
 
     #[test]
     fn fuzzy_select_network_empty_returns_ok_none() {
         let networks: Vec<String> = vec![];
-        let result = fuzzy_select_network(&networks);
+        let result = fuzzy_select_network(&networks, false);
         assert!(matches!(result, Ok(None)));
     }
 }

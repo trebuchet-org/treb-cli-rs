@@ -13,6 +13,13 @@ fn build_cli() -> ClapCommand {
                 .global(true)
                 .help("Disable colored output"),
         )
+        .arg(
+            Arg::new("non-interactive")
+                .long("non-interactive")
+                .action(ArgAction::SetTrue)
+                .global(true)
+                .help("Skip interactive confirmation prompts"),
+        )
         .subcommand(build_run())
         .subcommand(build_list())
         .subcommand(build_show())
@@ -91,20 +98,19 @@ fn build_run() -> ClapCommand {
         .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
         .arg(Arg::new("env").long("env").num_args(1).help("Set environment variables (KEY=VALUE)"))
         .arg(Arg::new("target-contract").long("target-contract").help("Target contract to run"))
-        .arg(
-            Arg::new("non-interactive")
-                .long("non-interactive")
-                .action(ArgAction::SetTrue)
-                .help("Skip interactive confirmation prompts"),
-        )
 }
 
 fn build_list() -> ClapCommand {
     ClapCommand::new("list")
         .about("List deployments in the registry")
         .alias("ls")
-        .arg(Arg::new("network").long("network").help("Filter by network name or chain ID"))
-        .arg(Arg::new("namespace").long("namespace").help("Filter by namespace"))
+        .arg(
+            Arg::new("network")
+                .long("network")
+                .short('n')
+                .help("Filter by network name or chain ID"),
+        )
+        .arg(Arg::new("namespace").long("namespace").short('s').help("Filter by namespace"))
         .arg(
             Arg::new("type")
                 .long("type")
@@ -213,6 +219,8 @@ fn build_tag() -> ClapCommand {
         .arg(Arg::new("deployment").help("Deployment identifier; omit to select interactively"))
         .arg(Arg::new("add").long("add").help("Add a tag to the deployment"))
         .arg(Arg::new("remove").long("remove").help("Remove a tag from the deployment"))
+        .arg(Arg::new("network").long("network").short('n').help("Network name or chain ID"))
+        .arg(Arg::new("namespace").long("namespace").short('s').help("Deployment namespace"))
         .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
 }
 
@@ -363,12 +371,6 @@ fn build_compose() -> ClapCommand {
         )
         .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
         .arg(Arg::new("env").long("env").num_args(1).help("Set environment variables (KEY=VALUE)"))
-        .arg(
-            Arg::new("non-interactive")
-                .long("non-interactive")
-                .action(ArgAction::SetTrue)
-                .help("Skip interactive confirmation prompts"),
-        )
 }
 
 fn build_prune() -> ClapCommand {

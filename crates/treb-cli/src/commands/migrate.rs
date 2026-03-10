@@ -57,7 +57,7 @@ pub enum MigrateSubcommand {
 // ── run ───────────────────────────────────────────────────────────────────────
 
 /// Entry point for `treb migrate`.
-pub async fn run(subcommand: MigrateSubcommand) -> anyhow::Result<()> {
+pub async fn run(subcommand: MigrateSubcommand, non_interactive: bool) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
 
     if !cwd.join("foundry.toml").exists() {
@@ -66,7 +66,7 @@ pub async fn run(subcommand: MigrateSubcommand) -> anyhow::Result<()> {
 
     match subcommand {
         MigrateSubcommand::Config { dry_run, json, yes, cleanup_foundry } => {
-            run_config(&cwd, dry_run, json, yes, cleanup_foundry).await
+            run_config(&cwd, dry_run, json, yes, cleanup_foundry, non_interactive).await
         }
     }
 }
@@ -79,6 +79,7 @@ async fn run_config(
     json: bool,
     yes: bool,
     cleanup_foundry: bool,
+    non_interactive: bool,
 ) -> anyhow::Result<()> {
     if !json {
         output::print_stage("\u{1f50d}", "Detecting config format...");
@@ -115,6 +116,7 @@ async fn run_config(
                 yes,
                 cleanup_foundry,
                 Some("foundry"),
+                non_interactive,
             )
             .await;
         }
@@ -157,6 +159,7 @@ async fn run_config(
         yes,
         cleanup_foundry,
         None,
+        non_interactive,
     )
     .await
 }
@@ -173,6 +176,7 @@ async fn write_or_print_v2(
     yes: bool,
     cleanup_foundry: bool,
     source: Option<&str>,
+    non_interactive: bool,
 ) -> anyhow::Result<()> {
     write_or_print_v2_with_prompt(
         project_root,
@@ -185,6 +189,7 @@ async fn write_or_print_v2(
         cleanup_foundry,
         source,
         std::io::stdin().is_terminal(),
+        !crate::ui::interactive::is_non_interactive(non_interactive),
         crate::ui::prompt::confirm,
     )
     .await
@@ -202,6 +207,7 @@ async fn write_or_print_v2_with_prompt<F>(
     cleanup_foundry: bool,
     source: Option<&str>,
     stdin_is_tty: bool,
+    prompts_enabled: bool,
     confirm_prompt: F,
 ) -> anyhow::Result<()>
 where
@@ -225,7 +231,7 @@ where
 
     // Warn when treb.toml already exists (Go: migrate.go:126-138)
     if treb_toml_existed && !json {
-        if yes || !stdin_is_tty {
+        if yes || !stdin_is_tty || !prompts_enabled {
             // Non-interactive: plain text to stderr (Go: fmt.Fprintln(os.Stderr, ...))
             eprintln!("Warning: treb.toml already exists and will be overwritten.");
         } else {
@@ -240,7 +246,7 @@ where
     }
 
     // Interactive preview + confirmation (unless --yes, --json, or non-TTY).
-    if !yes && !json && stdin_is_tty {
+    if !yes && !json && stdin_is_tty && prompts_enabled {
         println!("Generated treb.toml:");
         println!();
         println!("{v2_toml}");
@@ -625,7 +631,7 @@ private_key = "0xDeployerKey"
 
         let original = std::fs::read_to_string(dir.path().join("treb.toml")).unwrap();
 
-        run_config(dir.path(), true, false, false, false).await.unwrap();
+        run_config(dir.path(), true, false, false, false, false).await.unwrap();
 
         // treb.toml must be unchanged
         let after = std::fs::read_to_string(dir.path().join("treb.toml")).unwrap();
@@ -650,7 +656,7 @@ private_key = "0xDeployerKey"
 
         let original = std::fs::read_to_string(dir.path().join("treb.toml")).unwrap();
 
-        run_config(dir.path(), false, false, true, false).await.unwrap();
+        run_config(dir.path(), false, false, true, false, false).await.unwrap();
 
         let after = std::fs::read_to_string(dir.path().join("treb.toml")).unwrap();
         assert_eq!(original, after, "v2 config should not be modified");
@@ -674,7 +680,7 @@ private_key = "0xDeployerKey"
 
         let original = std::fs::read_to_string(dir.path().join("treb.toml")).unwrap();
 
-        run_config(dir.path(), false, false, true, false).await.unwrap();
+        run_config(dir.path(), false, false, true, false, false).await.unwrap();
 
         // treb.toml should now be v2
         let after = std::fs::read_to_string(dir.path().join("treb.toml")).unwrap();
@@ -711,6 +717,7 @@ private_key = "0xDeployerKey"
             false,
             false,
             None,
+            true,
             true,
             |prompt, default| {
                 assert_eq!(prompt, "Overwrite existing treb.toml?");
@@ -755,6 +762,7 @@ private_key = "0xDeployerKey"
             false,
             None,
             true,
+            true,
             |prompt, default| {
                 let count = call_count.get();
                 call_count.set(count + 1);
@@ -782,6 +790,41 @@ private_key = "0xDeployerKey"
         assert!(backups.is_empty(), "declining write prompt should not create backup files");
     }
 
+    #[tokio::test]
+    async fn write_or_print_v2_skips_prompts_when_global_non_interactive_is_set() {
+        let dir = TempDir::new().unwrap();
+        let treb_toml = dir.path().join("treb.toml");
+        write_v1_treb_toml(dir.path());
+        let original = std::fs::read_to_string(&treb_toml).unwrap();
+
+        write_or_print_v2_with_prompt(
+            dir.path(),
+            &treb_toml,
+            "[accounts.deployer]\ntype = \"private_key\"\n",
+            false,
+            false,
+            true,
+            false,
+            false,
+            None,
+            true,
+            false,
+            |_prompt, _default| panic!("global non-interactive migrate should not prompt"),
+        )
+        .await
+        .unwrap();
+
+        let after = std::fs::read_to_string(&treb_toml).unwrap();
+        assert_ne!(after, original, "non-interactive migrate should still write the migrated file");
+
+        let backups: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with("treb.toml.bak-"))
+            .collect();
+        assert_eq!(backups.len(), 1, "non-interactive migrate should still create a backup");
+    }
+
     // ── run_config foundry sender migration ───────────────────────────────────
 
     #[tokio::test]
@@ -805,7 +848,7 @@ derivation_path = "m/44'/60'/0'/0/0"
         // v1 treb.toml with deployer only
         write_v1_treb_toml(dir.path());
 
-        run_config(dir.path(), false, false, true, false).await.unwrap();
+        run_config(dir.path(), false, false, true, false, false).await.unwrap();
 
         // Parse the resulting v2 treb.toml
         let v2 = treb_config::load_treb_config_v2(&dir.path().join("treb.toml")).unwrap();
@@ -983,7 +1026,7 @@ private_key = "0xDeployerKey"
         write_foundry_toml_with_senders(dir.path());
         // No treb.toml — foundry-only migration path
 
-        run_config(dir.path(), false, false, true, false).await.unwrap();
+        run_config(dir.path(), false, false, true, false, false).await.unwrap();
 
         // treb.toml should now exist as v2
         let treb_toml = dir.path().join("treb.toml");
@@ -1016,7 +1059,7 @@ private_key = "0xDeployerKey"
         let dir = TempDir::new().unwrap();
         write_foundry_toml_with_senders(dir.path());
 
-        run_config(dir.path(), true, false, false, false).await.unwrap();
+        run_config(dir.path(), true, false, false, false, false).await.unwrap();
 
         // treb.toml should NOT be created
         assert!(!dir.path().join("treb.toml").exists(), "dry-run should not create treb.toml");
@@ -1043,7 +1086,7 @@ address = "0xAddr"
         let original_foundry = std::fs::read_to_string(dir.path().join("foundry.toml")).unwrap();
 
         // dry_run=true, cleanup_foundry=true
-        run_config(dir.path(), true, false, false, true).await.unwrap();
+        run_config(dir.path(), true, false, false, true, false).await.unwrap();
 
         // foundry.toml must be unchanged
         let after_foundry = std::fs::read_to_string(dir.path().join("foundry.toml")).unwrap();

@@ -363,7 +363,7 @@ fn print_candidate_sections(candidates: &[PruneCandidate]) {
 // ── run ───────────────────────────────────────────────────────────────────────
 
 /// Entry point for `treb prune`.
-pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
+pub async fn run(args: PruneArgs, non_interactive: bool) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
 
     if !cwd.join("foundry.toml").exists() {
@@ -426,7 +426,7 @@ pub async fn run(args: PruneArgs) -> anyhow::Result<()> {
         print_candidate_sections(&candidates);
     }
 
-    let skip_confirmation = args.yes || crate::ui::interactive::is_non_interactive(false);
+    let skip_confirmation = args.yes || crate::ui::interactive::is_non_interactive(non_interactive);
     if skip_confirmation {
         if !args.json {
             println!("Running in non-interactive mode. Proceeding with prune...");

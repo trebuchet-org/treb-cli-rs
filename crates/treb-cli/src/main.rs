@@ -34,6 +34,11 @@ struct Cli {
     #[arg(long, global = true)]
     no_color: bool,
 
+    /// Skip interactive prompts (also enabled via TREB_NON_INTERACTIVE=1, CI=true, or non-TTY
+    /// stdin/stdout)
+    #[arg(long, global = true)]
+    non_interactive: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -100,10 +105,6 @@ enum Commands {
         /// Target contract to run (when multiple contracts in script)
         #[arg(long)]
         target_contract: Option<String>,
-        /// Skip interactive prompts (also enabled via TREB_NON_INTERACTIVE=1, CI=true, or non-TTY
-        /// stdin/stdout)
-        #[arg(long)]
-        non_interactive: bool,
     },
     /// List deployments from registry
     ///
@@ -115,10 +116,10 @@ enum Commands {
     #[command(alias = "ls")]
     List {
         /// Network name or chain ID
-        #[arg(long)]
+        #[arg(long, short = 'n')]
         network: Option<String>,
         /// Deployment namespace
-        #[arg(long)]
+        #[arg(long, short = 's')]
         namespace: Option<String>,
         /// Filter by deployment type (SINGLETON, PROXY, LIBRARY)
         #[arg(long, value_name = "TYPE")]
@@ -246,6 +247,12 @@ enum Commands {
         /// Remove a tag from the deployment
         #[arg(long, conflicts_with = "add")]
         remove: Option<String>,
+        /// Network name or chain ID
+        #[arg(long, short = 'n')]
+        network: Option<String>,
+        /// Deployment namespace
+        #[arg(long, short = 's')]
+        namespace: Option<String>,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -398,10 +405,6 @@ enum Commands {
         /// Set environment variables (KEY=VALUE, repeatable)
         #[arg(long, num_args = 1)]
         env: Vec<String>,
-        /// Skip interactive prompts (also enabled via TREB_NON_INTERACTIVE=1, CI=true, or non-TTY
-        /// stdin/stdout)
-        #[arg(long)]
-        non_interactive: bool,
     },
     /// Prune registry entries that no longer exist on-chain
     ///
@@ -780,7 +783,9 @@ async fn main() {
 }
 
 async fn run(cli: Cli) -> anyhow::Result<()> {
-    match cli.command {
+    let Cli { command, non_interactive, .. } = cli;
+
+    match command {
         Commands::Run {
             script,
             sig,
@@ -799,7 +804,6 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             json,
             env,
             target_contract,
-            non_interactive,
         } => {
             commands::run::run(
                 &script,
@@ -839,7 +843,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             )
             .await?
         }
-        Commands::Show { deployment, json } => commands::show::run(deployment, json).await?,
+        Commands::Show { deployment, json } => {
+            commands::show::run(deployment, json, non_interactive).await?
+        }
         Commands::Init { force } => commands::init::run(force).await?,
         Commands::Config { subcommand } => match subcommand {
             ConfigSubcommand::Show { json } => commands::config::show(json).await?,
@@ -889,11 +895,12 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 retries,
                 delay,
                 json,
+                non_interactive,
             )
             .await?
         }
-        Commands::Tag { deployment, add, remove, json } => {
-            commands::tag::run(deployment, add, remove, json).await?
+        Commands::Tag { deployment, add, remove, json, .. } => {
+            commands::tag::run(deployment, add, remove, json, non_interactive).await?
         }
         Commands::Register {
             tx_hash,
@@ -949,7 +956,6 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             dump_command,
             json,
             env,
-            non_interactive,
         } => {
             commands::compose::run(
                 file,
@@ -972,9 +978,11 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             )
             .await?
         }
-        Commands::Prune(args) => commands::prune::run(args).await?,
-        Commands::Reset(args) => commands::reset::run(args).await?,
-        Commands::Migrate { subcommand } => commands::migrate::run(subcommand).await?,
+        Commands::Prune(args) => commands::prune::run(args, non_interactive).await?,
+        Commands::Reset(args) => commands::reset::run(args, non_interactive).await?,
+        Commands::Migrate { subcommand } => {
+            commands::migrate::run(subcommand, non_interactive).await?
+        }
         Commands::Fork { subcommand } => commands::fork::run(subcommand).await?,
         Commands::Dev { subcommand } => commands::dev::run(subcommand).await?,
         Commands::Completion { shell } | Commands::CompletionCompat { shell } => {
@@ -1010,6 +1018,7 @@ async fn run_gen_deploy_command(args: GenDeployArgs) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::migrate::MigrateSubcommand;
 
     #[test]
     fn gen_deploy_nested_command_sets_json_flag() {
@@ -1124,6 +1133,113 @@ mod tests {
             Ok(_) => panic!("expected config --help to return clap help output"),
             Err(err) => assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp),
         }
+    }
+
+    #[test]
+    fn non_interactive_is_accepted_before_run_subcommand() {
+        let cli =
+            parse_cli_from(["treb", "--non-interactive", "run", "script/Deploy.s.sol"]).unwrap();
+        assert!(cli.non_interactive);
+
+        match cli.command {
+            Commands::Run { script, .. } => assert_eq!(script, "script/Deploy.s.sol"),
+            _ => panic!("expected run command"),
+        }
+    }
+
+    #[test]
+    fn non_interactive_is_accepted_after_run_subcommand() {
+        let cli =
+            parse_cli_from(["treb", "run", "--non-interactive", "script/Deploy.s.sol"]).unwrap();
+        assert!(cli.non_interactive);
+
+        match cli.command {
+            Commands::Run { script, .. } => assert_eq!(script, "script/Deploy.s.sol"),
+            _ => panic!("expected run command"),
+        }
+    }
+
+    #[test]
+    fn non_interactive_is_accepted_on_list() {
+        let cli = parse_cli_from(["treb", "--non-interactive", "list"]).unwrap();
+        assert!(cli.non_interactive);
+
+        match cli.command {
+            Commands::List { .. } => {}
+            _ => panic!("expected list command"),
+        }
+    }
+
+    #[test]
+    fn non_interactive_is_accepted_before_migrate_subcommand() {
+        let cli = parse_cli_from(["treb", "--non-interactive", "migrate", "config"]).unwrap();
+        assert!(cli.non_interactive);
+
+        match cli.command {
+            Commands::Migrate { subcommand: MigrateSubcommand::Config { .. } } => {}
+            _ => panic!("expected migrate config command"),
+        }
+    }
+
+    #[test]
+    fn list_network_short_flag_parses() {
+        let cli = parse_cli_from(["treb", "list", "-n", "mainnet"]).unwrap();
+
+        match cli.command {
+            Commands::List { network, .. } => assert_eq!(network.as_deref(), Some("mainnet")),
+            _ => panic!("expected list command"),
+        }
+    }
+
+    #[test]
+    fn list_namespace_short_flag_parses() {
+        let cli = parse_cli_from(["treb", "list", "-s", "production"]).unwrap();
+
+        match cli.command {
+            Commands::List { namespace, .. } => {
+                assert_eq!(namespace.as_deref(), Some("production"))
+            }
+            _ => panic!("expected list command"),
+        }
+    }
+
+    #[test]
+    fn list_alias_accepts_short_flags() {
+        let cli = parse_cli_from(["treb", "ls", "-n", "mainnet", "-s", "production"]).unwrap();
+
+        match cli.command {
+            Commands::List { network, namespace, .. } => {
+                assert_eq!(network.as_deref(), Some("mainnet"));
+                assert_eq!(namespace.as_deref(), Some("production"));
+            }
+            _ => panic!("expected list command"),
+        }
+    }
+
+    #[test]
+    fn tag_short_flags_parse_without_wiring_behavior() {
+        let cli = parse_cli_from(["treb", "tag", "Counter", "-n", "mainnet", "-s", "production"])
+            .unwrap();
+
+        match cli.command {
+            Commands::Tag { deployment, network, namespace, .. } => {
+                assert_eq!(deployment.as_deref(), Some("Counter"));
+                assert_eq!(network.as_deref(), Some("mainnet"));
+                assert_eq!(namespace.as_deref(), Some("production"));
+            }
+            _ => panic!("expected tag command"),
+        }
+    }
+
+    #[test]
+    fn list_help_includes_short_flags_for_network_and_namespace() {
+        let mut cmd = Cli::command();
+        let mut buffer = Vec::new();
+        cmd.find_subcommand_mut("list").unwrap().write_long_help(&mut buffer).unwrap();
+        let help = String::from_utf8(buffer).unwrap();
+
+        assert!(help.contains("-n, --network"), "unexpected help output: {help}");
+        assert!(help.contains("-s, --namespace"), "unexpected help output: {help}");
     }
 
     #[test]
