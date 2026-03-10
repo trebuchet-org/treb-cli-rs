@@ -178,6 +178,7 @@ async fn run_anvil_start_with_entry(
     // Compute paths early for styled output.
     let pid_file_path = pid_file_path(&treb_dir, &instance_name);
     let log_file_path = log_file_path(&treb_dir, &instance_name);
+    let display_log_file_path = human_display_path(&cwd, &log_file_path);
 
     // Deploy CreateX factory (non-fatal — show warning on failure).
     let createx_ok = deploy_createx(&anvil).await.is_ok();
@@ -193,14 +194,11 @@ async fn run_anvil_start_with_entry(
     println!(
         "{}",
         styled(
-            &format!("{} Logs: {}", emoji::CLIPBOARD, log_file_path.display()),
+            &format!("{} Logs: {}", emoji::CLIPBOARD, display_log_file_path.display()),
             color::YELLOW,
         )
     );
-    println!(
-        "{}",
-        styled(&format!("{} RPC URL: {}", emoji::GLOBE, rpc_url), color::BLUE)
-    );
+    println!("{}", styled(&format!("{} RPC URL: {}", emoji::GLOBE, rpc_url), color::BLUE));
     if createx_ok {
         println!(
             "{}",
@@ -215,15 +213,9 @@ async fn run_anvil_start_with_entry(
     } else {
         println!(
             "{}",
-            styled(
-                &format!("{}  Warning: Failed to deploy CreateX", emoji::WARNING),
-                color::RED,
-            )
+            styled(&format!("{}  Warning: Failed to deploy CreateX", emoji::WARNING), color::RED,)
         );
-        println!(
-            "{}",
-            styled("Deployments may fail without CreateX factory", color::YELLOW)
-        );
+        println!("{}", styled("Deployments may fail without CreateX factory", color::YELLOW));
     }
 
     // Write PID file.
@@ -257,7 +249,10 @@ async fn run_anvil_start_with_entry(
                 println!(
                     "{}",
                     styled(
-                        &format!("{}  Warning: could not take initial EVM snapshot: {e}", emoji::WARNING),
+                        &format!(
+                            "{}  Warning: could not take initial EVM snapshot: {e}",
+                            emoji::WARNING
+                        ),
                         color::YELLOW,
                     )
                 );
@@ -443,7 +438,6 @@ pub async fn run_anvil_restart(
 
     // Try to stop the old instance if it's still running.
     if entry_port != 0 && is_port_reachable(entry_port).await {
-        println!("Stopping existing instance on port {}...", entry_port);
         try_kill_pid_file(&entry_pid_file);
 
         // Wait for port to become available.
@@ -457,7 +451,6 @@ pub async fn run_anvil_restart(
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
-        println!("Old instance stopped.");
     }
 
     // Record restart history.
@@ -820,6 +813,10 @@ pub(crate) fn pid_file_path(treb_dir: &Path, instance_name: &str) -> PathBuf {
 /// Return the log file path for the given instance name.
 pub(crate) fn log_file_path(treb_dir: &Path, instance_name: &str) -> PathBuf {
     treb_dir.join(format!("anvil-{instance_name}.log"))
+}
+
+fn human_display_path<'a>(cwd: &Path, path: &'a Path) -> &'a Path {
+    path.strip_prefix(cwd).unwrap_or(path)
 }
 
 /// Attempt to stop a process by reading its PID from a file and sending SIGTERM.
@@ -1355,6 +1352,22 @@ mod tests {
     fn log_file_path_uses_instance_name() {
         let path = log_file_path(Path::new(".treb"), "mainnet");
         assert_eq!(path, Path::new(".treb/anvil-mainnet.log"));
+    }
+
+    #[test]
+    fn human_display_path_strips_current_directory_prefix() {
+        let cwd = Path::new("/workspace/treb-cli-rs");
+        let path = cwd.join(".treb/anvil-mainnet.log");
+
+        assert_eq!(human_display_path(cwd, &path), Path::new(".treb/anvil-mainnet.log"));
+    }
+
+    #[test]
+    fn human_display_path_falls_back_when_path_is_outside_cwd() {
+        let cwd = Path::new("/workspace/treb-cli-rs");
+        let path = Path::new("/tmp/anvil-mainnet.log");
+
+        assert_eq!(human_display_path(cwd, path), path);
     }
 
     // ── helpers ───────────────────────────────────────────────────────────
