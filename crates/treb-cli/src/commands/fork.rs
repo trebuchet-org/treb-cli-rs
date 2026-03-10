@@ -1446,16 +1446,36 @@ fn resolve_fork_url(
     if let Some(url) = rpc_url_override {
         return Ok(url);
     }
-    let foundry_config =
-        treb_config::load_foundry_config(cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let endpoints = treb_config::rpc_endpoints(&foundry_config);
-    endpoints.get(network).cloned().ok_or_else(|| {
+    let endpoints = treb_config::resolve_rpc_endpoints(cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let endpoint = endpoints.get(network).ok_or_else(|| {
         anyhow::anyhow!(
             "no RPC URL configured for network '{}' in foundry.toml\n\n\
              Add it under [rpc_endpoints] or pass --rpc-url to specify directly.",
             network
         )
-    })
+    })?;
+
+    if !endpoint.missing_vars.is_empty() {
+        bail!(
+            "RPC URL for network '{}' is missing required environment variables after .env expansion: {}",
+            network,
+            endpoint.missing_vars.join(", ")
+        );
+    }
+
+    if endpoint.unresolved {
+        bail!(
+            "RPC URL for network '{}' contains unresolved environment variables: {}",
+            network,
+            endpoint.raw_url
+        );
+    }
+
+    if endpoint.expanded_url.trim().is_empty() {
+        bail!("RPC URL for network '{}' is empty after .env expansion", network);
+    }
+
+    Ok(endpoint.expanded_url.clone())
 }
 
 async fn fetch_chain_id(rpc_url: &str) -> anyhow::Result<u64> {
@@ -1593,7 +1613,11 @@ mod tests {
     use super::ForkSubcommand;
     use chrono::{TimeZone, Utc};
     use clap::{Parser, Subcommand};
-    use std::{fs, path::PathBuf};
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::{Mutex, MutexGuard, OnceLock},
+    };
     use tempfile::TempDir;
     use treb_core::types::fork::{ForkEntry, ForkHistoryEntry, SnapshotEntry};
     use treb_registry::{DEPLOYMENTS_FILE, ForkStateStore, restore_registry, snapshot_registry};
@@ -1716,6 +1740,48 @@ mod tests {
         let treb_dir = dir.path().join(".treb");
         fs::create_dir_all(&treb_dir).unwrap();
         (dir, treb_dir)
+    }
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        original: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn unset(key: &'static str) -> Self {
+            let original = std::env::var(key).ok();
+            unsafe { std::env::remove_var(key) };
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(value) => unsafe { std::env::set_var(self.key, value) },
+                None => unsafe { std::env::remove_var(self.key) },
+            }
+        }
+    }
+
+    fn write_foundry_project(dir: &std::path::Path) {
+        fs::write(
+            dir.join("foundry.toml"),
+            r#"
+[profile.default]
+src = "src"
+
+[rpc_endpoints]
+mainnet = "${FORK_RPC_URL}"
+needs_env = "https://rpc.example/${FORK_API_KEY}"
+"#,
+        )
+        .unwrap();
     }
 
     fn sample_entry(treb_dir: &std::path::Path, network: &str) -> ForkEntry {
@@ -2259,6 +2325,33 @@ mod tests {
             .chain(snapshot_map.keys().filter(|k| !current_map.contains_key(*k)))
             .collect();
         assert!(changes.is_empty(), "expected no changes: {changes:?}");
+    }
+
+    #[test]
+    fn resolve_fork_url_expands_dotenv_backed_endpoint() {
+        let _lock = env_lock();
+        let _rpc = EnvVarGuard::unset("FORK_RPC_URL");
+        let tmp = TempDir::new().unwrap();
+        write_foundry_project(tmp.path());
+        fs::write(tmp.path().join(".env"), "FORK_RPC_URL=https://mainnet.rpc.example\n").unwrap();
+
+        let url = super::resolve_fork_url(tmp.path(), "mainnet", None).unwrap();
+
+        assert_eq!(url, "https://mainnet.rpc.example");
+    }
+
+    #[test]
+    fn resolve_fork_url_reports_missing_env_vars() {
+        let _lock = env_lock();
+        let _api_key = EnvVarGuard::unset("FORK_API_KEY");
+        let tmp = TempDir::new().unwrap();
+        write_foundry_project(tmp.path());
+
+        let err = super::resolve_fork_url(tmp.path(), "needs_env", None).unwrap_err();
+        let msg = err.to_string();
+
+        assert!(msg.contains("needs_env"), "got: {msg}");
+        assert!(msg.contains("FORK_API_KEY"), "got: {msg}");
     }
 
     // ── format_uptime tests ──────────────────────────────────────────────

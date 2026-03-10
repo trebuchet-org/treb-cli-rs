@@ -103,3 +103,38 @@ fn networks_bare_env_vars_report_unresolved_without_http_errors() {
         .stdout(predicate::str::contains("sepolia - Error: unresolved env var"))
         .stdout(predicate::str::contains("unreachable").not());
 }
+
+#[test]
+fn networks_braced_unset_env_var_reports_unresolved_in_json() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join("foundry.toml"),
+        r#"
+[profile.default]
+src = "src"
+
+[rpc_endpoints]
+test = "${TEST_RPC_URL}"
+"#,
+    )
+    .unwrap();
+
+    let output = treb()
+        .args(["networks", "--json"])
+        .env_remove("TEST_RPC_URL")
+        .current_dir(tmp.path())
+        .output()
+        .expect("failed to run treb networks --json");
+
+    assert!(output.status.success());
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("output is not valid JSON");
+    let arr = json.as_array().expect("JSON output is not an array");
+    let entry = arr.first().expect("JSON array is empty");
+
+    assert_eq!(entry.get("name").and_then(|v| v.as_str()), Some("test"));
+    assert_eq!(entry.get("rpcUrl").and_then(|v| v.as_str()), Some("${TEST_RPC_URL}"));
+    assert_eq!(entry.get("status").and_then(|v| v.as_str()), Some("unresolved env var"));
+    assert!(entry.get("chainId").is_none(), "chainId should be omitted for unresolved endpoints");
+}

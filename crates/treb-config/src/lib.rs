@@ -36,7 +36,10 @@ pub use trebfile_v1::{convert_v1_to_resolved, load_treb_config_v1};
 pub use env::load_dotenv;
 
 // Re-export foundry config integration.
-pub use foundry::{extract_treb_senders_from_foundry, load_foundry_config, rpc_endpoints};
+pub use foundry::{
+    ResolvedRpcEndpoint, extract_treb_senders_from_foundry, load_foundry_config,
+    resolve_rpc_endpoints, rpc_endpoints,
+};
 
 // Re-export resolver.
 pub use resolver::{ResolveOpts, resolve_config, resolve_namespace_v2};

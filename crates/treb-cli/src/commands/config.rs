@@ -74,16 +74,7 @@ pub async fn show(json: bool) -> anyhow::Result<()> {
 
         if !resolved.senders.is_empty() {
             println!();
-            let mut table = output::build_table(&["Role", "Type", "Address"]);
-            let mut roles: Vec<&String> = resolved.senders.keys().collect();
-            roles.sort();
-            for role in roles {
-                let sender = &resolved.senders[role];
-                let type_str = sender.type_.as_ref().map(|t| t.to_string()).unwrap_or_default();
-                let addr = sender.address.as_deref().unwrap_or("");
-                table.add_row(vec![role.as_str(), &type_str, addr]);
-            }
-            output::print_table(&table);
+            println!("{}", format_sender_rows(&resolved.senders));
         }
     }
 
@@ -186,4 +177,77 @@ fn human_config_source(config_source: &str) -> &str {
     }
 
     config_source
+}
+
+fn format_sender_rows(senders: &HashMap<String, SenderConfig>) -> String {
+    let mut rows: Vec<(&str, String, &str)> = senders
+        .iter()
+        .map(|(role, sender)| {
+            (
+                role.as_str(),
+                sender.type_.as_ref().map(ToString::to_string).unwrap_or_default(),
+                sender.address.as_deref().unwrap_or(""),
+            )
+        })
+        .collect();
+    rows.sort_by_key(|(role, ..)| *role);
+
+    let role_width = rows.iter().map(|(role, ..)| role.len()).max().unwrap_or(0);
+    let type_width = rows.iter().map(|(_, type_str, _)| type_str.len()).max().unwrap_or(0);
+
+    rows.into_iter()
+        .map(|(role, type_str, address)| {
+            if address.is_empty() {
+                format!("  {role:<role_width$}  {type_str}")
+            } else {
+                format!("  {role:<role_width$}  {type_str:<type_width$}  {address}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use treb_config::SenderType;
+
+    fn sender_config(type_: SenderType, address: Option<&str>) -> SenderConfig {
+        SenderConfig {
+            type_: Some(type_),
+            address: address.map(str::to_string),
+            ..SenderConfig::default()
+        }
+    }
+
+    #[test]
+    fn format_sender_rows_sorts_roles_and_aligns_columns() {
+        let mut senders = HashMap::new();
+        senders.insert(
+            "ops".to_string(),
+            sender_config(SenderType::Ledger, Some("0x2222222222222222222222222222222222222222")),
+        );
+        senders.insert(
+            "deployer".to_string(),
+            sender_config(
+                SenderType::PrivateKey,
+                Some("0x1111111111111111111111111111111111111111"),
+            ),
+        );
+        senders.insert("admin".to_string(), sender_config(SenderType::Safe, None));
+
+        assert_eq!(
+            format_sender_rows(&senders),
+            concat!(
+                "  admin     safe\n",
+                "  deployer  private_key  0x1111111111111111111111111111111111111111\n",
+                "  ops       ledger       0x2222222222222222222222222222222222222222"
+            )
+        );
+    }
+
+    #[test]
+    fn format_sender_rows_returns_empty_string_when_no_senders() {
+        assert!(format_sender_rows(&HashMap::new()).is_empty());
+    }
 }

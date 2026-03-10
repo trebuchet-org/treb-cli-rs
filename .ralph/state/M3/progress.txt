@@ -1,54 +1,65 @@
 # Ralph Progress Log
-Started: Tue Mar 10 12:34:35 PM CET 2026
+Started: Tue Mar 10 02:02:08 PM CET 2026
 ## Codebase Patterns
-- Go registry compatibility fixtures belong in `crates/treb-registry/tests/fixtures/go-compat/` as bare JSON maps; prefer production slices from `/home/sol/projects/mento-deployments-v2/.treb/` and call out any extra edge-case coverage when the live snapshot does not exercise it.
-- For `treb-registry` cross-CLI store tests, seed a temp registry dir with the raw fixture bytes under the real store filename and call `Store::load()` so the compatibility coverage exercises the actual read path; compare offset timestamps after converting them to `DateTime<Utc>`.
-- `write_versioned_file()` now writes bare JSON for Go compatibility, while `read_versioned_file()` and `read_versioned_file_compat()` must keep accepting legacy `{"_format":"treb-v1","entries":...}` payloads; persistence tests should assert the top-level bare object directly.
-- Go-fixture round-trip assertions should compare recursive JSON key sets and timestamp instants, not literal RFC3339 strings, because `chrono::DateTime<Utc>` rewrites source offsets to `Z` on save without changing the represented instant.
-- CLI golden snapshots of persisted `.treb/*.json` artifacts must also use the bare-map registry format; if an older golden still contains `_format`/`entries`, normalize it to `.entries // .` before relying on the failure diff.
+- Foundry RPC endpoint parsing should reuse `treb_config::expand_env_vars()` after `foundry_config::Config::load_with_root()` because Foundry preserves `${VAR}` placeholders in endpoint strings.
+- Raw `foundry.toml` sender tables should reuse `trebfile::expand_sender_config_env_vars()` after TOML deserialization so `SenderConfig` field expansion matches `treb.toml`.
+- CLI commands that read `foundry.toml` directly instead of going through `treb_config::resolve_config()` must call `treb_config::load_dotenv(project_root)` first so `.env`-backed RPC and sender values are available before config parsing.
+- `treb config show` sender output is Go-style plain text, not `comfy_table`: keep rows sorted by role and preserve `--json` output when adjusting that command.
+- CLI golden tests that need a resolved RPC endpoint can use a tiny loopback JSON-RPC server plus an `extra_normalizer` for `http://127.0.0.1:<port>` instead of relying on fixed ports or Anvil.
+- `config show` integration tests can cover dotenv-backed sender resolution by overwriting fixture `treb.toml` and `.env` in a `pre_setup_hook`; `treb_config::resolve_config()` already loads dotenv files, so process env injection is unnecessary.
 ---
-## 2026-03-10 12:56 CET - P2-US-001
-- Added bare Go-compat fixture maps for deployments (11 entries), transactions (10 entries), and safe transactions (8 entries) under `crates/treb-registry/tests/fixtures/go-compat/`.
-- Files changed: `crates/treb-registry/tests/fixtures/go-compat/deployments.json`, `crates/treb-registry/tests/fixtures/go-compat/transactions.json`, `crates/treb-registry/tests/fixtures/go-compat/safe-txs.json`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-10 14:08 CET - P3-US-001
+- Implemented `${VAR}` expansion for `foundry.toml` RPC endpoints by reusing `expand_env_vars()` inside `treb_config::rpc_endpoints()`.
+- Added unit coverage for full env-var URLs, literal URLs, mixed literal/env-var URLs, and unset vars expanding to empty strings.
+- Files changed: `crates/treb-config/src/foundry.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
 - **Learnings for future iterations:**
-  - Current `mento-deployments-v2/.treb/` data covers CREATE/CREATE2/CREATE3, LIBRARY/PROXY/SINGLETON, safeContext, and offset timestamps, but it does not include populated deployment tags or `executedAt` on safe transactions.
-  - Tagged deployment coverage comes from the existing Go-generated `crates/treb-core/tests/fixtures/deployments_map.json` entry, and `executedAt` coverage uses a production-derived safe transaction augmented to match Go's `sync_registry` write shape.
-  - `cargo check -p treb-registry` passes with the new fixture set.
+  - `foundry_config::Config::load_with_root()` preserves raw `${VAR}` text for RPC endpoints, so treb must resolve those placeholders after loading the config.
+  - Reusing `expand_env_vars()` keeps `${VAR}` behavior aligned between `treb.toml` account parsing and `foundry.toml` RPC endpoint parsing.
+  - `cargo test -p treb-config` passes for this story.
 ---
-## 2026-03-10 13:17 CET - P2-US-002
-- Added fixture-driven store-load compatibility tests for deployments, transactions, and safe transactions in `crates/treb-registry/tests/go_compat_deserialize.rs`, each seeding the raw Go JSON into a temp registry dir and verifying the real `Store::load()` path.
-- Verified fixture counts and spot-checked representative entries across all three stores, including proxy metadata, safe context, operation payloads, queued vs executed safe transactions, and timezone-offset timestamps parsed into UTC.
-- Files changed: `crates/treb-registry/tests/go_compat_deserialize.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-10 14:12 CET - P3-US-002
+- Implemented `${VAR}` expansion for `foundry.toml` treb sender configs by running parsed `SenderConfig` values through the existing sender-field expansion helper.
+- Added unit tests covering env-var expansion across sender string fields and confirming literal foundry sender values remain unchanged.
+- Files changed: `crates/treb-config/src/foundry.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
 - **Learnings for future iterations:**
-  - The current go-compat fixture set is 13 deployments, 10 transactions, and 8 safe transactions; use explicit count assertions so fixture drift is visible in tests.
-  - Store-level compatibility coverage should copy fixture bytes to the actual registry filename and call `load()` instead of deserializing the map directly, otherwise the read-path compatibility logic is not exercised.
-  - Offset timestamps from the Go registry round-trip cleanly through `chrono` once normalized to `DateTime<Utc>`, so UTC comparisons are the stable assertion style here.
-  - `cargo test -p treb-registry` and `cargo clippy -p treb-registry --all-targets -- -D warnings` pass for this story.
+  - `extract_treb_senders_from_foundry()` parses raw TOML custom sections, so env var expansion must happen after deserializing into `SenderConfig`.
+  - Reusing `trebfile::expand_sender_config_env_vars()` keeps `foundry.toml` sender handling aligned with `treb.toml` account parsing across address, signer, safe, governor, timelock, proposer, private key, and derivation path fields.
+  - `cargo test -p treb-config` passes for this story.
 ---
-## 2026-03-10 13:26 CET - P2-US-003
-- Changed `write_versioned_file()` to keep the existing advisory lock and atomic temp-file write, but persist bare JSON instead of the legacy `_format`/`entries` wrapper.
-- Updated `treb-registry` persistence tests across `io.rs`, the registry facade, lookup index, and all store modules so round-trips now assert bare JSON output while legacy wrapped payloads still load through the read path.
-- Files changed: `crates/treb-registry/src/io.rs`, `crates/treb-registry/src/lookup.rs`, `crates/treb-registry/src/registry.rs`, `crates/treb-registry/src/store/deployments.rs`, `crates/treb-registry/src/store/fork_state.rs`, `crates/treb-registry/src/store/governor_proposals.rs`, `crates/treb-registry/src/store/safe_transactions.rs`, `crates/treb-registry/src/store/transactions.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-10 14:22 CET - P3-US-003
+- Implemented `.env` / `.env.local` loading in `treb networks` before `foundry.toml` parsing so `${VAR}` RPC endpoints resolve through the normal `treb_config::rpc_endpoints()` path.
+- Added a golden integration test covering a `.env`-backed `${TEST_RPC_URL}` endpoint and confirming `networks --json` reports the resolved URL instead of `unresolved env var`.
+- Updated the stale `register` unit test to match the branch's existing `${VAR}` expansion semantics when env vars are unset, keeping `cargo test -p treb-cli` green.
+- Files changed: `crates/treb-cli/src/commands/networks.rs`, `crates/treb-cli/tests/integration_networks.rs`, `crates/treb-cli/tests/golden/networks_resolves_dotenv_rpc_urls/commands.golden`, `crates/treb-cli/src/commands/register.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
 - **Learnings for future iterations:**
-  - Go compatibility now depends on the write path staying bare; backward compatibility belongs in `read_versioned_file()` and `read_versioned_file_compat()`, not in persisted output.
-  - The helper-level `io.rs` tests cover the lock wait, trailing newline, indentation, and read-after-write round trip for `write_versioned_file()`, so future persistence changes should start there before touching individual stores.
-  - `cargo test -p treb-registry` and `cargo clippy -p treb-registry --all-targets -- -D warnings` pass for this story.
+  - `treb networks` bypasses `treb_config::resolve_config()`, so dotenv loading has to happen explicitly in the command before `load_foundry_config()`.
+  - In the CLI test harness, `.env` coverage for `networks` can be validated deterministically through `--json` output by asserting the expanded `rpcUrl` and a non-`unresolved env var` status.
+  - `cargo test -p treb-cli` passes for this story.
 ---
-## 2026-03-10 13:34 CET - P2-US-004
-- Added Go-fixture round-trip tests in `crates/treb-registry/tests/go_compat_deserialize.rs` for deployments, transactions, and safe transactions, each loading the Go-created file, mutating it through the Rust store, and asserting bare JSON output with identical recursive key sets.
-- Added a compatibility regression test that scans the registry/core model sources to ensure no serde type opts into `deny_unknown_fields`, and documented the timestamp-offset normalization gap on the relevant Rust type definitions.
-- Files changed: `crates/treb-registry/tests/go_compat_deserialize.rs`, `crates/treb-core/src/types/deployment.rs`, `crates/treb-core/src/types/transaction.rs`, `crates/treb-core/src/types/safe_transaction.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-10 14:45 CET - P3-US-004
+- Replaced `treb config show` sender rendering with inline aligned `role  type  address` rows sorted by role, matching the Go-style human output while leaving `--json` unchanged.
+- Added unit coverage for the inline formatter’s sorting, alignment, and empty-sender behavior, and refreshed the existing `config show` golden snapshots to match the new text output.
+- Files changed: `crates/treb-cli/src/commands/config.rs`, `crates/treb-cli/tests/integration_config.rs`, `crates/treb-cli/tests/golden/config_show_default/commands.golden`, `crates/treb-cli/tests/golden/config_set_show_round_trip/commands.golden`, `crates/treb-cli/tests/golden/config_remove_show_round_trip/commands.golden`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
 - **Learnings for future iterations:**
-  - Rust preserves Go registry timestamps by instant, but `DateTime<Utc>` serialization normalizes source offsets to `Z`, so round-trip tests should compare parsed instants instead of raw timestamp strings.
-  - Recursive JSON key-set comparisons are the reliable way to prove Rust writes keep the Go JSON tag schema intact while still allowing value updates.
-  - `cargo test -p treb-registry` and `cargo clippy -p treb-registry --all-targets -- -D warnings` pass for this story.
+  - `config show` human output should stay as plain aligned rows rather than reintroducing `comfy_table`, because the branch is matching the Go CLI’s config display format.
+  - The sender formatter should sort roles before rendering and omit placeholder text for missing addresses; JSON tests still guard the unchanged machine-readable path.
+  - `cargo check -p treb-cli` and `cargo test -p treb-cli` pass for this story.
 ---
-## 2026-03-10 13:51 CET - P2-US-005
-- Added CLI integration coverage for Go-created deployment data in `crates/treb-cli/tests/cli_go_registry_compat.rs`, verifying `treb list --json` sees all 13 seeded deployments, `treb show` resolves proxy details through the rebuilt lookup index, and Go-created tags remain queryable.
-- Added a reusable `seed_go_compat_registry()` helper, updated the tag integration test to assert `tag --add core` preserves a bare `deployments.json`, and refreshed stale CLI golden artifacts that still expected wrapped registry files.
-- Files changed: `crates/treb-cli/tests/cli_go_registry_compat.rs`, `crates/treb-cli/tests/helpers/mod.rs`, `crates/treb-cli/tests/integration_tag.rs`, `crates/treb-cli/tests/golden/register_basic/deployments.golden`, `crates/treb-cli/tests/golden/run_basic/deployments.golden`, `crates/treb-cli/tests/golden/run_basic/transactions.golden`, `crates/treb-cli/tests/golden/run_debug/deployments.golden`, `crates/treb-cli/tests/golden/run_debug/transactions.golden`, `crates/treb-cli/tests/golden/run_governor_human/deployments.golden`, `crates/treb-cli/tests/golden/run_governor_human/governor-txs.golden`, `crates/treb-cli/tests/golden/run_governor_human/transactions.golden`, `crates/treb-cli/tests/golden/run_governor_verbose/governor-txs.golden`, `crates/treb-cli/tests/golden/run_multi_operation/deployments.golden`, `crates/treb-cli/tests/golden/run_multi_operation/transactions.golden`, `crates/treb-cli/tests/golden/run_verbose/deployments.golden`, `crates/treb-cli/tests/golden/run_verbose/transactions.golden`, `crates/treb-cli/tests/golden/sync_governor_clean/governor-txs.golden`, `crates/treb-cli/tests/golden/sync_governor_human/governor-txs.golden`, `crates/treb-cli/tests/golden/sync_governor_json/governor-txs.golden`, `crates/treb-cli/tests/golden/sync_governor_json/transactions.golden`, `crates/treb-cli/tests/golden/sync_governor_missing_rpc_human/governor-txs.golden`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-10 14:55 CET - P3-US-005
+- Updated the `networks_resolves_dotenv_rpc_urls` golden scenario to stand up a deterministic local JSON-RPC endpoint, verify human output prints `Chain ID: 31337`, and verify `networks --json` includes `chainId` for the resolved endpoint.
+- Added a reusable test-only RPC URL normalizer so the dynamic loopback port does not churn golden files, and documented that pattern in `CLAUDE.md`.
+- Files changed: `crates/treb-cli/tests/integration_networks.rs`, `crates/treb-cli/tests/golden/networks_resolves_dotenv_rpc_urls/commands.golden`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
 - **Learnings for future iterations:**
-  - `treb-cli` compatibility tests can seed Go-created deployments by copying the bare fixture into `.treb/deployments.json` and rebuilding `lookup.json`; list/show/tag then exercise the same compatibility path the real CLI uses.
-  - When the bare write-path changes, persisted artifact goldens under `crates/treb-cli/tests/golden/` can fail long after the core change lands; normalize those snapshots alongside the new tests instead of treating the failures as unrelated regressions.
-  - `cargo test -p treb-cli --quiet` and `cargo clippy --workspace --all-targets -- -D warnings` pass for this story.
+  - `treb-cli` JSON goldens use `output::print_json()`, which sorts object keys deterministically; snapshot expectations should match that sorted key order.
+  - A lightweight loopback JSON-RPC server is enough to cover resolved `eth_chainId` behavior in `networks` tests without depending on Anvil startup.
+  - `cargo test -p treb-cli` passes for this story.
+---
+## 2026-03-10 15:08 CET - P3-US-006
+- Added a `config show` golden integration scenario that seeds `.env`, overwrites `treb.toml` with `address = "${TEST_ADDR}"`, and snapshots the resolved sender address in human output.
+- Documented the reusable dotenv-backed `config show` test pattern in `CLAUDE.md` and cleaned up the sender row sort helper to satisfy workspace clippy.
+- Files changed: `crates/treb-cli/tests/integration_config.rs`, `crates/treb-cli/tests/golden/config_show_resolves_dotenv_sender_address/commands.golden`, `crates/treb-cli/src/commands/config.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - `config show` already resolves `.env` / `.env.local` through `treb_config::resolve_config()`, so end-to-end sender env-var coverage belongs in integration tests rather than new command plumbing.
+  - The `project` fixture can be repurposed for config env-resolution coverage by overwriting `treb.toml` in a `pre_setup_hook` before `treb init`.
+  - `cargo test -p treb-cli` and `cargo clippy --workspace --all-targets` pass for this story.
 ---

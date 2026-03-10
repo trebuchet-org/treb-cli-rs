@@ -53,6 +53,10 @@ treb — deployment orchestration CLI for Foundry projects. Rust workspace with 
 
 **CLI registry artifact goldens**: Golden files that snapshot persisted `.treb/*.json` artifacts in `crates/treb-cli/tests/golden/` must match the current bare-map registry format. If an older snapshot still contains `_format`/`entries`, rewrite it to the bare object before trusting the test result.
 
+**CLI RPC golden tests**: When a golden test needs a resolved RPC endpoint, prefer a tiny loopback JSON-RPC listener plus an `extra_normalizer` that rewrites `http://127.0.0.1:<port>` instead of depending on a fixed port or a full Anvil instance.
+
+**CLI config dotenv tests**: For `config show` coverage that needs `${VAR}` sender resolution, overwrite the fixture `treb.toml` and `.env` in a `pre_setup_hook` and snapshot the human output; `treb_config::resolve_config()` already loads `.env` / `.env.local`, so the test should not inject process env separately.
+
 **Go registry compat fixtures**: `crates/treb-registry/tests/fixtures/go-compat/` stores bare `map[string]T` JSON for cross-CLI registry tests. Prefer subsets from `/home/sol/projects/mento-deployments-v2/.treb/`; the current local snapshot does not include populated deployment tags or `executedAt` on safe transactions, so keep those edge cases explicit when refreshing the fixture set.
 
 **Go registry store-load tests**: For `treb-registry` compatibility coverage, seed a temp registry directory with the raw go-compat fixture under the real store filename (`deployments.json`, `transactions.json`, `safe-txs.json`) and call `Store::load()`; compare offset timestamps as `DateTime<Utc>` values rather than raw strings.
@@ -96,3 +100,7 @@ cargo clippy --workspace --all-targets        # lint
 - **Secondary index ordering**: When a persisted registry index stores `Vec<String>` ID lists inside maps, sort those vectors before saving or returning rebuilt data so lookup file round-trips stay deterministic
 - **Registry metadata file**: Rust registry code should not create or read `.treb/registry.json`; that filename is reserved for Go/Solidity registry data, so tests should assert only on actual store files plus `config.local.json`
 - **Config ownership**: Only `treb-config` parses config files; other crates consume resolved config
+- **Env var expansion reuse**: When `foundry.toml` or `treb.toml` strings need `${VAR}` resolution, reuse `treb_config::expand_env_vars()` instead of duplicating expansion logic so unset vars and mixed literals behave consistently
+- **Sender config env expansion**: When custom sender tables are parsed into `SenderConfig` from either `treb.toml` or raw `foundry.toml`, run `trebfile::expand_sender_config_env_vars()` on the parsed struct so every supported sender string field stays in sync
+- **Dotenv before direct foundry reads**: Commands that bypass `treb_config::resolve_config()` and call `load_foundry_config()` directly must call `treb_config::load_dotenv(cwd)` first, otherwise `${VAR}` RPC endpoints and sender fields defined only in `.env` stay unresolved
+- **Config show sender rendering**: Human `treb config show` output should render senders as sorted inline `role  type  address` rows instead of `comfy_table`; keep `--json` output unchanged when touching that command

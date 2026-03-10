@@ -8,7 +8,19 @@ use framework::{
     normalizer::PathNormalizer,
 };
 
-/// Default config show displays Namespace, Network (not set), senders table.
+const TREB_TOML_WITH_ENV_BACKED_SENDER: &str = r#"[accounts.deployer]
+type = "private_key"
+address = "${TEST_ADDR}"
+private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+
+[namespace.default]
+profile = "default"
+
+[namespace.default.senders]
+deployer = "deployer"
+"#;
+
+/// Default config show displays Namespace, Network (not set), and inline sender rows.
 #[test]
 fn config_show_default() {
     let ctx = TestContext::new("project");
@@ -31,6 +43,29 @@ fn config_show_json() {
     let test = IntegrationTest::new("config_show_json")
         .setup(&["init"])
         .test(&["config", "show", "--json"])
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// Config show loads `.env` via config resolution and prints resolved sender addresses.
+#[test]
+fn config_show_resolves_dotenv_sender_address() {
+    let ctx = TestContext::new("project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("config_show_resolves_dotenv_sender_address")
+        .pre_setup_hook(|ctx| {
+            std::fs::write(ctx.path().join("treb.toml"), TREB_TOML_WITH_ENV_BACKED_SENDER)
+                .expect("write treb.toml with env-backed sender");
+            std::fs::write(
+                ctx.path().join(".env"),
+                "TEST_ADDR=0x1234567890123456789012345678901234567890\n",
+            )
+            .expect("write .env with sender address");
+        })
+        .setup(&["init"])
+        .test(&["config", "show"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
