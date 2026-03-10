@@ -61,6 +61,12 @@ fn seed_fork_status(project_root: &std::path::Path) {
     store.insert_active_fork(sample_fork_entry(&treb_dir)).unwrap();
 }
 
+fn load_active_fork(treb_dir: &std::path::Path, network: &str) -> ForkEntry {
+    let mut store = ForkStateStore::new(treb_dir);
+    store.load().unwrap();
+    store.get_active_fork(network).unwrap().clone()
+}
+
 // ── fork status: no forks ────────────────────────────────────────────────
 
 /// `treb fork status` with an empty fork state should print "No active forks."
@@ -841,6 +847,114 @@ fn fork_enter_success() {
         .extra_normalizer(Box::new(LabelNormalizer::new(format!("http://127.0.0.1:{port}"))));
 
     run_integration_test(&test, &ctx);
+}
+
+#[test]
+fn fork_history_accepts_positional_and_flag_network_filters() {
+    let ctx = TestContext::new("minimal-project");
+
+    ctx.run(["init"]).success();
+    seed_fork_history(ctx.path());
+
+    let positional = String::from_utf8(
+        ctx.run(["fork", "history", "mainnet"]).success().get_output().stdout.clone(),
+    )
+    .unwrap();
+    let flag = String::from_utf8(
+        ctx.run(["fork", "history", "--network", "mainnet"]).success().get_output().stdout.clone(),
+    )
+    .unwrap();
+
+    assert!(
+        positional.contains("mainnet"),
+        "positional network filter should include the selected network:\n{positional}"
+    );
+    assert!(
+        !positional.contains("sepolia"),
+        "positional network filter should exclude other networks:\n{positional}"
+    );
+    assert!(
+        flag.contains("mainnet"),
+        "flag network filter should include the selected network:\n{flag}"
+    );
+    assert!(
+        !flag.contains("sepolia"),
+        "flag network filter should exclude other networks:\n{flag}"
+    );
+}
+
+#[test]
+fn fork_enter_rejects_conflicting_network_forms_at_subprocess_level() {
+    let ctx = TestContext::new("minimal-project");
+
+    let stderr = String::from_utf8(
+        ctx.run(["fork", "enter", "sepolia", "--network", "mainnet"])
+            .failure()
+            .get_output()
+            .stderr
+            .clone(),
+    )
+    .unwrap();
+
+    assert!(
+        stderr.contains("cannot be used with"),
+        "conflicting positional and flag network forms should surface clap's conflict error:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("--network <NETWORK>"),
+        "conflict error should reference the legacy flag form:\n{stderr}"
+    );
+}
+
+#[test]
+fn fork_enter_requires_network_at_subprocess_level() {
+    let ctx = TestContext::new("minimal-project");
+
+    let stderr =
+        String::from_utf8(ctx.run(["fork", "enter"]).failure().get_output().stderr.clone())
+            .unwrap();
+
+    assert!(
+        stderr.contains("required arguments were not provided"),
+        "missing-network error should explain that a network is required:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("<NETWORK|--network <NETWORK>>"),
+        "missing-network error should point to the positional and flag forms:\n{stderr}"
+    );
+}
+
+#[test]
+fn fork_enter_url_alias_matches_rpc_url_persistence() {
+    let port = match spawn_json_rpc_server(|request| match request["method"].as_str().unwrap() {
+        "eth_chainId" => serde_json::json!("0x1"),
+        other => panic!("unexpected JSON-RPC method for fork enter fixture: {other}"),
+    }) {
+        Ok(port) => port,
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return,
+        Err(err) => panic!("spawn fork enter JSON-RPC fixture: {err}"),
+    };
+    let rpc_url = format!("http://127.0.0.1:{port}");
+    let network = "testnet";
+
+    let alias_ctx = TestContext::new("minimal-project");
+    alias_ctx.run(["init"]).success();
+    alias_ctx.run(["fork", "enter", network, "--url", &rpc_url]).success();
+
+    let flag_ctx = TestContext::new("minimal-project");
+    flag_ctx.run(["init"]).success();
+    flag_ctx.run(["fork", "enter", network, "--rpc-url", &rpc_url]).success();
+
+    let alias_entry = load_active_fork(&alias_ctx.treb_dir(), network);
+    let flag_entry = load_active_fork(&flag_ctx.treb_dir(), network);
+
+    assert_eq!(alias_entry.network, flag_entry.network);
+    assert_eq!(alias_entry.fork_url, flag_entry.fork_url);
+    assert_eq!(alias_entry.chain_id, flag_entry.chain_id);
+    assert_eq!(alias_entry.fork_block_number, flag_entry.fork_block_number);
+    assert_eq!(alias_entry.snapshots.len(), flag_entry.snapshots.len());
+    assert!(std::path::Path::new(&alias_entry.snapshot_dir).exists());
+    assert!(std::path::Path::new(&flag_entry.snapshot_dir).exists());
 }
 
 // ── fork exit: not forked ───────────────────────────────────────────────

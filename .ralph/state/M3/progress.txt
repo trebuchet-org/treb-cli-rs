@@ -3,6 +3,7 @@
 - When a clap command supports both positional and flag forms for the same input, mirror the conflicts/required-group wiring in `crates/treb-cli/src/**` and `crates/treb-cli/build.rs`, and set `value_name` on renamed flag fields so usage/errors show the user-facing placeholder instead of the internal field id.
 - When a dual-form fork subcommand also supports `--all`, put the positional arg, `--network`, and `--all` in the same ArgGroup in both clap definitions, then normalize them in the command dispatcher so the bypass path and conflict errors stay consistent.
 - Golden tests that can early-return before exercising their fixture will not rewrite `commands.golden` under `UPDATE_GOLDEN=1`; if only the recorded argv changed, refresh that snapshot from a runnable environment or patch the header manually so the stored command matches the test case.
+- For fork argument parsing coverage that only needs binary-level success/error assertions, add focused `TestContext::run(...)` checks in `crates/treb-cli/tests/integration_fork.rs` and reuse its loopback `spawn_json_rpc_server()` helper instead of creating new golden snapshots or spinning up full Anvil instances.
 
 Started: Tue Mar 10 10:14:21 PM CET 2026
 ---
@@ -32,4 +33,13 @@ Started: Tue Mar 10 10:14:21 PM CET 2026
   - Patterns discovered (e.g., "this codebase uses X for Y"): command-level help goldens belong in `crates/treb-cli/tests/integration_help.rs`, while fork behavior/output goldens stay in `crates/treb-cli/tests/integration_fork.rs`; keeping those split makes help-surface refreshes cheap.
   - Gotchas encountered (e.g., "don't forget to update Z when changing W"): some golden tests can early-return before running their fixture, so `UPDATE_GOLDEN=1` will not rewrite the stored argv header in those cases even if the test case changed.
   - Useful context (e.g., "the evaluation panel is in component X"): the fork integration harness snapshots the executed argv in `commands.golden`, so canonical syntax changes often require touching both the test invocation and the matching golden header even when stdout/stderr stays identical.
+---
+## 2026-03-10 22:57:53 CET - P7-US-004
+- Added focused subprocess integration tests for fork positional-vs-flag network filtering, missing-network failures, conflicting network forms, and `--url` alias persistence against `--rpc-url`.
+- Recorded the reusable fork argument-testing pattern in `CLAUDE.md` so future iterations can use direct `TestContext` assertions plus the loopback JSON-RPC fixture instead of broad golden churn.
+- Files changed: `CLAUDE.md`, `crates/treb-cli/tests/integration_fork.rs`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered (e.g., "this codebase uses X for Y"): `crates/treb-cli/tests/integration_fork.rs` is the right place for fork subprocess assertions that care about parser/runtime behavior more than formatted output snapshots.
+  - Gotchas encountered (e.g., "don't forget to update Z when changing W"): missing/conflicting fork network arguments are rejected by clap before command dispatch, so subprocess tests should assert on clap stderr text rather than the later resolver helpers.
+  - Useful context (e.g., "the evaluation panel is in component X"): the local `spawn_json_rpc_server()` fixture is enough for `fork enter` argument tests because the command only needs `eth_chainId`; no full Anvil process is required.
 ---
