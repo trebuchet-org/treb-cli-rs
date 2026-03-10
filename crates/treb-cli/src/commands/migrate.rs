@@ -289,9 +289,13 @@ where
     if json {
         let mut obj = serde_json::json!({
             "status": "migrated",
-            "backupPath": backup_path.as_ref().map(|p| p.display().to_string()),
-            "foundryCleanupBackup": foundry_cleanup_path.as_ref().map(|p| p.display().to_string()),
         });
+        if let Some(bp) = &backup_path {
+            obj["backupPath"] = serde_json::json!(bp.display().to_string());
+        }
+        if let Some(fp) = &foundry_cleanup_path {
+            obj["foundryCleanupBackup"] = serde_json::json!(fp.display().to_string());
+        }
         if let Some(src) = source {
             obj.as_object_mut().unwrap().insert("source".to_string(), serde_json::json!(src));
         }

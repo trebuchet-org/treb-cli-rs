@@ -91,6 +91,7 @@ pub struct PruneCandidate {
     /// Human-readable description of the issue.
     pub reason: String,
     /// Chain ID of the entry, if available.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub chain_id: Option<u64>,
     /// Contract address (for deployment candidates, used in human output).
     #[serde(skip)]

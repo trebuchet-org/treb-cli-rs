@@ -15,6 +15,7 @@ use crate::{output, ui::emoji};
 pub struct NetworkInfo {
     pub name: String,
     pub rpc_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub chain_id: Option<u64>,
     pub status: String,
 }

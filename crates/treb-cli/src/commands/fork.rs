@@ -150,7 +150,9 @@ struct ForkExitJson {
 #[serde(rename_all = "camelCase")]
 struct ForkRevertJson {
     network: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     snapshot_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     new_snapshot_id: Option<String>,
 }
 
@@ -161,6 +163,7 @@ struct ForkRestartJson {
     chain_id: u64,
     port: u16,
     rpc_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     snapshot_id: Option<String>,
 }
 

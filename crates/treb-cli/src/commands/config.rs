@@ -19,6 +19,7 @@ const TREB_DIR: &str = ".treb";
 #[serde(rename_all = "camelCase")]
 pub struct ConfigShowOutput {
     pub namespace: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub network: Option<String>,
     pub profile: String,
     pub config_source: String,

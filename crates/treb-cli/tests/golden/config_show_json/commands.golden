@@ -2,7 +2,6 @@
 {
   "configSource": "treb.toml (v2)",
   "namespace": "default",
-  "network": null,
   "profile": "default",
   "projectRoot": "<PROJECT_ROOT>",
   "senders": {

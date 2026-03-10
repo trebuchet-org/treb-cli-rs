@@ -82,6 +82,7 @@ struct RenderContext {
 struct GenDeployOutput {
     contract_name: String,
     strategy: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     proxy: Option<String>,
     output_path: String,
     code: String,
