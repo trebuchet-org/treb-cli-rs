@@ -355,10 +355,26 @@ pub async fn run_anvil_stop(network: Option<String>, name: Option<String>) -> an
                 .ok();
             removed.push((net.clone(), instance_name.clone()));
         } else if instance_name == net {
-            println!("Network '{net}' is still reachable at port {port}; skipping.");
+            println!(
+                "{}",
+                styled(
+                    &format!(
+                        "{}  Network '{net}' is still reachable at port {port}; skipping.",
+                        emoji::WARNING
+                    ),
+                    color::YELLOW,
+                )
+            );
         } else {
             println!(
-                "Instance '{instance_name}' for network '{net}' is still reachable at port {port}; skipping."
+                "{}",
+                styled(
+                    &format!(
+                        "{}  Instance '{instance_name}' for network '{net}' is still reachable at port {port}; skipping.",
+                        emoji::WARNING
+                    ),
+                    color::YELLOW,
+                )
             );
         }
     }
@@ -371,14 +387,14 @@ pub async fn run_anvil_stop(network: Option<String>, name: Option<String>) -> an
         }
         println!("No stale fork state entries found.");
     } else {
-        for (net, instance_name) in &removed {
-            if instance_name == net {
-                println!("Removed stale fork state entry for network '{net}'.");
-            } else {
-                println!(
-                    "Removed stale fork state entry for instance '{instance_name}' on network '{net}'."
-                );
-            }
+        for (_net, instance_name) in &removed {
+            println!(
+                "{}",
+                styled(
+                    &format!("{} Stopped anvil node '{instance_name}'", emoji::CHECK),
+                    color::GREEN,
+                )
+            );
         }
     }
 
