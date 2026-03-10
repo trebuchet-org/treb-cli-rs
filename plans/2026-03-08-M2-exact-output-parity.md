@@ -306,6 +306,19 @@ Port verification output from Go `render/verify.go`. The Go version shows skippe
 - Go uses overall `verification.status` + `etherscan_url`, not per-verifier breakdown — simpler display than Rust's current per-verifier approach
 - Color constants: `color::VERIFIED` (green), `color::NOT_VERIFIED` (red), `color::FAILED` (red), `color::UNVERIFIED` (dimmed)
 
+**Learnings from implementation:**
+- Verify human output goes to stderr via `eprintln!` — only JSON and table output go to stdout; this pattern applies when porting batch/progress output in other commands
+- `styled(text, color::STYLE)` helper in verify.rs for conditional coloring — same pattern as show.rs, use `color::is_color_enabled()` check
+- `get_status_icon` maps `VerificationStatus` to Go-matching emoji: Verified→🔄(REFRESH), Failed→⚠️(WARNING), Partial→🔁(REPEAT), Unverified→⏳(HOURGLASS) — capture status BEFORE running verification to show pre-verification state
+- `title_case()` helper added for verifier name capitalization (etherscan → Etherscan) — useful pattern for normalizing lowercase enum/key names for display
+- `print_verification_status()` sorts verifier names alphabetically for deterministic output — always sort dynamic keys for reproducible output
+- Batch verify uses `chain:CHAINID/NS/NAME` location format — the `namespace` field on Deployment is required for this format
+- Batch output writes progress/summary to stderr (not stdout) — unlike old table which used stdout via `print_table`; stdout is reserved for structured (JSON/table) output
+- The `resolved` deployment has a `label` field that must be captured before the borrow is released — clone needed values before moving/releasing borrows
+- Pre-existing test failure `show_proxy_deployment_shows_proxy_info` in cli_list_show was unrelated to verify changes — caused by missing `NO_COLOR=1` env; always investigate pre-existing failures before assuming your changes caused them
+- When changing batch output, CLI tests with hardcoded old-format expectations need updating — search for command-specific test functions (e.g., `verify_all_*`) in `cli_verify.rs`
+- Golden test column widths for fork commands drifted after table rendering changes — run `UPDATE_GOLDEN=1` after any rendering changes to catch cross-command drift
+
 ---
 
 ## Phase 8 -- compose Command Output
@@ -335,6 +348,19 @@ Port compose orchestration output from Go `render/compose.go`. The Go version sh
 
 **User stories:** 5
 **Dependencies:** Phase 6
+
+**Learnings from implementation:**
+- `print_dry_run_plan()` renamed to `print_execution_plan()` — reused for both dry-run plan display and pre-execution plan display (same plan, two call sites)
+- `color::GREEN` vs `color::SUCCESS`: GREEN is plain green (Go `FgGreen`), SUCCESS is green+bold (Go `FgGreen+Bold`). Same distinction for `color::RED` vs `color::ERROR` — choose based on Go reference
+- `color::CYAN` (plain cyan) vs `color::STAGE` (cyan+bold) — use CYAN for data labels (component names), STAGE for section headers
+- Summary/progress output goes to stderr (`eprintln!`), JSON output goes to stdout (`println!`) — this is a key convention across all commands
+- The `styled()` helper in compose.rs wraps text with color only if `color::is_color_enabled()` is true — same pattern as show.rs and verify.rs
+- `#[serde(skip_serializing_if = "Option::is_none")]` is the pattern for optional fields that should not appear in JSON when absent — keeps JSON backward-compatible
+- Rust `{:?}` format for HashMap produces `{"KEY": "VALUE"}` which differs from Go `map[KEY:VALUE]` — acceptable difference per plan
+- When adding new output that includes error messages, check existing tests for negative assertions that do substring matching — they may need tightening to avoid false matches
+- Fork golden tests had pre-existing table width drift from earlier phases — always run full `cargo test -p treb-cli` not just the command-specific subset
+- Golden tests normalize colors away (NO_COLOR), so color changes only show as text changes in golden diffs
+- All 88 compose golden tests passed without needing `UPDATE_GOLDEN=1` — execution-time output changes (non-dry-run) don't affect golden files since golden tests exercise dry-run paths
 
 ---
 
@@ -380,8 +406,28 @@ Port all seven fork subcommand outputs from Go `render/fork.go`. Each subcommand
 - All human-readable timestamps must use `.format("%Y-%m-%d %H:%M:%S")` for Go parity — never use `to_rfc3339()` in human output
 - Tests checking styled output with `contains()` must set `NO_COLOR=1` or strip ANSI codes — nested `styled()` calls break plain-text matching
 
+**Notes from Phase 8:**
+- `color::GREEN` (plain green) vs `color::SUCCESS` (green+bold), `color::RED` (plain red) vs `color::ERROR` (red+bold) — match against Go reference to pick the right variant
+- `color::CYAN` (plain) for data labels, `color::STAGE` (cyan+bold) for section headers — don't confuse them
+- Always run full `cargo test -p treb-cli` to catch cross-command golden drift, not just fork-specific tests
+
 **User stories:** 7
 **Dependencies:** Phase 1
+
+**Learnings from implementation:**
+- `render_fork_fields()` helper uses `{:<14}` label alignment with 2-space indent for key-value field lists — pattern works well for Go-matching indented output without comfy_table
+- Different indent levels per context: 2-space for top-level fields (enter/restart), 4-space for fields nested under network name (status) — match Go nesting depth
+- Fork revert uses 12-char label alignment (`{:<12}`) for `Reverted:` / `Remaining:` vs 14-char for enter/status — alignment width varies per subcommand in Go
+- `insert_active_fork()` takes ownership of `ForkEntry` — clone before passing if you need the entry afterward for display
+- Fork commands now use NO comfy_table — all tables replaced with indented key-value pairs or `+`/`~` prefix format; comfy_table is only needed for commands using the two-pass `render_table_with_widths` pattern (list, run)
+- After removing the last comfy_table usage from a command, check for dead `styled()` / `owo_colors` imports — they become unused when no styled table cells remain
+- TWO test files cover fork diff: `integration_fork.rs` (golden) and `fork_integration.rs` (assertions) — always search for ALL test files covering a command before changing output format
+- When adding fields to `ForkSubcommand` enum variants (e.g., `--all` flag), update BOTH `run()` dispatch AND `mod tests` parse tests
+- `TimestampNormalizer` in the test framework matches `%Y-%m-%d %H:%M:%S` with or without UTC suffix — no normalizer changes needed when dropping UTC suffix from timestamps
+- `println!()` between sections produces trailing blank lines that the golden test framework trims — canonical output via `UPDATE_GOLDEN=1` may differ from manual edits; always regenerate with `UPDATE_GOLDEN=1` as final step
+- Single-result JSON uses object directly, multi-result (e.g., `--all` exit) uses array — keeps backward compatibility for existing consumers
+- History entries stored most-recent-first; reverse per-network for chronological display with index 0 = "initial"
+- Fork diff extracts `address` and `type` from deployment JSON values; `format_diff_suffix()` gracefully handles missing `type` field (shows just address)
 
 ---
 
@@ -421,6 +467,32 @@ Port sync and tag rendering from Go. Sync uses a multi-section format with metri
 - Show command's `print_field(key, value)` / `print_section(title)` helpers are a useful pattern for section-based output — consider reusing or extracting to shared output module if tag show needs similar formatting
 - `contract_display_name(name, label)` from `treb_core::types` can be reused for tag show's deployment display
 
+**Notes from Phase 7:**
+- Human progress/status output should go to stderr (`eprintln!`), reserving stdout for structured output (JSON/table) — verify sync progress uses the same pattern
+- `styled(text, color::STYLE)` helper pattern for conditional coloring is established in both show.rs and verify.rs — reuse for tag/sync output
+
+**Notes from Phase 8:**
+- `color::GREEN` (plain green) vs `color::SUCCESS` (green+bold), `color::RED` vs `color::ERROR` — match Go reference to pick the right variant
+- Summary/progress output to stderr (`eprintln!`), JSON to stdout (`println!`) — confirmed as universal convention
+
+**Notes from Phase 9:**
+- Indented key-value format with aligned labels (e.g., `{:<14}`) is a proven alternative to comfy_table for simple displays — consider for sync metrics and tag show output instead of tables
+- After removing comfy_table from a command, check for dead `styled()` / `owo_colors` imports — they become unused when no styled table cells remain
+- Always search for ALL test files covering a command before changing output — there may be both golden and assertion-based test files
+
+**Learnings from implementation:**
+- Sync output uses `println!` for stdout results and `output::print_stage` (`eprintln`) for stderr progress — don't mix them within a single command's output flow
+- `emoji::CHECK_MARK` is ✓ (U+2713), `emoji::CHECK` is ✅ (U+2705) — different emoji for different contexts (sync footer uses CHECK_MARK, tag add/remove uses CHECK)
+- `color::GREEN` is plain green (Go `FgGreen`), `color::SUCCESS` is green+bold — use GREEN for inline styled text within a sentence
+- Bullet character `\u{2022}` (•) for Go-matching section bullets — not a dash or asterisk
+- `color::SECTION_HEADER` is `bold().bright_white()` — matches Go `FgHiWhite, Bold` for label text like "Address:" and "Tags:"
+- Extract `format_*` helper functions that return `String` to make output testable without stdout capture — avoids needing to capture stdout in unit tests
+- To disable color in unit tests: call `color::color_enabled(true)` (sets `COLOR_ENABLED` atomic to false), restore with `owo_colors::set_override(true)` after — `owo_colors::set_override(false)` alone is insufficient
+- `#[allow(clippy::too_many_arguments)]` needed on format functions with 8+ params — consider a struct parameter if the function grows beyond this
+- The `errors` Vec in sync.rs serves dual purpose: warnings section display AND footer message selection (empty → "synced successfully", non-empty → "completed with warnings")
+- Tags need `let mut` to sort alphabetically before display — sort in-place before rendering
+- Golden files can be pre-updated during review fix commits — always check git log before assuming regeneration is needed; US-006 may become verification-only
+
 ---
 
 ## Phase 11 -- register, prune, and reset Command Output
@@ -450,6 +522,40 @@ Port rendering for three registry management commands. Register uses interactive
 - Use `output::format_success()`, `format_warning()`, `format_error()` for status lines
 - Emoji imports from `crate::ui::emoji`; color styles: `color::SUCCESS`, `color::STAGE`, `color::WARNING`, `color::GRAY`
 
+**Notes from Phase 7:**
+- Human progress/status output (checking, pruning, success messages) should go to stderr (`eprintln!`) — stdout reserved for structured output
+- Pre-existing test failures may surface when running full test suite — always check with `NO_COLOR=1` env for tests asserting on formatted text
+
+**Notes from Phase 8:**
+- When adding output that includes error messages (e.g., `• Error: ...` bullets in summary), check existing tests for negative assertions that do substring matching — they may need tightening
+- `color::GREEN` (plain) vs `color::SUCCESS` (green+bold), `color::RED` vs `color::ERROR` — match Go reference to pick the right variant
+
+**Notes from Phase 9:**
+- Indented aligned labels (e.g., `{:<14}` or `{:<12}`) work well for registry management summary output (e.g., reset per-type counts) — simpler than comfy_table
+- When adding flags to subcommand enum variants, update BOTH `run()` dispatch AND `mod tests` parse tests
+- `println!()` between sections produces trailing blank lines trimmed by the golden framework — always finalize with `UPDATE_GOLDEN=1`
+
+**Notes from Phase 10:**
+- Extract `format_*` helper functions returning `String` for testable output — avoids stdout capture in unit tests; proven pattern in both sync.rs and tag.rs
+- Bullet character `\u{2022}` (•) for Go-matching section bullets in multi-section output (e.g., prune sections with item lists)
+- `color::SECTION_HEADER` (`bold().bright_white()`) for label text like "Address:", "Tags:" — matches Go `FgHiWhite, Bold`
+- To disable color in unit tests: `color::color_enabled(true)` then restore with `owo_colors::set_override(true)` — proven test pattern for format function tests
+- `#[allow(clippy::too_many_arguments)]` needed on format functions with 8+ params — consider struct parameter if function grows
+
+**Learnings from implementation:**
+- `RegisteredDeploymentJson` doesn't carry a `label` field (to keep JSON unchanged) — labels tracked in a parallel `dep_labels: Vec<String>`; clone `dep_label` before it's moved into the `Deployment` struct
+- `PruneCandidate` uses `#[serde(skip)]` (not `skip_serializing_if`) for display-only fields (`address`, `status`) that should never appear in JSON — use `skip` for fields that are purely for human rendering
+- Transaction status stored as uppercase (e.g., "EXECUTED") but displayed as title case (e.g., "Executed") in human output — normalize case for display
+- When removing `styled()` helper from a command, also remove `owo_colors` and `color` imports to avoid dead code warnings — search for all related imports
+- `backup_registry()` is still called but the backup path is no longer displayed in human output — use `_backup_path` prefix to suppress unused variable warnings
+- Reset uses `--network` as chain ID integer; defaults are namespace="default", network="31337" — the chain ID value appears in both `network` and `chain` positions in the output message
+- Per-type count lines only printed when count > 0 (matching Go behavior) — don't show zero-count sections
+- E2E test helper `run_human()` added for capturing human (non-JSON) CLI output; `run_json()` adds `--json` automatically — use `run_human()` for all future E2E human output assertions
+- When implementation stories (US-001/002/003) already update golden tests, the dedicated test-update story (US-004/006) becomes a no-op verification — still valuable as a consistency check but expect no code changes
+- Unit tests for prune/reset test pure logic (candidate detection, filtering, scope resolution) — they don't test CLI output formatting, so output changes don't break them
+- Error golden files are inherently stable since error paths don't go through human output formatting code — no need to update error golden files when changing success/normal output
+- Prune section headers include count in parentheses: "Deployments (N):" — match with "Deployments (" pattern in assertions, not exact count
+
 ---
 
 ## Phase 12 -- gen-deploy and migrate Command Output
@@ -477,6 +583,25 @@ Port gen-deploy and migrate output from Go. Gen-deploy has minimal output (succe
 - Use `output::format_success()`, `format_warning()` for status lines
 - Emoji imports from `crate::ui::emoji`; color styles: `color::SUCCESS`, `color::STAGE`, `color::WARNING`, `color::GRAY`
 - For relative path display: `path.strip_prefix(&cwd).unwrap_or_else(|_| path.as_path())`
+
+**Notes from Phase 10:**
+- Extract `format_*` helper functions returning `String` for testable output — proven pattern for unit testing formatted output without stdout capture
+- To disable color in unit tests: `color::color_enabled(true)` then restore with `owo_colors::set_override(true)`
+
+**Notes from Phase 11:**
+- When removing `styled()` helper from a command, also remove `owo_colors` and `color` imports to avoid dead code warnings
+- When implementation stories already update golden files, the dedicated golden-update story becomes a no-op verification — expect no code changes but still run as consistency check
+- Error golden files are stable when changing success/normal output formatting — no updates needed
+- E2E human output assertions: use `run_human()` helper (captures stdout without `--json` flag)
+
+**Learnings from implementation:**
+- gen-deploy success output goes to stderr via `eprintln!` and `output::print_stage` (not stdout) — instruction lines after success are also plain text to stderr (no styling), matching Go
+- `TemplateContext` struct has `is_library: bool` and `proxy: Option<String>` fields available at the gen-deploy output point (around line 874-902 in gen_deploy.rs)
+- migrate config success uses `styled()` + `color::SUCCESS` with `emoji::CHECK_MARK` (✓), NOT `print_stage` with ✅ — different emoji/styling pattern than gen-deploy
+- migrate config human output goes to stdout via `println!`, but warnings go to stderr via `eprintln!` — mixed stdout/stderr in same command is valid when matching Go behavior
+- `write_or_print_v2_with_prompt` has two sequential prompts when treb.toml exists: overwrite prompt first, then write/preview prompt — tests must handle both prompts
+- Integration tests asserting on human output text must use `.env("NO_COLOR", "1")` + `--no-color` to strip ANSI codes; `color_enabled()` defaults to `true` so ANSI codes appear even when stdout is piped
+- Golden files may already be updated by review-fix commits on prior stories — check test status before regenerating; error case and JSON golden files are typically unaffected by human output format changes
 
 ---
 
@@ -510,6 +635,37 @@ Port dev anvil subcommand output from Go `render/anvil.go`. Each subcommand (sta
 - Use `output::format_success()` for checkmark lines, `color::STAGE` (cyan bold) for section headers
 - Emoji imports from `crate::ui::emoji`; color styles: `color::SUCCESS`, `color::STAGE`, `color::GRAY`
 - For relative path display: `path.strip_prefix(&cwd).unwrap_or_else(|_| path.as_path())`
+
+**Notes from Phase 9:**
+- Indented key-value format with conditional field omission (fields not shown when value is empty/zero) is a proven pattern from fork enter/status — reuse for dev anvil status output
+- Different indent levels distinguish nesting: 2-space for top-level labels, 4-space for fields nested under a group header
+
+**Notes from Phase 10:**
+- Extract `format_*` helper functions returning `String` for testable output — proven pattern for unit testing formatted output without stdout capture
+- `emoji::CHECK_MARK` (✓ U+2713) vs `emoji::CHECK` (✅ U+2705) — use the correct variant per Go reference
+- To disable color in unit tests: `color::color_enabled(true)` then restore with `owo_colors::set_override(true)`
+
+**Notes from Phase 11:**
+- When removing `styled()` helper from a command, also remove `owo_colors` and `color` imports to avoid dead code warnings
+- Error golden files are stable when changing success/normal output formatting — no updates needed
+- E2E human output assertions: use `run_human()` helper (captures stdout without `--json` flag)
+
+**Notes from Phase 12:**
+- Integration tests asserting on human output must use `.env("NO_COLOR", "1")` + `--no-color` to strip ANSI codes — `color_enabled()` defaults to `true` even when stdout is piped
+- `emoji::CHECK_MARK` (✓) for success lines in styled context, `emoji::CHECK` (✅) for `print_stage` — dev anvil start/stop/status should match Go reference for which emoji variant to use
+- Success output may go to stderr (`eprintln!` / `print_stage`) not stdout — verify per-subcommand in Go reference
+
+**Learnings from implementation:**
+- Path helpers (`pid_file_path`, `log_file_path`) are pure path computations — safe to call early for output formatting before the anvil instance is running
+- `human_display_path()` helper exists in dev.rs for converting absolute paths to relative display paths — use instead of manual `strip_prefix` when available
+- CreateX deployment in Go CLI is non-fatal (warning on failure) — Rust now matches; when porting Go behavior, check whether errors are fatal or non-fatal (warnings)
+- `check_rpc_health()` and `check_createx_deployed()` use JSON-RPC calls (`eth_chainId`, `eth_getCode`) with 5s timeout — RPC probes only run when instance is running (port reachable)
+- The `styled()` helper is duplicated across many command files (dev.rs, show.rs, verify.rs, compose.rs, etc.) — same `fn styled(text: &str, style: Style) -> String` pattern; consider extracting to shared module in future cleanup
+- Restart delegates to the same function as start (`run_anvil_start_with_entry()`), so output changes propagate automatically — shared render functions reduce porting effort
+- comfy_table was used inline (`comfy_table::Cell::new(...)`) with no import statement in dev.rs — removing usage automatically removes all references without needing to clean up imports
+- `entry.pid_file` / `entry.log_file` may be empty strings — use path helper functions (`pid_file_path`, `log_file_path`) as fallback when entry fields are empty
+- Golden files were already updated by review-fix commits on prior stories — the final "verify golden files" story (US-005) was a no-op verification confirming consistency
+- No golden tests exist for the logs command — not all subcommands have golden test coverage; check golden file inventory before planning test updates
 
 ---
 
@@ -553,6 +709,53 @@ Audit every command's `--json` output to ensure schema-identical output with Go.
 - `show --json` already ported to Go schema: `{"deployment": {...}}` wrapper with conditional `"fork": true` field (absent for non-fork) — no audit needed for show
 - `serde_json::json!` macro works with `output::print_json()` for constructing wrapper objects with conditional fields — proven pattern for JSON wrappers
 - Fork detection in JSON uses `namespace.starts_with("fork/")` — `"fork"` field is absent (not `false`) for non-fork deployments, matching Go `omitempty` behavior
+
+**Notes from Phase 8:**
+- `compose --json` added optional `env` field to `PlanEntry` with `#[serde(skip_serializing_if = "Option::is_none")]` — verify this matches Go JSON schema (env present only when non-empty)
+- `#[serde(skip_serializing_if = "Option::is_none")]` is the canonical pattern for optional fields that should be absent (not null) in JSON when unset — equivalent to Go `omitempty` for pointer/slice types
+
+**Notes from Phase 9:**
+- Fork exit `--all` emits array for multi-network results, object for single-network — verify this single-vs-multi JSON pattern is consistent with Go output across all commands that support `--all`
+- Fork diff JSON includes `removed` deployments (in snapshot but not current) even though human output has no "Removed Deployments" section — audit whether Go JSON includes removed or omits them
+
+**Notes from Phase 10:**
+- JSON golden tests confirmed unaffected by human output changes (again) — `sync_json_empty`, `sync_governor_json` passed without changes; no JSON audit needed for sync/tag
+- Golden files can be pre-updated during review fix commits — when auditing JSON in Phase 14, check git log for prior golden updates before assuming regeneration is needed
+
+**Notes from Phase 11:**
+- `PruneCandidate` uses `#[serde(skip)]` for display-only fields (`address`, `status`) — these never appear in JSON; no JSON audit needed for prune
+- `RegisteredDeploymentJson` doesn't include `label` field — labels handled separately in human output; JSON output unchanged by register porting
+- JSON output confirmed unchanged by register/prune/reset human output changes — no JSON audit needed for these three commands
+
+**Notes from Phase 12:**
+- JSON output confirmed unchanged by gen-deploy/migrate human output changes — no JSON audit needed for gen-deploy/migrate
+- Error case and JSON golden files are typically unaffected by human output format changes — confirmed again across all Phase 12 stories
+- Golden files may already be updated by review-fix commits on implementation stories — check git log before assuming regeneration is needed
+
+**Notes from Phase 13:**
+- JSON output confirmed unchanged by dev anvil human output changes — dev anvil status `--json` output was not modified; no JSON audit needed for dev anvil
+- `styled()` helper pattern confirmed duplicated across 5+ command files (dev.rs, show.rs, verify.rs, compose.rs, tag.rs, sync.rs) — Phase 14 may want to note this as a future cleanup candidate but it does not affect JSON audit scope
+- All Phase 1-13 human output porting is complete — Phase 14 JSON audit can proceed with full confidence that human output is finalized
+
+**Learnings from implementation:**
+- Clap 4.x does NOT support multiple subcommand headings — workaround: hide all subcommands via `cmd.mut_subcommand(name, |s| s.hide(true))`, generate grouped text via `build_grouped_help()` using `cmd.find_subcommand(name).get_about()`, inject via `after_help()` + custom `help_template` that excludes `{subcommands}`
+- Hiding subcommands removes `<COMMAND>` from auto-generated usage — use `override_usage("treb [OPTIONS] <COMMAND>")` to restore it
+- `{after-help}` template variable adds a leading `\n` — place directly after `{usage}` without explicit `\n` for correct spacing
+- `{options}` template variable renders options WITHOUT the "Options:" heading — must add heading manually in template
+- Replaced `Cli::try_parse()` with `build_grouped_command().try_get_matches()` + `Cli::from_arg_matches()` for proper grouped help rendering (requires importing `clap::FromArgMatches` trait)
+- Clap derives `about` from first `///` doc comment line and `long_about` from full block — use `#[command(long_about = "...")]` to set them independently
+- `build_grouped_help()` reads `get_about()` from subcommands — changing doc comments on enum variants automatically updates the grouped help display
+- No golden files or tests assert on help description text content — description changes don't require golden file updates
+- All Option fields in JSON output structs MUST have `#[serde(skip_serializing_if = "Option::is_none")]` to match Go `omitempty` behavior — avoid producing null values in JSON
+- Exception: `Deployment` struct (treb-core) intentionally serializes `proxyInfo` and `tags` as null (not omitted) — matches Go behavior for these specific fields
+- When using inline `serde_json::json!()` with Option values, use conditional field insertion instead of direct mapping (which produces null)
+- `type` is a Rust keyword — use `deployment_type` with `#[serde(rename = "type")]` for JSON fields named "type"
+- For removed entries in fork diff, data must come from snapshot (`in_snapshot`) since `in_current` is None — use `in_current.or(in_snapshot).unwrap()`
+- `Deployment` struct takes ownership of `dep_label` — clone before passing if needed for JSON struct construction
+- Removing fields from JSON output structs can make variables unused — check for compiler warnings after schema changes
+- Golden file normalization for `foundryVersion` uses `<VERSION>` placeholder — auto-normalizes when foundry version changes
+- `UPDATE_GOLDEN=1` produces no extra changes when tests already pass — safe to run as a final verification step
+- Go CLI reference source for command descriptions: `/home/sol/projects/treb-cli/internal/cli/` — each command file has `Short`/`Long` cobra fields
 
 ---
 
