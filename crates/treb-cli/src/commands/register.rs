@@ -631,11 +631,47 @@ fn receipt_contract_address(receipt: &serde_json::Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
     use super::*;
 
     use tempfile::TempDir;
 
     // ── Helper ──────────────────────────────────────────────────────────
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().expect("env test lock poisoned")
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        original: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn unset(key: &'static str) -> Self {
+            let original = std::env::var(key).ok();
+            // SAFETY: Serialized by env_lock() in tests that mutate env vars.
+            unsafe { std::env::remove_var(key) };
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(value) => {
+                    // SAFETY: Serialized by env_lock() in tests that mutate env vars.
+                    unsafe { std::env::set_var(self.key, value) };
+                }
+                None => {
+                    // SAFETY: Serialized by env_lock() in tests that mutate env vars.
+                    unsafe { std::env::remove_var(self.key) };
+                }
+            }
+        }
+    }
 
     fn setup_project(dir: &std::path::Path) {
         std::fs::write(
@@ -701,11 +737,13 @@ needs_env = "https://rpc.example.com/${API_KEY}"
     }
 
     #[test]
-    fn rpc_url_unresolved_env_var_errors() {
+    fn rpc_url_env_var_expands_to_empty_string_when_unset() {
+        let _lock = env_lock();
+        let _api_key = EnvVarGuard::unset("API_KEY");
         let tmp = TempDir::new().unwrap();
         setup_project(tmp.path());
-        let err = resolve_rpc_url(None, Some("needs_env".to_string()), tmp.path()).unwrap_err();
-        assert!(err.to_string().contains("unresolved environment variables"));
+        let url = resolve_rpc_url(None, Some("needs_env".to_string()), tmp.path()).unwrap();
+        assert_eq!(url, "https://rpc.example.com/");
     }
 
     // ── extract_creations_from_trace ────────────────────────────────────

@@ -77,3 +77,28 @@ fn networks_no_endpoints() {
 
     run_integration_test(&test, &ctx);
 }
+
+/// Networks loads `.env` before parsing foundry endpoints, so `${VAR}` URLs
+/// resolve to a concrete RPC URL and no longer report as unresolved.
+#[test]
+fn networks_resolves_dotenv_rpc_urls() {
+    let ctx = TestContext::new("project");
+    let test = IntegrationTest::new("networks_resolves_dotenv_rpc_urls")
+        .pre_setup_hook(move |ctx| {
+            std::fs::write(
+                ctx.path().join("foundry.toml"),
+                r#"[profile.default]
+src = "src"
+
+[rpc_endpoints]
+test = "${TEST_RPC_URL}"
+"#,
+            )
+            .unwrap();
+            std::fs::write(ctx.path().join(".env"), "TEST_RPC_URL=http://127.0.0.1:8545\n")
+                .unwrap();
+        })
+        .test(&["networks", "--json"]);
+
+    run_integration_test(&test, &ctx);
+}

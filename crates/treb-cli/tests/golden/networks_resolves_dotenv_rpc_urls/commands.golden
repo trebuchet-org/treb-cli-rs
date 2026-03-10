@@ -1,0 +1,8 @@
+=== cmd 0: [networks --json] ===
+[
+  {
+    "name": "test",
+    "rpcUrl": "http://127.0.0.1:8545",
+    "status": "unreachable"
+  }
+]

@@ -83,6 +83,7 @@ pub async fn run(json: bool) -> anyhow::Result<()> {
         );
     }
 
+    treb_config::load_dotenv(&cwd);
     let config = treb_config::load_foundry_config(&cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
     let endpoints = treb_config::rpc_endpoints(&config);
 

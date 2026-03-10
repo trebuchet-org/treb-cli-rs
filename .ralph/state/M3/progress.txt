@@ -3,6 +3,7 @@ Started: Tue Mar 10 02:02:08 PM CET 2026
 ## Codebase Patterns
 - Foundry RPC endpoint parsing should reuse `treb_config::expand_env_vars()` after `foundry_config::Config::load_with_root()` because Foundry preserves `${VAR}` placeholders in endpoint strings.
 - Raw `foundry.toml` sender tables should reuse `trebfile::expand_sender_config_env_vars()` after TOML deserialization so `SenderConfig` field expansion matches `treb.toml`.
+- CLI commands that read `foundry.toml` directly instead of going through `treb_config::resolve_config()` must call `treb_config::load_dotenv(project_root)` first so `.env`-backed RPC and sender values are available before config parsing.
 ---
 ## 2026-03-10 14:08 CET - P3-US-001
 - Implemented `${VAR}` expansion for `foundry.toml` RPC endpoints by reusing `expand_env_vars()` inside `treb_config::rpc_endpoints()`.
@@ -21,4 +22,14 @@ Started: Tue Mar 10 02:02:08 PM CET 2026
   - `extract_treb_senders_from_foundry()` parses raw TOML custom sections, so env var expansion must happen after deserializing into `SenderConfig`.
   - Reusing `trebfile::expand_sender_config_env_vars()` keeps `foundry.toml` sender handling aligned with `treb.toml` account parsing across address, signer, safe, governor, timelock, proposer, private key, and derivation path fields.
   - `cargo test -p treb-config` passes for this story.
+---
+## 2026-03-10 14:22 CET - P3-US-003
+- Implemented `.env` / `.env.local` loading in `treb networks` before `foundry.toml` parsing so `${VAR}` RPC endpoints resolve through the normal `treb_config::rpc_endpoints()` path.
+- Added a golden integration test covering a `.env`-backed `${TEST_RPC_URL}` endpoint and confirming `networks --json` reports the resolved URL instead of `unresolved env var`.
+- Updated the stale `register` unit test to match the branch's existing `${VAR}` expansion semantics when env vars are unset, keeping `cargo test -p treb-cli` green.
+- Files changed: `crates/treb-cli/src/commands/networks.rs`, `crates/treb-cli/tests/integration_networks.rs`, `crates/treb-cli/tests/golden/networks_resolves_dotenv_rpc_urls/commands.golden`, `crates/treb-cli/src/commands/register.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - `treb networks` bypasses `treb_config::resolve_config()`, so dotenv loading has to happen explicitly in the command before `load_foundry_config()`.
+  - In the CLI test harness, `.env` coverage for `networks` can be validated deterministically through `--json` output by asserting the expanded `rpcUrl` and a non-`unresolved env var` status.
+  - `cargo test -p treb-cli` passes for this story.
 ---
