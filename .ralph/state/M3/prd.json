@@ -1,69 +1,69 @@
 {
   "project": "treb-cli-rs",
-  "branchName": "feat/M3-P10-register-and-sync-flag-alignment",
-  "description": "Align register and sync commands with Go CLI behavior: config-driven network/namespace fallback for register, sync --clean help text parity, and integration test coverage for both commands in Go-style project configurations.",
+  "branchName": "feat/M3-P11-error-messages-version-format-and-help-text",
+  "description": "Phase 11 - Error Messages, Version Format, and Help Text: Polish remaining surface-level differences between the Rust treb-cli and the Go treb CLI by aligning version string format, error message style, and help text consistency for seamless drop-in parity.",
   "userStories": [
     {
-      "id": "P10-US-001",
-      "title": "Register Config-Driven Network Fallback",
-      "description": "As a developer, I want `treb register --tx-hash 0x...` to resolve the network from treb.toml/config.local.json when --network and --rpc-url are omitted, so that register works without explicit flags in configured projects like the Go CLI.",
+      "id": "P11-US-001",
+      "title": "Git-Describe Version String in build.rs",
+      "description": "As a CLI user, I want treb --version and treb version to display a git describe-style version string (e.g., treb v0.1.0-3-gabcdef1) so that version output matches the Go CLI format.",
       "acceptanceCriteria": [
-        "`treb register --tx-hash 0x... --network anvil-31337` still works (explicit flag path unchanged)",
-        "`treb register --tx-hash 0x... --rpc-url http://...` still works (explicit URL path unchanged)",
-        "`treb register --tx-hash 0x...` (no network flag) resolves network from treb.toml config when available",
-        "`treb register --tx-hash 0x...` errors with 'no active network set in config, --network flag is required' when config has no network and no flag is provided",
-        "`resolve_rpc_endpoints` is called with dotenv already loaded (via resolve_config or resolve_rpc_endpoints which calls load_dotenv internally)",
-        "Unit test for fallback logic in register.rs",
-        "Typecheck passes: `cargo check -p treb-cli`"
+        "treb --version outputs 'treb <git-describe-string>' (e.g., treb v0.1.0-3-gabcdef1)",
+        "treb version human output first line is 'treb <git-describe-string>'",
+        "treb version --json includes '\"version\": \"<git-describe-string>\"' field",
+        "When no git tags exist, falls back to CARGO_PKG_VERSION so the build never fails",
+        "build.rs emits cargo:rerun-if-changed for .git/HEAD and .git/refs/ to rebuild when version changes",
+        "cargo check -p treb-cli passes (typecheck)"
       ],
       "priority": 1,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "P10-US-002",
-      "title": "Register Config-Driven Namespace Fallback",
-      "description": "As a developer, I want `treb register` to derive the namespace from resolve_config() when --namespace is omitted, so that register respects treb.toml namespace settings like the Go CLI does.",
+      "id": "P11-US-002",
+      "title": "Custom Clap Error Formatter for Go-Style Error Messages",
+      "description": "As a CLI user, I want unknown command and unknown flag errors to match the Go CLI format (e.g., Error: unknown command \"foo\" for \"treb\") so that the transition from Go to Rust is seamless.",
       "acceptanceCriteria": [
-        "`treb register --namespace production ...` still overrides config namespace",
-        "`treb register --tx-hash 0x... --network anvil-31337` (no --namespace) uses namespace from config resolution, or 'default' if no config exists",
-        "Generated deployment IDs use the config-derived namespace when --namespace is not provided",
-        "Unit test for namespace resolution priority: explicit flag > config > 'default'",
-        "Typecheck passes: `cargo check -p treb-cli`"
+        "treb nonexistent prints 'Error: unknown command \"nonexistent\" for \"treb\"' to stderr followed by 'Run 'treb --help' for usage.'",
+        "treb list --nonexistent-flag prints 'Error: unknown flag: --nonexistent-flag' to stderr followed by 'Run 'treb list --help' for usage.'",
+        "Clap typo suggestions (e.g., Did you mean 'list'?) are preserved for other error kinds",
+        "--json error output still produces {\"error\":\"...\"} with the reformatted message",
+        "Exit code remains non-zero for all error cases",
+        "Unit tests cover the mapping for InvalidSubcommand, UnknownArgument, and passthrough cases",
+        "cargo check -p treb-cli passes (typecheck)"
       ],
       "priority": 2,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "P10-US-003",
-      "title": "Sync Clean Flag Description and Help Alignment",
-      "description": "As a developer, I want `sync --clean` help text to match the Go CLI description so that the Rust CLI help output is consistent with Go.",
+      "id": "P11-US-003",
+      "title": "Help Footer and -h vs --help Behavior Audit",
+      "description": "As a CLI user, I want all help output to include consistent Go-style footer guidance so that I know how to access subcommand help.",
       "acceptanceCriteria": [
-        "`treb sync --help` shows --clean with description 'Remove invalid entries while syncing'",
-        "build.rs and main.rs descriptions for sync --clean match",
-        "Golden help snapshots updated for sync help changes",
-        "Typecheck passes: `cargo check -p treb-cli`"
+        "Root treb --help includes 'Use \"treb [command] --help\" for more information about a command.' footer",
+        "Subcommand help for commands with subcommands (gen, fork, config, addressbook) includes a contextual footer guiding users to subcommand help",
+        "A code comment in main.rs documents that -h shows summary help and --help shows full help as an intentional Rust CLI convention",
+        "cargo check -p treb-cli passes (typecheck)"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P10-US-004",
-      "title": "Integration Tests for Config-Driven Register and Sync",
-      "description": "As a developer, I want integration tests verifying register and sync work correctly in Go-style project configurations where network/namespace come from config rather than explicit flags.",
+      "id": "P11-US-004",
+      "title": "Refresh All Help Golden Snapshots and Add Error Format Tests",
+      "description": "As a developer, I want all golden snapshots refreshed and new error format integration tests added so that the test suite validates the version, help, and error changes from US-001 through US-003.",
       "acceptanceCriteria": [
-        "At least one test proves register resolves network from config (Anvil-backed, similar to existing register_basic pattern)",
-        "At least one test proves register errors correctly when config has no network and no flag",
-        "At least one test proves namespace comes from config when --namespace is omitted",
-        "Sync clean flag acceptance and help text test passes",
-        "All existing register and sync tests continue to pass",
-        "`cargo test -p treb-cli --test integration_register` passes",
-        "`cargo test -p treb-cli --test integration_sync` passes"
+        "All help_* golden tests pass with UPDATE_GOLDEN=1 and reflect updated footer/version",
+        "New error format tests verify treb nonexistent stderr contains 'Error: unknown command \"nonexistent\" for \"treb\"'",
+        "New error format tests verify treb list --fake-flag stderr contains 'Error: unknown flag: --fake-flag'",
+        "Exit codes are non-zero in all error test cases",
+        "cargo test -p treb-cli passes (full CLI test suite)",
+        "cargo clippy --workspace --all-targets passes (lint)"
       ],
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": ""
     }
   ]

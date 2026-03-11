@@ -916,6 +916,102 @@ where
     Ok(Cli::from_arg_matches(&matches).expect("bug: derive/builder arg mismatch"))
 }
 
+fn clap_context_values(err: &clap::Error, kind: clap::error::ContextKind) -> Vec<String> {
+    match err.get(kind) {
+        Some(clap::error::ContextValue::String(value)) => vec![value.clone()],
+        Some(clap::error::ContextValue::Strings(values)) => values.clone(),
+        Some(clap::error::ContextValue::StyledStr(value)) => vec![value.to_string()],
+        Some(clap::error::ContextValue::StyledStrs(values)) => {
+            values.iter().map(ToString::to_string).collect()
+        }
+        Some(clap::error::ContextValue::Bool(value)) => vec![value.to_string()],
+        Some(clap::error::ContextValue::Number(value)) => vec![value.to_string()],
+        Some(clap::error::ContextValue::None) | Some(_) | None => Vec::new(),
+    }
+}
+
+fn clap_context_value(err: &clap::Error, kind: clap::error::ContextKind) -> Option<String> {
+    clap_context_values(err, kind).into_iter().next()
+}
+
+fn clap_help_target(err: &clap::Error) -> String {
+    clap_context_value(err, clap::error::ContextKind::Usage)
+        .and_then(|usage| {
+            let usage = usage.trim();
+            let usage = usage.strip_prefix("Usage: ").unwrap_or(usage);
+            let command_path: Vec<&str> = usage
+                .split_whitespace()
+                .take_while(|token| {
+                    !token.starts_with('[') && !token.starts_with('<') && !token.starts_with('-')
+                })
+                .collect();
+            (!command_path.is_empty()).then(|| command_path.join(" "))
+        })
+        .unwrap_or_else(|| "treb".to_string())
+}
+
+fn clap_similarity_tip(noun: &str, suggestions: &[String]) -> Option<String> {
+    if suggestions.is_empty() {
+        return None;
+    }
+
+    let quoted =
+        suggestions.iter().map(|value| format!("'{value}'")).collect::<Vec<_>>().join(", ");
+    let (verb, label) =
+        if suggestions.len() == 1 { ("a similar", "exists") } else { ("some similar", "exist") };
+
+    Some(format!("  tip: {verb} {noun} {label}: {quoted}"))
+}
+
+fn custom_clap_error_message(err: &clap::Error) -> Option<String> {
+    match err.kind() {
+        clap::error::ErrorKind::InvalidSubcommand => {
+            let invalid = clap_context_value(err, clap::error::ContextKind::InvalidSubcommand)?;
+            let help_target = clap_help_target(err);
+            let mut lines =
+                vec![format!(r#"Error: unknown command "{invalid}" for "{help_target}""#)];
+
+            if let Some(tip) = clap_similarity_tip(
+                "subcommand",
+                &clap_context_values(err, clap::error::ContextKind::SuggestedSubcommand),
+            ) {
+                lines.push(tip);
+            }
+            lines.extend(
+                clap_context_values(err, clap::error::ContextKind::Suggested)
+                    .into_iter()
+                    .map(|tip| format!("  tip: {tip}")),
+            );
+            lines.push(format!("Run '{help_target} --help' for usage."));
+            Some(lines.join("\n"))
+        }
+        clap::error::ErrorKind::UnknownArgument => {
+            let invalid = clap_context_value(err, clap::error::ContextKind::InvalidArg)?;
+            if !invalid.starts_with('-') {
+                return None;
+            }
+
+            let help_target = clap_help_target(err);
+            let mut lines = vec![format!("Error: unknown flag: {invalid}")];
+
+            if let Some(tip) = clap_similarity_tip(
+                "argument",
+                &clap_context_values(err, clap::error::ContextKind::SuggestedArg),
+            ) {
+                lines.push(tip);
+            }
+            lines.extend(
+                clap_context_values(err, clap::error::ContextKind::Suggested)
+                    .into_iter()
+                    .map(|tip| format!("  tip: {tip}")),
+            );
+            lines.push(format!("Run '{help_target} --help' for usage."));
+            Some(lines.join("\n"))
+        }
+        _ => None,
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let no_color_requested = argv_requests_flag("--no-color");
@@ -925,17 +1021,25 @@ async fn main() {
     let cli = match parse_cli_from(env::args_os()) {
         Ok(cli) => cli,
         Err(err) => {
+            let custom_message = custom_clap_error_message(&err);
             if json_requested
                 && !matches!(
                     err.kind(),
                     clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
                 )
             {
-                output::print_json_error(&err.to_string());
+                let message = custom_message
+                    .clone()
+                    .unwrap_or_else(|| err.to_string().trim_end_matches('\n').to_string());
+                output::print_json_error(&message);
                 std::process::exit(1);
             }
 
-            err.print().expect("failed to print clap error");
+            if let Some(message) = custom_message {
+                eprintln!("{message}");
+            } else {
+                err.print().expect("failed to print clap error");
+            }
             std::process::exit(err.exit_code());
         }
     };
@@ -1744,6 +1848,49 @@ mod tests {
             }
             _ => panic!("expected verify command"),
         }
+    }
+
+    #[test]
+    fn invalid_subcommand_uses_go_style_error_message() {
+        let err =
+            build_grouped_command().try_get_matches_from(["treb", "nonexistent"]).unwrap_err();
+
+        let message =
+            custom_clap_error_message(&err).expect("invalid subcommand should be reformatted");
+        assert_eq!(
+            message,
+            "Error: unknown command \"nonexistent\" for \"treb\"\nRun 'treb --help' for usage."
+        );
+    }
+
+    #[test]
+    fn unknown_flag_uses_go_style_error_message() {
+        let err = build_grouped_command()
+            .try_get_matches_from(["treb", "list", "--nonexistent-flag"])
+            .unwrap_err();
+
+        let message = custom_clap_error_message(&err).expect("unknown flag should be reformatted");
+        assert_eq!(
+            message,
+            "Error: unknown flag: --nonexistent-flag\nRun 'treb list --help' for usage."
+        );
+    }
+
+    #[test]
+    fn non_mapped_clap_errors_fall_back_to_default_formatting() {
+        let err = clap::Command::new("treb")
+            .arg(clap::Arg::new("mode").long("mode").value_parser(["list"]))
+            .try_get_matches_from(["treb", "--mode", "lsit"])
+            .unwrap_err();
+
+        assert!(custom_clap_error_message(&err).is_none());
+
+        let default_message = err.to_string();
+        assert!(
+            default_message.contains("a similar value exists"),
+            "unexpected error: {default_message}"
+        );
+        assert!(default_message.contains("'list'"), "unexpected error: {default_message}");
     }
 
     #[test]

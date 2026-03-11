@@ -1,44 +1,23 @@
 # Ralph Progress Log
-Started: Wed Mar 11 11:50:04 AM CET 2026
+Started: Wed Mar 11 12:46:17 PM CET 2026
+---
 ## Codebase Patterns
-- For commands that accept both `--network` and `--rpc-url`, only resolve the config-backed network when both flags are absent, then pass that value through the existing RPC URL resolver so explicit overrides and direct-URL passthrough keep working unchanged.
-- For commands with an optional `--namespace`, resolve the omitted case through `treb_config::resolve_config()` instead of hard-coding `"default"` so local config precedence and namespace validation match the rest of the CLI.
-- For subcommand flag help text changes, update both `crates/treb-cli/src/main.rs` doc comments and `crates/treb-cli/build.rs` `Arg::help(...)` strings, then refresh a dedicated `help_<command>` golden so clap help and generated completions stay in sync.
-- For new Anvil-backed golden tests, refresh snapshots sequentially when creating new goldens; a skipped gated test under `UPDATE_GOLDEN=1` leaves the new golden directory absent even though the test itself still passes.
+- `crates/treb-cli/build.rs` owns the compiled `TREB_VERSION` string; keep `src/main.rs` clap version metadata and `src/commands/version.rs` wired to that env var so `treb --version` and `treb version` stay in sync
+- Go-style clap parse diagnostics are centralized in `crates/treb-cli/src/main.rs::custom_clap_error_message()`; when parser errors change, keep the human stderr path and `--json` stderr wrapper in sync and update both `src/main.rs` unit tests and `tests/cli_error_format.rs`
 
----
-## 2026-03-11 11:52:57 CET - P10-US-001
-- Implemented config-driven network fallback for `treb register` so it consults `resolve_config()` only when both `--network` and `--rpc-url` are omitted, then reuses the existing RPC endpoint resolution path.
-- Added focused unit coverage for the config-network fallback and the Go-parity missing-network error message.
-- Files changed: `CLAUDE.md`, `crates/treb-cli/src/commands/register.rs`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-11 12:52:54 CET - P11-US-001
+- Implemented build-time `TREB_VERSION` generation from `git describe --tags --dirty --abbrev=7` with fallback to `CARGO_PKG_VERSION` when the repo has no tags
+- Files changed: `crates/treb-cli/build.rs`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/src/commands/version.rs`, `crates/treb-cli/tests/cli_version.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
 - **Learnings for future iterations:**
-  - Patterns discovered: config-backed network fallback should stay separate from RPC URL resolution so explicit `--rpc-url` and `--network` precedence remains untouched.
-  - Gotchas encountered: `.ralph/current` is a symlink to `.ralph/state/M3`, so story bookkeeping updates land in the state files shown by `git status`.
-  - Useful context: `cargo test -p treb-cli effective_network_` is a fast focused check for the new register fallback helper before running broader command coverage.
+  - Patterns discovered: `build.rs` is already the shared place for CLI build metadata, so version-format changes belong there instead of hard-coding `CARGO_PKG_VERSION` in runtime code
+  - Gotchas encountered: root `--version` output comes from clap metadata in `src/main.rs`, not the `version` subcommand implementation, so both paths must be updated together
+  - Useful context: integration golden snapshots for `version` did not change in an untagged checkout because the new logic correctly falls back to the workspace package version
 ---
-## 2026-03-11 12:09:28 CET - P10-US-002
-- Implemented config-driven namespace fallback for `treb register` by resolving the omitted `--namespace` case through the shared config resolver before generating deployment IDs.
-- Added focused unit coverage for namespace precedence: explicit flag wins, config.local/resolve_config fallback is used when present, and missing local config still defaults to `default`.
-- Files changed: `CLAUDE.md`, `crates/treb-cli/src/commands/register.rs`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-11 13:15:47 CET - P11-US-002
+- Implemented Go-style clap parse error formatting for unknown commands and unknown flags, including matching `--json` stderr wrapping and help-target selection derived from clap usage context
+- Files changed: `crates/treb-cli/src/main.rs`, `crates/treb-cli/tests/cli_error_format.rs`, `crates/treb-cli/tests/cli_prune_reset_migrate.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
 - **Learnings for future iterations:**
-  - Patterns discovered: register-style commands should compute their effective namespace once, before generating registry IDs or transaction environment fields, so every derived artifact stays in sync.
-  - Gotchas encountered: using `resolve_config()` only for the omitted namespace path preserves the current explicit `--namespace` override behavior without introducing new config validation on explicit values.
-  - Useful context: `cargo test -p treb-cli effective_namespace_` is a fast focused check for the register namespace helper before running broader crate checks.
----
-## 2026-03-11 12:17:01 CET - P10-US-003
-- Implemented Go-parity `sync --clean` help text by changing the description to `Remove invalid entries while syncing` in both clap definitions and adding a dedicated `help_sync` golden snapshot.
-- Files changed: `CLAUDE.md`, `crates/treb-cli/build.rs`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/tests/integration_help.rs`, `crates/treb-cli/tests/golden/help_sync/commands.golden`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered: command-specific help wording should be pinned with a dedicated `help_<command>` golden instead of relying on generic flag-presence assertions.
-  - Gotchas encountered: changing only `src/main.rs` or only `build.rs` leaves clap help and generated completion metadata out of sync because sync flag descriptions are duplicated.
-  - Useful context: `UPDATE_GOLDEN=1 cargo test -p treb-cli help_sync --test integration_help` is enough to create or refresh the subcommand help snapshot before running `cargo check -p treb-cli`.
----
-## 2026-03-11 12:23:56 CET - P10-US-004
-- Added config-driven `register` integration coverage for network fallback, missing-network failure, and namespace fallback, plus the new golden snapshots that prove the resulting deployment IDs and persisted registry output.
-- Verified the existing `sync --clean` behavior and help coverage still pass through the integration suites required by this story.
-- Files changed: `crates/treb-cli/tests/integration_register.rs`, `crates/treb-cli/tests/golden/register_error_no_active_network/commands.golden`, `crates/treb-cli/tests/golden/register_network_from_config/commands.golden`, `crates/treb-cli/tests/golden/register_network_from_config/deployments.golden`, `crates/treb-cli/tests/golden/register_namespace_from_config/commands.golden`, `crates/treb-cli/tests/golden/register_namespace_from_config/deployments.golden`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered: config-backed register integration tests are easiest to express by seeding `.treb/config.local.json` through `treb config set ...` and, when needed, rewriting `treb.toml` in the temp fixture before `treb init`.
-  - Gotchas encountered: `UPDATE_GOLDEN=1` is not enough for new Anvil-backed snapshots if the gated test skips; confirm the new golden directories exist before trusting the update run.
-  - Useful context: the story acceptance is covered by `cargo test -p treb-cli --test integration_register`, `cargo test -p treb-cli --test integration_sync`, and `cargo test -p treb-cli help_sync --test integration_help`.
+  - Patterns discovered: clap's error context already exposes the invalid token, suggested replacements, and usage line, so parser error customization can stay structured instead of parsing formatted stderr
+  - Gotchas encountered: `ContextKind::Usage` includes the `Usage:` prefix and any already-parsed flags such as `--json`, so help-target extraction must strip that prefix and stop before option tokens
+  - Useful context: existing integration assertions that referenced clap's stock `unrecognized subcommand` wording needed to be updated to the new Go-style `Error: unknown command ...` surface
 ---
