@@ -4,6 +4,7 @@ Started: Wed Mar 11 11:50:04 AM CET 2026
 - For commands that accept both `--network` and `--rpc-url`, only resolve the config-backed network when both flags are absent, then pass that value through the existing RPC URL resolver so explicit overrides and direct-URL passthrough keep working unchanged.
 - For commands with an optional `--namespace`, resolve the omitted case through `treb_config::resolve_config()` instead of hard-coding `"default"` so local config precedence and namespace validation match the rest of the CLI.
 - For subcommand flag help text changes, update both `crates/treb-cli/src/main.rs` doc comments and `crates/treb-cli/build.rs` `Arg::help(...)` strings, then refresh a dedicated `help_<command>` golden so clap help and generated completions stay in sync.
+- For new Anvil-backed golden tests, refresh snapshots sequentially when creating new goldens; a skipped gated test under `UPDATE_GOLDEN=1` leaves the new golden directory absent even though the test itself still passes.
 
 ---
 ## 2026-03-11 11:52:57 CET - P10-US-001
@@ -31,4 +32,13 @@ Started: Wed Mar 11 11:50:04 AM CET 2026
   - Patterns discovered: command-specific help wording should be pinned with a dedicated `help_<command>` golden instead of relying on generic flag-presence assertions.
   - Gotchas encountered: changing only `src/main.rs` or only `build.rs` leaves clap help and generated completion metadata out of sync because sync flag descriptions are duplicated.
   - Useful context: `UPDATE_GOLDEN=1 cargo test -p treb-cli help_sync --test integration_help` is enough to create or refresh the subcommand help snapshot before running `cargo check -p treb-cli`.
+---
+## 2026-03-11 12:23:56 CET - P10-US-004
+- Added config-driven `register` integration coverage for network fallback, missing-network failure, and namespace fallback, plus the new golden snapshots that prove the resulting deployment IDs and persisted registry output.
+- Verified the existing `sync --clean` behavior and help coverage still pass through the integration suites required by this story.
+- Files changed: `crates/treb-cli/tests/integration_register.rs`, `crates/treb-cli/tests/golden/register_error_no_active_network/commands.golden`, `crates/treb-cli/tests/golden/register_network_from_config/commands.golden`, `crates/treb-cli/tests/golden/register_network_from_config/deployments.golden`, `crates/treb-cli/tests/golden/register_namespace_from_config/commands.golden`, `crates/treb-cli/tests/golden/register_namespace_from_config/deployments.golden`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: config-backed register integration tests are easiest to express by seeding `.treb/config.local.json` through `treb config set ...` and, when needed, rewriting `treb.toml` in the temp fixture before `treb init`.
+  - Gotchas encountered: `UPDATE_GOLDEN=1` is not enough for new Anvil-backed snapshots if the gated test skips; confirm the new golden directories exist before trusting the update run.
+  - Useful context: the story acceptance is covered by `cargo test -p treb-cli --test integration_register`, `cargo test -p treb-cli --test integration_sync`, and `cargo test -p treb-cli help_sync --test integration_help`.
 ---

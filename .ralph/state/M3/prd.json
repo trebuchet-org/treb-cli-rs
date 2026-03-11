@@ -63,7 +63,7 @@
         "`cargo test -p treb-cli --test integration_sync` passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]

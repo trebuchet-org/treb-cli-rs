@@ -24,6 +24,23 @@ fn golden_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("golden")
 }
 
+const TREB_TOML_WITH_STAGING_NAMESPACE: &str = r#"[accounts.deployer]
+type = "private_key"
+private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+
+[namespace.default]
+profile = "default"
+
+[namespace.default.senders]
+deployer = "deployer"
+
+[namespace.staging]
+profile = "default"
+
+[namespace.staging.senders]
+deployer = "deployer"
+"#;
+
 /// Deploy a minimal contract directly on Anvil via `eth_sendTransaction` and
 /// return the on-chain transaction hash.
 ///
@@ -174,6 +191,69 @@ async fn register_basic() {
     );
 }
 
+/// Register without `--network` falls back to the active config network.
+#[tokio::test(flavor = "multi_thread")]
+async fn register_network_from_config() {
+    let Some(ctx) = register_test_context().await else {
+        return;
+    };
+
+    ctx.run(["init"]).success();
+    ctx.run(["config", "set", "network", "anvil-31337"]).success();
+
+    let rpc_url = ctx.anvil("anvil-31337").unwrap().rpc_url().to_string();
+    let tx_hash = deploy_contract_on_anvil(&rpc_url).await;
+
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    run_register_golden_test(
+        &ctx,
+        "register_network_from_config",
+        &["register", "--tx-hash", &tx_hash],
+        &[".treb/deployments.json"],
+        vec![
+            Box::new(path_normalizer),
+            Box::new(CompilerOutputNormalizer),
+            Box::new(GasNormalizer),
+            Box::new(BlockNumberNormalizer),
+            Box::new(DurationNormalizer),
+        ],
+    );
+}
+
+/// Register without `--namespace` falls back to the active config namespace.
+#[tokio::test(flavor = "multi_thread")]
+async fn register_namespace_from_config() {
+    let Some(ctx) = register_test_context().await else {
+        return;
+    };
+
+    std::fs::write(ctx.path().join("treb.toml"), TREB_TOML_WITH_STAGING_NAMESPACE)
+        .expect("write treb.toml with staging namespace");
+
+    ctx.run(["init"]).success();
+    ctx.run(["config", "set", "namespace", "staging"]).success();
+
+    let rpc_url = ctx.anvil("anvil-31337").unwrap().rpc_url().to_string();
+    let tx_hash = deploy_contract_on_anvil(&rpc_url).await;
+
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    run_register_golden_test(
+        &ctx,
+        "register_namespace_from_config",
+        &["register", "--tx-hash", &tx_hash, "--network", "anvil-31337"],
+        &[".treb/deployments.json"],
+        vec![
+            Box::new(path_normalizer),
+            Box::new(CompilerOutputNormalizer),
+            Box::new(GasNormalizer),
+            Box::new(BlockNumberNormalizer),
+            Box::new(DurationNormalizer),
+        ],
+    );
+}
+
 /// Register with JSON output.
 ///
 /// Same setup as `register_basic`, verifies JSON structure with `deployments`
@@ -240,6 +320,21 @@ fn register_error_no_init() {
             std::fs::remove_dir_all(ctx.treb_dir()).ok();
             std::fs::remove_file(ctx.path().join("foundry.toml")).ok();
         })
+        .test(&["register", "--tx-hash", "0xabc"])
+        .expect_err(true)
+        .extra_normalizer(Box::new(path_normalizer));
+
+    run_integration_test(&test, &ctx);
+}
+
+/// Error: config-backed network fallback requires an active network.
+#[test]
+fn register_error_no_active_network() {
+    let ctx = TestContext::new("project");
+    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
+
+    let test = IntegrationTest::new("register_error_no_active_network")
+        .setup(&["init"])
         .test(&["register", "--tx-hash", "0xabc"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
