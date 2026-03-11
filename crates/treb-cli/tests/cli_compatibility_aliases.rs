@@ -416,6 +416,35 @@ fn compatibility_suite_still_exposes_completion_output_shape() {
 }
 
 #[test]
+fn register_help_exposes_phase_10_flag_surface() {
+    let output =
+        treb().args(["register", "--help"]).output().expect("register help command should run");
+
+    assert!(output.status.success(), "treb register --help should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for flag in ["--network", "--rpc-url", "--namespace", "--deployment-type", "--skip-verify"] {
+        assert!(stdout.contains(flag), "register help should include {flag}");
+    }
+}
+
+#[test]
+fn sync_help_exposes_phase_10_flag_surface() {
+    let output = treb().args(["sync", "--help"]).output().expect("sync help command should run");
+
+    assert!(output.status.success(), "treb sync --help should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for flag in ["--network", "--clean", "--debug", "--json"] {
+        assert!(stdout.contains(flag), "sync help should include {flag}");
+    }
+    assert!(
+        stdout.contains("Remove invalid entries while syncing"),
+        "sync help should include the Go-parity clean description"
+    );
+}
+
+#[test]
 fn list_short_flags_match_long_filter_output() {
     let tmp = setup_seeded_config_project();
 

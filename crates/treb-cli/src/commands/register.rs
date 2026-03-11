@@ -170,10 +170,12 @@ fn resolve_effective_namespace(
         network: None,
         profile: None,
         sender_overrides: HashMap::new(),
-    })
-    .map_err(|err| anyhow::anyhow!("{err}"))?;
+    });
 
-    Ok(resolved.namespace)
+    Ok(match resolved {
+        Ok(resolved) => resolved.namespace,
+        Err(_) => "default".to_string(),
+    })
 }
 
 // ── Trace parsing ───────────────────────────────────────────────────────
@@ -868,6 +870,29 @@ deployer = "deployer"
         let tmp = TempDir::new().unwrap();
         setup_project(tmp.path());
         std::fs::create_dir_all(tmp.path().join(".treb")).unwrap();
+
+        let namespace = resolve_effective_namespace(None, tmp.path()).unwrap();
+
+        assert_eq!(namespace, "default");
+    }
+
+    #[test]
+    fn effective_namespace_defaults_when_config_resolution_fails() {
+        let tmp = TempDir::new().unwrap();
+        setup_project(tmp.path());
+        std::fs::write(
+            tmp.path().join("treb.toml"),
+            r#"
+[namespace.default]
+profile = "default"
+"#,
+        )
+        .unwrap();
+        save_local_config(
+            tmp.path(),
+            &LocalConfig { namespace: "staging".to_string(), network: "mainnet".to_string() },
+        )
+        .unwrap();
 
         let namespace = resolve_effective_namespace(None, tmp.path()).unwrap();
 

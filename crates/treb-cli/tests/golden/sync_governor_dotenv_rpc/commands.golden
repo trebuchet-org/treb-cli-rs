@@ -1,0 +1,10 @@
+=== cmd 0: [sync] ===
+Syncing registry...
+🏛️ Syncing governor proposals...
+No pending Safe transactions found
+
+Governor Proposals:
+  • Checked: 1
+  • Proposals updated: 1
+
+✓ Registry synced successfully

@@ -1,0 +1,9 @@
+=== cmd 0: [register --tx-hash 0x1111111111111111111111111111111111111111111111111111111111111111] ===
+✓ Successfully registered 1 deployment(s)
+
+  Deployment 1:
+    Deployment ID: default/31337/Unknown
+    Address: 0x1234567890abcdef1234567890abcdef12345678
+    Contract: Unknown
+🔍 Tracing transaction...
+📝 Registering deployments...

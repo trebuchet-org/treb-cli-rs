@@ -79,6 +79,15 @@ fn help_sync() {
     run_integration_test(&test, &ctx);
 }
 
+/// `register --help` should snapshot the config-driven flag surface.
+#[test]
+fn help_register() {
+    let ctx = TestContext::new("minimal-project");
+    let test = IntegrationTest::new("help_register").test(&["register", "--help"]);
+
+    run_integration_test(&test, &ctx);
+}
+
 /// `verify --help` should snapshot the full flag-parity surface.
 #[test]
 fn help_verify() {
