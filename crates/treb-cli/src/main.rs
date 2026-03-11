@@ -347,7 +347,7 @@ enum Commands {
         /// Network name or chain ID
         #[arg(long)]
         network: Option<String>,
-        /// Remove safe transactions not found on the service
+        /// Remove invalid entries while syncing
         #[arg(long)]
         clean: bool,
         /// Print raw API responses to stderr

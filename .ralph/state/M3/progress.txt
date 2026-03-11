@@ -3,6 +3,7 @@ Started: Wed Mar 11 11:50:04 AM CET 2026
 ## Codebase Patterns
 - For commands that accept both `--network` and `--rpc-url`, only resolve the config-backed network when both flags are absent, then pass that value through the existing RPC URL resolver so explicit overrides and direct-URL passthrough keep working unchanged.
 - For commands with an optional `--namespace`, resolve the omitted case through `treb_config::resolve_config()` instead of hard-coding `"default"` so local config precedence and namespace validation match the rest of the CLI.
+- For subcommand flag help text changes, update both `crates/treb-cli/src/main.rs` doc comments and `crates/treb-cli/build.rs` `Arg::help(...)` strings, then refresh a dedicated `help_<command>` golden so clap help and generated completions stay in sync.
 
 ---
 ## 2026-03-11 11:52:57 CET - P10-US-001
@@ -22,4 +23,12 @@ Started: Wed Mar 11 11:50:04 AM CET 2026
   - Patterns discovered: register-style commands should compute their effective namespace once, before generating registry IDs or transaction environment fields, so every derived artifact stays in sync.
   - Gotchas encountered: using `resolve_config()` only for the omitted namespace path preserves the current explicit `--namespace` override behavior without introducing new config validation on explicit values.
   - Useful context: `cargo test -p treb-cli effective_namespace_` is a fast focused check for the register namespace helper before running broader crate checks.
+---
+## 2026-03-11 12:17:01 CET - P10-US-003
+- Implemented Go-parity `sync --clean` help text by changing the description to `Remove invalid entries while syncing` in both clap definitions and adding a dedicated `help_sync` golden snapshot.
+- Files changed: `CLAUDE.md`, `crates/treb-cli/build.rs`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/tests/integration_help.rs`, `crates/treb-cli/tests/golden/help_sync/commands.golden`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: command-specific help wording should be pinned with a dedicated `help_<command>` golden instead of relying on generic flag-presence assertions.
+  - Gotchas encountered: changing only `src/main.rs` or only `build.rs` leaves clap help and generated completion metadata out of sync because sync flag descriptions are duplicated.
+  - Useful context: `UPDATE_GOLDEN=1 cargo test -p treb-cli help_sync --test integration_help` is enough to create or refresh the subcommand help snapshot before running `cargo check -p treb-cli`.
 ---

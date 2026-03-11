@@ -70,6 +70,15 @@ fn help_show() {
     run_integration_test(&test, &ctx);
 }
 
+/// `sync --help` should pin the Go-parity clean flag description.
+#[test]
+fn help_sync() {
+    let ctx = TestContext::new("minimal-project");
+    let test = IntegrationTest::new("help_sync").test(&["sync", "--help"]);
+
+    run_integration_test(&test, &ctx);
+}
+
 /// `verify --help` should snapshot the full flag-parity surface.
 #[test]
 fn help_verify() {

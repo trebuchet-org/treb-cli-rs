@@ -1,0 +1,33 @@
+=== cmd 0: [sync --help] ===
+Sync registry with on-chain state
+
+Update deployment registry with latest on-chain information. Checks
+pending Safe transactions and updates their execution status.
+
+This command will:
+- Check all pending Safe transactions for execution status
+
+Usage: treb sync [OPTIONS]
+
+Options:
+      --network <NETWORK>
+          Network name or chain ID
+
+      --no-color
+          Disable colored output (also respected via NO_COLOR env var)
+
+      --clean
+          Remove invalid entries while syncing
+
+      --non-interactive
+          Skip interactive prompts (also enabled via TREB_NON_INTERACTIVE=1, CI=true, or non-TTY
+          stdin/stdout)
+
+      --debug
+          Print raw API responses to stderr
+
+      --json
+          Output as JSON
+
+  -h, --help
+          Print help (see a summary with '-h')
