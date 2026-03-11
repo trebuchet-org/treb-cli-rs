@@ -2,6 +2,7 @@
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
+use std::process::Command;
 
 fn treb() -> assert_cmd::Command {
     cargo_bin_cmd!("treb-cli")
@@ -36,6 +37,41 @@ fn version_flag_matches_json_version_field() {
     let version = json["version"].as_str().expect("version field is not a string");
 
     assert_eq!(version_stdout, format!("treb {version}\n"));
+}
+
+#[test]
+fn version_json_uses_git_describe_output_in_untagged_checkouts() {
+    let describe_always = Command::new("git")
+        .args(["describe", "--tags", "--always", "--dirty"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("failed to run git describe --tags --always --dirty");
+    assert!(describe_always.status.success(), "git describe --always should succeed in the repo");
+
+    let expected_version =
+        String::from_utf8(describe_always.stdout).expect("git describe output is not utf-8");
+    let expected_version = expected_version.trim();
+
+    let tagged_describe = Command::new("git")
+        .args(["describe", "--tags", "--abbrev=7"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("failed to run git describe --tags --abbrev=7");
+    assert!(
+        !tagged_describe.status.success(),
+        "this regression test expects the default checkout to be untagged"
+    );
+
+    let json_output =
+        treb().args(["version", "--json"]).output().expect("failed to run treb version --json");
+    assert!(json_output.status.success());
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&json_output.stdout).expect("output is not valid JSON");
+    let version = json["version"].as_str().expect("version field is not a string");
+
+    assert_eq!(version, expected_version);
+    assert_ne!(version, env!("CARGO_PKG_VERSION"));
 }
 
 #[test]

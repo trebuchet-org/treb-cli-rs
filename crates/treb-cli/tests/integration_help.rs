@@ -123,3 +123,21 @@ fn help_migrate() {
 
     run_integration_test(&test, &ctx);
 }
+
+/// `dev --help` should include the contextual footer for nested subcommands.
+#[test]
+fn help_dev() {
+    let ctx = TestContext::new("minimal-project");
+    let test = IntegrationTest::new("help_dev").test(&["dev", "--help"]);
+
+    run_integration_test(&test, &ctx);
+}
+
+/// `dev anvil --help` should include the contextual footer for nested subcommands.
+#[test]
+fn help_dev_anvil() {
+    let ctx = TestContext::new("minimal-project");
+    let test = IntegrationTest::new("help_dev_anvil").test(&["dev", "anvil", "--help"]);
+
+    run_integration_test(&test, &ctx);
+}

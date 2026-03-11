@@ -9,8 +9,6 @@ use treb_core::types::DeploymentType;
 
 const ROOT_HELP_FOOTER: &str =
     "Use \"treb [command] --help\" for more information about a command.";
-const CONTEXTUAL_HELP_FOOTER_COMMANDS: &[&str] =
-    &["gen", "fork", "config", "addressbook", "migrate"];
 
 /// Parse a deployment type string (case-insensitive).
 fn parse_deployment_type(s: &str) -> Result<DeploymentType, String> {
@@ -661,23 +659,21 @@ fn build_grouped_command() -> clap::Command {
         cmd = cmd.mut_subcommand(name, |s| s.hide(true));
     }
 
-    cmd.after_help(grouped_help)
-        .override_usage("treb [OPTIONS] <COMMAND>")
-        .help_template(format!(
-            "Smart contract deployment orchestrator for Foundry\n\
+    cmd.after_help(grouped_help).override_usage("treb [OPTIONS] <COMMAND>").help_template(format!(
+        "Smart contract deployment orchestrator for Foundry\n\
              \n\
              {{usage-heading}} {{usage}}\
              {{after-help}}\n\
              \nOptions:\n\
              {{options}}\n\
              {ROOT_HELP_FOOTER}\n"
-        ))
+    ))
 }
 
 fn apply_contextual_help_footers(mut cmd: clap::Command, command_path: &str) -> clap::Command {
     // Clap treats `-h` as short help and `--help` as long help. Keep navigation
     // footers in `after_long_help` so the extra guidance only appears on `--help`.
-    if should_add_contextual_help_footer(command_path) {
+    if should_add_contextual_help_footer(&cmd, command_path) {
         cmd = cmd.after_long_help(contextual_help_footer(command_path));
     }
 
@@ -693,12 +689,8 @@ fn apply_contextual_help_footers(mut cmd: clap::Command, command_path: &str) -> 
     cmd
 }
 
-fn should_add_contextual_help_footer(command_path: &str) -> bool {
-    command_path
-        .split_whitespace()
-        .nth(1)
-        .filter(|_| command_path.split_whitespace().count() == 2)
-        .is_some_and(|subcommand| CONTEXTUAL_HELP_FOOTER_COMMANDS.contains(&subcommand))
+fn should_add_contextual_help_footer(cmd: &clap::Command, command_path: &str) -> bool {
+    command_path != "treb" && cmd.get_subcommands().any(|subcommand| !subcommand.is_hide_set())
 }
 
 fn contextual_help_footer(command_path: &str) -> String {
@@ -1755,7 +1747,9 @@ mod tests {
         let help = String::from_utf8(buffer).unwrap();
 
         assert!(
-            help.contains("Use \"treb config [command] --help\" for more information about a command."),
+            help.contains(
+                "Use \"treb config [command] --help\" for more information about a command."
+            ),
             "unexpected help output: {help}"
         );
     }
@@ -1768,7 +1762,44 @@ mod tests {
         let help = String::from_utf8(buffer).unwrap();
 
         assert!(
-            !help.contains("Use \"treb config [command] --help\" for more information about a command."),
+            !help.contains(
+                "Use \"treb config [command] --help\" for more information about a command."
+            ),
+            "unexpected help output: {help}"
+        );
+    }
+
+    #[test]
+    fn dev_long_help_includes_contextual_footer() {
+        let mut cmd = build_grouped_command();
+        let mut buffer = Vec::new();
+        cmd.find_subcommand_mut("dev").unwrap().write_long_help(&mut buffer).unwrap();
+        let help = String::from_utf8(buffer).unwrap();
+
+        assert!(
+            help.contains(
+                "Use \"treb dev [command] --help\" for more information about a command."
+            ),
+            "unexpected help output: {help}"
+        );
+    }
+
+    #[test]
+    fn dev_anvil_long_help_includes_contextual_footer() {
+        let mut cmd = build_grouped_command();
+        let mut buffer = Vec::new();
+        cmd.find_subcommand_mut("dev")
+            .unwrap()
+            .find_subcommand_mut("anvil")
+            .unwrap()
+            .write_long_help(&mut buffer)
+            .unwrap();
+        let help = String::from_utf8(buffer).unwrap();
+
+        assert!(
+            help.contains(
+                "Use \"treb dev anvil [command] --help\" for more information about a command."
+            ),
             "unexpected help output: {help}"
         );
     }
