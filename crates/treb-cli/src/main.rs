@@ -742,6 +742,7 @@ where
     if let Some(index) = config_show_insertion_index(&args) {
         args.insert(index, OsString::from("show"));
     }
+    normalize_addressbook_help_args(&mut args);
     if let Some(index) = addressbook_list_insertion_index(&args) {
         args.insert(index, OsString::from("list"));
     }
@@ -831,6 +832,72 @@ fn addressbook_list_insertion_index(args: &[OsString]) -> Option<usize> {
     }
 
     Some(index)
+}
+
+fn normalize_addressbook_help_args(args: &mut Vec<OsString>) {
+    let mut command_index = 1;
+    while let Some(arg) = args.get(command_index) {
+        if arg == OsStr::new("--") {
+            return;
+        }
+
+        if matches!(arg.to_str(), Some("-h" | "--help" | "-V" | "--version")) {
+            return;
+        }
+
+        if !arg.to_string_lossy().starts_with('-') {
+            break;
+        }
+
+        command_index += 1;
+    }
+
+    let command = match args.get(command_index).map(OsString::as_os_str) {
+        Some(command) => command,
+        None => return,
+    };
+    if command != OsStr::new("addressbook") && command != OsStr::new("ab") {
+        return;
+    }
+
+    let mut help_insert_index = command_index + 1;
+    let mut index = command_index + 1;
+    while let Some(arg) = args.get(index) {
+        match arg.to_str() {
+            Some("-h" | "--help") => {
+                if index != help_insert_index {
+                    let help = args.remove(index);
+                    args.insert(help_insert_index, help);
+                }
+                return;
+            }
+            Some("set" | "remove" | "list" | "ls" | "help") => return,
+            Some("--network" | "-n" | "--namespace" | "-s") => {
+                if args.get(index + 1).is_none() {
+                    return;
+                }
+                help_insert_index = index + 2;
+                index += 2;
+            }
+            Some(flag) if flag.starts_with("--network=") || flag.starts_with("--namespace=") => {
+                help_insert_index = index + 1;
+                index += 1;
+            }
+            Some(flag)
+                if short_flag_has_inline_value(flag, 'n')
+                    || short_flag_has_inline_value(flag, 's') =>
+            {
+                help_insert_index = index + 1;
+                index += 1;
+            }
+            Some("--") => return,
+            Some(flag) if flag.starts_with('-') => {
+                index += 1;
+            }
+            Some(_) => return,
+            None => return,
+        }
+    }
 }
 
 fn short_flag_has_inline_value(flag: &str, short: char) -> bool {
@@ -1472,6 +1539,20 @@ mod tests {
         match parse_cli_from(["treb", "addressbook", "--help"]) {
             Ok(_) => panic!("expected addressbook --help to return clap help output"),
             Err(err) => assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp),
+        }
+    }
+
+    #[test]
+    fn addressbook_help_after_flags_does_not_normalize_to_list() {
+        for args in [
+            ["treb", "addressbook", "--no-color", "--help"],
+            ["treb", "ab", "--non-interactive", "--help"],
+            ["treb", "addressbook", "--json", "--help"],
+        ] {
+            match parse_cli_from(args) {
+                Ok(_) => panic!("expected addressbook help to bypass list normalization"),
+                Err(err) => assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp),
+            }
         }
     }
 
