@@ -9,7 +9,7 @@ use std::{collections::HashMap, env, time::Duration};
 use anyhow::{Context, bail};
 use chrono::Utc;
 use serde::Serialize;
-use treb_config::{ResolveOpts, resolve_config};
+use treb_config::load_local_config;
 use treb_core::types::{
     ArtifactInfo, Deployment, DeploymentMethod, DeploymentStrategy, DeploymentType, Operation,
     ProxyInfo, Transaction, TransactionStatus, VerificationInfo, VerificationStatus,
@@ -142,21 +142,13 @@ fn resolve_effective_network(
         return Ok(network);
     }
 
-    let resolved = resolve_config(ResolveOpts {
-        project_root: cwd.to_path_buf(),
-        namespace: None,
-        network: None,
-        profile: None,
-        sender_overrides: HashMap::new(),
-    })
-    .map_err(|err| anyhow::anyhow!("{err}"))?;
+    let local = load_local_config(cwd).map_err(|err| anyhow::anyhow!("{err}"))?;
 
-    resolved
-        .network
-        .ok_or_else(|| {
-            anyhow::anyhow!("no active network set in config, --network flag is required")
-        })
-        .map(Some)
+    if local.network.is_empty() {
+        anyhow::bail!("no active network set in config, --network flag is required");
+    }
+
+    Ok(Some(local.network))
 }
 
 // ── Trace parsing ───────────────────────────────────────────────────────
@@ -751,6 +743,29 @@ needs_env = "https://rpc.example.com/${API_KEY}"
     fn effective_network_falls_back_to_config() {
         let tmp = TempDir::new().unwrap();
         setup_project_with_config(tmp.path(), "mainnet");
+
+        let network = resolve_effective_network(None, None, tmp.path()).unwrap();
+
+        assert_eq!(network.as_deref(), Some("mainnet"));
+    }
+
+    #[test]
+    fn effective_network_ignores_invalid_local_namespace() {
+        let tmp = TempDir::new().unwrap();
+        setup_project(tmp.path());
+        std::fs::write(
+            tmp.path().join("treb.toml"),
+            r#"
+[namespace.default]
+profile = "default"
+"#,
+        )
+        .unwrap();
+        save_local_config(
+            tmp.path(),
+            &LocalConfig { namespace: "staging".to_string(), network: "mainnet".to_string() },
+        )
+        .unwrap();
 
         let network = resolve_effective_network(None, None, tmp.path()).unwrap();
 
