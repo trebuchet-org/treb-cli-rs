@@ -1,135 +1,69 @@
 {
   "project": "treb-cli-rs",
-  "branchName": "feat/M3-P09-addressbook-command",
-  "description": "Implement the addressbook command with list/set/remove subcommands for managing named addresses scoped by chain ID, stored in .treb/addressbook.json, bringing the Rust CLI to full parity with the Go CLI on address management.",
+  "branchName": "feat/M3-P10-register-and-sync-flag-alignment",
+  "description": "Align register and sync commands with Go CLI behavior: config-driven network/namespace fallback for register, sync --clean help text parity, and integration test coverage for both commands in Go-style project configurations.",
   "userStories": [
     {
-      "id": "P9-US-001",
-      "title": "Addressbook Store Module",
-      "description": "As a developer, I want an AddressbookStore in treb-registry with nested map structure (chain_id -> name -> address), CRUD methods, and Registry facade wiring so that addressbook data can be persisted in Go-compatible format.",
+      "id": "P10-US-001",
+      "title": "Register Config-Driven Network Fallback",
+      "description": "As a developer, I want `treb register --tx-hash 0x...` to resolve the network from treb.toml/config.local.json when --network and --rpc-url are omitted, so that register works without explicit flags in configured projects like the Go CLI.",
       "acceptanceCriteria": [
-        "New file crates/treb-registry/src/store/addressbook.rs with AddressbookStore struct following established store pattern (PathBuf + nested HashMap + load/save)",
-        "Internal data type: HashMap<String, HashMap<String, String>> — outer key is chain ID string, inner map is name→address",
-        "load() uses read_versioned_file() to accept both bare JSON and legacy wrapped format; returns empty map when file does not exist",
-        "save() converts to nested BTreeMap<String, BTreeMap<String, String>> before calling write_versioned_file() for deterministic key ordering",
-        "CRUD methods: list_entries(chain_id) returning sorted Vec<(String, String)>, set_entry(chain_id, name, address), remove_entry(chain_id, name) with error on not found, has_entry(chain_id, name)",
-        "remove_entry cleans up empty chain maps (removes outer key when inner map becomes empty)",
-        "ADDRESSBOOK_FILE constant added to crates/treb-registry/src/lib.rs",
-        "Store module registered in crates/treb-registry/src/store/mod.rs with pub use",
-        "AddressbookStore field added to Registry struct with accessor methods (load_addressbook, addressbook, addressbook_mut, set_addressbook_entry, remove_addressbook_entry, list_addressbook_entries)",
-        "Registry::init() does NOT create an empty addressbook.json — file created on first write",
-        "Unit tests for store load/save round-trip, BTreeMap ordering, and empty-chain cleanup",
-        "cargo check -p treb-registry passes",
-        "cargo test -p treb-registry passes"
+        "`treb register --tx-hash 0x... --network anvil-31337` still works (explicit flag path unchanged)",
+        "`treb register --tx-hash 0x... --rpc-url http://...` still works (explicit URL path unchanged)",
+        "`treb register --tx-hash 0x...` (no network flag) resolves network from treb.toml config when available",
+        "`treb register --tx-hash 0x...` errors with 'no active network set in config, --network flag is required' when config has no network and no flag is provided",
+        "`resolve_rpc_endpoints` is called with dotenv already loaded (via resolve_config or resolve_rpc_endpoints which calls load_dotenv internally)",
+        "Unit test for fallback logic in register.rs",
+        "Typecheck passes: `cargo check -p treb-cli`"
       ],
       "priority": 1,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "P9-US-002",
-      "title": "Addressbook Command Scaffolding with Set Subcommand",
-      "description": "As a user, I want to run treb addressbook set <name> <address> (or treb ab set) to add a named address entry scoped to the current chain ID so that I can manage addresses in my project.",
+      "id": "P10-US-002",
+      "title": "Register Config-Driven Namespace Fallback",
+      "description": "As a developer, I want `treb register` to derive the namespace from resolve_config() when --namespace is omitted, so that register respects treb.toml namespace settings like the Go CLI does.",
       "acceptanceCriteria": [
-        "New file crates/treb-cli/src/commands/addressbook.rs with AddressbookSubcommand enum (Set, Remove, List) and pub async fn run() dispatcher",
-        "Commands enum in main.rs gains Addressbook variant with #[command(alias = \"ab\")], --namespace/-s and --network/-n flags, and #[command(subcommand)]",
-        "Set subcommand accepts two required positional args: <name> and <address>",
-        "Address validation: must match ^0x[0-9a-fA-F]{40}$ with clear error message",
-        "Chain ID resolution: resolves --network value or config network to chain ID via Alloy Chain enum or numeric parsing; errors if no network configured",
-        "On success prints: Set <name> = <address> (chain <chainId>)",
-        "set calls Registry::set_addressbook_entry() then save()",
-        "Command registered in commands/mod.rs and dispatched in main() match arm",
-        "addressbook and ab mirrored in build.rs with all subcommands and flags",
-        "parse_cli_from unit tests: addressbook set and ab set parse correctly and identically",
-        "cargo check --workspace passes",
-        "cargo clippy --workspace --all-targets passes"
+        "`treb register --namespace production ...` still overrides config namespace",
+        "`treb register --tx-hash 0x... --network anvil-31337` (no --namespace) uses namespace from config resolution, or 'default' if no config exists",
+        "Generated deployment IDs use the config-derived namespace when --namespace is not provided",
+        "Unit test for namespace resolution priority: explicit flag > config > 'default'",
+        "Typecheck passes: `cargo check -p treb-cli`"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P9-US-003",
-      "title": "Addressbook Remove Subcommand",
-      "description": "As a user, I want to run treb addressbook remove <name> to delete a named address entry from the addressbook for the current chain so that I can clean up unused entries.",
+      "id": "P10-US-003",
+      "title": "Sync Clean Flag Description and Help Alignment",
+      "description": "As a developer, I want `sync --clean` help text to match the Go CLI description so that the Rust CLI help output is consistent with Go.",
       "acceptanceCriteria": [
-        "Remove subcommand accepts one required positional arg: <name>",
-        "Resolves chain ID using the same utility as set (from --network or config)",
-        "Calls Registry::remove_addressbook_entry(chain_id, name) — errors if entry not found with message: addressbook entry '<name>' not found on chain <chainId>",
-        "On success prints: Removed <name> (chain <chainId>)",
-        "parse_cli_from unit test: ab remove Foo parses correctly",
-        "cargo check --workspace passes"
+        "`treb sync --help` shows --clean with description 'Remove invalid entries while syncing'",
+        "build.rs and main.rs descriptions for sync --clean match",
+        "Golden help snapshots updated for sync help changes",
+        "Typecheck passes: `cargo check -p treb-cli`"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
-      "id": "P9-US-004",
-      "title": "Addressbook List Subcommand and Default Behavior",
-      "description": "As a user, I want to run treb addressbook list (or treb ab ls) to see all named addresses for the current chain, with optional --json output and bare treb addressbook defaulting to list behavior.",
+      "id": "P10-US-004",
+      "title": "Integration Tests for Config-Driven Register and Sync",
+      "description": "As a developer, I want integration tests verifying register and sync work correctly in Go-style project configurations where network/namespace come from config rather than explicit flags.",
       "acceptanceCriteria": [
-        "List subcommand has #[command(alias = \"ls\")] for the ls shorthand",
-        "--json flag on List subcommand",
-        "Human output: entries sorted by name, each line %-24s %s with name in bold yellow and address in default color",
-        "Empty state: prints 'No addressbook entries found' (no error, exit 0)",
-        "JSON output: array of {\"name\": \"...\", \"address\": \"...\"} objects sorted by name via output::print_json()",
-        "Default subcommand: bare treb addressbook and treb ab default to list via argv normalization in normalize_cli_args(), keeping --help unnormalized",
-        "list alias ls mirrored in build.rs",
-        "parse_cli_from unit tests: bare addressbook normalizes to list, ab ls --json parses with json=true",
-        "cargo check --workspace passes",
-        "cargo clippy --workspace --all-targets passes"
+        "At least one test proves register resolves network from config (Anvil-backed, similar to existing register_basic pattern)",
+        "At least one test proves register errors correctly when config has no network and no flag",
+        "At least one test proves namespace comes from config when --namespace is omitted",
+        "Sync clean flag acceptance and help text test passes",
+        "All existing register and sync tests continue to pass",
+        "`cargo test -p treb-cli --test integration_register` passes",
+        "`cargo test -p treb-cli --test integration_sync` passes"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "P9-US-005",
-      "title": "Update Golden Tests, Help Snapshots, and Add Integration Tests",
-      "description": "As a developer, I want golden help snapshots and integration tests for all addressbook subcommands so that behavior and output formatting are pinned against regressions.",
-      "acceptanceCriteria": [
-        "New help_addressbook golden snapshot in integration_help.rs for treb addressbook --help",
-        "Root help golden (help_root) refreshed to include addressbook in Management Commands group",
-        "New integration test file crates/treb-cli/tests/integration_addressbook.rs with test cases: set_and_list, set_and_list_json, remove, remove_not_found, invalid_address, no_network, default_to_list, empty_list",
-        "Integration tests use TestContext with project fixture and --network flag with numeric chain ID",
-        "Tests use NO_COLOR=1 for stable human output assertions",
-        "UPDATE_GOLDEN=1 cargo test -p treb-cli --test integration_help refreshes help snapshots",
-        "All golden tests pass",
-        "cargo test -p treb-cli passes"
-      ],
-      "priority": 5,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "P9-US-006",
-      "title": "CLI Compatibility Alias Tests",
-      "description": "As a developer, I want alias parity tests verifying that addressbook vs ab and list vs ls produce byte-identical output so that backward-compatible aliases stay reliable.",
-      "acceptanceCriteria": [
-        "New test cases in cli_compatibility_aliases.rs: addressbook_vs_ab_list, addressbook_list_vs_ls, addressbook_vs_ab_set, addressbook_default_vs_list",
-        "Each invocation uses a separate identically seeded temp project (since set/remove mutate state)",
-        "Tests follow established assert_matching_command_output pattern with seed function",
-        "cargo test -p treb-cli --test cli_compatibility_aliases passes"
-      ],
-      "priority": 6,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "P9-US-007",
-      "title": "Go Compatibility Store Tests",
-      "description": "As a developer, I want Go-compatible addressbook fixture and store-level tests so that the Rust store can read Go-written addressbook data and produce Go-readable output without data loss.",
-      "acceptanceCriteria": [
-        "New Go-compat fixture at crates/treb-registry/tests/fixtures/go-compat/addressbook.json with representative multi-chain bare JSON",
-        "Store-load test: AddressbookStore::load() correctly deserializes the Go-compat fixture",
-        "Round-trip test: load Go fixture → save → reload → verify entries unchanged",
-        "Key-set comparison: Rust-written JSON has identical recursive key structure to Go fixture",
-        "Confirm addressbook.json is bare JSON (not wrapped in _format/entries)",
-        "cargo test -p treb-registry passes"
-      ],
-      "priority": 7,
-      "passes": true,
+      "passes": false,
       "notes": ""
     }
   ]

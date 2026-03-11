@@ -9,6 +9,7 @@ use std::{collections::HashMap, env, time::Duration};
 use anyhow::{Context, bail};
 use chrono::Utc;
 use serde::Serialize;
+use treb_config::{ResolveOpts, resolve_config};
 use treb_core::types::{
     ArtifactInfo, Deployment, DeploymentMethod, DeploymentStrategy, DeploymentType, Operation,
     ProxyInfo, Transaction, TransactionStatus, VerificationInfo, VerificationStatus,
@@ -126,6 +127,36 @@ fn resolve_rpc_url(
     }
 
     Ok(url.expanded_url.clone())
+}
+
+/// Resolve the effective network for `register`.
+///
+/// Explicit `--network` wins. When `--rpc-url` is provided, network lookup is
+/// not needed. Otherwise, fall back to the active config network.
+fn resolve_effective_network(
+    network: Option<String>,
+    rpc_url: Option<&str>,
+    cwd: &std::path::Path,
+) -> anyhow::Result<Option<String>> {
+    if network.is_some() || rpc_url.is_some() {
+        return Ok(network);
+    }
+
+    let resolved = resolve_config(ResolveOpts {
+        project_root: cwd.to_path_buf(),
+        namespace: None,
+        network: None,
+        profile: None,
+        sender_overrides: HashMap::new(),
+    })
+    .map_err(|err| anyhow::anyhow!("{err}"))?;
+
+    resolved
+        .network
+        .ok_or_else(|| {
+            anyhow::anyhow!("no active network set in config, --network flag is required")
+        })
+        .map(Some)
 }
 
 // ── Trace parsing ───────────────────────────────────────────────────────
@@ -335,6 +366,7 @@ pub async fn run(
     }
 
     // ── Resolve RPC URL ─────────────────────────────────────────────────
+    let network = resolve_effective_network(network, rpc_url.as_deref(), &cwd)?;
     let effective_rpc_url = resolve_rpc_url(rpc_url, network, &cwd)?;
     let client = rpc_client()?;
 
@@ -650,6 +682,7 @@ mod tests {
     use super::*;
 
     use tempfile::TempDir;
+    use treb_config::{LocalConfig, save_local_config};
 
     // ── Helper ──────────────────────────────────────────────────────────
 
@@ -701,6 +734,37 @@ needs_env = "https://rpc.example.com/${API_KEY}"
 "#,
         )
         .unwrap();
+    }
+
+    fn setup_project_with_config(dir: &std::path::Path, network: &str) {
+        setup_project(dir);
+        save_local_config(
+            dir,
+            &LocalConfig { namespace: "default".to_string(), network: network.to_string() },
+        )
+        .unwrap();
+    }
+
+    // ── resolve_effective_network ───────────────────────────────────────
+
+    #[test]
+    fn effective_network_falls_back_to_config() {
+        let tmp = TempDir::new().unwrap();
+        setup_project_with_config(tmp.path(), "mainnet");
+
+        let network = resolve_effective_network(None, None, tmp.path()).unwrap();
+
+        assert_eq!(network.as_deref(), Some("mainnet"));
+    }
+
+    #[test]
+    fn effective_network_missing_config_errors() {
+        let tmp = TempDir::new().unwrap();
+        setup_project(tmp.path());
+
+        let err = resolve_effective_network(None, None, tmp.path()).unwrap_err();
+
+        assert_eq!(err.to_string(), "no active network set in config, --network flag is required");
     }
 
     // ── resolve_rpc_url ─────────────────────────────────────────────────

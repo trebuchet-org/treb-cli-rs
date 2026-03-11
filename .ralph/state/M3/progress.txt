@@ -1,75 +1,15 @@
 # Ralph Progress Log
+Started: Wed Mar 11 11:50:04 AM CET 2026
 ## Codebase Patterns
-- Nested map registry stores should sort both outer and inner maps into `BTreeMap`s before `write_versioned_file()` so bare JSON output stays deterministic.
-- Top-level CLI commands must stay in sync across `crates/treb-cli/src/main.rs`, `crates/treb-cli/build.rs`, and any manually maintained root-help goldens because clap parsing, shell completions, and grouped help are wired separately.
-- Addressbook subcommands should reuse `resolve_effective_chain_id()` in `crates/treb-cli/src/commands/addressbook.rs` so numeric chain IDs, Alloy named chains, and config defaults resolve consistently across `set`, `remove`, and `list`.
-- Default CLI subcommands implemented through `normalize_cli_args()` should insert after parent-scoped flags like `-n/-s` and before subcommand-only flags like `--json`, while still leaving `--help` unnormalized.
-- Addressbook CLI integration coverage is stable when it uses `TestContext::new("project")`, runs `treb init`, passes a numeric `--network`, and sets `NO_COLOR=1` for human-output assertions.
-- Stateful alias-compatibility tests should compare each command in its own identically seeded temp project; seed registry-backed state up front so mutations like `set` or `remove` do not leak across invocations.
-- Go registry compatibility tests should seed the raw fixture under the current store filename in a temp registry dir, then assert that `store.save()` preserves bare JSON and the fixture’s recursive key structure.
+- For commands that accept both `--network` and `--rpc-url`, only resolve the config-backed network when both flags are absent, then pass that value through the existing RPC URL resolver so explicit overrides and direct-URL passthrough keep working unchanged.
 
-Started: Wed Mar 11 12:14:13 AM CET 2026
 ---
-## 2026-03-11 00:22:16 CET - P9-US-001
-- Implemented `AddressbookStore` with nested chain-id to name-to-address persistence, bare/wrapped JSON loading, deterministic writes, CRUD helpers, and empty-chain cleanup.
-- Wired the store into `treb-registry` exports and the `Registry` facade with load/accessor/set/remove/list methods, plus init/open coverage to ensure `.treb/addressbook.json` is only created on first write.
-- Files changed: `CLAUDE.md`, `crates/treb-registry/src/lib.rs`, `crates/treb-registry/src/registry.rs`, `crates/treb-registry/src/store/addressbook.rs`, `crates/treb-registry/src/store/mod.rs`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+## 2026-03-11 11:52:57 CET - P10-US-001
+- Implemented config-driven network fallback for `treb register` so it consults `resolve_config()` only when both `--network` and `--rpc-url` are omitted, then reuses the existing RPC endpoint resolution path.
+- Added focused unit coverage for the config-network fallback and the Go-parity missing-network error message.
+- Files changed: `CLAUDE.md`, `crates/treb-cli/src/commands/register.rs`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
 - **Learnings for future iterations:**
-  - Patterns discovered: `treb-registry` store files are written as bare JSON but must still load legacy wrapped `_format`/`entries` payloads through `read_versioned_file()`.
-  - Gotchas encountered: `Registry::init()` should only create `.treb/` and must not eagerly materialize optional store files like `addressbook.json`.
-  - Useful context: `Registry::open()` is the central place to instantiate and load new stores, and facade helpers belong directly on `Registry` alongside the other store delegates.
----
-## 2026-03-11 00:34:35 CET - P9-US-002
-- Implemented the `treb addressbook` / `treb ab` command scaffold with `set`, `remove`, and `list` subcommands, plus a working `set` flow that validates `0x` addresses, resolves the effective chain ID from `--network` or config, and persists entries through the registry facade.
-- Wired the new top-level command into clap parsing, runtime dispatch, grouped root help, and shell completion generation, and added parser coverage for both `addressbook set` and `ab set`.
-- Files changed: `crates/treb-cli/build.rs`, `crates/treb-cli/src/commands/addressbook.rs`, `crates/treb-cli/src/commands/mod.rs`, `crates/treb-cli/src/main.rs`, `crates/treb-cli/tests/golden/help_root/commands.golden`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered: top-level CLI commands require parallel updates in clap derive definitions, `build.rs` completions, and grouped help snapshots because those surfaces are maintained independently.
-  - Gotchas encountered: changing `build_grouped_help()` will break `help_root` until the corresponding golden snapshot is refreshed.
-  - Useful context: addressbook chain resolution now lives in `crates/treb-cli/src/commands/addressbook.rs` and already supports both numeric chain IDs and Alloy named chains for reuse by `remove` and `list`.
----
-## 2026-03-11 00:41:54 CET - P9-US-003
-- Implemented `treb addressbook remove <name>` so it reuses the shared addressbook chain-resolution path, removes entries through the registry facade, prints `Removed <name> (chain <chainId>)` on success, and rewrites missing-entry failures to `addressbook entry '<name>' not found on chain <chainId>`.
-- Added focused test coverage for the CLI-facing remove error mapping and for `treb ab ... remove` parser behavior.
-- Files changed: `crates/treb-cli/src/commands/addressbook.rs`, `crates/treb-cli/src/main.rs`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered: addressbook subcommands should keep using `resolve_effective_chain_id()` in `crates/treb-cli/src/commands/addressbook.rs` so `--network` and config defaults resolve identically across set/remove/list.
-  - Gotchas encountered: the registry store returns a generic missing-entry error, so the command layer needs to translate that into the subcommand’s exact user-facing wording.
-  - Useful context: `cargo test -p treb-cli addressbook` is a fast focused check for the addressbook command module and parser coverage while broader integration coverage is still pending in later stories.
----
-## 2026-03-11 00:55:13 CET - P9-US-004
-- Implemented `treb addressbook list` with `ls` alias and `--json`, wired bare `treb addressbook` / `treb ab` to normalize to `list`, and added sorted human output plus the empty-state message for the current chain scope.
-- Mirrored the list alias and JSON flag into `crates/treb-cli/build.rs`, taught `Commands::json_flag()` about `addressbook list --json`, and added parser coverage for bare-command normalization, `ab ls --json`, and `--help` staying unnormalized.
-- Files changed: `CLAUDE.md`, `crates/treb-cli/build.rs`, `crates/treb-cli/src/commands/addressbook.rs`, `crates/treb-cli/src/main.rs`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered: default-subcommand argv normalization needs to skip over parent command scope flags before inserting the synthetic subcommand so list-only flags like `--json` still bind to the intended child command.
-  - Gotchas encountered: `Commands::json_flag()` needs explicit coverage for nested subcommands, otherwise JSON parse/runtime errors keep rendering as human stderr even when the subcommand accepts `--json`.
-  - Useful context: full validation for clap-facing command work is practical here with `cargo check --workspace`, `cargo clippy --workspace --all-targets`, and `cargo test -p treb-cli`.
----
-## 2026-03-11 01:21:19 CET - P9-US-005
-- Added dedicated `treb addressbook --help` golden coverage and a new `integration_addressbook.rs` suite covering set/list human output, JSON listing, remove success/error paths, invalid-address validation, missing-network handling, default-to-list behavior, and the empty-list state.
-- Refreshed the new help snapshot with `UPDATE_GOLDEN=1` and recorded the stable addressbook integration-test pattern in `CLAUDE.md`.
-- Files changed: `CLAUDE.md`, `crates/treb-cli/tests/golden/help_addressbook/commands.golden`, `crates/treb-cli/tests/integration_addressbook.rs`, `crates/treb-cli/tests/integration_help.rs`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered: addressbook integration tests are simplest with the `project` fixture plus `treb init`, because that gives a real config surface while leaving network selection explicit through numeric `--network`.
-  - Gotchas encountered: human-output assertions need `NO_COLOR=1`; otherwise the bold/yellow name styling changes the captured stdout bytes.
-  - Useful context: `UPDATE_GOLDEN=1 cargo test -p treb-cli --test integration_help help_addressbook` is enough to refresh the dedicated addressbook help snapshot without touching the rest of the golden suite.
----
-## 2026-03-11 01:26:31 CET - P9-US-006
-- Added addressbook alias-parity coverage for `addressbook` vs `ab` list, `list` vs `ls`, `addressbook` vs `ab` set, and bare `addressbook` defaulting to `list`, all as byte-for-byte stdout/stderr comparisons.
-- Seeded the stateful list/default parity cases through a helper that initializes the addressbook via the CLI in each temp project so both sides of the comparison start from identical registry state.
-- Files changed: `crates/treb-cli/tests/cli_compatibility_aliases.rs`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered: registry-backed alias compatibility tests fit the existing `assert_matching_command_output(...)` helper well when the seed function prepares state through the CLI or fixture before each invocation.
-  - Gotchas encountered: mutating commands like `addressbook set` need separate temp projects per side of the comparison, otherwise the first invocation changes the registry state and invalidates byte-for-byte assertions.
-  - Useful context: `cargo test -p treb-cli --test cli_compatibility_aliases` and `cargo clippy -p treb-cli --test cli_compatibility_aliases -- -D warnings` are sufficient focused checks for this parity suite.
----
-## 2026-03-11 01:31:00 CET - P9-US-007
-- Added a Go-compat `addressbook.json` fixture with representative multi-chain entries and extended the registry compatibility suite with addressbook store load and round-trip coverage.
-- Verified that `AddressbookStore::load()` reads Go-style bare JSON, `save()` keeps the file unwrapped, the saved JSON preserves the fixture’s recursive key structure, and reloading after save keeps entries unchanged.
-- Files changed: `crates/treb-registry/tests/fixtures/go-compat/addressbook.json`, `crates/treb-registry/tests/go_compat_deserialize.rs`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
-- **Learnings for future iterations:**
-  - Patterns discovered: nested-map Go compatibility checks fit naturally in `crates/treb-registry/tests/go_compat_deserialize.rs` alongside the other registry fixtures and should validate both `load()` and `save()` paths.
-  - Gotchas encountered: addressbook compatibility should assert the on-disk file stays a bare JSON object, because `read_versioned_file()` accepts wrapped legacy input even though Rust writes the unwrapped format.
-  - Useful context: a no-mutation round trip (`load` -> `save` -> `reload`) is enough to prove addressbook parity because the values are plain strings, so exact JSON equality and key-structure checks can both stay strict.
+  - Patterns discovered: config-backed network fallback should stay separate from RPC URL resolution so explicit `--rpc-url` and `--network` precedence remains untouched.
+  - Gotchas encountered: `.ralph/current` is a symlink to `.ralph/state/M3`, so story bookkeeping updates land in the state files shown by `git status`.
+  - Useful context: `cargo test -p treb-cli effective_network_` is a fast focused check for the new register fallback helper before running broader command coverage.
 ---
