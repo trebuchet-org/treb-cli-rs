@@ -754,7 +754,7 @@ fn treb_version() -> String {
     let fallback = std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "unknown".to_string());
 
     Command::new("git")
-        .args(["describe", "--tags", "--dirty", "--abbrev=7"])
+        .args(["describe", "--tags", "--abbrev=7"])
         .output()
         .ok()
         .filter(|o| o.status.success())
