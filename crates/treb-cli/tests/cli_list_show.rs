@@ -225,6 +225,28 @@ fn list_json_outputs_wrapped_object() {
 }
 
 #[test]
+fn list_json_ignores_corrupt_addressbook_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_deployments(&tmp);
+    fs::write(tmp.path().join(".treb/addressbook.json"), "{ definitely not json").unwrap();
+
+    let output =
+        treb().args(["list", "--json", "--network", "1"]).current_dir(tmp.path()).output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "treb list --json should ignore corrupt addressbook.json: stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("output is not valid JSON");
+    assert!(json.is_object(), "JSON output should be a wrapper object");
+    assert!(json["deployments"].is_array(), "JSON output should include deployments array");
+}
+
+#[test]
 fn list_filter_by_namespace() {
     let tmp = tempfile::tempdir().unwrap();
     init_project_with_deployments(&tmp);

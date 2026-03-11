@@ -41,7 +41,7 @@ fn set_and_list() {
 
     assert_eq!(
         stdout(&output),
-        format!("{ALPHA:<24} {ALPHA_ADDRESS}\n{ZULU:<24} {ZULU_ADDRESS}\n")
+        format!("  {ALPHA:<24}  {ALPHA_ADDRESS}\n  {ZULU:<24}  {ZULU_ADDRESS}\n")
     );
 }
 
@@ -120,7 +120,7 @@ fn invalid_address() {
 
     assert!(
         stderr(&output)
-            .contains("invalid address '0x1234'; expected a 0x-prefixed 40-hex-character address"),
+            .contains("invalid address \"0x1234\": must be a 0x-prefixed 40-character hex string"),
         "unexpected stderr: {}",
         stderr(&output)
     );
@@ -139,7 +139,7 @@ fn no_network() {
 
     assert!(
         stderr(&output).contains(
-            "no network configured; pass --network <network> or set one with `treb config set network <network>`"
+            "no network configured; set one with --network or 'treb config set network <name>'"
         ),
         "unexpected stderr: {}",
         stderr(&output)
@@ -159,7 +159,7 @@ fn default_to_list() {
         .get_output()
         .clone();
 
-    assert_eq!(stdout(&output), format!("{ALPHA:<24} {ALPHA_ADDRESS}\n"));
+    assert_eq!(stdout(&output), format!("  {ALPHA:<24}  {ALPHA_ADDRESS}\n"));
 }
 
 #[test]

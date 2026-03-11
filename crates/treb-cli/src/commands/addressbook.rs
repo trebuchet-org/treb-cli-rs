@@ -100,8 +100,10 @@ fn run_list(namespace: Option<String>, network: Option<String>, json: bool) -> a
     let chain_id = resolve_effective_chain_id(&cwd, namespace, network)
         .context("failed to resolve chain ID")?;
 
-    let registry = Registry::open(&cwd).context("failed to open registry")?;
-    let entries = registry.list_addressbook_entries(&chain_id.to_string());
+    let mut registry = Registry::open(&cwd).context("failed to open registry")?;
+    let entries = registry
+        .list_addressbook_entries(&chain_id.to_string())
+        .map_err(|err| anyhow::anyhow!("{err}"))?;
 
     if json {
         let json_entries: Vec<AddressbookEntryJson> = entries
@@ -141,7 +143,7 @@ fn print_entry(name: &str, address: &str) {
         padded_name
     };
 
-    println!("{rendered_name} {address}");
+    println!("  {rendered_name}  {address}");
 }
 
 fn ensure_initialized(cwd: &std::path::Path) -> anyhow::Result<()> {
@@ -179,7 +181,7 @@ fn resolve_effective_chain_id(
 
     let configured_network = resolved.network.ok_or_else(|| {
         anyhow::anyhow!(
-            "no network configured; pass --network <network> or set one with `treb config set network <network>`"
+            "no network configured; set one with --network or 'treb config set network <name>'"
         )
     })?;
 
@@ -204,7 +206,7 @@ fn validate_address(address: &str) -> anyhow::Result<()> {
     if is_valid {
         Ok(())
     } else {
-        bail!("invalid address '{address}'; expected a 0x-prefixed 40-hex-character address")
+        bail!("invalid address \"{address}\": must be a 0x-prefixed 40-character hex string")
     }
 }
 
@@ -229,7 +231,7 @@ mod tests {
         let err = validate_address("0x1234").unwrap_err();
         assert_eq!(
             err.to_string(),
-            "invalid address '0x1234'; expected a 0x-prefixed 40-hex-character address"
+            "invalid address \"0x1234\": must be a 0x-prefixed 40-character hex string"
         );
     }
 
