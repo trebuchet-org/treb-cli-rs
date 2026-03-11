@@ -52,6 +52,15 @@ fn help_list() {
     run_integration_test(&test, &ctx);
 }
 
+/// `addressbook --help` should snapshot the subcommand tree and scope flags.
+#[test]
+fn help_addressbook() {
+    let ctx = TestContext::new("minimal-project");
+    let test = IntegrationTest::new("help_addressbook").test(&["addressbook", "--help"]);
+
+    run_integration_test(&test, &ctx);
+}
+
 /// `show --help` should document deployment query scoping flags.
 #[test]
 fn help_show() {

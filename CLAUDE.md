@@ -46,6 +46,8 @@ treb — deployment orchestration CLI for Foundry projects. Rust workspace with 
 
 **CLI command help coverage**: When a command gains or changes command-specific flags, prefer adding or refreshing a dedicated `help_<command>` golden in `crates/treb-cli/tests/integration_help.rs` instead of relying on root help; clap-generated subcommand help can drift even when `treb --help` stays unchanged.
 
+**Addressbook integration coverage**: For `treb addressbook` behavior tests, use `TestContext::new("project")`, run `treb init`, pass a numeric `--network`, and set `NO_COLOR=1` for human-output assertions. That keeps config resolution realistic while making list/remove output byte-stable.
+
 **Global clap flags**: When hoisting a flag to `Cli` in `crates/treb-cli/src/main.rs`, mirror it in `crates/treb-cli/build.rs` and refresh the affected `tests/golden/help_*` snapshots; clap will surface the global option in root help and subcommand help, not just on the original command.
 
 **CLI alias compatibility coverage**: When a rename keeps backward-compatible spellings or shorthand forms, add or extend `crates/treb-cli/tests/cli_compatibility_aliases.rs` with byte-for-byte stdout comparisons across the canonical and legacy invocations. For registry-backed commands, seed a temp config project and compare raw stdout/stderr there instead of relying only on parser tests. Keep the feature-specific suites for richer behavior, but pin alias parity in one focused binary-level test file.

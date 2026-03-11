@@ -99,7 +99,7 @@
         "cargo test -p treb-cli passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

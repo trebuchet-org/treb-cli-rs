@@ -4,6 +4,7 @@
 - Top-level CLI commands must stay in sync across `crates/treb-cli/src/main.rs`, `crates/treb-cli/build.rs`, and any manually maintained root-help goldens because clap parsing, shell completions, and grouped help are wired separately.
 - Addressbook subcommands should reuse `resolve_effective_chain_id()` in `crates/treb-cli/src/commands/addressbook.rs` so numeric chain IDs, Alloy named chains, and config defaults resolve consistently across `set`, `remove`, and `list`.
 - Default CLI subcommands implemented through `normalize_cli_args()` should insert after parent-scoped flags like `-n/-s` and before subcommand-only flags like `--json`, while still leaving `--help` unnormalized.
+- Addressbook CLI integration coverage is stable when it uses `TestContext::new("project")`, runs `treb init`, passes a numeric `--network`, and sets `NO_COLOR=1` for human-output assertions.
 
 Started: Wed Mar 11 12:14:13 AM CET 2026
 ---
@@ -42,4 +43,13 @@ Started: Wed Mar 11 12:14:13 AM CET 2026
   - Patterns discovered: default-subcommand argv normalization needs to skip over parent command scope flags before inserting the synthetic subcommand so list-only flags like `--json` still bind to the intended child command.
   - Gotchas encountered: `Commands::json_flag()` needs explicit coverage for nested subcommands, otherwise JSON parse/runtime errors keep rendering as human stderr even when the subcommand accepts `--json`.
   - Useful context: full validation for clap-facing command work is practical here with `cargo check --workspace`, `cargo clippy --workspace --all-targets`, and `cargo test -p treb-cli`.
+---
+## 2026-03-11 01:21:19 CET - P9-US-005
+- Added dedicated `treb addressbook --help` golden coverage and a new `integration_addressbook.rs` suite covering set/list human output, JSON listing, remove success/error paths, invalid-address validation, missing-network handling, default-to-list behavior, and the empty-list state.
+- Refreshed the new help snapshot with `UPDATE_GOLDEN=1` and recorded the stable addressbook integration-test pattern in `CLAUDE.md`.
+- Files changed: `CLAUDE.md`, `crates/treb-cli/tests/golden/help_addressbook/commands.golden`, `crates/treb-cli/tests/integration_addressbook.rs`, `crates/treb-cli/tests/integration_help.rs`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: addressbook integration tests are simplest with the `project` fixture plus `treb init`, because that gives a real config surface while leaving network selection explicit through numeric `--network`.
+  - Gotchas encountered: human-output assertions need `NO_COLOR=1`; otherwise the bold/yellow name styling changes the captured stdout bytes.
+  - Useful context: `UPDATE_GOLDEN=1 cargo test -p treb-cli --test integration_help help_addressbook` is enough to refresh the dedicated addressbook help snapshot without touching the rest of the golden suite.
 ---
