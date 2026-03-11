@@ -461,6 +461,8 @@ fn migrate_registry_subcommand_is_rejected() {
         .current_dir(tmp.path())
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Error: unknown command \"registry\" for \"treb migrate\""))
+        .stderr(predicate::str::contains(
+            "Error: unknown command \"registry\" for \"treb migrate\"",
+        ))
         .stderr(predicate::str::contains("Run 'treb migrate --help' for usage."));
 }

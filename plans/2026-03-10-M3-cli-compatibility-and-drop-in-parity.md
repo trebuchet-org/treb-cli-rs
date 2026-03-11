@@ -472,6 +472,15 @@ Minor flag differences on `register` and `sync` that affect production workflows
 **Notes from Phase 6:**
 - If `register` or `sync` need scoped deployment resolution, reuse the established `filter_deployments()` → `resolve_deployment_in_scope()` pattern. The scoped resolution helpers are in `commands::resolve` and handle both typed queries and interactive selection consistently.
 
+**Learnings from implementation:**
+- Config-driven network fallback for `register` stays separate from RPC URL resolution: `resolve_config()` is consulted only when both `--network` and `--rpc-url` are absent, then the resolved network feeds into the existing RPC endpoint path. Explicit overrides keep their current precedence untouched.
+- Register-style commands should compute their effective namespace once, before generating registry IDs or transaction environment fields, so every derived artifact stays in sync. The effective namespace helper (`effective_namespace_for_register()`) is a standalone function with focused unit coverage.
+- Using `resolve_config()` only for the omitted `--namespace` path preserves current explicit `--namespace` override behavior without introducing new config validation on explicit values — the same principle applies to any future command adopting config-backed defaults.
+- Config-backed register integration tests are easiest to express by seeding `.treb/config.local.json` through `treb config set ...` and, when needed, rewriting `treb.toml` in the temp fixture before `treb init`.
+- `UPDATE_GOLDEN=1` is not enough for new Anvil-backed snapshots if the gated test skips; confirm the new golden directories actually exist before trusting the update run.
+- Focused unit test targets for register fallback helpers: `cargo test -p treb-cli effective_network_` and `cargo test -p treb-cli effective_namespace_`.
+- Changing only `src/main.rs` or only `build.rs` for a flag description change leaves clap help and generated completion metadata out of sync — both files must be updated atomically, then the dedicated `help_<command>` golden refreshed.
+
 ---
 
 ## Phase 11 -- Error Messages, Version Format, and Help Text
@@ -515,6 +524,10 @@ Polish remaining surface-level differences: error message format, version string
 **Notes from Phase 8:**
 - Phase 8 added a `help_verify` golden snapshot in `integration_help.rs` covering `-e`, `-b`, `-s`, `--namespace`, `--network`/`-n`, `--contract-path`, `--debug`, and the `--blockscout-verifier-url` alias. This is another per-command help golden that Phase 11 must refresh if help text formatting changes.
 - Clap alias flags (e.g., `--blockscout-verifier-url` as alias for `--verifier-url`) render inline under the primary option in `--help` output, not as separate lines. Phase 11 help text formatting should preserve this clap convention rather than trying to split them.
+
+**Notes from Phase 10:**
+- Phase 10 added a `help_sync` golden snapshot in `integration_help.rs` covering `--clean` flag description alignment. This is another per-command help golden that Phase 11 must refresh if help text formatting changes.
+- Flag description changes require atomic updates to both `src/main.rs` (derive parser doc comments) and `build.rs` (`Arg::help(...)` strings) — Phase 10 confirmed this pattern for `sync --clean` specifically.
 
 ---
 
