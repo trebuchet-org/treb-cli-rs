@@ -47,7 +47,7 @@
         "cargo check -p treb-cli passes (typecheck)"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

@@ -1,0 +1,32 @@
+=== cmd 0: [migrate --help] ===
+Migrate config to new treb.toml accounts/namespace format
+
+Migrate treb sender configuration from foundry.toml [profile.*.treb.*]
+sections into the new treb.toml format with [accounts.*] and [namespace.*]
+sections.
+
+This command will:
+1. Read all [profile.*.treb.*] sections from foundry.toml
+2. Deduplicate identical sender configs into shared accounts
+3. Map profile names to namespaces with role->account mappings
+4. Show a preview of the generated treb.toml
+5. Ask for confirmation before writing
+
+Usage: treb migrate [OPTIONS] <COMMAND>
+
+Commands:
+  config  Detect and convert treb.toml v1 → v2
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+      --no-color
+          Disable colored output (also respected via NO_COLOR env var)
+
+      --non-interactive
+          Skip interactive prompts (also enabled via TREB_NON_INTERACTIVE=1, CI=true, or non-TTY
+          stdin/stdout)
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Use "treb migrate [command] --help" for more information about a command.

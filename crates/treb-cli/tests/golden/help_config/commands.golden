@@ -26,3 +26,5 @@ Options:
 
   -h, --help
           Print help (see a summary with '-h')
+
+Use "treb config [command] --help" for more information about a command.

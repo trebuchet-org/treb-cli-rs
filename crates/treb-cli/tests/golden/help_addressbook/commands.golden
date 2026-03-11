@@ -10,9 +10,20 @@ Commands:
   help    Print this message or the help of the given subcommand(s)
 
 Options:
-      --no-color               Disable colored output (also respected via NO_COLOR env var)
-  -s, --namespace <NAMESPACE>  Deployment namespace
-  -n, --network <NETWORK>      Network name or chain ID
-      --non-interactive        Skip interactive prompts (also enabled via TREB_NON_INTERACTIVE=1,
-                               CI=true, or non-TTY stdin/stdout)
-  -h, --help                   Print help
+      --no-color
+          Disable colored output (also respected via NO_COLOR env var)
+
+  -s, --namespace <NAMESPACE>
+          Deployment namespace
+
+  -n, --network <NETWORK>
+          Network name or chain ID
+
+      --non-interactive
+          Skip interactive prompts (also enabled via TREB_NON_INTERACTIVE=1, CI=true, or non-TTY
+          stdin/stdout)
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Use "treb addressbook [command] --help" for more information about a command.

@@ -7,6 +7,11 @@ use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use treb_cli::{commands, output, ui};
 use treb_core::types::DeploymentType;
 
+const ROOT_HELP_FOOTER: &str =
+    "Use \"treb [command] --help\" for more information about a command.";
+const CONTEXTUAL_HELP_FOOTER_COMMANDS: &[&str] =
+    &["gen", "fork", "config", "addressbook", "migrate"];
+
 /// Parse a deployment type string (case-insensitive).
 fn parse_deployment_type(s: &str) -> Result<DeploymentType, String> {
     match s.to_lowercase().as_str() {
@@ -645,7 +650,7 @@ fn anvil_subcommand_json_flag(subcommand: &commands::dev::AnvilSubcommand) -> bo
 /// derived `Cli::command()`, hides all subcommands from the default rendering, and
 /// injects a custom grouped help text via `after_help` with a custom `help_template`.
 fn build_grouped_command() -> clap::Command {
-    let mut cmd = Cli::command().bin_name("treb");
+    let mut cmd = apply_contextual_help_footers(Cli::command().bin_name("treb"), "treb");
 
     // Build grouped help text from subcommand metadata before hiding them
     let grouped_help = build_grouped_help(&cmd);
@@ -656,15 +661,48 @@ fn build_grouped_command() -> clap::Command {
         cmd = cmd.mut_subcommand(name, |s| s.hide(true));
     }
 
-    cmd.after_help(grouped_help).override_usage("treb [OPTIONS] <COMMAND>").help_template(
-        "Smart contract deployment orchestrator for Foundry\n\
-         \n\
-         {usage-heading} {usage}\
-         {after-help}\n\
-         \nOptions:\n\
-         {options}\n\
-         Use \"treb [command] --help\" for more information about a command.\n",
-    )
+    cmd.after_help(grouped_help)
+        .override_usage("treb [OPTIONS] <COMMAND>")
+        .help_template(format!(
+            "Smart contract deployment orchestrator for Foundry\n\
+             \n\
+             {{usage-heading}} {{usage}}\
+             {{after-help}}\n\
+             \nOptions:\n\
+             {{options}}\n\
+             {ROOT_HELP_FOOTER}\n"
+        ))
+}
+
+fn apply_contextual_help_footers(mut cmd: clap::Command, command_path: &str) -> clap::Command {
+    // Clap treats `-h` as short help and `--help` as long help. Keep navigation
+    // footers in `after_long_help` so the extra guidance only appears on `--help`.
+    if should_add_contextual_help_footer(command_path) {
+        cmd = cmd.after_long_help(contextual_help_footer(command_path));
+    }
+
+    let subcommand_names: Vec<String> =
+        cmd.get_subcommands().map(|subcommand| subcommand.get_name().to_string()).collect();
+    for name in subcommand_names {
+        let subcommand_path = format!("{command_path} {name}");
+        cmd = cmd.mut_subcommand(name, |subcommand| {
+            apply_contextual_help_footers(subcommand, &subcommand_path)
+        });
+    }
+
+    cmd
+}
+
+fn should_add_contextual_help_footer(command_path: &str) -> bool {
+    command_path
+        .split_whitespace()
+        .nth(1)
+        .filter(|_| command_path.split_whitespace().count() == 2)
+        .is_some_and(|subcommand| CONTEXTUAL_HELP_FOOTER_COMMANDS.contains(&subcommand))
+}
+
+fn contextual_help_footer(command_path: &str) -> String {
+    format!("Use \"{command_path} [command] --help\" for more information about a command.")
 }
 
 fn build_grouped_help(cmd: &clap::Command) -> String {
@@ -1707,6 +1745,32 @@ mod tests {
 
         assert!(help.contains("-n, --network"), "unexpected help output: {help}");
         assert!(help.contains("-s, --namespace"), "unexpected help output: {help}");
+    }
+
+    #[test]
+    fn config_long_help_includes_contextual_footer() {
+        let mut cmd = build_grouped_command();
+        let mut buffer = Vec::new();
+        cmd.find_subcommand_mut("config").unwrap().write_long_help(&mut buffer).unwrap();
+        let help = String::from_utf8(buffer).unwrap();
+
+        assert!(
+            help.contains("Use \"treb config [command] --help\" for more information about a command."),
+            "unexpected help output: {help}"
+        );
+    }
+
+    #[test]
+    fn config_short_help_omits_contextual_footer() {
+        let mut cmd = build_grouped_command();
+        let mut buffer = Vec::new();
+        cmd.find_subcommand_mut("config").unwrap().write_help(&mut buffer).unwrap();
+        let help = String::from_utf8(buffer).unwrap();
+
+        assert!(
+            !help.contains("Use \"treb config [command] --help\" for more information about a command."),
+            "unexpected help output: {help}"
+        );
     }
 
     #[test]

@@ -4,6 +4,7 @@ Started: Wed Mar 11 12:46:17 PM CET 2026
 ## Codebase Patterns
 - `crates/treb-cli/build.rs` owns the compiled `TREB_VERSION` string; keep `src/main.rs` clap version metadata and `src/commands/version.rs` wired to that env var so `treb --version` and `treb version` stay in sync
 - Go-style clap parse diagnostics are centralized in `crates/treb-cli/src/main.rs::custom_clap_error_message()`; when parser errors change, keep the human stderr path and `--json` stderr wrapper in sync and update both `src/main.rs` unit tests and `tests/cli_error_format.rs`
+- Contextual command-navigation help footers are wired in `crates/treb-cli/src/main.rs::apply_contextual_help_footers()` and should use clap `after_long_help` so `--help` shows the footer while `-h` stays summary-only
 
 ## 2026-03-11 12:52:54 CET - P11-US-001
 - Implemented build-time `TREB_VERSION` generation from `git describe --tags --dirty --abbrev=7` with fallback to `CARGO_PKG_VERSION` when the repo has no tags
@@ -20,4 +21,12 @@ Started: Wed Mar 11 12:46:17 PM CET 2026
   - Patterns discovered: clap's error context already exposes the invalid token, suggested replacements, and usage line, so parser error customization can stay structured instead of parsing formatted stderr
   - Gotchas encountered: `ContextKind::Usage` includes the `Usage:` prefix and any already-parsed flags such as `--json`, so help-target extraction must strip that prefix and stop before option tokens
   - Useful context: existing integration assertions that referenced clap's stock `unrecognized subcommand` wording needed to be updated to the new Go-style `Error: unknown command ...` surface
+---
+## 2026-03-11 14:01:23 CET - P11-US-003
+- Implemented contextual `--help` footers for nested top-level commands (`gen`, `fork`, `config`, `addressbook`, `migrate`) while keeping `-h` as summary help via clap `after_long_help`
+- Files changed: `crates/treb-cli/src/main.rs`, `crates/treb-cli/tests/integration_help.rs`, `crates/treb-cli/tests/golden/help_gen/commands.golden`, `crates/treb-cli/tests/golden/help_config/commands.golden`, `crates/treb-cli/tests/golden/help_addressbook/commands.golden`, `crates/treb-cli/tests/golden/help_fork/commands.golden`, `crates/treb-cli/tests/golden/help_migrate/commands.golden`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: contextual help guidance belongs in the command builder, not individual derive attributes, so one traversal can keep all affected subcommands consistent
+  - Gotchas encountered: attaching the footer to clap `after_help` would also affect `-h`; `after_long_help` is required to preserve the short-help/full-help split
+  - Useful context: updating one subcommand footer can reflow clap's global option formatting in help goldens, so refresh the affected `help_*` snapshots together
 ---

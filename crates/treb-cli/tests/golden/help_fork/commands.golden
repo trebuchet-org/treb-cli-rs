@@ -1,0 +1,30 @@
+=== cmd 0: [fork --help] ===
+Manage network fork mode
+
+Fork mode lets you test deployment scripts against local forks of live networks with snapshot/revert
+workflow.
+
+Usage: treb fork [OPTIONS] <COMMAND>
+
+Commands:
+  enter    Enter fork mode for a network
+  exit     Exit fork mode for a network
+  revert   Revert the last treb run on a fork
+  restart  Restart a crashed fork
+  status   Show status of all active forks
+  history  Show command history for a fork
+  diff     Show deployments added or changed during fork mode
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+      --no-color
+          Disable colored output (also respected via NO_COLOR env var)
+
+      --non-interactive
+          Skip interactive prompts (also enabled via TREB_NON_INTERACTIVE=1, CI=true, or non-TTY
+          stdin/stdout)
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Use "treb fork [command] --help" for more information about a command.
