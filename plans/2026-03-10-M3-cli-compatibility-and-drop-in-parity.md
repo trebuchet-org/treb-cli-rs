@@ -223,6 +223,16 @@ The Go CLI has `--non-interactive` as a global flag inherited by every command. 
 **User stories:** 5
 **Dependencies:** none
 
+**Learnings from implementation:**
+- Global clap flags must be defined in both `src/main.rs` (derive parser) and `build.rs` (completion builder); promoting a flag to global propagates it into root help and every subcommand help, causing multiple `help_*` golden snapshots to change.
+- Shared UI helpers (`ui::selector::*`) are intentionally generic and do not see clap state — the command must pass `non_interactive` explicitly. Searching for `is_non_interactive(false)` only catches direct detector calls; selector helper signatures must be updated too.
+- `TREB_NON_INTERACTIVE` and `CI` have different truth tables: only the former accepts `"1"`, while both are case-insensitive for `"true"`. These env semantics are pinned in unit tests in `crates/treb-cli/src/ui/interactive.rs`.
+- `tag` can accept parser-only filter fields (e.g., `-s`/`-n`) without runtime behavior changes — add `..` to the match arm destructuring so new clap fields are silently ignored until wired.
+- Targeted clap regression coverage is cheap: `parse_cli_from(...)` in `src/main.rs` tests pins flag/alias parsing, and `find_subcommand_mut(...).write_long_help(...)` asserts exact help rows without snapshot churn.
+- For CLI shorthand compatibility on stateful commands, compare canonical and shorthand invocations at the subprocess level after seeding real registry state in `cli_compatibility_aliases.rs`; parser-only tests miss output drift.
+- `integration_prune.rs` is the strongest place to prove `TREB_NON_INTERACTIVE=1` works end-to-end because it exercises actual confirmation bypass and validates registry mutation afterward.
+- Help-surface changes that are intentionally scoped can be covered with a dedicated `integration_help` golden (e.g., `help_list`) without touching the broader root help baselines.
+
 ---
 
 ## Phase 6 -- Deployment Query Flags (show, list, tag)
@@ -254,6 +264,23 @@ The Go CLI's `show`, `list`, and `tag` commands have filtering/scoping flags tha
 - Go-compat test infrastructure is available: use `seed_go_compat_registry()` from `crates/treb-cli/tests/helpers/mod.rs` to seed `.treb/` with Go-created fixture data for testing new query flags against realistic registry content.
 - The `cli_go_registry_compat.rs` test file demonstrates the pattern for verifying CLI commands against Go-created data — follow the same approach for new flag tests.
 
+**Notes from Phase 5:**
+- `tag` already has parser-only `--namespace`/`-s` and `--network`/`-n` fields added in Phase 5 (with `..` in the match arm). Phase 6 needs to wire these into the runtime handler to actually filter tag operations — no clap definition changes required.
+- Short flags for `list` (`-s`/`-n`) are already defined in both `src/main.rs` and `build.rs` from Phase 5. Phase 6 should focus on runtime filtering behavior, not parser surface.
+- When adding `--no-fork` to `show`, mirror in `build.rs` for completions — established pattern from Phase 5.
+- Non-interactive plumbing for `show`, `tag`, `verify` was already wired in Phase 5 (global `non_interactive` passed through handlers). New flag additions should not regress this wiring.
+- For testing new query flags against seeded data, follow the `cli_compatibility_aliases.rs` subprocess pattern: seed real registry state and compare stdout, not just parser acceptance.
+
+**Learnings from implementation:**
+- Scoped deployment resolution requires a dedicated `resolve_deployment_in_scope()` function in `commands::resolve` — the existing `resolve_deployment()` resolves against the whole registry and stays ambiguous even when filters should narrow to one result.
+- The canonical pattern for scoped commands: (1) build `DeploymentFilters` from clap flags, (2) call `filter_deployments()` from `commands::list` to get the candidate set, (3) resolve the user query with `resolve_deployment_in_scope()` against that filtered set, (4) pass the same filtered set to `fuzzy_select_deployment_id()` for interactive selection.
+- Scoped interactive selection must use the filtered deployment slice — if you pass unfiltered deployments to `fuzzy_select_deployment_id()`, the interactive prompt surfaces out-of-scope deployments even though typed queries are filtered correctly.
+- The shared seeded registry fixture does not include ambiguous namespace/network variants; scoped resolution tests often need extra deployments inserted directly into a temp registry via `Registry::insert_deployment()`.
+- Focused binary test files (e.g., `cli_list_show.rs`, `cli_tag.rs`) are sufficient for scoped runtime filtering coverage without introducing new golden snapshots — reserve goldens for formatting-heavy output.
+- `integration_*.rs` suites can mix golden-backed scenarios with direct `TestContext` assertions, which is cleaner for scope-specific success/error checks than snapshotting every filtered branch.
+- `NO_COLOR=1` keeps scoped human-output assertions stable in subprocess tests, while `--json` assertions can read raw stdout without goldens.
+- `UPDATE_GOLDEN=1 cargo test -p treb-cli --test integration_help help_show` is sufficient to create or refresh a single help snapshot without broader golden churn.
+
 ---
 
 ## Phase 7 -- Fork Command Positional Arguments
@@ -282,6 +309,22 @@ Also, Go uses `--url` for external fork connection while Rust uses `--rpc-url`. 
 **User stories:** 5
 **Dependencies:** none
 
+**Notes from Phase 5:**
+- When adding `--url` as an alias for `--rpc-url`, mirror it in `build.rs` for shell completions — all subcommand flag changes must stay in sync across both files.
+- Non-interactive plumbing is already global from Phase 5 — fork subcommands automatically inherit the flag via `Cli.non_interactive`. No per-subcommand wiring needed for `--non-interactive`.
+
+**Learnings from implementation:**
+- Fork clap surfaces are defined twice — in the derive parser (`commands/fork.rs`) and in `build.rs` — so positional args, aliases, and ArgGroup wiring must be mirrored in both places or shell completions drift.
+- When the clap field name differs from the displayed long flag (e.g., a renamed field), missing `value_name` leaks the internal field id into usage text and conflict errors. Always set `value_name` explicitly on renamed flag fields.
+- Fork subcommands that accept both positional and `--network` forms are normalized in `commands::fork::run(...)` before dispatching to handlers, which keeps handler signatures stable while the clap surface evolves.
+- If a dual-form subcommand also supports `--all`, the positional arg, `--network` long flag, and `--all` must share one ArgGroup in both the derive parser and `build.rs` so bypass behavior and conflict errors stay aligned.
+- Fast parser-shape coverage lives in the `commands::fork::tests` block using `parse_cli_from(...)`; story-level validation does not need the heavier golden suites unless help text changes.
+- `crates/treb-cli/tests/integration_fork.rs` is the right place for fork subprocess assertions that care about parser/runtime behavior; it has a local `spawn_json_rpc_server()` fixture sufficient for commands that only need `eth_chainId`.
+- Missing/conflicting fork network arguments are rejected by clap before command dispatch — subprocess tests should assert on clap stderr text, not the later resolver helpers.
+- Fork parity tests in `cli_compatibility_aliases.rs` cannot reuse one workdir for both invocations because fork commands mutate fork state; clone the setup into separate temp projects and compare raw outputs.
+- A single nonblocking loopback JSON-RPC fixture can satisfy `eth_chainId`, `evm_revert`, `evm_snapshot`, `anvil_reset`, and `anvil_setCode` across both parity runs, keeping tests fast and deterministic.
+- Golden tests that early-return before exercising their fixture will not rewrite `commands.golden` under `UPDATE_GOLDEN=1`; if only the recorded argv changed, refresh that snapshot from a runnable environment or patch the header manually.
+
 ---
 
 ## Phase 8 -- Verify Command Flag Parity
@@ -306,6 +349,29 @@ The verify command is missing several flags needed for production verification w
 
 **User stories:** 5
 **Dependencies:** none
+
+**Notes from Phase 5:**
+- When adding short flags (`-e`, `-b`, `-s`, `-n`) to `verify`, mirror them in `build.rs` — established pattern from Phase 5. Use `parse_cli_from(...)` unit tests and `find_subcommand_mut(...).write_long_help(...)` assertions for cheap regression coverage without golden snapshot churn.
+- Phase 5 confirmed `-s` on `verify` is already used for `--sourcify`. If Go also uses `-s` for `--sourcify`, no conflict. If Go uses `-s` for `--namespace` on `verify`, that's a clash — check Go's `internal/cli/verify.go` for the actual short flag mapping before implementing.
+- Non-interactive plumbing for `verify` was already wired in Phase 5 (global flag passed to handler).
+
+**Notes from Phase 6:**
+- When `verify` adds `--namespace`/`--network` scoping, reuse the established scoped resolution pattern: `filter_deployments()` → `resolve_deployment_in_scope()` → pass filtered slice to interactive selection. This is now available in `commands::resolve` and `commands::list`.
+- For scoped behavior tests, prefer direct `TestContext` subprocess assertions with `Registry::insert_deployment()` setup over golden snapshots — the Phase 6 pattern in `integration_show.rs` and `integration_tag.rs` demonstrates this cleanly.
+
+**Notes from Phase 7:**
+- When adding flag aliases (e.g., `--blockscout-verifier-url` as alias for `--verifier-url`), set `value_name` explicitly on any renamed field so help and error output show the user-facing placeholder instead of the internal field id — this gotcha was discovered during fork alias work.
+- Mirror all new flags and aliases in `build.rs` alongside `src/main.rs` — the dual-definition requirement is confirmed across fork, list, tag, and show; verify will be no different.
+
+**Learnings from implementation:**
+- For namespace/network-scoped commands, encapsulating filter construction and scoped messaging in a dedicated `*Scope` struct (e.g., `VerifyScope`) keeps single-item resolution, batch candidate selection, and queryless interactive selection all consistent — the pattern from Phase 6's `resolve_deployment_in_scope()` generalizes cleanly when centralized in a command-specific scope helper.
+- Verify runtime flags should terminate in `treb_verify::build_verify_args()` unit tests because that function is the single translation layer into Foundry's `VerifyArgs` — testing at the CLI command level alone misses incorrect forge-arg mappings.
+- Adding a new verify execution option requires threading it through both single and batch verification loops in `commands/verify.rs`; updating only one path compiles cleanly but produces inconsistent behavior.
+- `treb_verify::format_verify_command()` centralizes the `forge verify-contract` debug surface so single and batch flows print the same stderr output. Debug output must sit immediately before `verify_args.run().await` in both loops — adding it in only one misses multi-verifier batch attempts.
+- `--blockscout-verifier-url` renders as a clap alias under `--verifier-url` in `verify --help`, not as a separate standalone option line — golden snapshots must match the alias rendering.
+- An already-verified seeded deployment is a stable integration fixture for flag-surface tests because it proves parsing/dispatch without requiring explorer network access or Foundry verification side effects.
+- Verify/help compatibility work is best locked down with both fast assertion tests (`cli_verify.rs`) and golden-backed subprocess coverage (`integration_help.rs`, `integration_verify.rs`) — clap rendering and runtime argv acceptance regressions are caught separately.
+- The package bin target is `treb-cli`, so targeted binary test runs use `cargo test -p treb-cli --bin treb-cli ...`.
 
 ---
 
@@ -355,6 +421,22 @@ Implement the `addressbook` command that is entirely missing from the Rust CLI. 
 - Human output should use inline aligned columns (matching the Go-style `NAME  ADDRESS` format) — follow the same pattern as the `config show` sender renderer in `commands/config.rs`, not `comfy_table`.
 - Integration tests covering chain-scoped addressbook entries can reuse the `pre_setup_hook` pattern to overwrite `.env` with a test chain ID, same as the `config_show_resolves_dotenv_sender_address` golden test.
 
+**Notes from Phase 5:**
+- When adding `addressbook` command with `ab` alias, define both in `src/main.rs` and mirror in `build.rs` for shell completions — established pattern from Phase 5.
+- Non-interactive is now a global flag on `Cli` — addressbook subcommands automatically inherit it. If any subcommand needs destructive confirmation (e.g., `remove`), pass `cli.non_interactive` explicitly to the confirmation helper, not `is_non_interactive(false)`.
+
+**Notes from Phase 6:**
+- If addressbook needs scoped deployment lookups (e.g., to resolve addresses from deployments within a namespace), reuse `filter_deployments()` → `resolve_deployment_in_scope()` from `commands::resolve` and `commands::list`.
+- For integration tests covering `--namespace`/`--network` scoping, use direct `TestContext` subprocess assertions with `NO_COLOR=1` for stable human output — reserve goldens for the formatting-heavy `list` output.
+
+**Notes from Phase 7:**
+- If `addressbook` subcommands accept both positional arguments and `--flag` forms (e.g., `addressbook set <name>` vs `--name`), normalize them in the command dispatcher before reaching the handler — the fork pattern in `commands::fork::run(...)` keeps handler signatures stable while clap evolves.
+- For `ab` alias parity tests in `cli_compatibility_aliases.rs`, use separate identically seeded temp projects per invocation if the command mutates state, and reuse a loopback JSON-RPC server when live RPC is needed — this keeps byte-for-byte output comparison clean without snapshot normalizers.
+
+**Notes from Phase 8:**
+- If addressbook adds namespace/network scoping, consider the `VerifyScope` pattern: a dedicated scope struct that centralizes filter construction, scoped resolution, and scoped error messages. This avoids duplicating filter/message logic across list, set, and remove subcommands.
+- For addressbook help coverage, add both fast assertion tests (like `cli_verify.rs`) and a dedicated `help_addressbook` golden in `integration_help.rs` — the dual-layer approach catches clap rendering and runtime argv regressions separately.
+
 ---
 
 ## Phase 10 -- Register and Sync Flag Alignment
@@ -387,6 +469,9 @@ Minor flag differences on `register` and `sync` that affect production workflows
 - `register` already had a unit test that was updated in Phase 3 to match `${VAR}` expansion semantics when env vars are unset (empty-string expansion). If `register` derives network from config, ensure `load_dotenv()` runs before `load_foundry_config()` so `.env`-backed RPC endpoints resolve correctly — follow the same pattern applied to `networks` in Phase 3.
 - `sync` likely reads foundry.toml for network resolution. If it bypasses `resolve_config()`, it needs the explicit `load_dotenv(cwd)` → `load_foundry_config()` sequence established in Phase 3.
 
+**Notes from Phase 6:**
+- If `register` or `sync` need scoped deployment resolution, reuse the established `filter_deployments()` → `resolve_deployment_in_scope()` pattern. The scoped resolution helpers are in `commands::resolve` and handle both typed queries and interactive selection consistently.
+
 ---
 
 ## Phase 11 -- Error Messages, Version Format, and Help Text
@@ -413,6 +498,23 @@ Polish remaining surface-level differences: error message format, version string
 
 **User stories:** 4
 **Dependencies:** none
+
+**Notes from Phase 5:**
+- Phase 5 established that `--non-interactive` appears in root help and every subcommand help as a global flag. Any help text reformatting in Phase 11 must account for this global option row appearing in all subcommand `--help` output.
+- `build_grouped_help()` in `main.rs` is the custom root help builder — it is maintained separately from clap's derive-generated subcommand help. Changes to help footer or `-h` behavior must update both paths.
+- Phase 5 added focused help goldens (e.g., `help_list`) that lock individual subcommand help without touching root baselines. Phase 11 help text changes will likely require refreshing all `help_*` golden snapshots, including these Phase 5 additions.
+
+**Notes from Phase 6:**
+- Phase 6 added a `help_show` golden snapshot in `integration_help.rs` covering `--namespace`, `--network`, and `--no-fork` options. This is another per-command help golden that Phase 11 must refresh if help text formatting changes.
+
+**Notes from Phase 7:**
+- Phase 7 added a `help_fork_enter` golden snapshot in `integration_help.rs` covering positional `<NETWORK>`, `--network`, and `--rpc-url`/`--url` alias surface. This is another per-command help golden that Phase 11 must refresh if help text formatting changes.
+- When clap field names differ from the displayed long flag, missing `value_name` leaks the internal field id into clap-generated usage and error text. Phase 11 error message polishing should audit existing commands for this issue — it was discovered and fixed during fork work.
+- Golden tests that early-return before running their fixture will not rewrite `commands.golden` under `UPDATE_GOLDEN=1`. When Phase 11 changes affect argv formatting in golden headers, some snapshots may need manual patching if the test cannot run in the current environment.
+
+**Notes from Phase 8:**
+- Phase 8 added a `help_verify` golden snapshot in `integration_help.rs` covering `-e`, `-b`, `-s`, `--namespace`, `--network`/`-n`, `--contract-path`, `--debug`, and the `--blockscout-verifier-url` alias. This is another per-command help golden that Phase 11 must refresh if help text formatting changes.
+- Clap alias flags (e.g., `--blockscout-verifier-url` as alias for `--verifier-url`) render inline under the primary option in `--help` output, not as separate lines. Phase 11 help text formatting should preserve this clap convention rather than trying to split them.
 
 ---
 

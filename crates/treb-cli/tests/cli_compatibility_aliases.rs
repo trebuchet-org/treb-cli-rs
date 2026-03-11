@@ -569,14 +569,7 @@ fn addressbook_vs_ab_set() {
             ADDRESSBOOK_NAME,
             ADDRESSBOOK_ADDRESS,
         ],
-        &[
-            "ab",
-            "--network",
-            ADDRESSBOOK_CHAIN_ID,
-            "set",
-            ADDRESSBOOK_NAME,
-            ADDRESSBOOK_ADDRESS,
-        ],
+        &["ab", "--network", ADDRESSBOOK_CHAIN_ID, "set", ADDRESSBOOK_NAME, ADDRESSBOOK_ADDRESS],
         |_| {},
     );
 }
