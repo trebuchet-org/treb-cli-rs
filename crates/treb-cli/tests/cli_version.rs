@@ -20,6 +20,25 @@ fn version_displays_expected_fields() {
 }
 
 #[test]
+fn version_flag_matches_json_version_field() {
+    let version_output = treb().arg("--version").output().expect("failed to run treb --version");
+    assert!(version_output.status.success());
+
+    let version_stdout =
+        String::from_utf8(version_output.stdout).expect("treb --version output is not utf-8");
+
+    let json_output =
+        treb().args(["version", "--json"]).output().expect("failed to run treb version --json");
+    assert!(json_output.status.success());
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&json_output.stdout).expect("output is not valid JSON");
+    let version = json["version"].as_str().expect("version field is not a string");
+
+    assert_eq!(version_stdout, format!("treb {version}\n"));
+}
+
+#[test]
 fn version_json_parses_with_expected_fields() {
     let output =
         treb().args(["version", "--json"]).output().expect("failed to run treb version --json");

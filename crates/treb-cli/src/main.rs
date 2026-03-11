@@ -25,7 +25,7 @@ fn parse_deployment_type(s: &str) -> Result<DeploymentType, String> {
 #[command(
     name = "treb",
     bin_name = "treb",
-    version,
+    version = env!("TREB_VERSION"),
     about,
     long_about = "Trebuchet (treb) orchestrates Foundry script execution for deterministic smart contract deployments using CreateX factory contracts."
 )]

@@ -105,6 +105,7 @@ cargo clippy --workspace --all-targets        # lint
 - **Foundry**: pinned to git tag v1.5.1 in workspace `[dependencies]`
 - **Alloy**: all 1.x crates pinned to v1.1.1 via `[patch.crates-io]` — foundry v1.5.1 needs exactly this; without the pins cargo resolves to 1.7.x which breaks alloy-evm
 - **Build metadata**: `build.rs` embeds git commit, build date, foundry version, treb-sol commit, rust version via `cargo:rustc-env`
+- **CLI version string**: `crates/treb-cli/build.rs` is the source of truth for `TREB_VERSION`; when version formatting changes, update both clap's root `#[command(version = ...)]` in `src/main.rs` and `src/commands/version.rs` to keep `treb --version` and `treb version` aligned
 
 ## Conventions
 

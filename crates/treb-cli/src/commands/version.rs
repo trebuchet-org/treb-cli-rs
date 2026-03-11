@@ -22,7 +22,7 @@ pub async fn run(json: bool) -> anyhow::Result<()> {
     let forge = detect_forge_version();
 
     let info = VersionInfo {
-        version: env!("CARGO_PKG_VERSION").to_string(),
+        version: env!("TREB_VERSION").to_string(),
         commit: env!("TREB_GIT_COMMIT").to_string(),
         date: env!("TREB_BUILD_DATE").to_string(),
         rust_version: env!("TREB_RUST_VERSION").to_string(),

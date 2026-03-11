@@ -750,10 +750,25 @@ fn workspace_foundry_version() -> Option<String> {
         .map(str::to_owned)
 }
 
+fn treb_version() -> String {
+    let fallback = std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "unknown".to_string());
+
+    Command::new("git")
+        .args(["describe", "--tags", "--dirty", "--abbrev=7"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(fallback)
+}
+
 fn main() {
     // Re-run if git state changes.
     println!("cargo:rerun-if-changed=../../.git/HEAD");
     println!("cargo:rerun-if-changed=../../.git/refs");
+    println!("cargo:rerun-if-changed=../../.git/packed-refs");
     println!("cargo:rerun-if-changed=src/main.rs");
     // Re-run when treb-sol submodule pointer changes.
     println!("cargo:rerun-if-changed=../../lib/treb-sol");
@@ -770,6 +785,9 @@ fn main() {
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|| "unknown".to_string());
     println!("cargo:rustc-env=TREB_GIT_COMMIT={git_commit}");
+
+    let treb_version = treb_version();
+    println!("cargo:rustc-env=TREB_VERSION={treb_version}");
 
     // Build date (UTC, RFC3339) for formatting at render time.
     let build_date = Command::new("date")
