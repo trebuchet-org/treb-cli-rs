@@ -9,6 +9,7 @@ use std::{collections::HashMap, env, time::Duration};
 use anyhow::{Context, bail};
 use chrono::Utc;
 use serde::Serialize;
+use treb_config::{ResolveOpts, load_local_config, resolve_config};
 use treb_core::types::{
     ArtifactInfo, Deployment, DeploymentMethod, DeploymentStrategy, DeploymentType, Operation,
     ProxyInfo, Transaction, TransactionStatus, VerificationInfo, VerificationStatus,
@@ -126,6 +127,55 @@ fn resolve_rpc_url(
     }
 
     Ok(url.expanded_url.clone())
+}
+
+/// Resolve the effective network for `register`.
+///
+/// Explicit `--network` wins. When `--rpc-url` is provided, network lookup is
+/// not needed. Otherwise, fall back to the active config network.
+fn resolve_effective_network(
+    network: Option<String>,
+    rpc_url: Option<&str>,
+    cwd: &std::path::Path,
+) -> anyhow::Result<Option<String>> {
+    if network.is_some() || rpc_url.is_some() {
+        return Ok(network);
+    }
+
+    let local = load_local_config(cwd).map_err(|err| anyhow::anyhow!("{err}"))?;
+
+    if local.network.is_empty() {
+        anyhow::bail!("no active network set in config, --network flag is required");
+    }
+
+    Ok(Some(local.network))
+}
+
+/// Resolve the effective namespace for `register`.
+///
+/// Explicit `--namespace` wins. Otherwise, reuse the shared config resolver so
+/// register follows the same namespace precedence as other config-backed
+/// commands.
+fn resolve_effective_namespace(
+    namespace: Option<String>,
+    cwd: &std::path::Path,
+) -> anyhow::Result<String> {
+    if let Some(namespace) = namespace {
+        return Ok(namespace);
+    }
+
+    let resolved = resolve_config(ResolveOpts {
+        project_root: cwd.to_path_buf(),
+        namespace: None,
+        network: None,
+        profile: None,
+        sender_overrides: HashMap::new(),
+    });
+
+    Ok(match resolved {
+        Ok(resolved) => resolved.namespace,
+        Err(_) => "default".to_string(),
+    })
 }
 
 // ── Trace parsing ───────────────────────────────────────────────────────
@@ -335,6 +385,7 @@ pub async fn run(
     }
 
     // ── Resolve RPC URL ─────────────────────────────────────────────────
+    let network = resolve_effective_network(network, rpc_url.as_deref(), &cwd)?;
     let effective_rpc_url = resolve_rpc_url(rpc_url, network, &cwd)?;
     let client = rpc_client()?;
 
@@ -449,7 +500,7 @@ pub async fn run(
     }
 
     // ── Build defaults ──────────────────────────────────────────────────
-    let effective_namespace = namespace.unwrap_or_else(|| "default".to_string());
+    let effective_namespace = resolve_effective_namespace(namespace, &cwd)?;
     let effective_name = resolve_contract_name(contract_name, contract);
     let tx_id = format!("tx-{tx_hash}");
 
@@ -650,6 +701,7 @@ mod tests {
     use super::*;
 
     use tempfile::TempDir;
+    use treb_config::{LocalConfig, save_local_config};
 
     // ── Helper ──────────────────────────────────────────────────────────
 
@@ -701,6 +753,150 @@ needs_env = "https://rpc.example.com/${API_KEY}"
 "#,
         )
         .unwrap();
+    }
+
+    fn setup_project_with_config(dir: &std::path::Path, network: &str) {
+        setup_project(dir);
+        save_local_config(
+            dir,
+            &LocalConfig { namespace: "default".to_string(), network: network.to_string() },
+        )
+        .unwrap();
+    }
+
+    // ── resolve_effective_network ───────────────────────────────────────
+
+    #[test]
+    fn effective_network_falls_back_to_config() {
+        let tmp = TempDir::new().unwrap();
+        setup_project_with_config(tmp.path(), "mainnet");
+
+        let network = resolve_effective_network(None, None, tmp.path()).unwrap();
+
+        assert_eq!(network.as_deref(), Some("mainnet"));
+    }
+
+    #[test]
+    fn effective_network_ignores_invalid_local_namespace() {
+        let tmp = TempDir::new().unwrap();
+        setup_project(tmp.path());
+        std::fs::write(
+            tmp.path().join("treb.toml"),
+            r#"
+[namespace.default]
+profile = "default"
+"#,
+        )
+        .unwrap();
+        save_local_config(
+            tmp.path(),
+            &LocalConfig { namespace: "staging".to_string(), network: "mainnet".to_string() },
+        )
+        .unwrap();
+
+        let network = resolve_effective_network(None, None, tmp.path()).unwrap();
+
+        assert_eq!(network.as_deref(), Some("mainnet"));
+    }
+
+    #[test]
+    fn effective_network_missing_config_errors() {
+        let tmp = TempDir::new().unwrap();
+        setup_project(tmp.path());
+
+        let err = resolve_effective_network(None, None, tmp.path()).unwrap_err();
+
+        assert_eq!(err.to_string(), "no active network set in config, --network flag is required");
+    }
+
+    // ── resolve_effective_namespace ───────────────────────────────────
+
+    fn setup_project_with_namespace_config(dir: &std::path::Path, namespace: &str) {
+        setup_project(dir);
+        std::fs::write(
+            dir.join("treb.toml"),
+            r#"
+[accounts.deployer]
+type = "private_key"
+address = "0x0000000000000000000000000000000000000001"
+private_key = "0x01"
+
+[namespace.default]
+profile = "default"
+
+[namespace.default.senders]
+deployer = "deployer"
+
+[namespace.staging]
+profile = "staging"
+
+[namespace.staging.senders]
+deployer = "deployer"
+"#,
+        )
+        .unwrap();
+        save_local_config(
+            dir,
+            &LocalConfig { namespace: namespace.to_string(), network: "mainnet".to_string() },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn effective_namespace_prefers_explicit_flag() {
+        let tmp = TempDir::new().unwrap();
+        setup_project_with_namespace_config(tmp.path(), "staging");
+
+        let namespace =
+            resolve_effective_namespace(Some("production".to_string()), tmp.path()).unwrap();
+
+        assert_eq!(namespace, "production");
+    }
+
+    #[test]
+    fn effective_namespace_falls_back_to_config() {
+        let tmp = TempDir::new().unwrap();
+        setup_project_with_namespace_config(tmp.path(), "staging");
+
+        let namespace = resolve_effective_namespace(None, tmp.path()).unwrap();
+        let deployment_id = generate_deployment_id(&namespace, 31_337, "Counter", "");
+
+        assert_eq!(namespace, "staging");
+        assert_eq!(deployment_id, "staging/31337/Counter");
+    }
+
+    #[test]
+    fn effective_namespace_defaults_when_config_file_missing() {
+        let tmp = TempDir::new().unwrap();
+        setup_project(tmp.path());
+        std::fs::create_dir_all(tmp.path().join(".treb")).unwrap();
+
+        let namespace = resolve_effective_namespace(None, tmp.path()).unwrap();
+
+        assert_eq!(namespace, "default");
+    }
+
+    #[test]
+    fn effective_namespace_defaults_when_config_resolution_fails() {
+        let tmp = TempDir::new().unwrap();
+        setup_project(tmp.path());
+        std::fs::write(
+            tmp.path().join("treb.toml"),
+            r#"
+[namespace.default]
+profile = "default"
+"#,
+        )
+        .unwrap();
+        save_local_config(
+            tmp.path(),
+            &LocalConfig { namespace: "staging".to_string(), network: "mainnet".to_string() },
+        )
+        .unwrap();
+
+        let namespace = resolve_effective_namespace(None, tmp.path()).unwrap();
+
+        assert_eq!(namespace, "default");
     }
 
     // ── resolve_rpc_url ─────────────────────────────────────────────────

@@ -1,0 +1,9 @@
+=== cmd 0: [register --tx-hash 0x4674c314019d10397b9275c83fdeca4351175467140b1da7443f5a483a7585cb --network anvil-31337] ===
+✓ Successfully registered 1 deployment(s)
+
+  Deployment 1:
+    Deployment ID: staging/31337/Unknown
+    Address: 0x5fbdb2315678afecb367f032d93f642f64180aa3
+    Contract: Unknown
+🔍 Tracing transaction...
+📝 Registering deployments...

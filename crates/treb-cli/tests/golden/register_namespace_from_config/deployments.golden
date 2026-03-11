@@ -1,0 +1,29 @@
+{
+  "staging/31337/Unknown": {
+    "id": "staging/31337/Unknown",
+    "namespace": "staging",
+    "chainId": 31337,
+    "contractName": "Unknown",
+    "label": "",
+    "address": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+    "type": "UNKNOWN",
+    "transactionId": "tx-<ID>",
+    "deploymentStrategy": {
+      "method": "CREATE"
+    },
+    "proxyInfo": null,
+    "artifact": {
+      "path": "",
+      "compilerVersion": "",
+      "bytecodeHash": "",
+      "scriptPath": "",
+      "gitCommit": ""
+    },
+    "verification": {
+      "status": "UNVERIFIED"
+    },
+    "tags": null,
+    "createdAt": "<TIMESTAMP>",
+    "updatedAt": "<TIMESTAMP>"
+  }
+}

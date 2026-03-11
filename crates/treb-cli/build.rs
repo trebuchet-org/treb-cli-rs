@@ -336,7 +336,7 @@ fn build_sync() -> ClapCommand {
             Arg::new("clean")
                 .long("clean")
                 .action(ArgAction::SetTrue)
-                .help("Remove safe transactions not found on the service"),
+                .help("Remove invalid entries while syncing"),
         )
         .arg(
             Arg::new("debug")

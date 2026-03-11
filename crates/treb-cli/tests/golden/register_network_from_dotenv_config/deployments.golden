@@ -1,0 +1,29 @@
+{
+  "default/31337/Unknown": {
+    "id": "default/31337/Unknown",
+    "namespace": "default",
+    "chainId": 31337,
+    "contractName": "Unknown",
+    "label": "",
+    "address": "0x1234567890abcdef1234567890abcdef12345678",
+    "type": "UNKNOWN",
+    "transactionId": "tx-<ID>",
+    "deploymentStrategy": {
+      "method": "CREATE"
+    },
+    "proxyInfo": null,
+    "artifact": {
+      "path": "",
+      "compilerVersion": "",
+      "bytecodeHash": "",
+      "scriptPath": "",
+      "gitCommit": ""
+    },
+    "verification": {
+      "status": "UNVERIFIED"
+    },
+    "tags": null,
+    "createdAt": "<TIMESTAMP>",
+    "updatedAt": "<TIMESTAMP>"
+  }
+}
