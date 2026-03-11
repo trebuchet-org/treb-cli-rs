@@ -2,6 +2,7 @@
 Started: Wed Mar 11 11:50:04 AM CET 2026
 ## Codebase Patterns
 - For commands that accept both `--network` and `--rpc-url`, only resolve the config-backed network when both flags are absent, then pass that value through the existing RPC URL resolver so explicit overrides and direct-URL passthrough keep working unchanged.
+- For commands with an optional `--namespace`, resolve the omitted case through `treb_config::resolve_config()` instead of hard-coding `"default"` so local config precedence and namespace validation match the rest of the CLI.
 
 ---
 ## 2026-03-11 11:52:57 CET - P10-US-001
@@ -12,4 +13,13 @@ Started: Wed Mar 11 11:50:04 AM CET 2026
   - Patterns discovered: config-backed network fallback should stay separate from RPC URL resolution so explicit `--rpc-url` and `--network` precedence remains untouched.
   - Gotchas encountered: `.ralph/current` is a symlink to `.ralph/state/M3`, so story bookkeeping updates land in the state files shown by `git status`.
   - Useful context: `cargo test -p treb-cli effective_network_` is a fast focused check for the new register fallback helper before running broader command coverage.
+---
+## 2026-03-11 12:09:28 CET - P10-US-002
+- Implemented config-driven namespace fallback for `treb register` by resolving the omitted `--namespace` case through the shared config resolver before generating deployment IDs.
+- Added focused unit coverage for namespace precedence: explicit flag wins, config.local/resolve_config fallback is used when present, and missing local config still defaults to `default`.
+- Files changed: `CLAUDE.md`, `crates/treb-cli/src/commands/register.rs`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: register-style commands should compute their effective namespace once, before generating registry IDs or transaction environment fields, so every derived artifact stays in sync.
+  - Gotchas encountered: using `resolve_config()` only for the omitted namespace path preserves the current explicit `--namespace` override behavior without introducing new config validation on explicit values.
+  - Useful context: `cargo test -p treb-cli effective_namespace_` is a fast focused check for the register namespace helper before running broader crate checks.
 ---

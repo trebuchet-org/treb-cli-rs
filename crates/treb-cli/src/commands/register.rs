@@ -9,7 +9,7 @@ use std::{collections::HashMap, env, time::Duration};
 use anyhow::{Context, bail};
 use chrono::Utc;
 use serde::Serialize;
-use treb_config::load_local_config;
+use treb_config::{ResolveOpts, load_local_config, resolve_config};
 use treb_core::types::{
     ArtifactInfo, Deployment, DeploymentMethod, DeploymentStrategy, DeploymentType, Operation,
     ProxyInfo, Transaction, TransactionStatus, VerificationInfo, VerificationStatus,
@@ -149,6 +149,31 @@ fn resolve_effective_network(
     }
 
     Ok(Some(local.network))
+}
+
+/// Resolve the effective namespace for `register`.
+///
+/// Explicit `--namespace` wins. Otherwise, reuse the shared config resolver so
+/// register follows the same namespace precedence as other config-backed
+/// commands.
+fn resolve_effective_namespace(
+    namespace: Option<String>,
+    cwd: &std::path::Path,
+) -> anyhow::Result<String> {
+    if let Some(namespace) = namespace {
+        return Ok(namespace);
+    }
+
+    let resolved = resolve_config(ResolveOpts {
+        project_root: cwd.to_path_buf(),
+        namespace: None,
+        network: None,
+        profile: None,
+        sender_overrides: HashMap::new(),
+    })
+    .map_err(|err| anyhow::anyhow!("{err}"))?;
+
+    Ok(resolved.namespace)
 }
 
 // ── Trace parsing ───────────────────────────────────────────────────────
@@ -473,7 +498,7 @@ pub async fn run(
     }
 
     // ── Build defaults ──────────────────────────────────────────────────
-    let effective_namespace = namespace.unwrap_or_else(|| "default".to_string());
+    let effective_namespace = resolve_effective_namespace(namespace, &cwd)?;
     let effective_name = resolve_contract_name(contract_name, contract);
     let tx_id = format!("tx-{tx_hash}");
 
@@ -780,6 +805,73 @@ profile = "default"
         let err = resolve_effective_network(None, None, tmp.path()).unwrap_err();
 
         assert_eq!(err.to_string(), "no active network set in config, --network flag is required");
+    }
+
+    // ── resolve_effective_namespace ───────────────────────────────────
+
+    fn setup_project_with_namespace_config(dir: &std::path::Path, namespace: &str) {
+        setup_project(dir);
+        std::fs::write(
+            dir.join("treb.toml"),
+            r#"
+[accounts.deployer]
+type = "private_key"
+address = "0x0000000000000000000000000000000000000001"
+private_key = "0x01"
+
+[namespace.default]
+profile = "default"
+
+[namespace.default.senders]
+deployer = "deployer"
+
+[namespace.staging]
+profile = "staging"
+
+[namespace.staging.senders]
+deployer = "deployer"
+"#,
+        )
+        .unwrap();
+        save_local_config(
+            dir,
+            &LocalConfig { namespace: namespace.to_string(), network: "mainnet".to_string() },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn effective_namespace_prefers_explicit_flag() {
+        let tmp = TempDir::new().unwrap();
+        setup_project_with_namespace_config(tmp.path(), "staging");
+
+        let namespace =
+            resolve_effective_namespace(Some("production".to_string()), tmp.path()).unwrap();
+
+        assert_eq!(namespace, "production");
+    }
+
+    #[test]
+    fn effective_namespace_falls_back_to_config() {
+        let tmp = TempDir::new().unwrap();
+        setup_project_with_namespace_config(tmp.path(), "staging");
+
+        let namespace = resolve_effective_namespace(None, tmp.path()).unwrap();
+        let deployment_id = generate_deployment_id(&namespace, 31_337, "Counter", "");
+
+        assert_eq!(namespace, "staging");
+        assert_eq!(deployment_id, "staging/31337/Counter");
+    }
+
+    #[test]
+    fn effective_namespace_defaults_when_config_file_missing() {
+        let tmp = TempDir::new().unwrap();
+        setup_project(tmp.path());
+        std::fs::create_dir_all(tmp.path().join(".treb")).unwrap();
+
+        let namespace = resolve_effective_namespace(None, tmp.path()).unwrap();
+
+        assert_eq!(namespace, "default");
     }
 
     // ── resolve_rpc_url ─────────────────────────────────────────────────
