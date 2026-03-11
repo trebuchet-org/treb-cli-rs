@@ -9,11 +9,12 @@ use serde_json::Value;
 use tempfile::TempDir;
 use treb_core::types::{DeploymentMethod, DeploymentType, TransactionStatus};
 use treb_registry::{
-    DEPLOYMENTS_FILE, DeploymentStore, SAFE_TXS_FILE, SafeTransactionStore, TRANSACTIONS_FILE,
-    TransactionStore,
+    ADDRESSBOOK_FILE, AddressbookStore, DEPLOYMENTS_FILE, DeploymentStore, SAFE_TXS_FILE,
+    SafeTransactionStore, TRANSACTIONS_FILE, TransactionStore,
 };
 
 const GO_COMPAT_FIXTURES_DIR: &str = "tests/fixtures/go-compat";
+const ADDRESSBOOK_FIXTURE_CHAIN_COUNT: usize = 3;
 const DEPLOYMENTS_FIXTURE_COUNT: usize = 13;
 const TRANSACTIONS_FIXTURE_COUNT: usize = 10;
 const SAFE_TXS_FIXTURE_COUNT: usize = 8;
@@ -97,6 +98,34 @@ fn assert_go_compat_json(expected: &Value, actual: &Value, path: &str) {
             }
         }
         _ => assert_eq!(actual, expected, "value differs at {path}"),
+    }
+}
+
+fn assert_matching_key_structure(expected: &Value, actual: &Value, path: &str) {
+    match (expected, actual) {
+        (Value::Object(expected_obj), Value::Object(actual_obj)) => {
+            let expected_keys: BTreeSet<&str> = expected_obj.keys().map(String::as_str).collect();
+            let actual_keys: BTreeSet<&str> = actual_obj.keys().map(String::as_str).collect();
+            assert_eq!(actual_keys, expected_keys, "object keys differ at {path}");
+
+            for (key, expected_value) in expected_obj {
+                let actual_value =
+                    actual_obj.get(key).unwrap_or_else(|| panic!("missing key {key} at {path}"));
+                let child_path = format!("{path}.{key}");
+                assert_matching_key_structure(expected_value, actual_value, &child_path);
+            }
+        }
+        (Value::Array(expected_items), Value::Array(actual_items)) => {
+            assert_eq!(actual_items.len(), expected_items.len(), "array length differs at {path}");
+
+            for (index, (expected_item, actual_item)) in
+                expected_items.iter().zip(actual_items.iter()).enumerate()
+            {
+                let child_path = format!("{path}[{index}]");
+                assert_matching_key_structure(expected_item, actual_item, &child_path);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -266,6 +295,29 @@ fn go_compat_safe_txs_deserialize() {
 }
 
 #[test]
+fn go_compat_addressbook_deserialize() {
+    let dir = TempDir::new().unwrap();
+    seed_registry_file(&dir, ADDRESSBOOK_FILE, "addressbook.json");
+
+    let mut store = AddressbookStore::new(dir.path());
+    store.load().unwrap();
+
+    assert_eq!(store.data().len(), ADDRESSBOOK_FIXTURE_CHAIN_COUNT);
+    assert_eq!(
+        store.data().get("1").and_then(|entries| entries.get("Treasury")).map(String::as_str),
+        Some("0x1111111111111111111111111111111111111111")
+    );
+    assert_eq!(
+        store.data().get("42220").and_then(|entries| entries.get("Broker")).map(String::as_str),
+        Some("0x2222222222222222222222222222222222222222")
+    );
+    assert_eq!(
+        store.data().get("8453").and_then(|entries| entries.get("Ops")).map(String::as_str),
+        Some("0x4444444444444444444444444444444444444444")
+    );
+}
+
+#[test]
 fn go_compat_deployments_round_trip() {
     let mut expected = load_fixture_json("deployments.json");
     let dir = TempDir::new().unwrap();
@@ -339,6 +391,27 @@ fn go_compat_safe_txs_round_trip() {
     let saved = load_registry_json(&dir, SAFE_TXS_FILE);
     assert_bare_registry_map(&saved, SAFE_TXS_FIXTURE_COUNT);
     assert_go_compat_json(&expected, &saved, "$");
+}
+
+#[test]
+fn go_compat_addressbook_round_trip() {
+    let expected = load_fixture_json("addressbook.json");
+    let dir = TempDir::new().unwrap();
+    seed_registry_file(&dir, ADDRESSBOOK_FILE, "addressbook.json");
+
+    let mut store = AddressbookStore::new(dir.path());
+    store.load().unwrap();
+    let expected_entries = store.data().clone();
+    store.save().unwrap();
+
+    let saved = load_registry_json(&dir, ADDRESSBOOK_FILE);
+    assert_bare_registry_map(&saved, ADDRESSBOOK_FIXTURE_CHAIN_COUNT);
+    assert_matching_key_structure(&expected, &saved, "$");
+    assert_eq!(saved, expected);
+
+    let mut reloaded = AddressbookStore::new(dir.path());
+    reloaded.load().unwrap();
+    assert_eq!(reloaded.data(), &expected_entries);
 }
 
 #[test]

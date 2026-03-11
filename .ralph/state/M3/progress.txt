@@ -6,6 +6,7 @@
 - Default CLI subcommands implemented through `normalize_cli_args()` should insert after parent-scoped flags like `-n/-s` and before subcommand-only flags like `--json`, while still leaving `--help` unnormalized.
 - Addressbook CLI integration coverage is stable when it uses `TestContext::new("project")`, runs `treb init`, passes a numeric `--network`, and sets `NO_COLOR=1` for human-output assertions.
 - Stateful alias-compatibility tests should compare each command in its own identically seeded temp project; seed registry-backed state up front so mutations like `set` or `remove` do not leak across invocations.
+- Go registry compatibility tests should seed the raw fixture under the current store filename in a temp registry dir, then assert that `store.save()` preserves bare JSON and the fixture’s recursive key structure.
 
 Started: Wed Mar 11 12:14:13 AM CET 2026
 ---
@@ -62,4 +63,13 @@ Started: Wed Mar 11 12:14:13 AM CET 2026
   - Patterns discovered: registry-backed alias compatibility tests fit the existing `assert_matching_command_output(...)` helper well when the seed function prepares state through the CLI or fixture before each invocation.
   - Gotchas encountered: mutating commands like `addressbook set` need separate temp projects per side of the comparison, otherwise the first invocation changes the registry state and invalidates byte-for-byte assertions.
   - Useful context: `cargo test -p treb-cli --test cli_compatibility_aliases` and `cargo clippy -p treb-cli --test cli_compatibility_aliases -- -D warnings` are sufficient focused checks for this parity suite.
+---
+## 2026-03-11 01:31:00 CET - P9-US-007
+- Added a Go-compat `addressbook.json` fixture with representative multi-chain entries and extended the registry compatibility suite with addressbook store load and round-trip coverage.
+- Verified that `AddressbookStore::load()` reads Go-style bare JSON, `save()` keeps the file unwrapped, the saved JSON preserves the fixture’s recursive key structure, and reloading after save keeps entries unchanged.
+- Files changed: `crates/treb-registry/tests/fixtures/go-compat/addressbook.json`, `crates/treb-registry/tests/go_compat_deserialize.rs`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: nested-map Go compatibility checks fit naturally in `crates/treb-registry/tests/go_compat_deserialize.rs` alongside the other registry fixtures and should validate both `load()` and `save()` paths.
+  - Gotchas encountered: addressbook compatibility should assert the on-disk file stays a bare JSON object, because `read_versioned_file()` accepts wrapped legacy input even though Rust writes the unwrapped format.
+  - Useful context: a no-mutation round trip (`load` -> `save` -> `reload`) is enough to prove addressbook parity because the values are plain strings, so exact JSON equality and key-structure checks can both stay strict.
 ---
