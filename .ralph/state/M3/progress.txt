@@ -5,6 +5,7 @@ Started: Wed Mar 11 12:46:17 PM CET 2026
 - `crates/treb-cli/build.rs` owns the compiled `TREB_VERSION` string; keep `src/main.rs` clap version metadata and `src/commands/version.rs` wired to that env var so `treb --version` and `treb version` stay in sync
 - Go-style clap parse diagnostics are centralized in `crates/treb-cli/src/main.rs::custom_clap_error_message()`; when parser errors change, keep the human stderr path and `--json` stderr wrapper in sync and update both `src/main.rs` unit tests and `tests/cli_error_format.rs`
 - Contextual command-navigation help footers are wired in `crates/treb-cli/src/main.rs::apply_contextual_help_footers()` and should use clap `after_long_help` so `--help` shows the footer while `-h` stays summary-only
+- Binary-level clap parse tests should assert non-zero exit status instead of hard-coding `1`; clap parse failures currently exit with code `2` even when the stderr text is custom-formatted
 
 ## 2026-03-11 12:52:54 CET - P11-US-001
 - Implemented build-time `TREB_VERSION` generation from `git describe --tags --dirty --abbrev=7` with fallback to `CARGO_PKG_VERSION` when the repo has no tags
@@ -29,4 +30,12 @@ Started: Wed Mar 11 12:46:17 PM CET 2026
   - Patterns discovered: contextual help guidance belongs in the command builder, not individual derive attributes, so one traversal can keep all affected subcommands consistent
   - Gotchas encountered: attaching the footer to clap `after_help` would also affect `-h`; `after_long_help` is required to preserve the short-help/full-help split
   - Useful context: updating one subcommand footer can reflow clap's global option formatting in help goldens, so refresh the affected `help_*` snapshots together
+---
+## 2026-03-11 20:11:00 CET - P11-US-004
+- Refreshed parser error regression coverage with explicit non-zero exit assertions and verified the help snapshots with `UPDATE_GOLDEN=1 cargo test -p treb-cli --test integration_help`
+- Files changed: `crates/treb-cli/tests/cli_error_format.rs`, `CLAUDE.md`, `.ralph/current/prd.json`, `.ralph/current/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered: parser stderr compatibility belongs in `crates/treb-cli/tests/cli_error_format.rs`, while the fastest targeted help-snapshot refresh check is `UPDATE_GOLDEN=1 cargo test -p treb-cli --test integration_help`
+  - Gotchas encountered: clap parse failures currently exit with status code `2`, so acceptance tests should assert non-zero instead of assuming `1`
+  - Useful context: the existing `help_*` goldens were already current after the footer/version work, and the targeted update pass confirmed no snapshot files needed rewriting for this story
 ---

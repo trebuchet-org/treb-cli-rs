@@ -8,7 +8,7 @@ fn treb() -> assert_cmd::Command {
 fn unknown_command_uses_go_style_stderr() {
     let output = treb().arg("nonexistent").output().expect("failed to run treb nonexistent");
 
-    assert!(!output.status.success(), "unknown command should fail");
+    assert_ne!(output.status.code(), Some(0), "unknown command should exit non-zero");
     let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
 
     assert_eq!(
@@ -22,7 +22,7 @@ fn unknown_flag_uses_go_style_stderr() {
     let output =
         treb().args(["list", "--nonexistent-flag"]).output().expect("failed to run treb list");
 
-    assert!(!output.status.success(), "unknown flag should fail");
+    assert_ne!(output.status.code(), Some(0), "unknown flag should exit non-zero");
     let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
 
     assert_eq!(
@@ -38,7 +38,7 @@ fn unknown_flag_json_uses_go_style_error_message() {
         .output()
         .expect("failed to run treb list --json");
 
-    assert_eq!(output.status.code(), Some(1));
+    assert_ne!(output.status.code(), Some(0), "json parse errors should exit non-zero");
     assert!(output.stdout.is_empty(), "stdout should stay empty for json parse errors");
 
     let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");

@@ -63,7 +63,7 @@
         "cargo clippy --workspace --all-targets passes (lint)"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]
