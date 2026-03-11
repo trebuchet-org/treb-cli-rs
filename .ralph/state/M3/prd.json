@@ -113,7 +113,7 @@
         "cargo test -p treb-cli --test cli_compatibility_aliases passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

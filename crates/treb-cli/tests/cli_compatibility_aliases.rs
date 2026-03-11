@@ -14,6 +14,10 @@ use std::{
 use treb_core::types::fork::{ForkEntry, ForkHistoryEntry, SnapshotEntry};
 use treb_registry::{DEPLOYMENTS_FILE, ForkStateStore, TRANSACTIONS_FILE};
 
+const ADDRESSBOOK_CHAIN_ID: &str = "1";
+const ADDRESSBOOK_NAME: &str = "Alpha";
+const ADDRESSBOOK_ADDRESS: &str = "0x1111111111111111111111111111111111111111";
+
 fn treb() -> assert_cmd::Command {
     cargo_bin_cmd!("treb-cli")
 }
@@ -217,6 +221,29 @@ fn seed_fork_runtime_for_restart(project_root: &Path, rpc_url: &str, port: u16) 
 
     let mut store = ForkStateStore::new(&treb_dir);
     store.insert_active_fork(entry).unwrap();
+}
+
+fn seed_addressbook_entry(project_root: &Path) {
+    let output = treb()
+        .args([
+            "addressbook",
+            "--network",
+            ADDRESSBOOK_CHAIN_ID,
+            "set",
+            ADDRESSBOOK_NAME,
+            ADDRESSBOOK_ADDRESS,
+        ])
+        .env("NO_COLOR", "1")
+        .current_dir(project_root)
+        .output()
+        .expect("addressbook seed command should run");
+
+    assert!(
+        output.status.success(),
+        "addressbook seed command should succeed: stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 fn read_http_request(stream: &mut std::net::TcpStream) -> std::io::Result<String> {
@@ -507,5 +534,59 @@ fn fork_diff_positional_network_matches_flag_output() {
         &["fork", "diff", "mainnet", "--json"],
         &["fork", "diff", "--network", "mainnet", "--json"],
         seed_fork_diff,
+    );
+}
+
+#[test]
+fn addressbook_vs_ab_list() {
+    assert_matching_command_output(
+        "addressbook vs ab list",
+        &["addressbook", "--network", ADDRESSBOOK_CHAIN_ID, "list"],
+        &["ab", "--network", ADDRESSBOOK_CHAIN_ID, "list"],
+        seed_addressbook_entry,
+    );
+}
+
+#[test]
+fn addressbook_list_vs_ls() {
+    assert_matching_command_output(
+        "addressbook list vs ls",
+        &["addressbook", "--network", ADDRESSBOOK_CHAIN_ID, "list"],
+        &["addressbook", "--network", ADDRESSBOOK_CHAIN_ID, "ls"],
+        seed_addressbook_entry,
+    );
+}
+
+#[test]
+fn addressbook_vs_ab_set() {
+    assert_matching_command_output(
+        "addressbook vs ab set",
+        &[
+            "addressbook",
+            "--network",
+            ADDRESSBOOK_CHAIN_ID,
+            "set",
+            ADDRESSBOOK_NAME,
+            ADDRESSBOOK_ADDRESS,
+        ],
+        &[
+            "ab",
+            "--network",
+            ADDRESSBOOK_CHAIN_ID,
+            "set",
+            ADDRESSBOOK_NAME,
+            ADDRESSBOOK_ADDRESS,
+        ],
+        |_| {},
+    );
+}
+
+#[test]
+fn addressbook_default_vs_list() {
+    assert_matching_command_output(
+        "addressbook default vs list",
+        &["addressbook", "--network", ADDRESSBOOK_CHAIN_ID],
+        &["addressbook", "--network", ADDRESSBOOK_CHAIN_ID, "list"],
+        seed_addressbook_entry,
     );
 }
