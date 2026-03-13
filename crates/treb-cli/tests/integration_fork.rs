@@ -6,50 +6,36 @@
 mod framework;
 
 use chrono::{TimeZone, Utc};
-use std::io::{Read, Write};
-use treb_core::types::fork::{ForkEntry, ForkHistoryEntry, SnapshotEntry};
+use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
 use treb_registry::{DEPLOYMENTS_FILE, ForkStateStore, TRANSACTIONS_FILE};
 
 use framework::{
-    anvil_node::AnvilNode,
     context::TestContext,
     integration_test::{IntegrationTest, run_integration_test},
-    normalizer::{LabelNormalizer, PathNormalizer, UptimeNormalizer},
+    normalizer::PathNormalizer,
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 /// Build a ForkEntry with fixed, deterministic values for golden file stability.
 fn sample_fork_entry(treb_dir: &std::path::Path) -> ForkEntry {
-    sample_fork_entry_for_network(
-        treb_dir,
-        "mainnet",
-        Utc.with_ymd_and_hms(2026, 1, 15, 10, 30, 0).unwrap(),
-    )
-}
-
-fn sample_fork_entry_for_network(
-    treb_dir: &std::path::Path,
-    network: &str,
-    entered_at: chrono::DateTime<Utc>,
-) -> ForkEntry {
-    let snapshot_dir = treb_dir.join("snapshots").join(network);
+    let ts = Utc.with_ymd_and_hms(2026, 1, 15, 10, 30, 0).unwrap();
+    let snapshot_dir = treb_dir.join("snapshots").join("mainnet");
     ForkEntry {
-        network: network.to_string(),
-        instance_name: None,
+        network: "mainnet".to_string(),
         rpc_url: "http://localhost:18545".to_string(),
         port: 18545,
         chain_id: 1,
         fork_url: "https://eth.example.com".to_string(),
         fork_block_number: None,
         snapshot_dir: snapshot_dir.to_string_lossy().into_owned(),
-        started_at: entered_at,
-        env_var_name: format!("ETH_RPC_URL_{}", network.to_uppercase()),
+        started_at: ts,
+        env_var_name: "ETH_RPC_URL_MAINNET".to_string(),
         original_rpc: "https://eth.example.com".to_string(),
         anvil_pid: 0,
         pid_file: String::new(),
         log_file: String::new(),
-        entered_at,
+        entered_at: ts,
         snapshots: vec![],
     }
 }
@@ -59,12 +45,6 @@ fn seed_fork_status(project_root: &std::path::Path) {
     let treb_dir = project_root.join(".treb");
     let mut store = ForkStateStore::new(&treb_dir);
     store.insert_active_fork(sample_fork_entry(&treb_dir)).unwrap();
-}
-
-fn load_active_fork(treb_dir: &std::path::Path, network: &str) -> ForkEntry {
-    let mut store = ForkStateStore::new(treb_dir);
-    store.load().unwrap();
-    store.get_active_fork(network).unwrap().clone()
 }
 
 // ── fork status: no forks ────────────────────────────────────────────────
@@ -97,8 +77,7 @@ fn fork_status_with_active_fork() {
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_fork_status(ctx.path()))
         .test(&["fork", "status"])
-        .extra_normalizer(Box::new(path_normalizer))
-        .extra_normalizer(Box::new(UptimeNormalizer));
+        .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
 }
@@ -115,8 +94,7 @@ fn fork_status_json() {
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_fork_status(ctx.path()))
         .test(&["fork", "status", "--json"])
-        .extra_normalizer(Box::new(path_normalizer))
-        .extra_normalizer(Box::new(UptimeNormalizer));
+        .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
 }
@@ -143,59 +121,16 @@ fn fork_status_not_initialized() {
 
 // ── History helpers ─────────────────────────────────────────────────────
 
-/// Pre-populate fork state with active fork entries plus audit history for
-/// golden file tests.
+/// Pre-populate fork state with history entries for golden file tests.
 ///
-/// Human and JSON history both read from the persisted audit log. Active fork
-/// entries are still seeded so the same fixture can exercise `fork status`.
-/// - active snapshots for mainnet: initial -> restart
-/// - active snapshots for sepolia: initial
-/// - audit history entries in most-recent-first order:
+/// Creates 3 entries in chronological order; the store prepends each, so the
+/// final order in `history` is most-recent-first:
 ///   1. restart mainnet (with details)
 ///   2. enter  sepolia  (no details)
 ///   3. enter  mainnet  (no details)
 fn seed_fork_history(project_root: &std::path::Path) {
     let treb_dir = project_root.join(".treb");
     let mut store = ForkStateStore::new(&treb_dir);
-
-    let mut mainnet = sample_fork_entry_for_network(
-        &treb_dir,
-        "mainnet",
-        Utc.with_ymd_and_hms(2026, 1, 10, 8, 0, 0).unwrap(),
-    );
-    mainnet.snapshots = vec![
-        SnapshotEntry {
-            index: 0,
-            snapshot_id: "0x1".to_string(),
-            command: "enter".to_string(),
-            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 8, 0, 0).unwrap(),
-        },
-        SnapshotEntry {
-            index: 1,
-            snapshot_id: "0x2".to_string(),
-            command: "restart".to_string(),
-            timestamp: Utc.with_ymd_and_hms(2026, 1, 15, 10, 30, 0).unwrap(),
-        },
-    ];
-    store.insert_active_fork(mainnet).unwrap();
-
-    let mut sepolia = sample_fork_entry_for_network(
-        &treb_dir,
-        "sepolia",
-        Utc.with_ymd_and_hms(2026, 1, 12, 14, 0, 0).unwrap(),
-    );
-    sepolia.chain_id = 11155111;
-    sepolia.rpc_url = "http://localhost:28545".to_string();
-    sepolia.fork_url = "https://sepolia.example.com".to_string();
-    sepolia.original_rpc = "https://sepolia.example.com".to_string();
-    sepolia.env_var_name = "ETH_RPC_URL_SEPOLIA".to_string();
-    sepolia.snapshots = vec![SnapshotEntry {
-        index: 0,
-        snapshot_id: "0x3".to_string(),
-        command: "enter".to_string(),
-        timestamp: Utc.with_ymd_and_hms(2026, 1, 12, 14, 0, 0).unwrap(),
-    }];
-    store.insert_active_fork(sepolia).unwrap();
 
     // Oldest first — add_history prepends, so last add ends up at index 0.
     let entries = vec![
@@ -242,8 +177,9 @@ fn fork_history_empty() {
 
 // ── fork history: with entries ──────────────────────────────────────────
 
-/// `treb fork history` with active fork snapshots should display stack-style
-/// history grouped by network.
+/// `treb fork history` with entries should display a table with 4 columns
+/// (Timestamp, Action, Network, Details) in most-recent-first order.
+/// Entries with details = None should show "-".
 #[test]
 fn fork_history_with_entries() {
     let ctx = TestContext::new("minimal-project");
@@ -260,8 +196,7 @@ fn fork_history_with_entries() {
 
 // ── fork history: network filter ────────────────────────────────────────
 
-/// `treb fork history --network mainnet` should only display the active
-/// mainnet session stack.
+/// `treb fork history --network mainnet` should only display mainnet entries.
 #[test]
 fn fork_history_network_filter() {
     let ctx = TestContext::new("minimal-project");
@@ -312,38 +247,6 @@ fn fork_history_not_initialized() {
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
-}
-
-#[test]
-fn fork_history_after_exit_uses_persisted_audit_log() {
-    let ctx = TestContext::new("minimal-project");
-    ctx.run(["init"]).success();
-
-    let mut store = ForkStateStore::new(&ctx.treb_dir());
-    store
-        .add_history(ForkHistoryEntry {
-            action: "enter".into(),
-            network: "mainnet".into(),
-            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 8, 0, 0).unwrap(),
-            details: None,
-        })
-        .unwrap();
-    store
-        .add_history(ForkHistoryEntry {
-            action: "exit".into(),
-            network: "mainnet".into(),
-            timestamp: Utc.with_ymd_and_hms(2026, 1, 11, 8, 0, 0).unwrap(),
-            details: None,
-        })
-        .unwrap();
-
-    let output =
-        ctx.run(["fork", "history", "--network", "mainnet"]).success().get_output().stdout.clone();
-    let stdout = String::from_utf8(output).expect("utf8 fork history output");
-
-    assert!(stdout.contains("Fork History: mainnet"));
-    assert!(stdout.contains("[0] initial"));
-    assert!(stdout.contains("→ [1] exit"));
 }
 
 // ── Diff helpers ────────────────────────────────────────────────────────
@@ -492,286 +395,9 @@ fn seed_fork_exit(project_root: &std::path::Path) {
     store.insert_active_fork(entry).unwrap();
 }
 
-fn seed_fork_exit_all(project_root: &std::path::Path) {
-    let treb_dir = project_root.join(".treb");
-    let mainnet_entry = sample_fork_entry_for_network(
-        &treb_dir,
-        "mainnet",
-        Utc.with_ymd_and_hms(2026, 1, 15, 10, 30, 0).unwrap(),
-    );
-    let sepolia_entry = sample_fork_entry_for_network(
-        &treb_dir,
-        "sepolia",
-        Utc.with_ymd_and_hms(2026, 1, 16, 10, 30, 0).unwrap(),
-    );
-
-    let mainnet_snapshot_dir = std::path::PathBuf::from(&mainnet_entry.snapshot_dir);
-    let sepolia_snapshot_dir = std::path::PathBuf::from(&sepolia_entry.snapshot_dir);
-    std::fs::create_dir_all(&mainnet_snapshot_dir).unwrap();
-    std::fs::create_dir_all(&sepolia_snapshot_dir).unwrap();
-
-    let state_before_mainnet = r#"{"phase":"before-mainnet"}"#;
-    let state_before_sepolia = r#"{"phase":"during-mainnet"}"#;
-    let active_state = r#"{"phase":"during-sepolia"}"#;
-
-    std::fs::write(mainnet_snapshot_dir.join(DEPLOYMENTS_FILE), state_before_mainnet).unwrap();
-    std::fs::write(sepolia_snapshot_dir.join(DEPLOYMENTS_FILE), state_before_sepolia).unwrap();
-    std::fs::write(treb_dir.join(DEPLOYMENTS_FILE), active_state).unwrap();
-
-    let mut store = ForkStateStore::new(&treb_dir);
-    store.insert_active_fork(mainnet_entry).unwrap();
-    store.insert_active_fork(sepolia_entry).unwrap();
-}
-
-/// Configure `foundry.toml` with a one-shot local JSON-RPC endpoint that
-/// responds to `eth_chainId` for deterministic `fork enter` golden testing.
-/// Returns the dynamically-assigned port so callers can normalize output.
-fn seed_fork_enter_success(project_root: &std::path::Path) -> std::io::Result<u16> {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
-    let port = listener.local_addr()?.port();
-
-    let foundry_toml = project_root.join("foundry.toml");
-    let content = std::fs::read_to_string(&foundry_toml)?;
-    let updated = content.replace(
-        r#"localhost = "http://localhost:8545""#,
-        &format!(r#"localhost = "http://127.0.0.1:{port}""#),
-    );
-    std::fs::write(foundry_toml, updated)?;
-
-    std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-
-        // Read and ignore request payload.
-        let mut buf = [0_u8; 2048];
-        let _ = stream.read(&mut buf);
-
-        // Reply with eth_chainId = 0x1.
-        let body = r#"{"jsonrpc":"2.0","id":1,"result":"0x1"}"#;
-        let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            body.len(),
-            body
-        );
-        stream.write_all(response.as_bytes()).unwrap();
-        stream.flush().unwrap();
-    });
-
-    Ok(port)
-}
-
-fn read_http_request(stream: &mut std::net::TcpStream) -> std::io::Result<String> {
-    stream.set_read_timeout(Some(std::time::Duration::from_millis(250)))?;
-
-    let mut buf = Vec::new();
-    let mut chunk = [0_u8; 2048];
-    loop {
-        match stream.read(&mut chunk) {
-            Ok(0) => break,
-            Ok(n) => {
-                buf.extend_from_slice(&chunk[..n]);
-
-                let Some(headers_end) = buf.windows(4).position(|window| window == b"\r\n\r\n")
-                else {
-                    continue;
-                };
-                let body_start = headers_end + 4;
-                let headers = String::from_utf8_lossy(&buf[..headers_end]);
-                let content_length = headers
-                    .lines()
-                    .find_map(|line| {
-                        line.split_once(':').and_then(|(name, value)| {
-                            if name.eq_ignore_ascii_case("content-length") {
-                                value.trim().parse::<usize>().ok()
-                            } else {
-                                None
-                            }
-                        })
-                    })
-                    .unwrap_or(0);
-
-                if buf.len() >= body_start + content_length {
-                    break;
-                }
-            }
-            Err(err)
-                if matches!(
-                    err.kind(),
-                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                ) =>
-            {
-                break;
-            }
-            Err(err) => return Err(err),
-        }
-    }
-
-    Ok(String::from_utf8_lossy(&buf).into_owned())
-}
-
-fn spawn_json_rpc_server<F>(mut handler: F) -> std::io::Result<u16>
-where
-    F: FnMut(&serde_json::Value) -> serde_json::Value + Send + 'static,
-{
-    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
-    listener.set_nonblocking(true)?;
-    let port = listener.local_addr()?.port();
-
-    std::thread::spawn(move || {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while std::time::Instant::now() < deadline {
-            match listener.accept() {
-                Ok((mut stream, _)) => {
-                    let request = read_http_request(&mut stream).unwrap();
-                    if request.is_empty() {
-                        continue;
-                    }
-
-                    let body = request.split("\r\n\r\n").nth(1).unwrap_or("");
-                    if body.is_empty() {
-                        continue;
-                    }
-
-                    let json: serde_json::Value = serde_json::from_str(body).unwrap();
-                    let response_body = serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": json.get("id").cloned().unwrap_or_else(|| serde_json::json!(1)),
-                        "result": handler(&json),
-                    })
-                    .to_string();
-                    let response = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                        response_body.len(),
-                        response_body
-                    );
-                    stream.write_all(response.as_bytes()).unwrap();
-                    stream.flush().unwrap();
-                }
-                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-                Err(err) => panic!("json-rpc fixture accept failed: {err}"),
-            }
-        }
-    });
-
-    Ok(port)
-}
-
-fn seed_fork_revert_json_success(project_root: &std::path::Path, port: u16) -> std::io::Result<()> {
-    let treb_dir = project_root.join(".treb");
-    let mut entry = sample_fork_entry(&treb_dir);
-    entry.rpc_url = format!("http://127.0.0.1:{port}");
-    entry.port = port;
-    entry.snapshots.push(treb_core::types::fork::SnapshotEntry {
-        index: 0,
-        snapshot_id: "0xrevert-old".to_string(),
-        command: "enter".to_string(),
-        timestamp: Utc.with_ymd_and_hms(2026, 1, 15, 10, 31, 0).unwrap(),
-    });
-
-    let snapshot_dir = std::path::PathBuf::from(&entry.snapshot_dir);
-    std::fs::create_dir_all(&snapshot_dir)?;
-    std::fs::write(treb_dir.join(DEPLOYMENTS_FILE), r#"{"Counter_1": {"address": "0xaaa"}}"#)?;
-    std::fs::write(snapshot_dir.join(DEPLOYMENTS_FILE), r#"{"Counter_1": {"address": "0xaaa"}}"#)?;
-
-    let mut store = ForkStateStore::new(&treb_dir);
-    store.insert_active_fork(entry).unwrap();
-    Ok(())
-}
-
-fn seed_fork_restart_json_success(
-    project_root: &std::path::Path,
-    port: u16,
-) -> std::io::Result<()> {
-    let treb_dir = project_root.join(".treb");
-    let mut entry = sample_fork_entry(&treb_dir);
-    entry.rpc_url = format!("http://127.0.0.1:{port}");
-    entry.port = port;
-
-    let snapshot_dir = std::path::PathBuf::from(&entry.snapshot_dir);
-    std::fs::create_dir_all(&snapshot_dir)?;
-    std::fs::write(treb_dir.join(DEPLOYMENTS_FILE), r#"{"Counter_1": {"address": "0xaaa"}}"#)?;
-    std::fs::write(snapshot_dir.join(DEPLOYMENTS_FILE), r#"{"Counter_1": {"address": "0xaaa"}}"#)?;
-
-    let mut store = ForkStateStore::new(&treb_dir);
-    store.insert_active_fork(entry).unwrap();
-    Ok(())
-}
-
-fn seed_fork_restart_success(
-    project_root: &std::path::Path,
-    rpc_url: &str,
-    port: u16,
-    fork_url: &str,
-) -> std::io::Result<()> {
-    let treb_dir = project_root.join(".treb");
-    let mut entry = sample_fork_entry(&treb_dir);
-    entry.rpc_url = rpc_url.to_string();
-    entry.port = port;
-    entry.fork_url = fork_url.to_string();
-    entry.anvil_pid = 4321;
-    entry.log_file = "/tmp/anvil-mainnet.log".to_string();
-
-    let snapshot_dir = std::path::PathBuf::from(&entry.snapshot_dir);
-    std::fs::create_dir_all(&snapshot_dir)?;
-    std::fs::write(treb_dir.join(DEPLOYMENTS_FILE), r#"{"Counter_1": {"address": "0xaaa"}}"#)?;
-    std::fs::write(snapshot_dir.join(DEPLOYMENTS_FILE), r#"{"Counter_1": {"address": "0xaaa"}}"#)?;
-
-    let mut store = ForkStateStore::new(&treb_dir);
-    store.insert_active_fork(entry).unwrap();
-    Ok(())
-}
-
-fn write_fork_setup_fixture(project_root: &std::path::Path) {
-    std::fs::write(
-        project_root.join("treb.toml"),
-        r#"
-[accounts.deployer]
-type = "private_key"
-private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-
-[namespace.default]
-profile = "default"
-
-[namespace.default.senders]
-deployer = "deployer"
-
-[fork]
-setup = "script/ForkSetup.s.sol"
-"#,
-    )
-    .unwrap();
-
-    std::fs::write(
-        project_root.join("script").join("ForkSetup.s.sol"),
-        r#"// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.13;
-
-interface Vm {
-    function startBroadcast() external;
-    function stopBroadcast() external;
-}
-
-address constant HEVM_ADDRESS = address(uint160(uint256(keccak256("hevm cheat code"))));
-Vm constant vm = Vm(HEVM_ADDRESS);
-
-contract SetupTarget {}
-
-contract ForkSetup {
-    function run() public {
-        vm.startBroadcast();
-        new SetupTarget();
-        vm.stopBroadcast();
-    }
-}
-"#,
-    )
-    .unwrap();
-}
-
 // ── fork enter: not initialized ─────────────────────────────────────────
 
-/// `treb fork enter mainnet` on an uninitialized project (no .treb/)
+/// `treb fork enter --network mainnet` on an uninitialized project (no .treb/)
 /// should error and mention `treb init`.
 #[test]
 fn fork_enter_not_initialized() {
@@ -782,7 +408,7 @@ fn fork_enter_not_initialized() {
         .pre_setup_hook(|ctx| {
             std::fs::remove_dir_all(ctx.path().join(".treb")).unwrap();
         })
-        .test(&["fork", "enter", "mainnet"])
+        .test(&["fork", "enter", "--network", "mainnet"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -791,7 +417,7 @@ fn fork_enter_not_initialized() {
 
 // ── fork enter: already forked ──────────────────────────────────────────
 
-/// `treb fork enter mainnet` when mainnet is already forked should
+/// `treb fork enter --network mainnet` when mainnet is already forked should
 /// error and suggest running `treb fork exit`.
 #[test]
 fn fork_enter_already_forked() {
@@ -801,7 +427,7 @@ fn fork_enter_already_forked() {
     let test = IntegrationTest::new("fork_enter_already_forked")
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_fork_status(ctx.path()))
-        .test(&["fork", "enter", "mainnet"])
+        .test(&["fork", "enter", "--network", "mainnet"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -810,7 +436,7 @@ fn fork_enter_already_forked() {
 
 // ── fork enter: no RPC URL ──────────────────────────────────────────────
 
-/// `treb fork enter mainnet` when mainnet has no RPC endpoint
+/// `treb fork enter --network mainnet` when mainnet has no RPC endpoint
 /// configured in foundry.toml should error mentioning the missing network.
 #[test]
 fn fork_enter_no_rpc_url() {
@@ -819,142 +445,11 @@ fn fork_enter_no_rpc_url() {
 
     let test = IntegrationTest::new("fork_enter_no_rpc_url")
         .setup(&["init"])
-        .test(&["fork", "enter", "mainnet"])
+        .test(&["fork", "enter", "--network", "mainnet"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
-}
-
-// ── fork enter: success ──────────────────────────────────────────────────
-
-/// `treb fork enter localhost` with a deterministic local RPC
-/// endpoint should succeed and print Go-matching indented field list.
-#[test]
-fn fork_enter_success() {
-    let ctx = TestContext::new("minimal-project");
-    let port = match seed_fork_enter_success(ctx.path()) {
-        Ok(port) => port,
-        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return,
-        Err(err) => panic!("seed fork enter success: {err}"),
-    };
-    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
-
-    let test = IntegrationTest::new("fork_enter_success")
-        .setup(&["init"])
-        .test(&["fork", "enter", "localhost"])
-        .extra_normalizer(Box::new(path_normalizer))
-        .extra_normalizer(Box::new(LabelNormalizer::new(format!("http://127.0.0.1:{port}"))));
-
-    run_integration_test(&test, &ctx);
-}
-
-#[test]
-fn fork_history_accepts_positional_and_flag_network_filters() {
-    let ctx = TestContext::new("minimal-project");
-
-    ctx.run(["init"]).success();
-    seed_fork_history(ctx.path());
-
-    let positional = String::from_utf8(
-        ctx.run(["fork", "history", "mainnet"]).success().get_output().stdout.clone(),
-    )
-    .unwrap();
-    let flag = String::from_utf8(
-        ctx.run(["fork", "history", "--network", "mainnet"]).success().get_output().stdout.clone(),
-    )
-    .unwrap();
-
-    assert!(
-        positional.contains("mainnet"),
-        "positional network filter should include the selected network:\n{positional}"
-    );
-    assert!(
-        !positional.contains("sepolia"),
-        "positional network filter should exclude other networks:\n{positional}"
-    );
-    assert!(
-        flag.contains("mainnet"),
-        "flag network filter should include the selected network:\n{flag}"
-    );
-    assert!(
-        !flag.contains("sepolia"),
-        "flag network filter should exclude other networks:\n{flag}"
-    );
-}
-
-#[test]
-fn fork_enter_rejects_conflicting_network_forms_at_subprocess_level() {
-    let ctx = TestContext::new("minimal-project");
-
-    let stderr = String::from_utf8(
-        ctx.run(["fork", "enter", "sepolia", "--network", "mainnet"])
-            .failure()
-            .get_output()
-            .stderr
-            .clone(),
-    )
-    .unwrap();
-
-    assert!(
-        stderr.contains("cannot be used with"),
-        "conflicting positional and flag network forms should surface clap's conflict error:\n{stderr}"
-    );
-    assert!(
-        stderr.contains("--network <NETWORK>"),
-        "conflict error should reference the legacy flag form:\n{stderr}"
-    );
-}
-
-#[test]
-fn fork_enter_requires_network_at_subprocess_level() {
-    let ctx = TestContext::new("minimal-project");
-
-    let stderr =
-        String::from_utf8(ctx.run(["fork", "enter"]).failure().get_output().stderr.clone())
-            .unwrap();
-
-    assert!(
-        stderr.contains("required arguments were not provided"),
-        "missing-network error should explain that a network is required:\n{stderr}"
-    );
-    assert!(
-        stderr.contains("<NETWORK|--network <NETWORK>>"),
-        "missing-network error should point to the positional and flag forms:\n{stderr}"
-    );
-}
-
-#[test]
-fn fork_enter_url_alias_matches_rpc_url_persistence() {
-    let port = match spawn_json_rpc_server(|request| match request["method"].as_str().unwrap() {
-        "eth_chainId" => serde_json::json!("0x1"),
-        other => panic!("unexpected JSON-RPC method for fork enter fixture: {other}"),
-    }) {
-        Ok(port) => port,
-        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return,
-        Err(err) => panic!("spawn fork enter JSON-RPC fixture: {err}"),
-    };
-    let rpc_url = format!("http://127.0.0.1:{port}");
-    let network = "testnet";
-
-    let alias_ctx = TestContext::new("minimal-project");
-    alias_ctx.run(["init"]).success();
-    alias_ctx.run(["fork", "enter", network, "--url", &rpc_url]).success();
-
-    let flag_ctx = TestContext::new("minimal-project");
-    flag_ctx.run(["init"]).success();
-    flag_ctx.run(["fork", "enter", network, "--rpc-url", &rpc_url]).success();
-
-    let alias_entry = load_active_fork(&alias_ctx.treb_dir(), network);
-    let flag_entry = load_active_fork(&flag_ctx.treb_dir(), network);
-
-    assert_eq!(alias_entry.network, flag_entry.network);
-    assert_eq!(alias_entry.fork_url, flag_entry.fork_url);
-    assert_eq!(alias_entry.chain_id, flag_entry.chain_id);
-    assert_eq!(alias_entry.fork_block_number, flag_entry.fork_block_number);
-    assert_eq!(alias_entry.snapshots.len(), flag_entry.snapshots.len());
-    assert!(std::path::Path::new(&alias_entry.snapshot_dir).exists());
-    assert!(std::path::Path::new(&flag_entry.snapshot_dir).exists());
 }
 
 // ── fork exit: not forked ───────────────────────────────────────────────
@@ -1015,7 +510,7 @@ fn fork_revert_not_forked() {
 
 // ── fork revert: no active forks ────────────────────────────────────────
 
-/// `treb fork revert --all` when no forks are active
+/// `treb fork revert --all --network mainnet` when no forks are active
 /// should print "No active forks to revert." (not an error).
 #[test]
 fn fork_revert_no_active_forks() {
@@ -1024,7 +519,7 @@ fn fork_revert_no_active_forks() {
 
     let test = IntegrationTest::new("fork_revert_no_active_forks")
         .setup(&["init"])
-        .test(&["fork", "revert", "--all"])
+        .test(&["fork", "revert", "--network", "mainnet", "--all"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
@@ -1067,10 +562,13 @@ fn fork_restart_not_forked() {
     run_integration_test(&test, &ctx);
 }
 
-// ── fork restart: port unreachable ──────────────────────────────────────
+// ── fork restart: no snapshot dir ────────────────────────────────────────
 
-/// `treb fork restart --network mainnet` when the fork's Anvil port (18545)
-/// is not reachable should error mentioning the port and "not reachable".
+/// `treb fork restart --network mainnet` when the fork's snapshot directory
+/// does not exist should error mentioning "failed to restore registry".
+/// With background Anvil subprocess behavior, restart kills the old process
+/// and starts fresh, but still needs the snapshot directory for registry
+/// restoration.
 #[test]
 fn fork_restart_port_unreachable() {
     let ctx = TestContext::new("minimal-project");
@@ -1084,345 +582,4 @@ fn fork_restart_port_unreachable() {
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
-}
-
-// ── fork restart: success ────────────────────────────────────────────────
-
-/// `treb fork restart --network mainnet` should render the local fork endpoint
-/// and tracked runtime metadata when a forked Anvil instance is available.
-#[test]
-fn fork_restart_success() {
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    let upstream = match runtime.block_on(AnvilNode::spawn()) {
-        Ok(node) => node,
-        Err(err) if err.to_string().contains("Operation not permitted") => return,
-        Err(err) => panic!("spawn upstream anvil: {err}"),
-    };
-    let local = match runtime.block_on(AnvilNode::spawn()) {
-        Ok(node) => node,
-        Err(err) if err.to_string().contains("Operation not permitted") => return,
-        Err(err) => panic!("spawn local anvil: {err}"),
-    };
-
-    let local_rpc_url = local.rpc_url().to_string();
-    let local_port = local.port();
-    let upstream_rpc_url = upstream.rpc_url().to_string();
-    let normalized_local_rpc_url = local_rpc_url.clone();
-    let setup_local_rpc_url = local_rpc_url.clone();
-    let setup_upstream_rpc_url = upstream_rpc_url.clone();
-    let ctx = TestContext::new("minimal-project");
-    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
-
-    let test = IntegrationTest::new("fork_restart_success")
-        .setup(&["init"])
-        .post_setup_hook(move |ctx| {
-            write_fork_setup_fixture(ctx.path());
-            seed_fork_restart_success(
-                ctx.path(),
-                &setup_local_rpc_url,
-                local_port,
-                &setup_upstream_rpc_url,
-            )
-            .unwrap();
-        })
-        .test(&["fork", "restart", "--network", "mainnet"])
-        .extra_normalizer(Box::new(path_normalizer))
-        .extra_normalizer(Box::new(LabelNormalizer::new(normalized_local_rpc_url)));
-
-    run_integration_test(&test, &ctx);
-}
-
-// ── fork enter: JSON output ─────────────────────────────────────────────
-
-/// `treb fork enter localhost --json` should return a structured
-/// JSON error because runtime-only fields are unavailable until anvil starts.
-#[test]
-fn fork_enter_json() {
-    let ctx = TestContext::new("minimal-project");
-    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
-
-    let test = IntegrationTest::new("fork_enter_json")
-        .setup(&["init"])
-        .test(&["fork", "enter", "localhost", "--json"])
-        .expect_err(true)
-        .extra_normalizer(Box::new(path_normalizer));
-
-    run_integration_test(&test, &ctx);
-}
-
-// ── fork exit: JSON output ──────────────────────────────────────────────
-
-/// `treb fork exit --network mainnet --json` should emit valid JSON with
-/// camelCase field names (network, restoredEntries, cleanedUp).
-#[test]
-fn fork_exit_json() {
-    let ctx = TestContext::new("minimal-project");
-    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
-
-    let test = IntegrationTest::new("fork_exit_json")
-        .setup(&["init"])
-        .post_setup_hook(|ctx| seed_fork_exit(ctx.path()))
-        .test(&["fork", "exit", "--network", "mainnet", "--json"])
-        .extra_normalizer(Box::new(path_normalizer));
-
-    run_integration_test(&test, &ctx);
-}
-
-#[test]
-fn fork_exit_all_restores_earliest_snapshot_last() {
-    let ctx = TestContext::new("minimal-project");
-
-    ctx.run(["init"]).success();
-    seed_fork_exit_all(ctx.path());
-
-    ctx.run(["fork", "exit", "--all"]).success();
-
-    let deployments =
-        std::fs::read_to_string(ctx.treb_dir().join(DEPLOYMENTS_FILE)).expect("read deployments");
-    assert_eq!(deployments, r#"{"phase":"before-mainnet"}"#);
-
-    let mut store = ForkStateStore::new(&ctx.treb_dir());
-    store.load().expect("load fork state after exit");
-    assert!(store.list_active_forks().is_empty(), "all fork entries should be removed");
-
-    assert!(!ctx.treb_dir().join("snapshots").join("mainnet").exists());
-    assert!(!ctx.treb_dir().join("snapshots").join("sepolia").exists());
-}
-
-#[test]
-fn fork_exit_all_accepts_legacy_network_flag() {
-    let ctx = TestContext::new("minimal-project");
-
-    ctx.run(["init"]).success();
-    seed_fork_exit_all(ctx.path());
-
-    ctx.run(["fork", "exit", "--network", "mainnet", "--all"]).success();
-
-    let deployments =
-        std::fs::read_to_string(ctx.treb_dir().join(DEPLOYMENTS_FILE)).expect("read deployments");
-    assert_eq!(deployments, r#"{"phase":"before-mainnet"}"#);
-
-    let mut store = ForkStateStore::new(&ctx.treb_dir());
-    store.load().expect("load fork state after exit");
-    assert!(store.list_active_forks().is_empty(), "all fork entries should be removed");
-}
-
-#[test]
-fn fork_exit_all_json_is_always_an_array() {
-    let ctx = TestContext::new("minimal-project");
-
-    ctx.run(["init"]).success();
-    seed_fork_exit(ctx.path());
-
-    let assertion = ctx.run(["fork", "exit", "--all", "--json"]).success();
-    let output = assertion.get_output();
-    let json: serde_json::Value =
-        serde_json::from_slice(&output.stdout).expect("parse fork exit JSON output");
-    let results = json.as_array().expect("--all JSON output should be an array");
-
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0]["network"], "mainnet");
-    assert_eq!(results[0]["restoredEntries"], 1);
-    assert_eq!(results[0]["cleanedUp"], true);
-}
-
-// ── fork revert: JSON output ────────────────────────────────────────────
-
-/// `treb fork revert --network mainnet --json` should emit valid JSON with
-/// network, snapshotId, and newSnapshotId fields on the success path.
-#[test]
-fn fork_revert_json_success() {
-    let port = match spawn_json_rpc_server(|request| match request["method"].as_str().unwrap() {
-        "evm_revert" => serde_json::json!(true),
-        "evm_snapshot" => serde_json::json!("0xrevert-new"),
-        other => panic!("unexpected JSON-RPC method for revert fixture: {other}"),
-    }) {
-        Ok(port) => port,
-        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return,
-        Err(err) => panic!("seed fork revert success: {err}"),
-    };
-    let ctx = TestContext::new("minimal-project");
-    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
-
-    let test = IntegrationTest::new("fork_revert_json_success")
-        .setup(&["init"])
-        .post_setup_hook(move |ctx| seed_fork_revert_json_success(ctx.path(), port).unwrap())
-        .test(&["fork", "revert", "--network", "mainnet", "--json"])
-        .extra_normalizer(Box::new(path_normalizer));
-
-    run_integration_test(&test, &ctx);
-}
-
-/// `treb fork revert --all --json` with no active forks
-/// should output an empty JSON array.
-#[test]
-fn fork_revert_json_no_active() {
-    let ctx = TestContext::new("minimal-project");
-    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
-
-    let test = IntegrationTest::new("fork_revert_json_no_active")
-        .setup(&["init"])
-        .test(&["fork", "revert", "--all", "--json"])
-        .extra_normalizer(Box::new(path_normalizer));
-
-    run_integration_test(&test, &ctx);
-}
-
-#[test]
-fn fork_revert_all_accepts_legacy_network_flag() {
-    let port = match spawn_json_rpc_server(|request| match request["method"].as_str().unwrap() {
-        "evm_revert" => serde_json::json!(true),
-        "evm_snapshot" => serde_json::json!("0xrevert-new"),
-        other => panic!("unexpected JSON-RPC method for revert fixture: {other}"),
-    }) {
-        Ok(port) => port,
-        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return,
-        Err(err) => panic!("seed fork revert success: {err}"),
-    };
-    let ctx = TestContext::new("minimal-project");
-
-    ctx.run(["init"]).success();
-    seed_fork_revert_json_success(ctx.path(), port).expect("seed fork revert state");
-
-    ctx.run(["fork", "revert", "--network", "mainnet", "--all"]).success();
-
-    let mut store = ForkStateStore::new(&ctx.treb_dir());
-    store.load().expect("load fork state after revert");
-    let entry = store.get_active_fork("mainnet").expect("active mainnet fork");
-    assert_eq!(entry.snapshots.len(), 1, "revert should leave a fresh baseline snapshot");
-    assert_eq!(entry.snapshots[0].snapshot_id, "0xrevert-new");
-}
-
-// ── fork restart: JSON error (not forked) ───────────────────────────────
-
-/// `treb fork restart --network mainnet --json` should emit valid JSON with
-/// network, chainId, port, rpcUrl, and snapshotId fields on the success path.
-#[test]
-fn fork_restart_json_success() {
-    let port = match spawn_json_rpc_server(|request| match request["method"].as_str().unwrap() {
-        "anvil_reset" | "anvil_setCode" => serde_json::Value::Null,
-        "evm_snapshot" => serde_json::json!("0xrestart-new"),
-        other => panic!("unexpected JSON-RPC method for restart fixture: {other}"),
-    }) {
-        Ok(port) => port,
-        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return,
-        Err(err) => panic!("seed fork restart success: {err}"),
-    };
-    let ctx = TestContext::new("minimal-project");
-    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
-
-    let test = IntegrationTest::new("fork_restart_json_success")
-        .setup(&["init"])
-        .post_setup_hook(move |ctx| seed_fork_restart_json_success(ctx.path(), port).unwrap())
-        .test(&["fork", "restart", "--network", "mainnet", "--json"])
-        .extra_normalizer(Box::new(path_normalizer))
-        .extra_normalizer(Box::new(LabelNormalizer::new(format!("http://127.0.0.1:{port}"))))
-        .extra_normalizer(Box::new(LabelNormalizer::new(port.to_string())));
-
-    run_integration_test(&test, &ctx);
-}
-
-/// `treb fork restart --network mainnet --json` when mainnet is not forked
-/// should output a JSON error to stderr.
-#[test]
-fn fork_restart_json_not_forked() {
-    let ctx = TestContext::new("minimal-project");
-    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
-
-    let test = IntegrationTest::new("fork_restart_json_not_forked")
-        .setup(&["init"])
-        .test(&["fork", "restart", "--network", "mainnet", "--json"])
-        .expect_err(true)
-        .extra_normalizer(Box::new(path_normalizer));
-
-    run_integration_test(&test, &ctx);
-}
-
-#[test]
-fn fork_restart_revert_keeps_status_and_history_in_sync() {
-    let mut snapshot_count = 0usize;
-    let port =
-        match spawn_json_rpc_server(move |request| match request["method"].as_str().unwrap() {
-            "anvil_reset" | "anvil_setCode" => serde_json::Value::Null,
-            "evm_revert" => serde_json::json!(true),
-            "evm_snapshot" => {
-                snapshot_count += 1;
-                match snapshot_count {
-                    1 => serde_json::json!("0xrestart-1"),
-                    2 => serde_json::json!("0xrevert-1"),
-                    3 => serde_json::json!("0xrestart-2"),
-                    other => panic!("unexpected evm_snapshot call #{other}"),
-                }
-            }
-            other => panic!("unexpected JSON-RPC method for lifecycle fixture: {other}"),
-        }) {
-            Ok(port) => port,
-            Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return,
-            Err(err) => panic!("spawn lifecycle fixture: {err}"),
-        };
-
-    let ctx = TestContext::new("minimal-project");
-    ctx.run(["init"]).success();
-
-    let treb_dir = ctx.treb_dir();
-    let mut entry = sample_fork_entry(&treb_dir);
-    entry.rpc_url = format!("http://127.0.0.1:{port}");
-    entry.port = port;
-    entry.snapshots = vec![SnapshotEntry {
-        index: 0,
-        snapshot_id: "0xenter".into(),
-        command: "enter".into(),
-        timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 8, 0, 0).unwrap(),
-    }];
-
-    let snapshot_dir = std::path::PathBuf::from(&entry.snapshot_dir);
-    std::fs::create_dir_all(&snapshot_dir).unwrap();
-    std::fs::write(treb_dir.join(DEPLOYMENTS_FILE), r#"{"Counter_1":{"address":"0xaaa"}}"#)
-        .unwrap();
-    std::fs::write(snapshot_dir.join(DEPLOYMENTS_FILE), r#"{"Counter_1":{"address":"0xaaa"}}"#)
-        .unwrap();
-
-    let mut store = ForkStateStore::new(&treb_dir);
-    store.insert_active_fork(entry).unwrap();
-    store
-        .add_history(ForkHistoryEntry {
-            action: "enter".into(),
-            network: "mainnet".into(),
-            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 8, 0, 0).unwrap(),
-            details: None,
-        })
-        .unwrap();
-
-    ctx.run(["fork", "restart", "--network", "mainnet"]).success();
-    ctx.run(["fork", "revert", "--network", "mainnet"]).success();
-    ctx.run(["fork", "restart", "--network", "mainnet"]).success();
-
-    let mut store = ForkStateStore::new(&treb_dir);
-    store.load().expect("load fork state after lifecycle commands");
-    let entry = store.get_active_fork("mainnet").expect("active mainnet fork");
-    assert_eq!(entry.snapshots.len(), 1, "restart should clear prior snapshot stack");
-    assert_eq!(entry.snapshots[0].index, 0);
-    assert_eq!(entry.snapshots[0].snapshot_id, "0xrestart-2");
-    assert_eq!(entry.snapshots[0].command, "restart");
-
-    let status = ctx.run(["fork", "status"]).success().get_output().stdout.clone();
-    let status = String::from_utf8(status).expect("utf8 fork status output");
-    assert!(status.contains("Snapshots:    1"), "status output: {status}");
-
-    let history =
-        ctx.run(["fork", "history", "--network", "mainnet"]).success().get_output().stdout.clone();
-    let history = String::from_utf8(history).expect("utf8 fork history output");
-    assert!(history.contains("[0] initial"), "history output: {history}");
-    assert!(
-        history.contains("[1] restart: Anvil reset; snapshot: 0xrestart-1"),
-        "history output: {history}"
-    );
-    assert!(
-        history.contains("[2] revert: new EVM snapshot: 0xrevert-1"),
-        "history output: {history}"
-    );
-    assert!(
-        history.contains("→ [3] restart: Anvil reset; snapshot: 0xrestart-2"),
-        "history output: {history}"
-    );
 }

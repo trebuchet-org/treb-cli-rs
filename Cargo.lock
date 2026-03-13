@@ -59,7 +59,8 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 [[package]]
 name = "alloy-chains"
 version = "0.2.30"
-source = "git+https://github.com/alloy-rs/chains?tag=v0.2.30#bb00a6cfdd14551ace5766d76450ff9fa44a2962"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90f374d3c6d729268bbe2d0e0ff992bb97898b2df756691a62ee1d5f0506bc39"
 dependencies = [
  "alloy-primitives 1.5.7",
  "num_enum",
@@ -8240,7 +8241,6 @@ dependencies = [
  "comfy-table",
  "console 0.15.11",
  "dialoguer 0.11.0",
- "foundry-common",
  "handlebars",
  "nucleo-matcher",
  "num_cpus",
@@ -8314,7 +8314,7 @@ dependencies = [
  "foundry-evm",
  "foundry-linking",
  "foundry-wallets",
- "reqwest 0.12.28",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",
@@ -8325,6 +8325,7 @@ dependencies = [
  "treb-registry",
  "treb-safe",
  "treb-sol",
+ "ureq",
 ]
 
 [[package]]
@@ -8545,6 +8546,35 @@ name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
+
+[[package]]
+name = "ureq"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdc97a28575b85cfedf2a7e7d3cc64b3e11bd8ac766666318003abbacc7a21fc"
+dependencies = [
+ "base64 0.22.1",
+ "flate2",
+ "log",
+ "percent-encoding",
+ "rustls",
+ "rustls-pki-types",
+ "ureq-proto",
+ "utf-8",
+ "webpki-roots 1.0.6",
+]
+
+[[package]]
+name = "ureq-proto"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d81f9efa9df032be5934a46a068815a10a042b494b6a58cb0a1a97bb5467ed6f"
+dependencies = [
+ "base64 0.22.1",
+ "http",
+ "httparse",
+ "log",
+]
 
 [[package]]
 name = "url"

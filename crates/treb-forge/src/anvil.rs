@@ -247,6 +247,232 @@ impl AnvilInstance {
 }
 
 // ---------------------------------------------------------------------------
+// Background subprocess Anvil — spawns `anvil` as a detached OS process
+// ---------------------------------------------------------------------------
+
+/// Information about a background Anvil subprocess spawned via [`spawn_background_anvil`].
+#[derive(Debug)]
+pub struct BackgroundAnvil {
+    /// PID of the spawned Anvil process.
+    pub pid: u32,
+    /// Port Anvil is listening on.
+    pub port: u16,
+    /// Local RPC URL (e.g. `http://127.0.0.1:8545`).
+    pub rpc_url: String,
+    /// Path to the PID file.
+    pub pid_file: std::path::PathBuf,
+    /// Path to the log file.
+    pub log_file: std::path::PathBuf,
+}
+
+/// Configuration for spawning a background Anvil subprocess.
+#[derive(Debug, Clone)]
+pub struct BackgroundAnvilConfig {
+    /// Port to listen on.
+    pub port: u16,
+    /// Chain ID to set.
+    pub chain_id: Option<u64>,
+    /// Upstream RPC URL to fork from.
+    pub fork_url: Option<String>,
+    /// Block number to fork from.
+    pub fork_block_number: Option<u64>,
+    /// Path to the PID file.
+    pub pid_file: std::path::PathBuf,
+    /// Path to the log file.
+    pub log_file: std::path::PathBuf,
+}
+
+/// Spawn Anvil as a detached background OS subprocess.
+///
+/// The process is started with `std::process::Command::spawn()` so it outlives
+/// the current process. Stdout/stderr are redirected to the configured log file,
+/// and the PID is written to the configured PID file.
+///
+/// After spawning, this function polls the RPC endpoint until healthy (up to 30
+/// seconds for forked instances, 5 seconds otherwise).
+pub fn spawn_background_anvil(
+    config: &BackgroundAnvilConfig,
+) -> Result<BackgroundAnvil, TrebError> {
+    use std::fs;
+    use std::process::{Command, Stdio};
+
+    // Ensure parent directories exist for PID and log files.
+    if let Some(parent) = config.pid_file.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| TrebError::Fork(format!("failed to create PID file directory: {e}")))?;
+    }
+    if let Some(parent) = config.log_file.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| TrebError::Fork(format!("failed to create log file directory: {e}")))?;
+    }
+
+    // Build args matching Go: --port, --host 0.0.0.0, --chain-id, --fork-url
+    let mut args = vec![
+        "--port".to_string(),
+        config.port.to_string(),
+        "--host".to_string(),
+        "0.0.0.0".to_string(),
+    ];
+    if let Some(chain_id) = config.chain_id {
+        args.push("--chain-id".to_string());
+        args.push(chain_id.to_string());
+    }
+    if let Some(ref fork_url) = config.fork_url {
+        args.push("--fork-url".to_string());
+        args.push(fork_url.clone());
+    }
+    if let Some(block) = config.fork_block_number {
+        args.push("--fork-block-number".to_string());
+        args.push(block.to_string());
+    }
+
+    // Open log file for stdout/stderr redirection.
+    let log_file = fs::File::create(&config.log_file)
+        .map_err(|e| TrebError::Fork(format!("failed to create log file: {e}")))?;
+    let log_file_err = log_file
+        .try_clone()
+        .map_err(|e| TrebError::Fork(format!("failed to clone log file handle: {e}")))?;
+
+    let child = Command::new("anvil")
+        .args(&args)
+        .stdout(Stdio::from(log_file))
+        .stderr(Stdio::from(log_file_err))
+        .stdin(Stdio::null())
+        .spawn()
+        .map_err(|e| TrebError::Fork(format!("failed to spawn anvil: {e}")))?;
+
+    let pid = child.id();
+
+    // Write PID file.
+    fs::write(&config.pid_file, pid.to_string())
+        .map_err(|e| TrebError::Fork(format!("failed to write PID file: {e}")))?;
+
+    Ok(BackgroundAnvil {
+        pid,
+        port: config.port,
+        rpc_url: format!("http://127.0.0.1:{}", config.port),
+        pid_file: config.pid_file.clone(),
+        log_file: config.log_file.clone(),
+    })
+}
+
+/// Poll the RPC endpoint until it responds to `eth_blockNumber`, or until the
+/// timeout elapses. Forked anvils can take longer to start (up to 30 s).
+pub fn poll_anvil_health(rpc_url: &str, is_forked: bool) -> Result<(), TrebError> {
+    use std::time::{Duration, Instant};
+
+    let timeout = if is_forked { Duration::from_secs(30) } else { Duration::from_secs(5) };
+    let interval = Duration::from_millis(200);
+    let deadline = Instant::now() + timeout;
+
+    let body = r#"{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}"#;
+
+    loop {
+        let result: Result<(), String> = (|| {
+            let mut resp = ureq::post(rpc_url)
+                .header("Content-Type", "application/json")
+                .send(body.as_bytes())
+                .map_err(|e| e.to_string())?;
+            let buf = resp.body_mut().read_to_string().map_err(|e| e.to_string())?;
+            if buf.contains("\"result\"") {
+                Ok(())
+            } else {
+                Err(format!("unexpected response: {buf}"))
+            }
+        })();
+
+        if result.is_ok() {
+            return Ok(());
+        }
+
+        if Instant::now() >= deadline {
+            let err_msg = result.unwrap_err();
+            return Err(TrebError::Fork(format!(
+                "anvil not ready after {timeout:?}: {err_msg}"
+            )));
+        }
+
+        std::thread::sleep(interval);
+    }
+}
+
+/// Stop a background Anvil process by reading its PID file and sending SIGTERM.
+///
+/// This is safe to call even if the process is already dead. On failure, logs a
+/// warning but does not return an error (matching Go behavior for cleanup paths).
+pub fn stop_background_anvil(pid_file: &std::path::Path) -> Result<(), TrebError> {
+    use std::fs;
+
+    let pid_str = match fs::read_to_string(pid_file) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => {
+            return Err(TrebError::Fork(format!("failed to read PID file: {e}")));
+        }
+    };
+
+    let pid: i32 = pid_str
+        .trim()
+        .parse()
+        .map_err(|e| TrebError::Fork(format!("invalid PID in file: {e}")))?;
+
+    // Send SIGTERM.
+    #[cfg(unix)]
+    {
+        // SAFETY: kill(2) with SIGTERM is safe — worst case pid doesn't exist (ESRCH).
+        let ret = unsafe { libc::kill(pid, libc::SIGTERM) };
+        if ret != 0 {
+            let err = std::io::Error::last_os_error();
+            // ESRCH = no such process — already dead, that's fine.
+            if err.raw_os_error() != Some(libc::ESRCH) {
+                // Try SIGKILL as fallback.
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+            }
+        }
+
+        // Wait for process to exit (up to 5 seconds).
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let ret = unsafe { libc::kill(pid, 0) };
+            if ret != 0 {
+                break; // Process is gone.
+            }
+            if std::time::Instant::now() >= deadline {
+                // Force kill.
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        // On non-Unix, use the `kill` command as a fallback.
+        let _ = std::process::Command::new("kill")
+            .arg(pid.to_string())
+            .status();
+    }
+
+    // Remove PID file.
+    let _ = fs::remove_file(pid_file);
+
+    Ok(())
+}
+
+/// Find an available TCP port by binding to port 0 and reading back the assigned port.
+pub fn find_available_port() -> Result<u16, TrebError> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .map_err(|e| TrebError::Fork(format!("failed to find available port: {e}")))?;
+    let port = listener
+        .local_addr()
+        .map_err(|e| TrebError::Fork(format!("failed to read local address: {e}")))?
+        .port();
+    Ok(port)
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -257,19 +483,13 @@ mod tests {
     use super::*;
 
     /// Spawn a local devnet with OS-assigned port for test isolation.
-    async fn test_instance() -> Option<AnvilInstance> {
-        match AnvilConfig::new().port(0).spawn().await {
-            Ok(instance) => Some(instance),
-            Err(err) if err.to_string().contains("Operation not permitted") => None,
-            Err(err) => panic!("spawn failed: {err}"),
-        }
+    async fn test_instance() -> AnvilInstance {
+        AnvilConfig::new().port(0).spawn().await.expect("spawn failed")
     }
 
     #[tokio::test]
     async fn spawn_returns_reachable_rpc_url() {
-        let Some(instance) = test_instance().await else {
-            return;
-        };
+        let instance = test_instance().await;
 
         // rpc_url is well-formed
         assert!(instance.rpc_url().starts_with("http://127.0.0.1:"));
@@ -282,19 +502,13 @@ mod tests {
 
     #[tokio::test]
     async fn chain_id_config_works() {
-        let instance = match AnvilConfig::new().chain_id(42161).port(0).spawn().await {
-            Ok(instance) => instance,
-            Err(err) if err.to_string().contains("Operation not permitted") => return,
-            Err(err) => panic!("spawn: {err}"),
-        };
+        let instance = AnvilConfig::new().chain_id(42161).port(0).spawn().await.expect("spawn");
         assert_eq!(instance.chain_id(), 42161);
     }
 
     #[tokio::test]
     async fn snapshot_revert_round_trip() {
-        let Some(instance) = test_instance().await else {
-            return;
-        };
+        let instance = test_instance().await;
 
         let test_addr = address!("1234567890123456789012345678901234567890");
 
@@ -324,9 +538,7 @@ mod tests {
 
     #[tokio::test]
     async fn set_code_verifiable_via_get_code() {
-        let Some(instance) = test_instance().await else {
-            return;
-        };
+        let instance = test_instance().await;
 
         let target = address!("0000000000000000000000000000000000001234");
         let code = Bytes::from(vec![0x60, 0x00, 0x60, 0x00, 0x56]); // dummy bytecode
@@ -346,9 +558,7 @@ mod tests {
     #[tokio::test]
     async fn dropping_instance_frees_port() {
         let port = {
-            let Some(instance) = test_instance().await else {
-                return;
-            };
+            let instance = test_instance().await;
             let p = instance.port();
 
             // Verify port is reachable while alive.

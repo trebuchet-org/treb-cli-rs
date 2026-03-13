@@ -87,6 +87,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time",
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 handlebars = "6"
 
+# System
+libc = "0.2"
+ureq = "3"
+
 # Patch: svm-rs-builds >=0.5.22 fixes duplicate SOLC_VERSION_0_8_31 constants
 # (see https://github.com/alloy-rs/svm-rs/pull/179)
 [patch.crates-io]
@@ -97,10 +101,6 @@ solar = { package = "solar-compiler", git = "https://github.com/paradigmxyz/sola
 solar-interface = { package = "solar-interface", git = "https://github.com/paradigmxyz/solar.git", rev = "1f28069" }
 solar-ast = { package = "solar-ast", git = "https://github.com/paradigmxyz/solar.git", rev = "1f28069" }
 solar-sema = { package = "solar-sema", git = "https://github.com/paradigmxyz/solar.git", rev = "1f28069" }
-
-# Patch: pin alloy-chains to 0.2.30 — 0.2.31 removed NamedChain::EtherlinkTestnet
-# which foundry v1.5.1 references. Without --locked, cargo install resolves to latest.
-alloy-chains = { git = "https://github.com/alloy-rs/chains", tag = "v0.2.30" }
 
 # Patch: pin alloy crates to v1.1.1 to match foundry v1.5.1's expected versions.
 # Without this, cargo resolves alloy to 1.7.x which breaks alloy-evm 0.24.2 and anvil.
