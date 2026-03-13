@@ -20,6 +20,7 @@ use treb_forge::{
     },
     script::build_script_config_with_senders,
     sender::resolve_all_senders,
+    sender_config::encode_sender_configs,
 };
 use treb_registry::Registry;
 
@@ -181,6 +182,12 @@ pub async fn run(
     // ── Sender resolution ────────────────────────────────────────────────
     let mut resolved_senders =
         resolve_all_senders(&resolved.senders).await.context("failed to resolve senders")?;
+
+    // ── Encode sender configs for Solidity consumption ──────────────────
+    let encoded_senders = encode_sender_configs(&resolved_senders, &resolved.senders)
+        .context("failed to encode sender configs")?;
+    // SAFETY: this is single-threaded CLI code; no concurrent env access.
+    unsafe { env::set_var("SENDER_CONFIGS", &encoded_senders) };
 
     // ── Build ScriptConfig with all CLI flags ────────────────────────────
     let mut script_config = build_script_config_with_senders(&resolved, script, &resolved_senders)
