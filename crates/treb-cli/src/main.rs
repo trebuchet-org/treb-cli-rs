@@ -610,11 +610,11 @@ fn fork_subcommand_json_flag(subcommand: &commands::fork::ForkSubcommand) -> boo
     match subcommand {
         commands::fork::ForkSubcommand::Status { json, .. }
         | commands::fork::ForkSubcommand::History { json, .. }
-        | commands::fork::ForkSubcommand::Diff { json, .. }
-        | commands::fork::ForkSubcommand::Enter { json, .. }
-        | commands::fork::ForkSubcommand::Exit { json, .. }
-        | commands::fork::ForkSubcommand::Revert { json, .. }
-        | commands::fork::ForkSubcommand::Restart { json, .. } => *json,
+        | commands::fork::ForkSubcommand::Diff { json, .. } => *json,
+        commands::fork::ForkSubcommand::Enter { .. }
+        | commands::fork::ForkSubcommand::Exit { .. }
+        | commands::fork::ForkSubcommand::Revert { .. }
+        | commands::fork::ForkSubcommand::Restart { .. } => false,
     }
 }
 
