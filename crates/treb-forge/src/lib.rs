@@ -15,6 +15,7 @@ pub mod governor;
 pub mod pipeline;
 pub mod script;
 pub mod sender;
+pub mod sender_config;
 pub mod version;
 
 // Re-export key public types for convenience.
@@ -40,6 +41,7 @@ pub use script::{
 pub use sender::{
     ResolvedSender, default_test_signers, in_memory_signer, resolve_all_senders, resolve_sender,
 };
+pub use sender_config::encode_sender_configs;
 pub use version::{ForgeVersion, detect_forge_version};
 
 // Re-export foundry-linking for downstream use (Phase 8 deployment recording pipeline).
