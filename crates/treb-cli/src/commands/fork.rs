@@ -758,6 +758,8 @@ fn resolve_fork_url(
     if let Some(url) = rpc_url_override {
         return Ok(url);
     }
+    // Load .env/.env.local so ${VAR} placeholders in foundry.toml resolve correctly.
+    treb_config::load_dotenv(cwd);
     let foundry_config =
         treb_config::load_foundry_config(cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
     let endpoints = treb_config::rpc_endpoints(&foundry_config);
