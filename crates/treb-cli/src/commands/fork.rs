@@ -758,18 +758,25 @@ fn resolve_fork_url(
     if let Some(url) = rpc_url_override {
         return Ok(url);
     }
-    // Load .env/.env.local so ${VAR} placeholders in foundry.toml resolve correctly.
-    treb_config::load_dotenv(cwd);
-    let foundry_config =
-        treb_config::load_foundry_config(cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let endpoints = treb_config::rpc_endpoints(&foundry_config);
-    endpoints.get(network).cloned().ok_or_else(|| {
+    // Use resolve_rpc_endpoints which loads .env and expands ${VAR} placeholders.
+    let endpoints =
+        treb_config::resolve_rpc_endpoints(cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let ep = endpoints.get(network).ok_or_else(|| {
         anyhow::anyhow!(
             "no RPC URL configured for network '{}' in foundry.toml\n\n\
              Add it under [rpc_endpoints] or pass --rpc-url to specify directly.",
             network
         )
-    })
+    })?;
+    if ep.unresolved {
+        bail!(
+            "RPC URL for network '{}' has unresolved environment variables: {}\n\n\
+             Check your .env file or set the variables in your environment.",
+            network,
+            ep.missing_vars.join(", ")
+        );
+    }
+    Ok(ep.expanded_url.clone())
 }
 
 async fn fetch_chain_id(rpc_url: &str) -> anyhow::Result<u64> {
