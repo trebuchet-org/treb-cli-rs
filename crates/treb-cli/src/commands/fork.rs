@@ -902,6 +902,21 @@ async fn evm_revert_http(
 
 /// Deploy the CreateX factory bytecode at its canonical address via `anvil_setCode`.
 async fn deploy_createx_http(client: &reqwest::Client, rpc_url: &str) -> anyhow::Result<()> {
+    // Check if CreateX already exists (e.g., on a forked chain where it's
+    // natively deployed). Skip deployment if code is already present.
+    let code_resp = json_rpc_call(
+        client,
+        rpc_url,
+        "eth_getCode",
+        serde_json::json!([CREATEX_ADDRESS, "latest"]),
+    )
+    .await?;
+    let existing_code = code_resp.as_str().unwrap_or("0x");
+    if existing_code.len() > 2 {
+        // CreateX already has code — don't overwrite it
+        return Ok(());
+    }
+
     let bytecode_bytes = createx_deployed_bytecode();
     let hex: String = bytecode_bytes.iter().map(|b| format!("{b:02x}")).collect();
     let hex_str = format!("0x{hex}");
