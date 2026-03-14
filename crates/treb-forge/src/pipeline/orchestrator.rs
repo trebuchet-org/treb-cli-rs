@@ -43,18 +43,19 @@ use super::{
     types::{PipelineResult, RecordedDeployment, RecordedTransaction},
 };
 
+/// Callback that receives hydrated transactions and returns true to broadcast.
+pub type BroadcastHook = Box<dyn FnOnce(&[RecordedTransaction]) -> bool + Send>;
+
 /// Orchestrator for the deployment recording pipeline.
 pub struct RunPipeline {
     context: PipelineContext,
     script_config: Option<ScriptConfig>,
-    /// Optional callback: called after script execution, before broadcast.
-    /// Return `true` to proceed, `false` to skip broadcast.
-    broadcast_confirm: Option<Box<dyn FnOnce() -> bool + Send>>,
+    broadcast_hook: Option<BroadcastHook>,
 }
 
 impl RunPipeline {
     pub fn new(context: PipelineContext) -> Self {
-        Self { context, script_config: None, broadcast_confirm: None }
+        Self { context, script_config: None, broadcast_hook: None }
     }
 
     pub fn with_script_config(mut self, config: ScriptConfig) -> Self {
@@ -62,9 +63,10 @@ impl RunPipeline {
         self
     }
 
-    /// Set a broadcast confirmation callback.
-    pub fn with_broadcast_confirm(mut self, f: Box<dyn FnOnce() -> bool + Send>) -> Self {
-        self.broadcast_confirm = Some(f);
+    /// Set a broadcast confirmation hook. Called with hydrated transactions
+    /// after simulation, before broadcast. Return false to skip broadcast.
+    pub fn with_broadcast_hook(mut self, hook: BroadcastHook) -> Self {
+        self.broadcast_hook = Some(hook);
         self
     }
 
@@ -107,7 +109,96 @@ impl RunPipeline {
         };
 
         let script_args = script_config.into_script_args()?;
-        let mut execution = execute_script(script_args, self.broadcast_confirm).await?;
+
+        // Build a confirm callback that hydrates transactions from raw logs
+        // and calls the broadcast hook with the preview.
+        let confirm_fn = if let Some(hook) = self.broadcast_hook {
+            let namespace = self.context.config.namespace.clone();
+            let chain_id = self.context.config.chain_id;
+            let sender_roles = self.context.sender_role_names.clone();
+            let sender_labels = self.context.sender_labels.clone();
+
+            let confirm: Box<dyn FnOnce(&crate::script::ExecutionResult) -> bool + Send> =
+                Box::new(move |sim_result| {
+                    // Quick hydration from raw logs
+                    let parsed = decode_events(&sim_result.raw_logs);
+                    let tx_events: Vec<TransactionSimulated> = parsed
+                        .iter()
+                        .filter_map(|e| match e {
+                            ParsedEvent::Treb(t) => match t.as_ref() {
+                                TrebEvent::TransactionSimulated(ts) => Some(ts.clone()),
+                                _ => None,
+                            },
+                            _ => None,
+                        })
+                        .collect();
+
+                    let sender_id_map: HashMap<B256, String> = sender_roles
+                        .iter()
+                        .map(|r| (alloy_primitives::keccak256(r.as_bytes()), r.clone()))
+                        .collect();
+
+                    let now = chrono::Utc::now();
+                    let recorded: Vec<RecordedTransaction> = tx_events
+                        .iter()
+                        .map(|event| {
+                            let sim_tx = &event.simulatedTx;
+                            let tx_id = format!("tx-{:#x}", sim_tx.transactionId);
+                            let sender_name = sender_id_map
+                                .get(&sim_tx.senderId)
+                                .cloned();
+
+                            let operations = if sim_tx.transaction.to == Address::ZERO {
+                                vec![treb_core::types::Operation {
+                                    operation_type: "DEPLOY".to_string(),
+                                    target: format!("{:#x}", sim_tx.transaction.to),
+                                    method: String::new(),
+                                    result: Default::default(),
+                                }]
+                            } else {
+                                let method = if sim_tx.transaction.data.len() >= 4 {
+                                    format!("0x{}", alloy_primitives::hex::encode(&sim_tx.transaction.data[..4]))
+                                } else {
+                                    String::new()
+                                };
+                                vec![treb_core::types::Operation {
+                                    operation_type: "CALL".to_string(),
+                                    target: format!("{:#x}", sim_tx.transaction.to),
+                                    method,
+                                    result: Default::default(),
+                                }]
+                            };
+
+                            RecordedTransaction {
+                                transaction: treb_core::types::Transaction {
+                                    id: tx_id,
+                                    chain_id,
+                                    hash: String::new(),
+                                    status: treb_core::types::TransactionStatus::Simulated,
+                                    block_number: 0,
+                                    sender: sim_tx.sender.to_checksum(None),
+                                    nonce: 0,
+                                    deployments: Vec::new(),
+                                    operations,
+                                    safe_context: None,
+                                    environment: namespace.clone(),
+                                    created_at: now,
+                                },
+                                sender_name,
+                                gas_used: None,
+                                trace: None,
+                            }
+                        })
+                        .collect();
+
+                    hook(&recorded)
+                });
+            Some(confirm)
+        } else {
+            None
+        };
+
+        let mut execution = execute_script(script_args, confirm_fn).await?;
 
         // 3. Check for failed execution
         if !execution.success {

@@ -17,7 +17,7 @@ pub use hydration::{
     generate_deployment_id, hydrate_deployment, hydrate_governor_proposals,
     hydrate_safe_transactions, hydrate_transactions, populate_safe_context,
 };
-pub use orchestrator::RunPipeline;
+pub use orchestrator::{BroadcastHook, RunPipeline};
 pub use types::{
     PipelineConfig, PipelineContext, PipelineResult, RecordedDeployment, RecordedTransaction,
     SkippedDeployment,

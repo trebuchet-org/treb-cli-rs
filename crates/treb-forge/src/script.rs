@@ -63,10 +63,11 @@ pub struct ExecutionResult {
 /// fill_metadata → bundle → wait_for_pending → broadcast.
 ///
 /// The optional `confirm` callback is called after execute but before
-/// broadcast. If it returns `false`, broadcast is skipped.
+/// broadcast. It receives the simulation result so callers can preview
+/// transactions. If it returns `false`, broadcast is skipped.
 pub async fn execute_script(
     args: ScriptArgs,
-    confirm: Option<Box<dyn FnOnce() -> bool + Send>>,
+    confirm: Option<Box<dyn FnOnce(&ExecutionResult) -> bool + Send>>,
 ) -> treb_core::Result<ExecutionResult> {
     let preprocessed = args
         .preprocess()
@@ -98,9 +99,23 @@ pub async fn execute_script(
     let should_broadcast = executed.args.broadcast
         && result.transactions.as_ref().is_some_and(|txs| !txs.is_empty());
 
-    // Ask for confirmation if a callback is provided.
+    // Build a simulation result for the confirm callback.
+    let decoded_logs = crate::console::decode_console_logs(&result.logs);
+    let labeled: HashMap<Address, String> = result.labeled_addresses.clone().into_iter().collect();
+    let sim_result = ExecutionResult {
+        success: result.success,
+        logs: decoded_logs.clone(),
+        raw_logs: result.logs.clone(),
+        gas_used: result.gas_used,
+        returned: result.returned.clone(),
+        labeled_addresses: labeled.clone(),
+        transactions: result.transactions.clone(),
+        traces: Vec::new(), // traces are expensive to clone, skip for preview
+        broadcast_receipts: None,
+    };
+
     let confirmed = if should_broadcast {
-        confirm.map_or(true, |f| f())
+        confirm.map_or(true, |f| f(&sim_result))
     } else {
         false
     };
@@ -149,16 +164,13 @@ pub async fn execute_script(
         None
     };
 
-    let decoded_logs = crate::console::decode_console_logs(&result.logs);
-    let labeled = result.labeled_addresses.into_iter().collect();
-
     Ok(ExecutionResult {
         success: result.success,
         logs: decoded_logs,
         raw_logs: result.logs,
         gas_used: result.gas_used,
         returned: result.returned,
-        labeled_addresses: labeled,
+        labeled_addresses: labeled.clone(),
         transactions: result.transactions,
         traces: result.traces,
         broadcast_receipts,

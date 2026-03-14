@@ -19,7 +19,7 @@ use treb_config::{ResolveOpts, resolve_config};
 use treb_core::types::{Operation, TransactionStatus};
 use treb_forge::{
     pipeline::{
-        PipelineConfig, PipelineContext, PipelineResult, RecordedTransaction,
+        BroadcastHook, PipelineConfig, PipelineContext, PipelineResult, RecordedTransaction,
         RunPipeline, resolve_git_commit,
     },
     script::build_script_config_with_senders,
@@ -634,13 +634,16 @@ pub async fn run(
     let broadcast_previewed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     if wants_broadcast && prompts_enabled && !json {
         let previewed = broadcast_previewed.clone();
-        pipeline = pipeline.with_broadcast_confirm(Box::new(move || {
-            let confirmed = crate::ui::prompt::confirm("Broadcast?", false);
+        let hook: BroadcastHook = Box::new(move |transactions: &[RecordedTransaction]| {
+            display_transactions_grouped(transactions, 0);
+            let confirmed = crate::ui::prompt::confirm("Broadcast these transactions?", false);
             if confirmed {
                 previewed.store(true, std::sync::atomic::Ordering::Relaxed);
+                println!();
             }
             confirmed
-        }));
+        });
+        pipeline = pipeline.with_broadcast_hook(hook);
     }
 
     let result = {
