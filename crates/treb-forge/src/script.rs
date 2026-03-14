@@ -93,7 +93,6 @@ pub struct ScriptConfig {
     fork_url: Option<String>,
     broadcast: bool,
     slow: bool,
-    debug: bool,
     dry_run: bool,
     gas_estimate_multiplier: u64,
     legacy: bool,
@@ -121,7 +120,6 @@ impl ScriptConfig {
             fork_url: None,
             broadcast: false,
             slow: false,
-            debug: false,
             dry_run: false,
             gas_estimate_multiplier: 130,
             legacy: false,
@@ -174,11 +172,6 @@ impl ScriptConfig {
 
     pub fn slow(&mut self, slow: bool) -> &mut Self {
         self.slow = slow;
-        self
-    }
-
-    pub fn debug(&mut self, debug: bool) -> &mut Self {
-        self.debug = debug;
         self
     }
 
@@ -275,7 +268,6 @@ impl ScriptConfig {
         args.target_contract = self.target_contract;
         args.broadcast = if self.dry_run { false } else { self.broadcast };
         args.slow = self.slow;
-        args.debug = self.debug;
         args.gas_estimate_multiplier = self.gas_estimate_multiplier;
         args.legacy = self.legacy;
         args.non_interactive = self.non_interactive;
@@ -416,7 +408,6 @@ mod tests {
         assert_eq!(args.batch_size, 100);
         assert!(!args.broadcast);
         assert!(!args.slow);
-        assert!(!args.debug);
         assert!(!args.legacy);
         assert!(args.evm.fork_url.is_none());
         assert!(args.evm.sender.is_none());

@@ -9,7 +9,9 @@ use std::{collections::HashMap, path::Path};
 use alloy_primitives::{Address, B256, U256};
 use alloy_signer::Signer;
 use foundry_config::Config;
-use foundry_evm::traces::{CallKind, TraceKind, Traces};
+use foundry_evm::traces::{
+    CallKind, CallTraceDecoderBuilder, TraceKind, Traces, decode_trace_arena, render_trace_arena,
+};
 use treb_core::error::TrebError;
 use treb_registry::Registry;
 use treb_safe::{
@@ -234,6 +236,14 @@ impl RunPipeline {
             }
         }
 
+        // 12. Render traces based on verbosity level
+        let (execution_traces, setup_traces) = render_traces_for_verbosity(
+            execution.traces,
+            &execution.labeled_addresses,
+            self.context.config.verbosity,
+        )
+        .await;
+
         Ok(PipelineResult {
             deployments: recorded_deployments,
             transactions: recorded_transactions,
@@ -246,8 +256,48 @@ impl RunPipeline {
             event_count,
             console_logs: execution.logs,
             governor_proposals,
+            execution_traces,
+            setup_traces,
         })
     }
+}
+
+/// Render traces into human-readable strings based on verbosity level.
+///
+/// - `verbosity >= 1`: render execution traces
+/// - `verbosity >= 3`: also render setup traces
+async fn render_traces_for_verbosity(
+    mut traces: Traces,
+    labeled_addresses: &HashMap<Address, String>,
+    verbosity: u8,
+) -> (Option<String>, Option<String>) {
+    if verbosity == 0 {
+        return (None, None);
+    }
+
+    let decoder = CallTraceDecoderBuilder::new()
+        .with_labels(labeled_addresses.clone())
+        .build();
+
+    let mut execution_parts = Vec::new();
+    let mut setup_parts = Vec::new();
+
+    for (kind, arena) in &mut traces {
+        decode_trace_arena(&mut arena.arena, &decoder).await;
+        let rendered = render_trace_arena(arena);
+        match kind {
+            TraceKind::Execution => execution_parts.push(rendered),
+            TraceKind::Setup if verbosity >= 3 => setup_parts.push(rendered),
+            _ => {}
+        }
+    }
+
+    let execution_traces =
+        (!execution_parts.is_empty()).then(|| execution_parts.join("\n"));
+    let setup_traces =
+        (!setup_parts.is_empty()).then(|| setup_parts.join("\n"));
+
+    (execution_traces, setup_traces)
 }
 
 /// Load the foundry configuration from the project root.

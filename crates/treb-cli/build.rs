@@ -87,14 +87,8 @@ fn build_run() -> ClapCommand {
             Arg::new("verbose")
                 .long("verbose")
                 .short('v')
-                .action(ArgAction::SetTrue)
-                .help("Show verbose output"),
-        )
-        .arg(
-            Arg::new("debug")
-                .long("debug")
-                .action(ArgAction::SetTrue)
-                .help("Enable Forge debugger"),
+                .action(ArgAction::Count)
+                .help("Verbosity level (-v, -vv, -vvv)"),
         )
         .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
         .arg(Arg::new("env").long("env").num_args(1).help("Set environment variables (KEY=VALUE)"))
@@ -441,8 +435,8 @@ fn build_compose() -> ClapCommand {
             Arg::new("verbose")
                 .long("verbose")
                 .short('v')
-                .action(ArgAction::SetTrue)
-                .help("Show verbose output"),
+                .action(ArgAction::Count)
+                .help("Verbosity level (-v, -vv, -vvv)"),
         )
         .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
         .arg(Arg::new("env").long("env").num_args(1).help("Set environment variables (KEY=VALUE)"))

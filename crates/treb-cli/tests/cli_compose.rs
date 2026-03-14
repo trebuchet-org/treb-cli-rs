@@ -56,7 +56,6 @@ fn compose_help_shows_all_flags() {
     assert!(stdout.contains("--json"), "help should show --json");
     assert!(stdout.contains("--env"), "help should show --env");
     assert!(stdout.contains("--non-interactive"), "help should show --non-interactive");
-    assert!(stdout.contains("--debug"), "help should show --debug");
     assert!(stdout.contains("--dump-command"), "help should show --dump-command");
 }
 
@@ -353,7 +352,6 @@ fn compose_all_flags_accepted() {
             "--slow",
             "--legacy",
             "--verbose",
-            "--debug",
             "--json",
             "--env",
             "FOO=bar",
@@ -431,51 +429,6 @@ fn compose_dump_command_writes_commands_to_stdout() {
     assert!(stdout.contains("# registry"), "stdout should include component header: {stdout}");
     assert!(stdout.contains("forge script"), "stdout should include forge command: {stdout}");
     assert!(stderr.trim().is_empty(), "stderr should be empty for dump-command: {stderr}");
-}
-
-#[test]
-fn compose_json_debug_does_not_emit_human_debug_line() {
-    let tmp = tempfile::tempdir().unwrap();
-    fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
-    treb().arg("init").current_dir(tmp.path()).assert().success();
-    copy_fixture_to("simple.yaml", tmp.path());
-
-    let compose_path = tmp.path().join("simple.yaml");
-    let compose_contents = fs::read_to_string(&compose_path).unwrap();
-    let mut hasher = DefaultHasher::new();
-    compose_contents.hash(&mut hasher);
-    let compose_hash = format!("{:016x}", hasher.finish());
-
-    let state_path = tmp.path().join(".treb").join("compose-state.json");
-    fs::write(
-        &state_path,
-        serde_json::to_string_pretty(&serde_json::json!({
-            "compose_hash": compose_hash,
-            "completed": ["registry", "token"],
-            "deployment_total": 4
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-
-    let output = treb()
-        .args(["compose", "simple.yaml", "--resume", "--json", "--debug"])
-        .current_dir(tmp.path())
-        .output()
-        .expect("failed to run compose --resume --json --debug");
-
-    assert!(output.status.success());
-    let json: serde_json::Value =
-        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    assert_eq!(json["success"], true);
-    assert_eq!(json["totals"]["deployments"], 0);
-    assert_eq!(json["totals"]["skipped"], 2);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !stderr.contains("Debug logs saved to"),
-        "stderr should not include debug-path line in json mode: {stderr}"
-    );
-    assert!(stderr.trim().is_empty(), "stderr should be empty in json mode: {stderr}");
 }
 
 #[test]

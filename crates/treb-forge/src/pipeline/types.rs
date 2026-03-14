@@ -33,6 +33,8 @@ pub struct PipelineConfig {
     pub script_args: Vec<String>,
     /// Environment variables to inject into the script execution.
     pub env_vars: HashMap<String, String>,
+    /// Verbosity level for trace output (0 = none, 1+ = render traces).
+    pub verbosity: u8,
 }
 
 impl Default for PipelineConfig {
@@ -45,6 +47,7 @@ impl Default for PipelineConfig {
             script_sig: "run()".to_string(),
             script_args: Vec::new(),
             env_vars: HashMap::new(),
+            verbosity: 0,
         }
     }
 }
@@ -98,6 +101,10 @@ pub struct PipelineResult {
     pub console_logs: Vec<String>,
     /// Governor proposals created during script execution.
     pub governor_proposals: Vec<GovernorProposal>,
+    /// Pre-rendered execution traces (shown at `-v` and `-vv`).
+    pub execution_traces: Option<String>,
+    /// Pre-rendered setup traces (shown at `-vvv`).
+    pub setup_traces: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

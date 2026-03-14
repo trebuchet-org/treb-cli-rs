@@ -90,12 +90,9 @@ enum Commands {
         /// Verify deployed contracts on Etherscan
         #[arg(long)]
         verify: bool,
-        /// Show verbose output
-        #[arg(long, short)]
-        verbose: bool,
-        /// Enable Forge debugger
-        #[arg(long)]
-        debug: bool,
+        /// Verbosity level (-v, -vv, -vvv)
+        #[arg(long, short, action = clap::ArgAction::Count)]
+        verbose: u8,
         /// Print the equivalent forge script command and exit without executing
         #[arg(long)]
         dump_command: bool,
@@ -426,12 +423,9 @@ enum Commands {
         /// Use legacy (pre-EIP-1559) transactions
         #[arg(long)]
         legacy: bool,
-        /// Show verbose output
-        #[arg(long, short)]
-        verbose: bool,
-        /// Save per-component debug logs to .treb/debug-compose-<timestamp>/
-        #[arg(long)]
-        debug: bool,
+        /// Verbosity level (-v, -vv, -vvv)
+        #[arg(long, short, action = clap::ArgAction::Count)]
+        verbose: u8,
         /// Print per-component forge commands and exit without executing
         #[arg(long)]
         dump_command: bool,
@@ -1108,7 +1102,6 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             legacy,
             verify,
             verbose,
-            debug,
             dump_command,
             json,
             env,
@@ -1127,7 +1120,6 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 legacy,
                 verify,
                 verbose,
-                debug,
                 dump_command,
                 json,
                 env,
@@ -1274,7 +1266,6 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             slow,
             legacy,
             verbose,
-            debug,
             dump_command,
             json,
             env,
@@ -1292,7 +1283,6 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 slow,
                 legacy,
                 verbose,
-                debug,
                 dump_command,
                 json,
                 env,

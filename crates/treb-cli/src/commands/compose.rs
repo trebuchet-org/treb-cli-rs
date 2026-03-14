@@ -5,7 +5,7 @@
 
 use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
-    env, fs,
+    env,
     hash::{DefaultHasher, Hash, Hasher},
     io::{self, BufRead, Write},
     path::{Path, PathBuf},
@@ -539,8 +539,7 @@ pub async fn run(
     verify: bool,
     slow: bool,
     legacy: bool,
-    verbose: bool,
-    debug: bool,
+    verbose: u8,
     dump_command: bool,
     json: bool,
     env_vars: Vec<String>,
@@ -575,7 +574,7 @@ pub async fn run(
     };
 
     // ── Verbose resume context ────────────────────────────────────────
-    if verbose && !json && resume && !skip_set.is_empty() {
+    if verbose > 0 && !json && resume && !skip_set.is_empty() {
         let hash_str = &compose_hash;
         let skip_count = skip_set.len().to_string();
         let kv_pairs: Vec<(&str, &str)> =
@@ -748,17 +747,6 @@ pub async fn run(
         deployment_total: resumed_deployments,
     };
 
-    // ── Debug log directory ─────────────────────────────────────────
-    let debug_dir = if debug {
-        let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
-        let dir = cwd.join(".treb").join(format!("debug-compose-{}", timestamp));
-        fs::create_dir_all(&dir)
-            .with_context(|| format!("failed to create debug directory: {}", dir.display()))?;
-        Some(dir)
-    } else {
-        None
-    };
-
     // ── Execute components in topological order ───────────────────────
     let total = order.len();
     let mut completed = skip_set.len();
@@ -873,7 +861,7 @@ pub async fn run(
             }
 
             // Verbose per-component context.
-            if verbose && !json {
+            if verbose > 0 && !json {
                 let sig_display = sig.to_string();
                 let verify_display = effective_verify.to_string();
                 let rpc_display = effective_rpc_url.clone().unwrap_or_default();
@@ -932,7 +920,7 @@ pub async fn run(
         .await;
 
         match step_result {
-            Ok((result, resolved_namespace, effective_rpc_url)) => {
+            Ok((result, _resolved_namespace, _effective_rpc_url)) => {
                 completed += 1;
                 if !json {
                     eprintln!(
@@ -948,7 +936,7 @@ pub async fn run(
                 }
 
                 // Verbose post-execution summary per component.
-                if verbose && !json {
+                if verbose > 0 && !json {
                     let dep_str = format!("{} deployment(s)", result.deployments.len());
                     let tx_str = format!("{} transaction(s)", result.transactions.len());
                     let gas_str = format!("{} gas", output::format_gas(result.gas_used));
@@ -959,48 +947,6 @@ pub async fn run(
                     ];
                     output::eprint_kv(&summary_pairs);
                     eprintln!();
-                }
-
-                // Write per-component debug log.
-                if let Some(ref dir) = debug_dir {
-                    let mut log = String::new();
-                    log.push_str(&format!("component: {}\n", name));
-                    log.push_str("status: success\n");
-                    log.push_str(&format!("script: {}\n", component.script));
-                    log.push_str(&format!("sig: {}\n", sig));
-                    log.push_str(&format!("namespace: {}\n", resolved_namespace));
-                    if let Some(ref url) = effective_rpc_url {
-                        log.push_str(&format!("rpc: {}\n", url));
-                    }
-                    log.push_str(&format!("broadcast: {}\n", broadcast));
-                    log.push_str(&format!("verify: {}\n", effective_verify));
-                    log.push_str(&format!("gas_used: {}\n", result.gas_used));
-                    log.push_str(&format!("deployments: {}\n", result.deployments.len()));
-                    log.push_str(&format!("transactions: {}\n", result.transactions.len()));
-
-                    if !result.deployments.is_empty() {
-                        log.push_str("\n--- Deployments ---\n");
-                        for rd in &result.deployments {
-                            let d = &rd.deployment;
-                            log.push_str(&format!(
-                                "  {} {} ({}) chain={}\n",
-                                d.deployment_type, d.contract_name, d.address, d.chain_id
-                            ));
-                        }
-                    }
-
-                    if !result.transactions.is_empty() {
-                        log.push_str("\n--- Transactions ---\n");
-                        for rt in &result.transactions {
-                            let tx = &rt.transaction;
-                            log.push_str(&format!("  {} {} ({})\n", tx.id, tx.hash, tx.status));
-                        }
-                    }
-
-                    let log_path = dir.join(format!("{}.log", name));
-                    fs::write(&log_path, &log).with_context(|| {
-                        format!("failed to write debug log to {}", log_path.display())
-                    })?;
                 }
 
                 component_results.push(ComponentResultEntry {
@@ -1024,20 +970,6 @@ pub async fn run(
                         "{}",
                         styled(&format!("{} Failed: {}", emoji::CROSS, error_msg), color::RED,),
                     );
-                }
-
-                // Write per-component debug log for failure.
-                if let Some(ref dir) = debug_dir {
-                    let mut log = String::new();
-                    log.push_str(&format!("component: {}\n", name));
-                    log.push_str("status: failed\n");
-                    log.push_str(&format!("script: {}\n", component.script));
-                    log.push_str(&format!("sig: {}\n", sig));
-                    log.push_str(&format!("error: {}\n", error_msg));
-                    let log_path = dir.join(format!("{}.log", name));
-                    fs::write(&log_path, &log).with_context(|| {
-                        format!("failed to write debug log to {}", log_path.display())
-                    })?;
                 }
 
                 component_results.push(ComponentResultEntry {
@@ -1085,9 +1017,6 @@ pub async fn run(
             &failed_component,
         );
 
-        if let Some(ref dir) = debug_dir {
-            eprintln!("Debug logs saved to {}", dir.display());
-        }
     } else if success {
         // In JSON mode, execution failures bubble up to the top-level JSON
         // error wrapper instead of mixing a result payload with stderr errors.

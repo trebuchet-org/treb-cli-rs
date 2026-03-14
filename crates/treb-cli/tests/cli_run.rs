@@ -45,7 +45,6 @@ fn run_help_shows_all_flags() {
     assert!(stdout.contains("--legacy"), "help should show --legacy");
     assert!(stdout.contains("--verify"), "help should show --verify");
     assert!(stdout.contains("--verbose"), "help should show --verbose");
-    assert!(stdout.contains("--debug"), "help should show --debug");
     assert!(stdout.contains("--json"), "help should show --json");
     assert!(stdout.contains("--env"), "help should show --env");
     assert!(stdout.contains("--target-contract"), "help should show --target-contract");
@@ -197,7 +196,6 @@ fn run_all_flags_accepted_together() {
             "--legacy",
             "--verify",
             "--verbose",
-            "--debug",
             "--json",
             "--env",
             "KEY=value",

@@ -12,8 +12,8 @@ use framework::{
     context::TestContext,
     integration_test::{IntegrationTest, run_integration_test},
     normalizer::{
-        BlockNumberNormalizer, CompilerOutputNormalizer, DebugLogNormalizer, DurationNormalizer,
-        GasNormalizer, PathNormalizer,
+        BlockNumberNormalizer, CompilerOutputNormalizer, DurationNormalizer, GasNormalizer,
+        PathNormalizer,
     },
 };
 
@@ -241,40 +241,6 @@ async fn run_basic_json() {
         .extra_normalizer(Box::new(GasNormalizer))
         .extra_normalizer(Box::new(BlockNumberNormalizer))
         .extra_normalizer(Box::new(DurationNormalizer));
-
-    run_integration_test(&test, &ctx);
-}
-
-/// Debug mode — enables Forge debugger flag which adds trace output.
-///
-/// Verifies that `--debug` produces output beyond the basic deployment.
-#[tokio::test(flavor = "multi_thread")]
-async fn run_debug() {
-    let Some(ctx) = run_test_context().await else {
-        return;
-    };
-
-    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
-
-    let test = IntegrationTest::new("run_debug")
-        .setup(&["init"])
-        .test(&[
-            "run",
-            "script/Deploy.s.sol",
-            "--network",
-            "anvil-31337",
-            "--broadcast",
-            "--non-interactive",
-            "--debug",
-        ])
-        .output_artifact(".treb/deployments.json")
-        .output_artifact(".treb/transactions.json")
-        .extra_normalizer(Box::new(path_normalizer))
-        .extra_normalizer(Box::new(CompilerOutputNormalizer))
-        .extra_normalizer(Box::new(GasNormalizer))
-        .extra_normalizer(Box::new(BlockNumberNormalizer))
-        .extra_normalizer(Box::new(DurationNormalizer))
-        .extra_normalizer(Box::new(DebugLogNormalizer));
 
     run_integration_test(&test, &ctx);
 }

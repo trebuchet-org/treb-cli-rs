@@ -2,7 +2,7 @@
 
 use std::{
     collections::HashMap,
-    env, fs,
+    env,
     io::{self, BufRead, Write},
     path::PathBuf,
     time::Duration,
@@ -67,11 +67,11 @@ fn format_verbose_sender(role: &str, sender: &ResolvedSender) -> String {
     }
 }
 
-fn format_verbose_senders(resolved_senders: &HashMap<String, ResolvedSender>) -> String {
+fn format_verbose_senders(resolved_senders: &HashMap<String, ResolvedSender>) -> Vec<String> {
     let mut senders: Vec<String> =
         resolved_senders.iter().map(|(role, sender)| format_verbose_sender(role, sender)).collect();
     senders.sort();
-    senders.join(", ")
+    senders
 }
 
 fn sorted_env_var_entries(env_vars: &[String]) -> Vec<(String, String)> {
@@ -135,8 +135,8 @@ fn is_active_fork_run(
         .any(|entry| active_fork_matches(entry, cwd, network, effective_rpc_url))
 }
 
-fn deployment_banner_mode(dry_run: bool, active_fork: bool) -> (&'static str, Style) {
-    if dry_run {
+fn deployment_banner_mode(dry_run: bool, broadcast: bool, active_fork: bool) -> (&'static str, Style) {
+    if dry_run || !broadcast {
         ("DRY_RUN", color::YELLOW)
     } else if active_fork {
         ("FORK", color::MAGENTA)
@@ -164,6 +164,38 @@ fn should_prompt_for_broadcast_confirmation(
     prompts_enabled: bool,
 ) -> bool {
     broadcast && !dry_run && prompts_enabled
+}
+
+/// Resolve the effective network: CLI flag > local config > interactive picker.
+pub fn resolve_network(
+    cli_network: Option<String>,
+    cwd: &std::path::Path,
+    prompts_enabled: bool,
+    non_interactive: bool,
+) -> anyhow::Result<Option<String>> {
+    // 1. Explicit CLI flag wins.
+    if cli_network.is_some() {
+        return Ok(cli_network);
+    }
+
+    // 2. Check local config for a saved default network.
+    let local = treb_config::load_local_config(cwd).unwrap_or_default();
+    if !local.network.is_empty() {
+        return Ok(Some(local.network));
+    }
+
+    // 3. Interactive picker as last resort.
+    if prompts_enabled {
+        let endpoints = treb_config::resolve_rpc_endpoints(cwd)
+            .map_err(|e| anyhow::anyhow!("failed to load foundry config: {e}"))?;
+        let mut names: Vec<String> = endpoints.keys().cloned().collect();
+        names.sort();
+        return fuzzy_select_network(&names, non_interactive)
+            .map_err(|e| anyhow::anyhow!("{e}"))
+            .map(|opt| opt.map(|s| s.to_string()));
+    }
+
+    Ok(None)
 }
 
 fn should_reject_interactive_json_broadcast(
@@ -291,8 +323,7 @@ pub async fn run(
     slow: bool,
     legacy: bool,
     verify: bool,
-    verbose: bool,
-    debug: bool,
+    verbose: u8,
     dump_command: bool,
     json: bool,
     env_vars: Vec<String>,
@@ -313,18 +344,8 @@ pub async fn run(
         );
     }
 
-    // ── Interactive network selection when --network is omitted ───────────
-    let network = if network.is_none() && prompts_enabled {
-        let endpoints = treb_config::resolve_rpc_endpoints(&cwd)
-            .map_err(|e| anyhow::anyhow!("failed to load foundry config: {e}"))?;
-        let mut names: Vec<String> = endpoints.keys().cloned().collect();
-        names.sort();
-        fuzzy_select_network(&names, non_interactive)
-            .map_err(|e| anyhow::anyhow!("{e}"))?
-            .map(|s| s.to_string())
-    } else {
-        network
-    };
+    // ── Network resolution: CLI flag > local config > interactive prompt ──
+    let network = resolve_network(network, &cwd, prompts_enabled, non_interactive)?;
 
     // ── Config resolution ────────────────────────────────────────────────
     let resolved = resolve_config(ResolveOpts {
@@ -339,14 +360,21 @@ pub async fn run(
     // If --rpc-url is provided, it overrides the network-derived RPC URL.
     let effective_rpc_url = rpc_url.or_else(|| resolved.network.clone());
 
+    // ── Derive effective network name from CLI flag or resolved config ──
+    let effective_network = network.clone().or_else(|| resolved.network.clone());
+
     // ── Sender resolution ────────────────────────────────────────────────
     let mut resolved_senders =
         resolve_all_senders(&resolved.senders).await.context("failed to resolve senders")?;
 
-    // ── Encode sender configs for Solidity consumption ──────────────────
+    // ── Inject treb context env vars for Solidity consumption ──────────
+    // SAFETY: this is single-threaded CLI code; no concurrent env access.
+    unsafe { env::set_var("NAMESPACE", &resolved.namespace) };
+    if let Some(ref net) = effective_network {
+        unsafe { env::set_var("NETWORK", net) };
+    }
     let encoded_senders = encode_sender_configs(&resolved_senders, &resolved.senders)
         .context("failed to encode sender configs")?;
-    // SAFETY: this is single-threaded CLI code; no concurrent env access.
     unsafe { env::set_var("SENDER_CONFIGS", &encoded_senders) };
 
     // ── Build ScriptConfig with all CLI flags ────────────────────────────
@@ -361,7 +389,6 @@ pub async fn run(
         .slow(slow || resolved.slow)
         .legacy(legacy)
         .verify(verify)
-        .debug(debug)
         .non_interactive(non_interactive);
 
     if let Some(ref tc) = target_contract {
@@ -399,8 +426,8 @@ pub async fn run(
         0
     };
 
-    // ── Verbose pre-execution banner (Go: PrintDeploymentBanner) ──────
-    if verbose && !json {
+    // ── Pre-execution banner (Go: PrintDeploymentBanner) ──────────────
+    if !json {
         let separator: String = "─".repeat(50);
         let use_color = color::is_color_enabled();
         let active_fork =
@@ -450,7 +477,7 @@ pub async fn run(
         }
 
         // Mode
-        let (mode_label, mode_style) = deployment_banner_mode(dry_run, active_fork);
+        let (mode_label, mode_style) = deployment_banner_mode(dry_run, broadcast, active_fork);
         if use_color {
             println!("  {:10} {}", "Mode:", mode_label.style(mode_style));
         } else {
@@ -475,12 +502,13 @@ pub async fn run(
         }
 
         // Senders
-        let sender_line = format_verbose_senders(&resolved_senders);
-        if !sender_line.is_empty() {
+        let sender_lines = format_verbose_senders(&resolved_senders);
+        for (i, line) in sender_lines.iter().enumerate() {
+            let label = if i == 0 { "Senders:" } else { "" };
             if use_color {
-                println!("  {:10} {}", "Senders:", sender_line.style(color::GRAY));
+                println!("  {:10} {}", label, line.style(color::GRAY));
             } else {
-                println!("  {:10} {}", "Senders:", sender_line);
+                println!("  {:10} {}", label, line);
             }
         }
 
@@ -500,6 +528,7 @@ pub async fn run(
         chain_id,
         script_sig: sig.to_string(),
         script_args: Vec::new(), // args already in ScriptConfig
+        verbosity: verbose,
         ..Default::default()
     };
 
@@ -562,83 +591,7 @@ pub async fn run(
     };
 
     // ── Display results ──────────────────────────────────────────────────
-    display_result(&result, json, resolved.network.as_deref(), &resolved.namespace)?;
-
-    // ── Debug log output ────────────────────────────────────────────────
-    if debug {
-        let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
-        let log_filename = format!("debug-{}.log", timestamp);
-        let log_path = cwd.join(TREB_DIR).join(&log_filename);
-
-        let mut log_content = String::new();
-        log_content.push_str(&format!("treb run debug log — {}\n", timestamp));
-        log_content.push_str(&format!("Script: {}\n", script));
-        log_content.push_str(&format!("Sig: {}\n", sig));
-        log_content.push_str(&format!("Namespace: {}\n", resolved.namespace));
-        log_content.push_str(&format!("Chain ID: {}\n", chain_id));
-        if let Some(ref url) = effective_rpc_url {
-            log_content.push_str(&format!("RPC: {}\n", url));
-        }
-        log_content.push_str(&format!("Broadcast: {}\n", broadcast));
-        log_content.push_str(&format!("Dry run: {}\n", dry_run));
-        log_content.push_str(&format!("Success: {}\n", result.success));
-        log_content.push_str(&format!("Gas used: {}\n", result.gas_used));
-        log_content.push_str(&format!("Events decoded: {}\n", result.event_count));
-        log_content.push_str(&format!("Deployments: {}\n", result.deployments.len()));
-        log_content.push_str(&format!("Transactions: {}\n", result.transactions.len()));
-        log_content.push_str(&format!("Skipped: {}\n", result.skipped.len()));
-        log_content.push_str(&format!("Collisions: {}\n", result.collisions.len()));
-
-        if !result.console_logs.is_empty() {
-            log_content.push_str("\n--- Console Output ---\n");
-            for line in &result.console_logs {
-                log_content.push_str(line);
-                log_content.push('\n');
-            }
-        }
-
-        if !result.deployments.is_empty() {
-            log_content.push_str("\n--- Deployments ---\n");
-            for rd in &result.deployments {
-                let d = &rd.deployment;
-                log_content.push_str(&format!(
-                    "  {} {} ({}) chain={}\n",
-                    d.deployment_type, d.contract_name, d.address, d.chain_id
-                ));
-            }
-        }
-
-        if !result.transactions.is_empty() {
-            log_content.push_str("\n--- Transactions ---\n");
-            for rt in &result.transactions {
-                let tx = &rt.transaction;
-                log_content.push_str(&format!("  {} {} ({})\n", tx.id, tx.hash, tx.status));
-            }
-        }
-
-        if !result.governor_proposals.is_empty() {
-            log_content.push_str("\n--- Governor Proposals ---\n");
-            for gp in &result.governor_proposals {
-                let timelock = if gp.timelock_address.is_empty() {
-                    "none".to_string()
-                } else {
-                    gp.timelock_address.clone()
-                };
-                log_content.push_str(&format!(
-                    "  {} governor={} timelock={} status={} txs={}\n",
-                    gp.proposal_id,
-                    gp.governor_address,
-                    timelock,
-                    gp.status,
-                    gp.transaction_ids.len(),
-                ));
-            }
-        }
-
-        fs::write(&log_path, &log_content)
-            .with_context(|| format!("failed to write debug log to {}", log_path.display()))?;
-        eprintln!("Debug log saved to {}", log_path.display());
-    }
+    display_result(&result, json, verbose, resolved.network.as_deref(), &resolved.namespace)?;
 
     Ok(())
 }
@@ -700,13 +653,14 @@ struct GovernorProposalJson {
 fn display_result(
     result: &PipelineResult,
     json: bool,
+    verbose: u8,
     network: Option<&str>,
     namespace: &str,
 ) -> anyhow::Result<()> {
     if json {
         display_result_json(result)?;
     } else {
-        display_result_human(result, network, namespace);
+        display_result_human(result, verbose, network, namespace);
     }
     Ok(())
 }
@@ -906,7 +860,7 @@ fn format_skipped_deployment_line(skipped: &treb_forge::SkippedDeployment) -> St
     )
 }
 
-fn display_result_human(result: &PipelineResult, network: Option<&str>, namespace: &str) {
+fn display_result_human(result: &PipelineResult, verbose: u8, network: Option<&str>, namespace: &str) {
     // ── Transactions ────────────────────────────────────────────────────
     output::print_section_header(emoji::REFRESH, "Transactions", 50);
     if result.transactions.is_empty() {
@@ -1059,6 +1013,20 @@ fn display_result_human(result: &PipelineResult, network: Option<&str>, namespac
         println!();
     }
 
+    // ── Traces ───────────────────────────────────────────────────────────
+    if verbose >= 3 {
+        if let Some(ref setup) = result.setup_traces {
+            println!("Setup Traces:");
+            println!("{setup}");
+        }
+    }
+    if verbose >= 1 {
+        if let Some(ref traces) = result.execution_traces {
+            println!("Traces:");
+            println!("{traces}");
+        }
+    }
+
     // ── Success Message ───────────────────────────────────────────────
     let success_msg = format!("{} Script execution completed successfully", emoji::CHECK_MARK,);
     if color::is_color_enabled() {
@@ -1071,6 +1039,8 @@ fn display_result_human(result: &PipelineResult, network: Option<&str>, namespac
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+
     use alloy_primitives::{Address, B256};
     use chrono::{TimeZone, Utc};
     use treb_core::types::{
@@ -1188,6 +1158,8 @@ mod tests {
             event_count: 0,
             console_logs: Vec::new(),
             governor_proposals: Vec::new(),
+            execution_traces: None,
+            setup_traces: None,
         }
     }
 
@@ -1315,9 +1287,12 @@ needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
 
     #[test]
     fn deployment_banner_mode_uses_go_parity_labels() {
-        assert_eq!(deployment_banner_mode(true, false).0, "DRY_RUN");
-        assert_eq!(deployment_banner_mode(false, true).0, "FORK");
-        assert_eq!(deployment_banner_mode(false, false).0, "LIVE");
+        assert_eq!(deployment_banner_mode(true, true, false).0, "DRY_RUN");
+        assert_eq!(deployment_banner_mode(true, false, false).0, "DRY_RUN");
+        assert_eq!(deployment_banner_mode(false, false, false).0, "DRY_RUN");
+        assert_eq!(deployment_banner_mode(false, false, true).0, "DRY_RUN");
+        assert_eq!(deployment_banner_mode(false, true, true).0, "FORK");
+        assert_eq!(deployment_banner_mode(false, true, false).0, "LIVE");
     }
 
     #[test]
@@ -1374,18 +1349,17 @@ needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
     }
 
     #[test]
-    fn format_verbose_senders_joins_sorted_entries_on_one_line() {
+    fn format_verbose_senders_returns_sorted_rows() {
         let mut senders = HashMap::new();
         senders
             .insert("deployer".to_string(), ResolvedSender::InMemory(in_memory_signer(0).unwrap()));
         senders.insert("anvil".to_string(), ResolvedSender::InMemory(in_memory_signer(1).unwrap()));
 
-        let line = format_verbose_senders(&senders);
+        let lines = format_verbose_senders(&senders);
 
-        assert_eq!(
-            line,
-            "anvil: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8, deployer: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
-        );
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0], "anvil: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8");
+        assert_eq!(lines[1], "deployer: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
     }
 
     #[test]
