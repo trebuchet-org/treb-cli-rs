@@ -410,7 +410,7 @@ fn collect_recorded_transaction_metadata(
 ) -> HashMap<String, RecordedTransactionMetadata> {
     tx_events
         .iter()
-        .flat_map(|event| event.transactions.iter())
+        .map(|event| &event.simulatedTx)
         .map(|sim_tx| {
             let tx_id = format!("tx-{:#x}", sim_tx.transactionId);
             let deployment_targets = transaction_deployments.get(&tx_id).map(Vec::as_slice);
@@ -427,7 +427,7 @@ fn collect_recorded_transaction_metadata(
             (
                 tx_id,
                 RecordedTransactionMetadata {
-                    sender_name: (!sim_tx.senderId.is_empty()).then(|| sim_tx.senderId.clone()),
+                    sender_name: (!sim_tx.senderId.is_zero()).then(|| format!("{:#x}", sim_tx.senderId)),
                     gas_used,
                 },
             )
@@ -470,7 +470,7 @@ fn matches_simulated_transaction(
 fn build_sim_tx_index(tx_events: &[TransactionSimulated]) -> HashMap<B256, &SimulatedTransaction> {
     tx_events
         .iter()
-        .flat_map(|event| &event.transactions)
+        .map(|event| &event.simulatedTx)
         .map(|sim_tx| (sim_tx.transactionId, sim_tx))
         .collect()
 }
@@ -601,15 +601,16 @@ async fn propose_safe_transactions(
 mod tests {
     use super::*;
     use crate::events::{ExtractedDeployment, abi};
-    use alloy_primitives::{Bytes, address, b256};
+    use alloy_primitives::{Bytes, address, b256, keccak256};
     use treb_core::types::enums::DeploymentMethod;
 
     fn sample_sim_tx(to: Address, value: U256, data: &[u8], tx_id: B256) -> SimulatedTransaction {
         SimulatedTransaction {
             transactionId: tx_id,
-            senderId: "deployer".to_string(),
+            senderId: keccak256(b"deployer"),
             sender: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
             returnData: Bytes::new(),
+            gasUsed: U256::ZERO,
             transaction: abi::Transaction { to, data: Bytes::from(data.to_vec()), value },
         }
     }
@@ -732,12 +733,14 @@ mod tests {
         let tx_id_1 = b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         let tx_id_2 = b256!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
 
-        let events = vec![TransactionSimulated {
-            transactions: vec![
-                sample_sim_tx(Address::ZERO, U256::ZERO, &[], tx_id_1),
-                sample_sim_tx(Address::ZERO, U256::ZERO, &[], tx_id_2),
-            ],
-        }];
+        let events = vec![
+            TransactionSimulated {
+                simulatedTx: sample_sim_tx(Address::ZERO, U256::ZERO, &[], tx_id_1),
+            },
+            TransactionSimulated {
+                simulatedTx: sample_sim_tx(Address::ZERO, U256::ZERO, &[], tx_id_2),
+            },
+        ];
 
         let index = build_sim_tx_index(&events);
         assert_eq!(index.len(), 2);
@@ -766,7 +769,7 @@ mod tests {
         let events = vec![
             // A TransactionSimulated event (should be skipped)
             ParsedEvent::Treb(Box::new(TrebEvent::TransactionSimulated(TransactionSimulated {
-                transactions: vec![sample_sim_tx(Address::ZERO, U256::ZERO, &[], B256::ZERO)],
+                simulatedTx: sample_sim_tx(Address::ZERO, U256::ZERO, &[], B256::ZERO),
             }))),
             // A GovernorProposalCreated event (should be extracted)
             ParsedEvent::Treb(Box::new(TrebEvent::GovernorProposalCreated(
@@ -802,18 +805,20 @@ mod tests {
         let to = address!("0000000000000000000000000000000000001000");
         let data = vec![0xde, 0xad, 0xbe, 0xef];
 
+        let governance_id = keccak256(b"governance");
         let events = vec![TransactionSimulated {
-            transactions: vec![SimulatedTransaction {
+            simulatedTx: SimulatedTransaction {
                 transactionId: tx_id,
-                senderId: "governance".to_string(),
+                senderId: governance_id,
                 sender,
                 returnData: Bytes::new(),
+                gasUsed: U256::ZERO,
                 transaction: abi::Transaction {
                     to,
                     data: Bytes::from(data.clone()),
                     value: U256::ZERO,
                 },
-            }],
+            },
         }];
 
         let mut pending = vec![PendingExecutionTrace {
@@ -832,7 +837,7 @@ mod tests {
             .get("tx-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
             .expect("metadata should exist");
 
-        assert_eq!(tx_meta.sender_name.as_deref(), Some("governance"));
+        assert_eq!(tx_meta.sender_name.as_deref(), Some(&format!("{:#x}", governance_id)[..]));
         assert_eq!(tx_meta.gas_used, Some(123_456));
         assert!(pending[0].matched);
     }
@@ -845,32 +850,36 @@ mod tests {
         let deployed_1 = address!("5FbDB2315678afecb367f032d93F642f64180aa3");
         let deployed_2 = address!("e7f1725E7734CE288F8367e1Bb143E90bb3F0512");
 
-        let events = vec![TransactionSimulated {
-            transactions: vec![
-                SimulatedTransaction {
+        let events = vec![
+            TransactionSimulated {
+                simulatedTx: SimulatedTransaction {
                     transactionId: tx_id_1,
-                    senderId: "deployer".to_string(),
+                    senderId: keccak256(b"deployer"),
                     sender,
                     returnData: Bytes::new(),
+                    gasUsed: U256::ZERO,
                     transaction: abi::Transaction {
                         to: Address::ZERO,
                         data: Bytes::new(),
                         value: U256::ZERO,
                     },
                 },
-                SimulatedTransaction {
+            },
+            TransactionSimulated {
+                simulatedTx: SimulatedTransaction {
                     transactionId: tx_id_2,
-                    senderId: "deployer".to_string(),
+                    senderId: keccak256(b"deployer"),
                     sender,
                     returnData: Bytes::new(),
+                    gasUsed: U256::ZERO,
                     transaction: abi::Transaction {
                         to: Address::ZERO,
                         data: Bytes::new(),
                         value: U256::ZERO,
                     },
                 },
-            ],
-        }];
+            },
+        ];
 
         let deployments = HashMap::from([
             (format!("tx-{:#x}", tx_id_1), vec![deployed_1]),
@@ -905,9 +914,10 @@ mod tests {
             .get("tx-0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
             .expect("metadata should exist");
 
-        assert_eq!(tx_meta_1.sender_name.as_deref(), Some("deployer"));
+        let deployer_hex = format!("{:#x}", keccak256(b"deployer"));
+        assert_eq!(tx_meta_1.sender_name.as_deref(), Some(deployer_hex.as_str()));
         assert_eq!(tx_meta_1.gas_used, Some(111_222));
-        assert_eq!(tx_meta_2.sender_name.as_deref(), Some("deployer"));
+        assert_eq!(tx_meta_2.sender_name.as_deref(), Some(deployer_hex.as_str()));
         assert_eq!(tx_meta_2.gas_used, Some(654_321));
         assert!(pending.iter().all(|candidate| candidate.matched));
     }
@@ -917,7 +927,7 @@ mod tests {
         let tx_id = b256!("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
         let deployed = address!("5FbDB2315678afecb367f032d93F642f64180aa3");
         let events = vec![TransactionSimulated {
-            transactions: vec![sample_sim_tx(Address::ZERO, U256::ZERO, &[], tx_id)],
+            simulatedTx: sample_sim_tx(Address::ZERO, U256::ZERO, &[], tx_id),
         }];
         let deployments = vec![sample_extracted_deployment(tx_id, deployed)];
         let mut arena = foundry_evm::traces::CallTraceArena::default();

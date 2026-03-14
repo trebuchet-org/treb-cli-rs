@@ -5,7 +5,7 @@
 //! `SolEvent::encode_log_data`, passes the raw log through `decode_events`,
 //! and asserts every field matches the original.
 
-use alloy_primitives::{Address, B256, Bytes, Log, LogData, U256, address, b256};
+use alloy_primitives::{Address, B256, Bytes, Log, LogData, U256, address, b256, keccak256};
 use alloy_sol_types::SolEvent;
 use treb_forge::events::{
     ContractCreation_0, ContractDeployed, CreateXEvent, DeploymentCollision, DeploymentDetails,
@@ -79,54 +79,66 @@ fn roundtrip_transaction_simulated() {
     let call_data = Bytes::from(vec![0xaa, 0xbb, 0xcc]);
     let return_data = Bytes::from(vec![0xdd, 0xee]);
 
-    let event = TransactionSimulated {
-        transactions: vec![
-            SimulatedTransaction {
-                transactionId: tx_id,
-                senderId: "deployer".to_string(),
-                sender,
-                returnData: return_data.clone(),
-                transaction: Transaction {
-                    to: target,
-                    data: call_data.clone(),
-                    value: U256::from(1000u64),
-                },
+    let deployer_id = keccak256(b"deployer");
+    let treasury_id = keccak256(b"treasury");
+
+    let event0 = TransactionSimulated {
+        simulatedTx: SimulatedTransaction {
+            transactionId: tx_id,
+            senderId: deployer_id,
+            sender,
+            returnData: return_data.clone(),
+            gasUsed: U256::ZERO,
+            transaction: Transaction {
+                to: target,
+                data: call_data.clone(),
+                value: U256::from(1000u64),
             },
-            SimulatedTransaction {
-                transactionId: B256::ZERO,
-                senderId: "treasury".to_string(),
-                sender: Address::ZERO,
-                returnData: Bytes::new(),
-                transaction: Transaction {
-                    to: Address::ZERO,
-                    data: Bytes::new(),
-                    value: U256::ZERO,
-                },
+        },
+    };
+    let event1 = TransactionSimulated {
+        simulatedTx: SimulatedTransaction {
+            transactionId: B256::ZERO,
+            senderId: treasury_id,
+            sender: Address::ZERO,
+            returnData: Bytes::new(),
+            gasUsed: U256::ZERO,
+            transaction: Transaction {
+                to: Address::ZERO,
+                data: Bytes::new(),
+                value: U256::ZERO,
             },
-        ],
+        },
     };
 
-    let log = make_log(Address::ZERO, event.encode_log_data());
-    let parsed = decode_events(&[log]);
-    assert_eq!(parsed.len(), 1);
+    let log0 = make_log(Address::ZERO, event0.encode_log_data());
+    let log1 = make_log(Address::ZERO, event1.encode_log_data());
+    let parsed = decode_events(&[log0, log1]);
+    assert_eq!(parsed.len(), 2);
 
     match &parsed[0] {
         ParsedEvent::Treb(boxed) => match boxed.as_ref() {
             TrebEvent::TransactionSimulated(d) => {
-                assert_eq!(d.transactions.len(), 2);
-
-                let tx0 = &d.transactions[0];
+                let tx0 = &d.simulatedTx;
                 assert_eq!(tx0.transactionId, tx_id);
-                assert_eq!(tx0.senderId, "deployer");
+                assert_eq!(tx0.senderId, deployer_id);
                 assert_eq!(tx0.sender, sender);
                 assert_eq!(tx0.returnData, return_data);
                 assert_eq!(tx0.transaction.to, target);
                 assert_eq!(tx0.transaction.data, call_data);
                 assert_eq!(tx0.transaction.value, U256::from(1000u64));
+            }
+            other => panic!("expected TransactionSimulated, got {other:?}"),
+        },
+        other => panic!("expected Treb event, got {other:?}"),
+    }
 
-                let tx1 = &d.transactions[1];
+    match &parsed[1] {
+        ParsedEvent::Treb(boxed) => match boxed.as_ref() {
+            TrebEvent::TransactionSimulated(d) => {
+                let tx1 = &d.simulatedTx;
                 assert_eq!(tx1.transactionId, B256::ZERO);
-                assert_eq!(tx1.senderId, "treasury");
+                assert_eq!(tx1.senderId, treasury_id);
                 assert_eq!(tx1.sender, Address::ZERO);
                 assert_eq!(tx1.returnData, Bytes::new());
                 assert_eq!(tx1.transaction.to, Address::ZERO);
@@ -254,17 +266,18 @@ fn roundtrip_all_events_in_single_batch() {
 
     // 2. TransactionSimulated
     let simulated = TransactionSimulated {
-        transactions: vec![SimulatedTransaction {
+        simulatedTx: SimulatedTransaction {
             transactionId: B256::ZERO,
-            senderId: "deployer".to_string(),
+            senderId: keccak256(b"deployer"),
             sender: deployer,
             returnData: Bytes::new(),
+            gasUsed: U256::ZERO,
             transaction: Transaction {
                 to: location,
                 data: Bytes::from(vec![0xaa]),
                 value: U256::ZERO,
             },
-        }],
+        },
     };
     let log2 = make_log(Address::ZERO, simulated.encode_log_data());
 

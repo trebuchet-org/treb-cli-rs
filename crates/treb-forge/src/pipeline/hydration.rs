@@ -141,7 +141,7 @@ pub fn hydrate_transactions(
 
     events
         .iter()
-        .flat_map(|event| &event.transactions)
+        .map(|event| &event.simulatedTx)
         .map(|sim_tx| {
             let tx_id_hex = format!("tx-{:#x}", sim_tx.transactionId);
 
@@ -564,7 +564,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     use crate::events::abi::SimulatedTransaction;
-    use alloy_primitives::U256;
+    use alloy_primitives::{U256, keccak256};
 
     /// Helper: build a hydrated Deployment with specific id and transaction_id.
     fn mock_deployment(id: &str, transaction_id: &str) -> Deployment {
@@ -613,17 +613,18 @@ mod tests {
         let tx_id_hex = "tx-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
         let events = vec![TransactionSimulated {
-            transactions: vec![SimulatedTransaction {
+            simulatedTx: SimulatedTransaction {
                 transactionId: tx_id,
-                senderId: "deployer".to_string(),
+                senderId: keccak256(b"deployer"),
                 sender: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
                 returnData: Bytes::new(),
+                gasUsed: U256::ZERO,
                 transaction: crate::events::abi::Transaction {
                     to: address!("5FbDB2315678afecb367f032d93F642f64180aa3"),
                     data: Bytes::new(),
                     value: U256::ZERO,
                 },
-            }],
+            },
         }];
 
         let deployments = vec![
@@ -660,17 +661,18 @@ mod tests {
         let tx_id = b256!("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
 
         let events = vec![TransactionSimulated {
-            transactions: vec![SimulatedTransaction {
+            simulatedTx: SimulatedTransaction {
                 transactionId: tx_id,
-                senderId: "governance".to_string(),
+                senderId: keccak256(b"governance"),
                 sender: address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
                 returnData: Bytes::new(),
+                gasUsed: U256::ZERO,
                 transaction: crate::events::abi::Transaction {
                     to: address!("0000000000000000000000000000000000001000"),
                     data: Bytes::from(vec![0xde, 0xad, 0xbe, 0xef, 0x01]),
                     value: U256::ZERO,
                 },
-            }],
+            },
         }];
 
         let transactions = hydrate_transactions(&events, &[], &ctx);
@@ -748,33 +750,37 @@ mod tests {
         let tx_id_1 = b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         let tx_id_2 = b256!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
 
-        // Create two simulated transactions
-        let events = vec![TransactionSimulated {
-            transactions: vec![
-                SimulatedTransaction {
+        // Create two simulated transactions (one event per transaction)
+        let events = vec![
+            TransactionSimulated {
+                simulatedTx: SimulatedTransaction {
                     transactionId: tx_id_1,
-                    senderId: "deployer".to_string(),
+                    senderId: keccak256(b"deployer"),
                     sender: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
                     returnData: Bytes::new(),
+                    gasUsed: U256::ZERO,
                     transaction: crate::events::abi::Transaction {
                         to: address!("5FbDB2315678afecb367f032d93F642f64180aa3"),
                         data: Bytes::new(),
                         value: U256::ZERO,
                     },
                 },
-                SimulatedTransaction {
+            },
+            TransactionSimulated {
+                simulatedTx: SimulatedTransaction {
                     transactionId: tx_id_2,
-                    senderId: "deployer".to_string(),
+                    senderId: keccak256(b"deployer"),
                     sender: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
                     returnData: Bytes::new(),
+                    gasUsed: U256::ZERO,
                     transaction: crate::events::abi::Transaction {
                         to: address!("e7f1725E7734CE288F8367e1Bb143E90bb3F0512"),
                         data: Bytes::new(),
                         value: U256::ZERO,
                     },
                 },
-            ],
-        }];
+            },
+        ];
 
         let mut transactions = hydrate_transactions(&events, &[], &ctx);
         assert_eq!(transactions.len(), 2);
@@ -820,17 +826,18 @@ mod tests {
         let tx_id = b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 
         let events = vec![TransactionSimulated {
-            transactions: vec![SimulatedTransaction {
+            simulatedTx: SimulatedTransaction {
                 transactionId: tx_id,
-                senderId: "deployer".to_string(),
+                senderId: keccak256(b"deployer"),
                 sender: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
                 returnData: Bytes::new(),
+                gasUsed: U256::ZERO,
                 transaction: crate::events::abi::Transaction {
                     to: address!("5FbDB2315678afecb367f032d93F642f64180aa3"),
                     data: Bytes::new(),
                     value: U256::ZERO,
                 },
-            }],
+            },
         }];
 
         let mut transactions = hydrate_transactions(&events, &[], &ctx);
@@ -863,17 +870,18 @@ mod tests {
         let tx_id = b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 
         let events = vec![TransactionSimulated {
-            transactions: vec![SimulatedTransaction {
+            simulatedTx: SimulatedTransaction {
                 transactionId: tx_id,
-                senderId: "deployer".to_string(),
+                senderId: keccak256(b"deployer"),
                 sender: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
                 returnData: Bytes::new(),
+                gasUsed: U256::ZERO,
                 transaction: crate::events::abi::Transaction {
                     to: address!("5FbDB2315678afecb367f032d93F642f64180aa3"),
                     data: Bytes::new(),
                     value: U256::ZERO,
                 },
-            }],
+            },
         }];
 
         let mut transactions = hydrate_transactions(&events, &[], &ctx);

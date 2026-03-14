@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use alloy_primitives::{Address, B256, Bytes, address, b256};
+use alloy_primitives::{Address, B256, Bytes, address, b256, keccak256};
 use tempfile::TempDir;
 use treb_core::types::enums::{
     DeploymentMethod, DeploymentType, TransactionStatus, VerificationStatus,
@@ -115,6 +115,8 @@ fn build_pipeline_result(
         event_count: 0,
         console_logs: Vec::new(),
         governor_proposals: Vec::new(),
+        execution_traces: None,
+        setup_traces: None,
     }
 }
 
@@ -257,17 +259,18 @@ fn transaction_linking_deployments_to_transactions() {
 
     // Hydrate transaction
     let events = vec![TransactionSimulated {
-        transactions: vec![SimulatedTransaction {
+        simulatedTx: SimulatedTransaction {
             transactionId: tx_id,
-            senderId: "deployer".to_string(),
+            senderId: keccak256(b"deployer"),
             sender: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
             returnData: Bytes::new(),
+            gasUsed: alloy_primitives::U256::ZERO,
             transaction: treb_forge::events::abi::Transaction {
                 to: address!("5FbDB2315678afecb367f032d93F642f64180aa3"),
                 data: Bytes::new(),
                 value: alloy_primitives::U256::ZERO,
             },
-        }],
+        },
     }];
 
     let transactions = hydrate_transactions(&events, &hydrated_deployments, &ctx);
@@ -429,19 +432,20 @@ fn dry_run_leaves_registry_unchanged() {
 
     // Hydrate a transaction
     let tx_events = vec![TransactionSimulated {
-        transactions: vec![SimulatedTransaction {
+        simulatedTx: SimulatedTransaction {
             transactionId: b256!(
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
             ),
-            senderId: "deployer".to_string(),
+            senderId: keccak256(b"deployer"),
             sender: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
             returnData: Bytes::new(),
+            gasUsed: alloy_primitives::U256::ZERO,
             transaction: treb_forge::events::abi::Transaction {
                 to: address!("5FbDB2315678afecb367f032d93F642f64180aa3"),
                 data: Bytes::new(),
                 value: alloy_primitives::U256::ZERO,
             },
-        }],
+        },
     }];
     let transactions = hydrate_transactions(&tx_events, std::slice::from_ref(&deployment), &ctx);
 

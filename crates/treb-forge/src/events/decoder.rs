@@ -180,7 +180,7 @@ fn decode_or_skip(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{B256, Bytes, LogData, U256, address, b256};
+    use alloy_primitives::{B256, Bytes, LogData, U256, address, b256, keccak256};
     use alloy_sol_types::SolEvent;
 
     use crate::events::abi::{DeploymentDetails, SimulatedTransaction, Transaction};
@@ -378,18 +378,20 @@ mod tests {
 
     #[test]
     fn decode_transaction_simulated() {
+        let deployer_id = keccak256(b"deployer");
         let event = TransactionSimulated {
-            transactions: vec![SimulatedTransaction {
+            simulatedTx: SimulatedTransaction {
                 transactionId: B256::ZERO,
-                senderId: "deployer".to_string(),
+                senderId: deployer_id,
                 sender: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
                 returnData: Bytes::new(),
+                gasUsed: U256::ZERO,
                 transaction: Transaction {
                     to: address!("5FbDB2315678afecb367f032d93F642f64180aa3"),
                     data: Bytes::from(vec![0xaa]),
                     value: U256::from(1000u64),
                 },
-            }],
+            },
         };
         let log = make_log(Address::ZERO, event.encode_log_data());
 
@@ -399,8 +401,7 @@ mod tests {
         match &parsed[0] {
             ParsedEvent::Treb(boxed) => match boxed.as_ref() {
                 TrebEvent::TransactionSimulated(decoded) => {
-                    assert_eq!(decoded.transactions.len(), 1);
-                    assert_eq!(decoded.transactions[0].senderId, "deployer");
+                    assert_eq!(decoded.simulatedTx.senderId, deployer_id);
                 }
                 other => panic!("expected TransactionSimulated, got {other:?}"),
             },

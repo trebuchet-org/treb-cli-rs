@@ -31,10 +31,11 @@ sol! {
     #[derive(Debug)]
     struct SimulatedTransaction {
         bytes32 transactionId;
-        string senderId;
+        bytes32 senderId;
         address sender;
         bytes returnData;
         Transaction transaction;
+        uint256 gasUsed;
     }
 
     #[derive(Debug)]
@@ -46,7 +47,7 @@ sol! {
 
     #[derive(Debug)]
     event TransactionSimulated(
-        SimulatedTransaction[] transactions
+        SimulatedTransaction simulatedTx
     );
 
     #[derive(Debug)]

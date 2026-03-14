@@ -24,7 +24,7 @@ pub use treb_sol::{AdminChanged, BeaconUpgraded, Upgraded};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{Address, B256, Bytes, U256, address, b256};
+    use alloy_primitives::{Address, B256, Bytes, U256, address, b256, keccak256};
     use alloy_sol_types::SolEvent;
 
     #[test]
@@ -51,9 +51,10 @@ mod tests {
     fn construct_simulated_transaction_and_access_fields() {
         let tx = SimulatedTransaction {
             transactionId: B256::ZERO,
-            senderId: "deployer".to_string(),
+            senderId: keccak256(b"deployer"),
             sender: Address::ZERO,
             returnData: Bytes::new(),
+            gasUsed: U256::ZERO,
             transaction: Transaction {
                 to: address!("0000000000000000000000000000000000000001"),
                 data: Bytes::from(vec![0xaa, 0xbb]),
@@ -61,7 +62,7 @@ mod tests {
             },
         };
 
-        assert_eq!(tx.senderId, "deployer");
+        assert_eq!(tx.senderId, keccak256(b"deployer"));
         assert_eq!(tx.transaction.to, address!("0000000000000000000000000000000000000001"));
         assert_eq!(tx.transaction.value, U256::from(1000u64));
     }
