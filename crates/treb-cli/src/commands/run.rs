@@ -597,6 +597,7 @@ pub async fn run(
         script_sig: sig.to_string(),
         script_args: Vec::new(), // args already in ScriptConfig
         verbosity: verbose,
+        is_fork: active_fork.is_some(),
         ..Default::default()
     };
 

@@ -37,6 +37,8 @@ pub struct PipelineConfig {
     pub env_vars: HashMap<String, String>,
     /// Verbosity level for trace output (0 = none, 1+ = render traces).
     pub verbosity: u8,
+    /// Whether the pipeline is running against an Anvil fork.
+    pub is_fork: bool,
 }
 
 impl Default for PipelineConfig {
@@ -50,6 +52,7 @@ impl Default for PipelineConfig {
             script_args: Vec::new(),
             env_vars: HashMap::new(),
             verbosity: 0,
+            is_fork: false,
         }
     }
 }
