@@ -141,14 +141,38 @@ impl RunPipeline {
         // Force simulation mode for initial execution
         let mut sim_args = script_args;
         sim_args.broadcast = false;
-        let execution = execute_script(sim_args).await?;
+        let mut execution = execute_script(sim_args).await?;
 
         // 3. Check for failed execution
         if !execution.success {
-            return Err(TrebError::Forge(format!(
-                "script execution failed:\n{}",
-                execution.logs.join("\n")
-            )));
+            // Render traces to show the revert reason
+            let mut err_parts = Vec::new();
+            if !execution.logs.is_empty() {
+                err_parts.push(execution.logs.join("\n"));
+            }
+
+            let contracts = artifact_index.inner();
+            let mut decoder = CallTraceDecoderBuilder::new()
+                .with_known_contracts(contracts)
+                .build();
+            let mut identifier = TraceIdentifiers::new().with_local(contracts);
+            for (_, arena) in &execution.traces {
+                decoder.identify(&arena.arena, &mut identifier);
+            }
+            for (_, arena) in &mut execution.traces {
+                decode_trace_arena(&mut arena.arena, &decoder).await;
+                let rendered = render_trace_arena(arena);
+                if !rendered.trim().is_empty() {
+                    err_parts.push(rendered);
+                }
+            }
+
+            let detail = if err_parts.is_empty() {
+                "script reverted without output".to_string()
+            } else {
+                err_parts.join("\n")
+            };
+            return Err(TrebError::Forge(format!("script execution failed:\n{detail}")));
         }
 
         // 4. Decode events

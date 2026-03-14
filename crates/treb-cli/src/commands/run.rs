@@ -166,13 +166,11 @@ fn is_active_fork_run(
         .any(|entry| active_fork_matches(entry, cwd, network, effective_rpc_url))
 }
 
-fn deployment_banner_mode(_dry_run: bool, broadcast: bool, active_fork: bool) -> (&'static str, Style) {
-    if !broadcast {
-        ("DRY_RUN", color::YELLOW)
-    } else if active_fork {
-        ("FORK", color::MAGENTA)
+fn deployment_banner_mode(_dry_run: bool, broadcast: bool, _active_fork: bool) -> (&'static str, Style) {
+    if broadcast {
+        ("BROADCAST", color::GREEN)
     } else {
-        ("LIVE", color::GREEN)
+        ("DRY_RUN", color::YELLOW)
     }
 }
 
@@ -514,21 +512,29 @@ pub async fn run(
 
         // Network
         let network_name = resolved.network.as_deref().unwrap_or("(none)");
+        let fork_tag = if is_fork { " [fork]" } else { "" };
         if use_color {
-            if chain_id > 0 {
-                println!(
-                    "  {:10} {} {}",
-                    "Network:",
-                    network_name.style(color::BLUE),
-                    format!("({})", chain_id).style(color::GRAY)
-                );
+            let chain_suffix = if chain_id > 0 {
+                format!(" {}", format!("({})", chain_id).style(color::GRAY))
             } else {
-                println!("  {:10} {}", "Network:", network_name.style(color::BLUE));
-            }
+                String::new()
+            };
+            let fork_suffix = if is_fork {
+                format!(" {}", "[fork]".style(color::MAGENTA))
+            } else {
+                String::new()
+            };
+            println!(
+                "  {:10} {}{}{}",
+                "Network:",
+                network_name.style(color::BLUE),
+                chain_suffix,
+                fork_suffix,
+            );
         } else if chain_id > 0 {
-            println!("  {:10} {} ({})", "Network:", network_name, chain_id);
+            println!("  {:10} {} ({}){}", "Network:", network_name, chain_id, fork_tag);
         } else {
-            println!("  {:10} {}", "Network:", network_name);
+            println!("  {:10} {}{}", "Network:", network_name, fork_tag);
         }
 
         // Namespace
