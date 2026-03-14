@@ -52,7 +52,7 @@ mod tests {
     fn pipeline_config_default_construction() {
         let config = PipelineConfig::default();
         assert!(config.script_path.is_empty());
-        assert!(!config.dry_run);
+        assert!(!config.broadcast);
         assert!(config.namespace.is_empty());
         assert_eq!(config.chain_id, 0);
         assert_eq!(config.script_sig, "run()");

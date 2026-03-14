@@ -133,7 +133,7 @@ impl RunPipeline {
 
         // Clone args for potential broadcast (before simulation consumes them)
         let wants_broadcast = script_args.broadcast
-            && !self.context.config.dry_run
+            && self.context.config.broadcast
             && !self.context.deployer_sender.as_ref().is_some_and(|s| s.is_safe())
             && !self.context.deployer_sender.as_ref().is_some_and(|s| s.is_governor());
         let broadcast_args = if wants_broadcast { Some(script_args.clone()) } else { None };
@@ -228,7 +228,7 @@ impl RunPipeline {
 
         if is_safe_sender {
             populate_safe_context(&mut transactions, &safe_transactions);
-            if !self.context.config.dry_run {
+            if self.context.config.broadcast {
                 propose_safe_transactions(&self.context, &safe_tx_events, &tx_events).await?;
             }
         }
@@ -279,11 +279,10 @@ impl RunPipeline {
         let resolved = resolve_duplicates(hydrated_deployments, registry, DuplicateStrategy::Skip)?;
         let skipped = resolved.skipped;
 
-        // Effective dry_run: explicit dry-run OR broadcast was wanted but declined
-        let effective_dry_run =
-            self.context.config.dry_run || (wants_broadcast && !broadcast_confirmed);
+        // Record to registry only when broadcast was confirmed and completed.
+        let should_record = broadcast_confirmed;
 
-        let registry_updated = !effective_dry_run
+        let registry_updated = should_record
             && (!resolved.to_insert.is_empty()
                 || !resolved.to_update.is_empty()
                 || !recorded_transactions.is_empty()
@@ -293,7 +292,7 @@ impl RunPipeline {
         // 15. Record to registry (or build dry-run result)
         let mut recorded_deployments = Vec::new();
 
-        if !effective_dry_run {
+        if should_record {
             for dep in resolved.to_insert {
                 registry.insert_deployment(dep.clone())?;
                 recorded_deployments
@@ -328,7 +327,7 @@ impl RunPipeline {
             registry_updated,
             collisions,
             skipped,
-            dry_run: effective_dry_run,
+            dry_run: !should_record,
             success: true,
             gas_used: execution.gas_used,
             event_count,
@@ -370,6 +369,11 @@ async fn render_traces_for_verbosity(
 
     for (kind, arena) in &mut traces {
         decode_trace_arena(&mut arena.arena, &decoder).await;
+
+        // Replace long hex bytecode blobs in decoded call args with artifact
+        // names before rendering — this way both full traces and per-tx
+        // sub-trees get the collapsed form automatically.
+        collapse_decoded_bytecode_args(&mut arena.arena, artifact_index);
 
         // Extract per-transaction sub-trees from execution arenas
         if matches!(kind, TraceKind::Execution) {
@@ -612,6 +616,68 @@ fn extract_per_transaction_traces(
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Bytecode collapse in decoded trace data
+// ---------------------------------------------------------------------------
+
+/// Minimum byte count before we collapse a hex argument.
+const BYTECODE_COLLAPSE_THRESHOLD: usize = 64;
+
+/// Walk the decoded trace arena and replace long hex bytecode arguments
+/// with compact artifact-matched summaries.
+///
+/// Modifies `DecodedCallData.args` in-place so that both full-trace
+/// rendering and per-transaction sub-tree extraction see the collapsed form.
+fn collapse_decoded_bytecode_args(
+    arena: &mut foundry_evm::traces::CallTraceArena,
+    artifact_index: &ArtifactIndex,
+) {
+    use alloy_primitives::hex;
+
+    for node in arena.nodes_mut() {
+        let Some(ref mut decoded) = node.trace.decoded else { continue };
+
+        // Collapse long hex args in the decoded call data
+        if let Some(ref mut call_data) = decoded.call_data {
+            for arg in &mut call_data.args {
+                collapse_hex_arg(arg, artifact_index);
+            }
+        }
+
+        // Collapse long hex in return data
+        if let Some(ref mut ret) = decoded.return_data {
+            collapse_hex_arg(ret, artifact_index);
+        }
+    }
+
+    /// Replace a single string in-place if it contains a long hex blob.
+    fn collapse_hex_arg(s: &mut String, artifact_index: &ArtifactIndex) {
+        // Strip leading 0x for the hex check
+        let hex_str = s.strip_prefix("0x").unwrap_or(s);
+        if hex_str.len() < BYTECODE_COLLAPSE_THRESHOLD * 2 {
+            return;
+        }
+        if !hex_str.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return;
+        }
+
+        let byte_count = hex_str.len() / 2;
+        if let Ok(bytes) = hex::decode(hex_str) {
+            if let Some(matched) = artifact_index.find_by_creation_code(&bytes) {
+                *s = format!("<{} initcode ({byte_count} bytes)>", matched.name);
+                return;
+            }
+        }
+
+        // No match — truncate
+        let prefix = &hex_str[..8.min(hex_str.len())];
+        let suffix_start = hex_str.len().saturating_sub(8);
+        let suffix = &hex_str[suffix_start..];
+        *s = format!("0x{prefix}…{suffix} ({byte_count} bytes)");
+    }
+}
+
 
 // ---------------------------------------------------------------------------
 // Broadcast receipt application

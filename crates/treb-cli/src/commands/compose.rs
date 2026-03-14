@@ -894,7 +894,7 @@ pub async fn run(
             // Build pipeline context.
             let pipeline_config = PipelineConfig {
                 script_path: component.script.clone(),
-                dry_run: false,
+                broadcast: true,
                 namespace: resolved.namespace.clone(),
                 script_sig: sig.to_string(),
                 script_args: Vec::new(),

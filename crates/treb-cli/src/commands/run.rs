@@ -160,8 +160,8 @@ fn is_active_fork_run(
         .any(|entry| active_fork_matches(entry, cwd, network, effective_rpc_url))
 }
 
-fn deployment_banner_mode(dry_run: bool, broadcast: bool, active_fork: bool) -> (&'static str, Style) {
-    if dry_run || !broadcast {
+fn deployment_banner_mode(_dry_run: bool, broadcast: bool, active_fork: bool) -> (&'static str, Style) {
+    if !broadcast {
         ("DRY_RUN", color::YELLOW)
     } else if active_fork {
         ("FORK", color::MAGENTA)
@@ -549,7 +549,7 @@ pub async fn run(
     // ── Build PipelineConfig and PipelineContext ─────────────────────────
     let pipeline_config = PipelineConfig {
         script_path: script.to_string(),
-        dry_run,
+        broadcast,
         namespace: resolved.namespace.clone(),
         chain_id,
         script_sig: sig.to_string(),
@@ -1411,8 +1411,7 @@ needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
 
     #[test]
     fn deployment_banner_mode_uses_go_parity_labels() {
-        assert_eq!(deployment_banner_mode(true, true, false).0, "DRY_RUN");
-        assert_eq!(deployment_banner_mode(true, false, false).0, "DRY_RUN");
+        // dry_run param is ignored — mode is driven by broadcast flag
         assert_eq!(deployment_banner_mode(false, false, false).0, "DRY_RUN");
         assert_eq!(deployment_banner_mode(false, false, true).0, "DRY_RUN");
         assert_eq!(deployment_banner_mode(false, true, true).0, "FORK");

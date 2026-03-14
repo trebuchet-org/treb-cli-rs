@@ -22,8 +22,9 @@ use crate::{events::ExtractedCollision, sender::ResolvedSender};
 pub struct PipelineConfig {
     /// Path to the forge script to execute (e.g., `script/Deploy.s.sol`).
     pub script_path: String,
-    /// When true, the pipeline runs end-to-end but does not write to the registry.
-    pub dry_run: bool,
+    /// When true, the pipeline broadcasts transactions and writes to the registry.
+    /// When false, the pipeline simulates only (dry run).
+    pub broadcast: bool,
     /// The namespace for this deployment (e.g., `production`, `staging`).
     pub namespace: String,
     /// The target chain ID.
@@ -42,7 +43,7 @@ impl Default for PipelineConfig {
     fn default() -> Self {
         Self {
             script_path: String::new(),
-            dry_run: false,
+            broadcast: false,
             namespace: String::new(),
             chain_id: 0,
             script_sig: "run()".to_string(),
