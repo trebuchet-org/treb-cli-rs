@@ -575,6 +575,7 @@ pub async fn run(
     let git_commit = resolve_git_commit();
 
     // Build sender address → role name mapping for trace labeling.
+    let sender_role_names: Vec<String> = resolved_senders.keys().cloned().collect();
     let sender_labels = resolved_senders
         .iter()
         .map(|(role, sender)| (sender.sender_address(), role.clone()))
@@ -591,6 +592,7 @@ pub async fn run(
         project_root: cwd.clone(),
         deployer_sender,
         sender_labels,
+        sender_role_names,
     };
 
     // ── Open registry and execute pipeline ───────────────────────────────
@@ -603,7 +605,7 @@ pub async fn run(
     let wants_broadcast = broadcast && !dry_run && !is_safe && !is_gov;
     if wants_broadcast && prompts_enabled && !json {
         let hook: BroadcastHook = Box::new(move |transactions: &[RecordedTransaction]| {
-            display_broadcast_preview(transactions);
+            display_transactions_grouped(transactions, 0);
             let confirmed = crate::ui::prompt::confirm("Broadcast these transactions?", false);
             if confirmed {
                 println!();
@@ -825,11 +827,10 @@ fn collision_metadata_lines(collision: &treb_forge::events::ExtractedCollision) 
 // Broadcast preview (shown before confirmation prompt)
 // ---------------------------------------------------------------------------
 
-/// Display a preview of transactions grouped by sender before broadcast.
+/// Display transactions grouped by sender, with traces and optional footers.
 ///
-/// Shows per-transaction decoded traces when available, and groups
-/// everything under sender headers.
-fn display_broadcast_preview(transactions: &[RecordedTransaction]) {
+/// Used for both the broadcast preview and the post-execution results.
+fn display_transactions_grouped(transactions: &[RecordedTransaction], verbose: u8) {
     if transactions.is_empty() {
         return;
     }
@@ -853,7 +854,7 @@ fn display_broadcast_preview(transactions: &[RecordedTransaction]) {
     }
 
     let header = format!(
-        "\n{} transaction{} to broadcast:",
+        "\n{} transaction{}:",
         transactions.len(),
         if transactions.len() == 1 { "" } else { "s" },
     );
@@ -875,40 +876,39 @@ fn display_broadcast_preview(transactions: &[RecordedTransaction]) {
             println!("\n  {} ({} tx)", sender, txs.len());
         }
 
-        // Each transaction: trace or operation summary + gas footer
+        // Each transaction: trace or operation summary + footer
         for (i, rt) in txs.iter().enumerate() {
             if i > 0 {
                 println!();
             }
-            if let Some(ref trace) = rt.trace {
-                for line in trace.lines() {
-                    println!("  {line}");
-                }
-            } else {
-                // Fallback: show operations when no trace is available
-                for op in &rt.transaction.operations {
-                    let target = output::truncate_address(&op.target);
-                    let line = if op.method.is_empty() || op.method.starts_with("0x") {
-                        format!("    {} {}", op.operation_type, target)
-                    } else {
-                        format!("    {} {}.{}()", op.operation_type, target, op.method)
-                    };
-                    if use_color {
-                        println!("{}", line.style(color::MUTED));
-                    } else {
-                        println!("{line}");
+            // Per-transaction decoded trace sub-tree
+            if verbose == 0 {
+                if let Some(ref trace) = rt.trace {
+                    for line in trace.lines() {
+                        println!("  {line}");
+                    }
+                } else {
+                    // Fallback: show operations when no trace is available
+                    for op in &rt.transaction.operations {
+                        let target = output::truncate_address(&op.target);
+                        let line = if op.method.is_empty() || op.method.starts_with("0x") {
+                            format!("    {} {}", op.operation_type, target)
+                        } else {
+                            format!("    {} {}.{}()", op.operation_type, target, op.method)
+                        };
+                        if use_color {
+                            println!("{}", line.style(color::MUTED));
+                        } else {
+                            println!("{line}");
+                        }
                     }
                 }
             }
 
-            // Gas estimate
-            if let Some(gas) = rt.gas_used.filter(|g| *g > 0) {
-                let footer = format!("    Gas: {}", output::format_gas(gas));
-                if use_color {
-                    println!("{}", footer.style(color::GRAY));
-                } else {
-                    println!("{footer}");
-                }
+            // Footer: hash, block, gas (only shown when populated)
+            let footer = format_tx_footer(rt);
+            if !footer.is_empty() {
+                println!("  {footer}");
             }
         }
     }
@@ -998,39 +998,7 @@ fn display_result_human(result: &PipelineResult, verbose: u8, network: Option<&s
             println!("\n  {}", msg);
         }
     } else if !result.transactions.is_empty() {
-        output::print_section_header(emoji::REFRESH, "Transactions", 50);
-        for rt in &result.transactions {
-            let tx = &rt.transaction;
-            let status_str = format_tx_status(&tx.status);
-            let sender_label = tx_sender_label(rt);
-            let tx_id = output::truncate_address(&tx.id);
-
-            // Header: status sender tx-id
-            let sender_display = if color::is_color_enabled() {
-                format!("{}", sender_label.style(color::CYAN))
-            } else {
-                sender_label.to_string()
-            };
-            let id_display = if color::is_color_enabled() {
-                format!("{}", tx_id.style(color::GRAY))
-            } else {
-                tx_id.to_string()
-            };
-            println!("\n{} {} {}", status_str, sender_display, id_display);
-
-            // Per-transaction decoded trace sub-tree (default mode)
-            if verbose == 0 {
-                if let Some(ref trace) = rt.trace {
-                    for line in trace.lines() {
-                        println!("{line}");
-                    }
-                }
-            }
-            let footer = format_tx_footer(rt);
-            if !footer.is_empty() {
-                println!("{}", footer);
-            }
-        }
+        display_transactions_grouped(&result.transactions, verbose);
     }
     println!();
 

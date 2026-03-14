@@ -183,8 +183,8 @@ impl RunPipeline {
         // sender resolution when multiple senders share the same address.
         let sender_id_labels: HashMap<B256, String> = self
             .context
-            .sender_labels
-            .values()
+            .sender_role_names
+            .iter()
             .map(|role| (alloy_primitives::keccak256(role.as_bytes()), role.clone()))
             .collect();
 

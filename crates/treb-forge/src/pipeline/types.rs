@@ -75,6 +75,8 @@ pub struct PipelineContext {
     pub deployer_sender: Option<ResolvedSender>,
     /// Sender address → role name mapping for trace labeling.
     pub sender_labels: HashMap<Address, String>,
+    /// All sender role names (for senderId-based resolution).
+    pub sender_role_names: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------

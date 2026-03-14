@@ -338,6 +338,7 @@ mod tests {
             project_root: PathBuf::from("/tmp/project"),
             deployer_sender: None,
             sender_labels: Default::default(),
+            sender_role_names: Default::default(),
         }
     }
 

@@ -910,6 +910,7 @@ pub async fn run(
                 project_root: cwd.clone(),
                 deployer_sender: None,
                 sender_labels: Default::default(),
+                sender_role_names: Default::default(),
             };
 
             // Execute pipeline.
