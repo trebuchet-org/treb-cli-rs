@@ -1147,9 +1147,6 @@ fn display_result_human(result: &PipelineResult, verbose: u8, network: Option<&s
         println!();
     }
 
-    // ── Registry Update ────────────────────────────────────────────────
-    print_registry_update_section(result, network, namespace);
-
     // ── Governor Proposals ──────────────────────────────────────────────
     if !result.governor_proposals.is_empty() {
         output::print_section_header(emoji::CLASSICAL_BUILDING, "Governor Proposals", 50);
