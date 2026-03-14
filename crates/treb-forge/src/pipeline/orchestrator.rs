@@ -30,7 +30,7 @@ use crate::{
         decoder::{ParsedEvent, TrebEvent},
         detect_proxy_relationships, extract_collisions, extract_deployments,
     },
-    script::{BroadcastReceipt, ScriptConfig, execute_script},
+    script::{BroadcastReceipt, ExecutionResult, ScriptConfig},
 };
 
 use super::{
@@ -109,96 +109,47 @@ impl RunPipeline {
         };
 
         let script_args = script_config.into_script_args()?;
+        let wants_broadcast = script_args.broadcast
+            && self.context.config.broadcast
+            && !self.context.deployer_sender.as_ref().is_some_and(|s| s.is_safe())
+            && !self.context.deployer_sender.as_ref().is_some_and(|s| s.is_governor());
 
-        // Build a confirm callback that hydrates transactions from raw logs
-        // and calls the broadcast hook with the preview.
-        let confirm_fn = if let Some(hook) = self.broadcast_hook {
-            let namespace = self.context.config.namespace.clone();
-            let chain_id = self.context.config.chain_id;
-            let sender_roles = self.context.sender_role_names.clone();
-            let sender_labels = self.context.sender_labels.clone();
+        // Run forge: preprocess → compile → link → prepare → execute
+        let preprocessed = script_args
+            .preprocess()
+            .await
+            .map_err(|e| TrebError::Forge(format!("forge preprocessing failed: {e}")))?;
+        let compiled = preprocessed
+            .compile()
+            .map_err(|e| TrebError::Forge(format!("forge compilation failed: {e}")))?;
+        let linked = compiled
+            .link()
+            .await
+            .map_err(|e| TrebError::Forge(format!("forge linking failed: {e}")))?;
+        let prepared = linked
+            .prepare_execution()
+            .await
+            .map_err(|e| TrebError::Forge(format!("forge execution preparation failed: {e}")))?;
+        let executed = prepared
+            .execute()
+            .await
+            .map_err(|e| TrebError::Forge(format!("forge execution failed: {e}")))?;
 
-            let confirm: Box<dyn FnOnce(&crate::script::ExecutionResult) -> bool + Send> =
-                Box::new(move |sim_result| {
-                    // Quick hydration from raw logs
-                    let parsed = decode_events(&sim_result.raw_logs);
-                    let tx_events: Vec<TransactionSimulated> = parsed
-                        .iter()
-                        .filter_map(|e| match e {
-                            ParsedEvent::Treb(t) => match t.as_ref() {
-                                TrebEvent::TransactionSimulated(ts) => Some(ts.clone()),
-                                _ => None,
-                            },
-                            _ => None,
-                        })
-                        .collect();
-
-                    let sender_id_map: HashMap<B256, String> = sender_roles
-                        .iter()
-                        .map(|r| (alloy_primitives::keccak256(r.as_bytes()), r.clone()))
-                        .collect();
-
-                    let now = chrono::Utc::now();
-                    let recorded: Vec<RecordedTransaction> = tx_events
-                        .iter()
-                        .map(|event| {
-                            let sim_tx = &event.simulatedTx;
-                            let tx_id = format!("tx-{:#x}", sim_tx.transactionId);
-                            let sender_name = sender_id_map
-                                .get(&sim_tx.senderId)
-                                .cloned();
-
-                            let operations = if sim_tx.transaction.to == Address::ZERO {
-                                vec![treb_core::types::Operation {
-                                    operation_type: "DEPLOY".to_string(),
-                                    target: format!("{:#x}", sim_tx.transaction.to),
-                                    method: String::new(),
-                                    result: Default::default(),
-                                }]
-                            } else {
-                                let method = if sim_tx.transaction.data.len() >= 4 {
-                                    format!("0x{}", alloy_primitives::hex::encode(&sim_tx.transaction.data[..4]))
-                                } else {
-                                    String::new()
-                                };
-                                vec![treb_core::types::Operation {
-                                    operation_type: "CALL".to_string(),
-                                    target: format!("{:#x}", sim_tx.transaction.to),
-                                    method,
-                                    result: Default::default(),
-                                }]
-                            };
-
-                            RecordedTransaction {
-                                transaction: treb_core::types::Transaction {
-                                    id: tx_id,
-                                    chain_id,
-                                    hash: String::new(),
-                                    status: treb_core::types::TransactionStatus::Simulated,
-                                    block_number: 0,
-                                    sender: sim_tx.sender.to_checksum(None),
-                                    nonce: 0,
-                                    deployments: Vec::new(),
-                                    operations,
-                                    safe_context: None,
-                                    environment: namespace.clone(),
-                                    created_at: now,
-                                },
-                                sender_name,
-                                gas_used: None,
-                                trace: None,
-                            }
-                        })
-                        .collect();
-
-                    hook(&recorded)
-                });
-            Some(confirm)
-        } else {
-            None
+        // Clone the result — we need it for hydration, and the state machine
+        // may consume `executed` if we broadcast.
+        let script_result = executed.execution_result.clone();
+        let decoded_logs = crate::console::decode_console_logs(&script_result.logs);
+        let mut execution = ExecutionResult {
+            success: script_result.success,
+            logs: decoded_logs,
+            raw_logs: script_result.logs,
+            gas_used: script_result.gas_used,
+            returned: script_result.returned,
+            labeled_addresses: script_result.labeled_addresses.into_iter().collect(),
+            transactions: script_result.transactions,
+            traces: script_result.traces,
+            broadcast_receipts: None,
         };
-
-        let mut execution = execute_script(script_args, confirm_fn).await?;
 
         // 3. Check for failed execution
         if !execution.success {
@@ -348,17 +299,62 @@ impl RunPipeline {
             })
             .collect();
 
-        // 13. Apply broadcast receipts if broadcast happened
-        if let Some(receipts) = &execution.broadcast_receipts {
-            apply_broadcast_receipts(&mut recorded_transactions, receipts);
-        }
+        // 13. Broadcast: hook → confirm → broadcast (single pass, no re-execution)
+        let broadcast_confirmed = if wants_broadcast && !recorded_transactions.is_empty() {
+            let confirmed = self
+                .broadcast_hook
+                .map_or(true, |hook| hook(&recorded_transactions));
+
+            if confirmed {
+                let pre_sim = executed
+                    .prepare_simulation()
+                    .await
+                    .map_err(|e| TrebError::Forge(format!("forge simulation preparation failed: {e}")))?;
+                let filled = pre_sim
+                    .fill_metadata()
+                    .await
+                    .map_err(|e| TrebError::Forge(format!("forge metadata fill failed: {e}")))?;
+                let bundled = filled
+                    .bundle()
+                    .await
+                    .map_err(|e| TrebError::Forge(format!("forge bundling failed: {e}")))?;
+                let bundled = bundled
+                    .wait_for_pending()
+                    .await
+                    .map_err(|e| TrebError::Forge(format!("forge pending transaction wait failed: {e}")))?;
+                let broadcasted = bundled
+                    .broadcast()
+                    .await
+                    .map_err(|e| TrebError::Forge(format!("forge broadcast failed: {e}")))?;
+
+                // Extract receipts and apply to recorded transactions
+                let mut receipts = Vec::new();
+                for seq in broadcasted.sequence.sequences() {
+                    for (tx_meta, receipt) in seq.transactions.iter().zip(seq.receipts.iter()) {
+                        receipts.push(crate::script::BroadcastReceipt {
+                            hash: receipt.transaction_hash,
+                            block_number: receipt.block_number.unwrap_or_default(),
+                            gas_used: receipt.gas_used,
+                            status: receipt.inner.inner.inner.receipt.status.coerce_status(),
+                            contract_name: tx_meta.contract_name.clone().filter(|s| !s.is_empty()),
+                            contract_address: receipt.contract_address,
+                        });
+                    }
+                }
+                apply_broadcast_receipts(&mut recorded_transactions, &receipts);
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
 
         // 14. Duplicate detection
         let resolved = resolve_duplicates(hydrated_deployments, registry, DuplicateStrategy::Skip)?;
         let skipped = resolved.skipped;
 
-        // Record to registry only when broadcast completed.
-        let should_record = execution.broadcast_receipts.is_some();
+        let should_record = broadcast_confirmed;
 
         let registry_updated = should_record
             && (!resolved.to_insert.is_empty()
