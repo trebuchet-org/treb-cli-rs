@@ -623,6 +623,7 @@ fn dev_subcommand_json_flag(subcommand: &commands::dev::DevSubcommand) -> bool {
         commands::dev::DevSubcommand::Anvil { subcommand } => {
             anvil_subcommand_json_flag(subcommand)
         }
+        commands::dev::DevSubcommand::FundSenders { .. } => false,
     }
 }
 

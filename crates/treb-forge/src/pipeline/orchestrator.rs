@@ -13,7 +13,7 @@ use foundry_evm::traces::{
     CallKind, CallTraceDecoderBuilder, TraceKind, Traces, decode_trace_arena,
     identifier::TraceIdentifiers, render_trace_arena,
 };
-use treb_core::error::TrebError;
+use treb_core::{error::TrebError, types::TransactionStatus};
 use treb_registry::Registry;
 use treb_safe::{
     SafeServiceClient, SafeTx, compute_safe_tx_hash, sign_safe_tx, types::ProposeRequest,
@@ -21,6 +21,7 @@ use treb_safe::{
 
 use crate::{
     artifacts::ArtifactIndex,
+    broadcast::read_latest_broadcast,
     compiler::compile_project,
     events::{
         ExtractedDeployment, GovernorProposalCreated, SafeTransactionQueued, TransactionSimulated,
@@ -29,7 +30,7 @@ use crate::{
         decoder::{ParsedEvent, TrebEvent},
         detect_proxy_relationships, extract_collisions, extract_deployments,
     },
-    script::{ScriptConfig, execute_script},
+    script::{BroadcastReceipt, ScriptConfig, broadcast_script, execute_script},
 };
 
 use super::{
@@ -42,6 +43,13 @@ use super::{
     types::{PipelineResult, RecordedDeployment, RecordedTransaction},
 };
 
+/// Callback invoked between simulation and broadcast.
+///
+/// Receives the hydrated transactions so the caller can display a preview
+/// and prompt for confirmation. Return `true` to proceed with broadcast,
+/// `false` to abort (the result will be returned as a dry-run).
+pub type BroadcastHook = Box<dyn FnOnce(&[RecordedTransaction]) -> bool + Send>;
+
 /// Orchestrator for the deployment recording pipeline.
 ///
 /// Drives the end-to-end flow: compile → execute → decode → extract →
@@ -53,12 +61,14 @@ pub struct RunPipeline {
     /// of building one from PipelineConfig. This allows the CLI layer to wire
     /// in all flags (broadcast, sender credentials, legacy, etc.) directly.
     script_config: Option<ScriptConfig>,
+    /// Optional hook called after simulation to confirm broadcast.
+    broadcast_hook: Option<BroadcastHook>,
 }
 
 impl RunPipeline {
     /// Create a new pipeline orchestrator with the given execution context.
     pub fn new(context: PipelineContext) -> Self {
-        Self { context, script_config: None }
+        Self { context, script_config: None, broadcast_hook: None }
     }
 
     /// Set a pre-built ScriptConfig for this pipeline.
@@ -68,6 +78,16 @@ impl RunPipeline {
     /// (broadcast, sender credentials, legacy, verify, etc.) directly.
     pub fn with_script_config(mut self, config: ScriptConfig) -> Self {
         self.script_config = Some(config);
+        self
+    }
+
+    /// Set a broadcast confirmation hook.
+    ///
+    /// When set, the hook is called after simulation with the hydrated
+    /// transaction list. If it returns `false`, the pipeline skips
+    /// broadcast and recording, returning a dry-run result.
+    pub fn with_broadcast_hook(mut self, hook: BroadcastHook) -> Self {
+        self.broadcast_hook = Some(hook);
         self
     }
 
@@ -95,7 +115,7 @@ impl RunPipeline {
         let compilation = compile_project(&foundry_config)?;
         let artifact_index = ArtifactIndex::from_compile_output(compilation);
 
-        // 2. Build script args and execute
+        // 2. Build script args and execute (simulation only)
         let script_config = match self.script_config {
             Some(config) => config,
             None => {
@@ -110,7 +130,18 @@ impl RunPipeline {
         };
 
         let script_args = script_config.into_script_args()?;
-        let execution = execute_script(script_args).await?;
+
+        // Clone args for potential broadcast (before simulation consumes them)
+        let wants_broadcast = script_args.broadcast
+            && !self.context.config.dry_run
+            && !self.context.deployer_sender.as_ref().is_some_and(|s| s.is_safe())
+            && !self.context.deployer_sender.as_ref().is_some_and(|s| s.is_governor());
+        let broadcast_args = if wants_broadcast { Some(script_args.clone()) } else { None };
+
+        // Force simulation mode for initial execution
+        let mut sim_args = script_args;
+        sim_args.broadcast = false;
+        let execution = execute_script(sim_args).await?;
 
         // 3. Check for failed execution
         if !execution.success {
@@ -158,7 +189,6 @@ impl RunPipeline {
         // 9. Build combined address labels for trace decoding:
         //    execution labels + senders + current deployments + existing registry entries.
         let mut labeled_addresses = execution.labeled_addresses.clone();
-        // Label sender addresses from resolved sender config
         for (addr, role) in &self.context.sender_labels {
             labeled_addresses.entry(*addr).or_insert_with(|| role.clone());
         }
@@ -181,8 +211,7 @@ impl RunPipeline {
             }
         }
 
-        // 10. Render traces and extract per-transaction sub-trees (before
-        //     metadata is consumed by the recording loop below).
+        // 10. Render traces and extract per-transaction sub-trees
         let (execution_traces, setup_traces) = render_traces_for_verbosity(
             execution.traces,
             &labeled_addresses,
@@ -192,88 +221,104 @@ impl RunPipeline {
         )
         .await;
 
-        // 10. Safe sender: populate safe_context and propose to Safe Service
+        // 11. Safe sender: populate safe_context and propose to Safe Service
         let is_safe_sender = self.context.deployer_sender.as_ref().is_some_and(|s| s.is_safe());
-
         let is_governor_sender =
             self.context.deployer_sender.as_ref().is_some_and(|s| s.is_governor());
 
         if is_safe_sender {
-            // Populate safe_context on Transaction records linked to Safe batches
             populate_safe_context(&mut transactions, &safe_transactions);
-
-            // Propose to Safe Transaction Service (skip in dry-run)
             if !self.context.config.dry_run {
                 propose_safe_transactions(&self.context, &safe_tx_events, &tx_events).await?;
             }
         }
 
-        // 11. Duplicate detection
+        // 12. Build recorded transactions (needed for hook preview AND final result)
+        let mut recorded_transactions: Vec<RecordedTransaction> = transactions
+            .into_iter()
+            .map(|tx| {
+                let metadata = transaction_metadata.remove(&tx.id).unwrap_or_default();
+                RecordedTransaction {
+                    transaction: tx,
+                    sender_name: metadata.sender_name,
+                    gas_used: metadata.gas_used,
+                    trace: metadata.trace,
+                }
+            })
+            .collect();
+
+        // 13. Broadcast hook: let the CLI confirm before broadcasting
+        let broadcast_confirmed = if let Some(broadcast_args) = broadcast_args {
+            if recorded_transactions.is_empty() {
+                false
+            } else {
+                let confirmed = self
+                    .broadcast_hook
+                    .map_or(true, |hook| hook(&recorded_transactions));
+
+                if confirmed {
+                    // Silence foundry shell during re-execution so the user
+                    // does not see a second "[⠒] Compiling..." line.
+                    *foundry_common::Shell::get() = foundry_common::Shell::empty();
+                    // Skip forge's own "Do you wish to continue?" prompt —
+                    // the user already confirmed through our hook.
+                    let mut broadcast_args = broadcast_args;
+                    broadcast_args.non_interactive = true;
+                    let receipts = broadcast_script(broadcast_args).await?;
+                    apply_broadcast_receipts(&mut recorded_transactions, &receipts);
+                    true
+                } else {
+                    false
+                }
+            }
+        } else {
+            false
+        };
+
+        // 14. Duplicate detection
         let resolved = resolve_duplicates(hydrated_deployments, registry, DuplicateStrategy::Skip)?;
         let skipped = resolved.skipped;
-        let registry_updated = !self.context.config.dry_run
+
+        // Effective dry_run: explicit dry-run OR broadcast was wanted but declined
+        let effective_dry_run =
+            self.context.config.dry_run || (wants_broadcast && !broadcast_confirmed);
+
+        let registry_updated = !effective_dry_run
             && (!resolved.to_insert.is_empty()
                 || !resolved.to_update.is_empty()
-                || !transactions.is_empty()
+                || !recorded_transactions.is_empty()
                 || !safe_transactions.is_empty()
                 || (is_governor_sender && !governor_proposals.is_empty()));
 
-        // 12. Record to registry (or build dry-run result)
+        // 15. Record to registry (or build dry-run result)
         let mut recorded_deployments = Vec::new();
-        let mut recorded_transactions = Vec::new();
 
-        if !self.context.config.dry_run {
-            // Insert new deployments
+        if !effective_dry_run {
             for dep in resolved.to_insert {
                 registry.insert_deployment(dep.clone())?;
                 recorded_deployments
                     .push(RecordedDeployment { deployment: dep, safe_transaction: None });
             }
-
-            // Update existing deployments
             for dep in resolved.to_update {
                 registry.update_deployment(dep.clone())?;
                 recorded_deployments
                     .push(RecordedDeployment { deployment: dep, safe_transaction: None });
             }
-
-            // Insert transactions (with safe_context populated for Safe sender)
-            for tx in transactions {
-                registry.insert_transaction(tx.clone())?;
-                let metadata = transaction_metadata.remove(&tx.id).unwrap_or_default();
-                recorded_transactions.push(RecordedTransaction {
-                    transaction: tx,
-                    sender_name: metadata.sender_name,
-                    gas_used: metadata.gas_used,
-                    trace: metadata.trace,
-                });
+            for rt in &recorded_transactions {
+                registry.insert_transaction(rt.transaction.clone())?;
             }
-
-            // Insert safe transactions
             for safe_tx in safe_transactions {
                 registry.insert_safe_transaction(safe_tx)?;
             }
-
-            // Insert governor proposals (skip broadcast for Governor sender)
             if is_governor_sender {
                 for proposal in &governor_proposals {
                     registry.insert_governor_proposal(proposal.clone())?;
                 }
             }
         } else {
-            // Dry-run: populate result without writing to registry
             for dep in resolved.to_insert.into_iter().chain(resolved.to_update) {
                 recorded_deployments
                     .push(RecordedDeployment { deployment: dep, safe_transaction: None });
-            }
-            for tx in transactions {
-                let metadata = transaction_metadata.remove(&tx.id).unwrap_or_default();
-                recorded_transactions.push(RecordedTransaction {
-                    transaction: tx,
-                    sender_name: metadata.sender_name,
-                    gas_used: metadata.gas_used,
-                    trace: metadata.trace,
-                });
             }
         }
 
@@ -283,7 +328,7 @@ impl RunPipeline {
             registry_updated,
             collisions,
             skipped,
-            dry_run: self.context.config.dry_run,
+            dry_run: effective_dry_run,
             success: true,
             gas_used: execution.gas_used,
             event_count,
@@ -565,6 +610,32 @@ fn extract_per_transaction_traces(
         if !rendered.trim().is_empty() {
             meta.trace = Some(rendered);
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Broadcast receipt application
+// ---------------------------------------------------------------------------
+
+/// Apply broadcast receipts to recorded transactions.
+///
+/// Uses positional matching: `TransactionSimulated` events and
+/// `BroadcastableTransactions` are collected in the same order during
+/// script execution, so the i-th receipt corresponds to the i-th transaction.
+fn apply_broadcast_receipts(
+    transactions: &mut [RecordedTransaction],
+    receipts: &[BroadcastReceipt],
+) {
+    for (rt, receipt) in transactions.iter_mut().zip(receipts.iter()) {
+        rt.transaction.hash = format!("{:#x}", receipt.hash);
+        rt.transaction.block_number = receipt.block_number;
+        rt.transaction.status = if receipt.status {
+            TransactionStatus::Executed
+        } else {
+            TransactionStatus::Failed
+        };
+        // Override simulated gas estimate with actual on-chain gas
+        rt.gas_used = Some(receipt.gas_used);
     }
 }
 

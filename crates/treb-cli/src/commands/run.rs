@@ -18,7 +18,10 @@ use serde::Serialize;
 use treb_config::{ResolveOpts, resolve_config};
 use treb_core::types::{Operation, TransactionStatus};
 use treb_forge::{
-    pipeline::{PipelineConfig, PipelineContext, PipelineResult, RunPipeline, resolve_git_commit},
+    pipeline::{
+        BroadcastHook, PipelineConfig, PipelineContext, PipelineResult, RecordedTransaction,
+        RunPipeline, resolve_git_commit,
+    },
     script::build_script_config_with_senders,
     sender::{ResolvedSender, resolve_all_senders},
     sender_config::encode_sender_configs,
@@ -32,6 +35,7 @@ use crate::{
 
 const FOUNDRY_TOML: &str = "foundry.toml";
 const TREB_DIR: &str = ".treb";
+
 
 /// Parse a `KEY=VALUE` environment variable string.
 ///
@@ -402,10 +406,14 @@ pub async fn run(
     let mut script_config = build_script_config_with_senders(&resolved, script, &resolved_senders)
         .context("failed to build script configuration")?;
 
+    // Safe/Governor senders use treb's own proposal flow, not forge broadcast.
+    let is_safe = resolved_senders.get("deployer").is_some_and(|s| s.is_safe());
+    let is_gov = resolved_senders.get("deployer").is_some_and(|s| s.is_governor());
+
     script_config
         .sig(sig)
         .args(args)
-        .broadcast(broadcast)
+        .broadcast(broadcast && !is_safe && !is_gov)
         .dry_run(dry_run)
         .slow(slow || resolved.slow)
         .legacy(legacy)
@@ -571,39 +579,24 @@ pub async fn run(
         sender_labels,
     };
 
-    // ── Broadcast confirmation prompt ──────────────────────────────────
-    if should_prompt_for_broadcast_confirmation(broadcast, dry_run, prompts_enabled) {
-        eprintln!("About to broadcast transactions to the network.");
-        eprintln!("  Script: {}", script);
-        eprintln!("  Namespace: {}", resolved.namespace);
-        if let Some(ref url) = effective_rpc_url {
-            eprintln!("  RPC: {}", url);
-        }
-        eprint!("Proceed? [y/N] ");
-        io::stderr().flush().ok();
-
-        let mut input = String::new();
-        io::stdin().lock().read_line(&mut input).ok();
-        let answer = input.trim().to_lowercase();
-
-        if answer != "y" && answer != "yes" {
-            bail!("broadcast cancelled by user");
-        }
-    }
-
     // ── Open registry and execute pipeline ───────────────────────────────
     let mut registry = Registry::open(&cwd).context("failed to open registry")?;
 
-    let pipeline = RunPipeline::new(pipeline_context).with_script_config(script_config);
+    let mut pipeline = RunPipeline::new(pipeline_context).with_script_config(script_config);
 
-    if !json && !dry_run && broadcast {
-        if is_governor_sender {
-            output::print_stage("\u{1f3db}\u{fe0f}", "Creating governance proposal...");
-        } else {
-            output::print_stage("\u{1f4e1}", "Broadcasting...");
-        }
-    } else if !json && dry_run {
-        output::print_stage("\u{1f9ea}", "Simulating...");
+    // Wire broadcast confirmation hook (interactive broadcast flow).
+    // Foundry's own SpinnerReporter handles compilation progress.
+    let wants_broadcast = broadcast && !dry_run && !is_safe && !is_gov;
+    if wants_broadcast && prompts_enabled && !json {
+        let hook: BroadcastHook = Box::new(move |transactions: &[RecordedTransaction]| {
+            display_broadcast_preview(transactions);
+            let confirmed = crate::ui::prompt::confirm("Broadcast these transactions?", false);
+            if confirmed {
+                println!();
+            }
+            confirmed
+        });
+        pipeline = pipeline.with_broadcast_hook(hook);
     }
 
     let result = {
@@ -812,6 +805,97 @@ fn collision_metadata_lines(collision: &treb_forge::events::ExtractedCollision) 
         lines.push(format!("    Entropy: {}", collision.entropy));
     }
     lines
+}
+
+// ---------------------------------------------------------------------------
+// Broadcast preview (shown before confirmation prompt)
+// ---------------------------------------------------------------------------
+
+/// Display a preview of transactions grouped by sender before broadcast.
+///
+/// Shows per-transaction decoded traces when available, and groups
+/// everything under sender headers.
+fn display_broadcast_preview(transactions: &[RecordedTransaction]) {
+    if transactions.is_empty() {
+        return;
+    }
+
+    let use_color = color::is_color_enabled();
+
+    // Group transactions by sender name
+    let mut by_sender: Vec<(&str, Vec<&RecordedTransaction>)> = Vec::new();
+    for rt in transactions {
+        let sender = rt
+            .sender_name
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&rt.transaction.sender);
+
+        if let Some(entry) = by_sender.iter_mut().find(|(s, _)| *s == sender) {
+            entry.1.push(rt);
+        } else {
+            by_sender.push((sender, vec![rt]));
+        }
+    }
+
+    let header = format!(
+        "\n{} transaction{} to broadcast:",
+        transactions.len(),
+        if transactions.len() == 1 { "" } else { "s" },
+    );
+    if use_color {
+        println!("{}", header.style(color::BOLD));
+    } else {
+        println!("{header}");
+    }
+
+    for (sender, txs) in &by_sender {
+        // Sender header
+        if use_color {
+            println!(
+                "\n  {} {}",
+                sender.style(color::CYAN),
+                format!("({} tx)", txs.len()).style(color::GRAY),
+            );
+        } else {
+            println!("\n  {} ({} tx)", sender, txs.len());
+        }
+
+        // Each transaction: trace or operation summary + gas footer
+        for rt in txs {
+            if let Some(ref trace) = rt.trace {
+                for line in trace.lines() {
+                    println!("  {line}");
+                }
+            } else {
+                // Fallback: show operations when no trace is available
+                for op in &rt.transaction.operations {
+                    let target = output::truncate_address(&op.target);
+                    let line = if op.method.is_empty() || op.method.starts_with("0x") {
+                        format!("    {} {}", op.operation_type, target)
+                    } else {
+                        format!("    {} {}.{}()", op.operation_type, target, op.method)
+                    };
+                    if use_color {
+                        println!("{}", line.style(color::MUTED));
+                    } else {
+                        println!("{line}");
+                    }
+                }
+            }
+
+            // Gas estimate
+            if let Some(gas) = rt.gas_used.filter(|g| *g > 0) {
+                let footer = format!("    Gas: {}", output::format_gas(gas));
+                if use_color {
+                    println!("{}", footer.style(color::GRAY));
+                } else {
+                    println!("{footer}");
+                }
+            }
+        }
+    }
+    println!();
 }
 
 // ---------------------------------------------------------------------------

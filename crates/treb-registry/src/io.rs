@@ -107,6 +107,13 @@ pub fn write_json_file<T: Serialize>(path: &Path, value: &T) -> Result<(), TrebE
         TrebError::Registry(format!("failed to persist temp file to {}: {e}", path.display()))
     })?;
 
+    // Ensure the file is group-writable so shared workspaces can co-operate.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o664));
+    }
+
     Ok(())
 }
 

@@ -1,4 +1,4 @@
-//! `treb dev` subcommands — manage local Anvil development nodes.
+//! `treb dev` subcommands — manage local Anvil development nodes and utilities.
 
 use std::{
     collections::HashMap,
@@ -51,6 +51,18 @@ pub enum DevSubcommand {
     Anvil {
         #[command(subcommand)]
         subcommand: AnvilSubcommand,
+    },
+    /// Fund all configured senders on the active fork
+    ///
+    /// Sets each sender's balance to 10,000 ETH on the active Anvil fork
+    /// using anvil_setBalance. Requires an active fork (via `treb fork enter`).
+    FundSenders {
+        /// Network name (defaults to resolved config network)
+        #[arg(long)]
+        network: Option<String>,
+        /// Amount of ETH to set on each sender (default: 10000)
+        #[arg(long, default_value = "10000")]
+        amount: u64,
     },
 }
 
@@ -135,6 +147,9 @@ pub enum AnvilSubcommand {
 
 pub async fn run(subcommand: DevSubcommand) -> anyhow::Result<()> {
     match subcommand {
+        DevSubcommand::FundSenders { network, amount } => {
+            run_fund_senders(network, amount).await
+        }
         DevSubcommand::Anvil { subcommand } => match subcommand {
             AnvilSubcommand::Start { network, port, fork_block_number, name } => {
                 run_anvil_start(network, port, fork_block_number, name).await
@@ -1118,6 +1133,117 @@ fn format_uptime(duration: chrono::Duration) -> String {
     } else {
         "< 1m".to_string()
     }
+}
+
+// ── fund-senders ──────────────────────────────────────────────────────────────
+
+async fn run_fund_senders(network: Option<String>, amount: u64) -> anyhow::Result<()> {
+    let cwd = env::current_dir().context("failed to determine current directory")?;
+    let treb_dir = cwd.join(TREB_DIR);
+
+    if !treb_dir.exists() {
+        bail!("not a treb project (no .treb directory)");
+    }
+
+    // Resolve config to get senders and network
+    let resolved = treb_config::resolve_config(treb_config::ResolveOpts {
+        project_root: cwd.clone(),
+        namespace: None,
+        network: network.clone(),
+        profile: None,
+        sender_overrides: HashMap::new(),
+    })
+    .context("failed to resolve configuration")?;
+
+    let effective_network = network.or_else(|| resolved.network.clone());
+
+    // Find the active fork's RPC URL
+    let rpc_url = {
+        let mut store = ForkStateStore::new(&treb_dir);
+        store.load().context("failed to load fork state")?;
+
+        let net = effective_network
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("no network configured; pass --network"))?;
+
+        store
+            .get_active_fork(net)
+            .map(|entry| entry.rpc_url.clone())
+            .ok_or_else(|| anyhow::anyhow!("no active fork for network '{net}'; run `treb fork enter` first"))?
+    };
+
+    // Resolve senders to get addresses
+    let resolved_senders = treb_forge::sender::resolve_all_senders(&resolved.senders)
+        .await
+        .context("failed to resolve senders")?;
+
+    if resolved_senders.is_empty() {
+        println!("No senders configured.");
+        return Ok(());
+    }
+
+    // Fund each sender via anvil_setBalance
+    // amount ETH in wei as hex
+    let balance_wei_hex = format!("{:#x}", amount as u128 * 1_000_000_000_000_000_000u128);
+    let client = reqwest::Client::new();
+
+    let use_color = color::is_color_enabled();
+
+    // Collect unique addresses (multiple roles may share an address)
+    let mut seen = std::collections::HashSet::new();
+    let mut funded = Vec::new();
+
+    for (role, sender) in &resolved_senders {
+        let addr = sender.sender_address();
+        if !seen.insert(addr) {
+            continue;
+        }
+
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "anvil_setBalance",
+            "params": [format!("{:#x}", addr), &balance_wei_hex],
+            "id": 1
+        });
+
+        client
+            .post(&rpc_url)
+            .json(&body)
+            .send()
+            .await
+            .with_context(|| format!("anvil_setBalance failed for {role} ({addr})"))?;
+
+        funded.push((role.clone(), addr));
+    }
+
+    // Display results
+    for (role, addr) in &funded {
+        if use_color {
+            println!(
+                "  {} {} {}",
+                emoji::CHECK_MARK,
+                styled(role, color::CYAN),
+                styled(&format!("{:#x}", addr), color::GRAY),
+            );
+        } else {
+            println!("  {} {} {:#x}", emoji::CHECK_MARK, role, addr);
+        }
+    }
+
+    let summary = format!(
+        "\nFunded {} address{} with {} ETH on {}",
+        funded.len(),
+        if funded.len() == 1 { "" } else { "es" },
+        amount,
+        rpc_url,
+    );
+    if use_color {
+        println!("{}", styled(&summary, color::GREEN));
+    } else {
+        println!("{summary}");
+    }
+
+    Ok(())
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
