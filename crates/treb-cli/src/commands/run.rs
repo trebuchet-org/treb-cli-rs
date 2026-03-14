@@ -876,7 +876,10 @@ fn display_broadcast_preview(transactions: &[RecordedTransaction]) {
         }
 
         // Each transaction: trace or operation summary + gas footer
-        for rt in txs {
+        for (i, rt) in txs.iter().enumerate() {
+            if i > 0 {
+                println!();
+            }
             if let Some(ref trace) = rt.trace {
                 for line in trace.lines() {
                     println!("  {line}");
@@ -1165,13 +1168,6 @@ fn display_result_human(result: &PipelineResult, verbose: u8, network: Option<&s
         }
     }
 
-    // ── Success Message ───────────────────────────────────────────────
-    let success_msg = format!("{} Script execution completed successfully", emoji::CHECK_MARK,);
-    if color::is_color_enabled() {
-        println!("{}", success_msg.style(color::GREEN));
-    } else {
-        println!("{success_msg}");
-    }
 }
 
 #[cfg(test)]

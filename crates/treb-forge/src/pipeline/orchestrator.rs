@@ -179,11 +179,20 @@ impl RunPipeline {
             hydrate_transactions(&tx_events, &hydrated_deployments, &self.context);
         let safe_transactions = hydrate_safe_transactions(&safe_tx_events, &self.context);
         let governor_proposals = hydrate_governor_proposals(&governor_events, &self.context);
+        // Build senderId (keccak of role name) → role name map for accurate
+        // sender resolution when multiple senders share the same address.
+        let sender_id_labels: HashMap<B256, String> = self
+            .context
+            .sender_labels
+            .values()
+            .map(|role| (alloy_primitives::keccak256(role.as_bytes()), role.clone()))
+            .collect();
+
         let mut transaction_metadata = build_recorded_transaction_metadata(
             &tx_events,
             &extracted_deployments,
             &execution.traces,
-            &self.context.sender_labels,
+            &sender_id_labels,
         );
 
         // 9. Build combined address labels for trace decoding:
@@ -471,7 +480,7 @@ fn build_recorded_transaction_metadata(
     tx_events: &[TransactionSimulated],
     extracted_deployments: &[ExtractedDeployment],
     traces: &Traces,
-    sender_labels: &HashMap<Address, String>,
+    sender_id_labels: &HashMap<B256, String>,
 ) -> HashMap<String, RecordedTransactionMetadata> {
     let transaction_deployments = build_transaction_deployment_index(extracted_deployments);
     let mut pending_traces = traces
@@ -489,7 +498,7 @@ fn build_recorded_transaction_metadata(
         })
         .collect::<Vec<_>>();
 
-    collect_recorded_transaction_metadata(tx_events, &transaction_deployments, &mut pending_traces, sender_labels)
+    collect_recorded_transaction_metadata(tx_events, &transaction_deployments, &mut pending_traces, sender_id_labels)
 }
 
 fn build_transaction_deployment_index(
@@ -509,7 +518,7 @@ fn collect_recorded_transaction_metadata(
     tx_events: &[TransactionSimulated],
     transaction_deployments: &HashMap<String, Vec<Address>>,
     pending_traces: &mut [PendingExecutionTrace],
-    sender_labels: &HashMap<Address, String>,
+    sender_id_labels: &HashMap<B256, String>,
 ) -> HashMap<String, RecordedTransactionMetadata> {
     tx_events
         .iter()
@@ -527,9 +536,10 @@ fn collect_recorded_transaction_metadata(
                     (candidate.gas_used, candidate.node_idx)
                 });
 
-            // Resolve sender name: prefer config role name, fall back to senderId hex
-            let sender_name = sender_labels
-                .get(&sim_tx.sender)
+            // Resolve sender name by senderId (keccak of role name) for
+            // accurate identification when multiple senders share an address.
+            let sender_name = sender_id_labels
+                .get(&sim_tx.senderId)
                 .cloned()
                 .or_else(|| (!sim_tx.senderId.is_zero()).then(|| format!("{:#x}", sim_tx.senderId)));
 
