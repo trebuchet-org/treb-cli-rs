@@ -23,6 +23,18 @@ use treb_registry::{
 
 const TREB_DIR: &str = ".treb";
 const SNAPSHOT_BASE: &str = "snapshots";
+
+/// Format a chrono duration into a human-readable string matching the Go CLI.
+fn format_duration(d: chrono::Duration) -> String {
+    let secs = d.num_seconds().max(0);
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m{}s", secs / 60, secs % 60)
+    } else {
+        format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
+    }
+}
 const CREATEX_ADDRESS: &str = "0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed";
 
 // ── Subcommand enum ───────────────────────────────────────────────────────────
@@ -282,9 +294,22 @@ pub async fn run_enter(
     // Ensure .treb/priv/ is in .gitignore
     ensure_gitignore_entry(&cwd, ".treb/priv/");
 
-    println!("Entered fork mode for network '{network}'.");
-    println!("Anvil forking {rpc_url} on port {port} (PID {anvil_pid}).");
-    println!("Registry snapshot saved to {}", snapshot_dir.display());
+    println!("Fork mode entered for network '{network}'");
+    println!();
+    println!("  {:14}{}", "Network:", network);
+    println!("  {:14}{}", "Chain ID:", chain_id);
+    println!("  {:14}{}", "Fork URL:", rpc_url);
+    println!("  {:14}{}", "Anvil PID:", anvil_pid);
+    println!(
+        "  {:14}{}={}",
+        "Env Override:",
+        format!("ETH_RPC_URL_{}", network.to_uppercase()),
+        rpc_url,
+    );
+    println!("  {:14}{}", "Logs:", log_file.display());
+    println!();
+    println!("Run 'treb fork status' to check fork state");
+    println!("Run 'treb fork exit' to stop fork and restore original state");
 
     Ok(())
 }
@@ -589,38 +614,32 @@ pub async fn run_status(json: bool) -> anyhow::Result<()> {
     }
 
     if forks.is_empty() {
-        println!("No active forks.");
+        println!("No active forks");
         return Ok(());
     }
 
-    let mut table = crate::output::build_table(&[
-        "Network",
-        "RPC URL",
-        "Port",
-        "Chain ID",
-        "Fork Block",
-        "Started At",
-        "Status",
-    ]);
+    println!("Active Forks");
 
     for entry in &forks {
         let running = is_port_reachable(entry.port).await;
-        let status = if running { "running" } else { "stopped" };
-        let fork_block =
-            entry.fork_block_number.map(|b| b.to_string()).unwrap_or_else(|| "latest".into());
+        let status = if running { "healthy" } else { "dead" };
+        let uptime = format_duration(Utc::now() - entry.started_at);
+        let snapshot_count = entry.snapshots.len();
 
-        table.add_row(vec![
-            entry.network.as_str(),
-            entry.rpc_url.as_str(),
-            &entry.port.to_string(),
-            &entry.chain_id.to_string(),
-            fork_block.as_str(),
-            &entry.started_at.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
-            status,
-        ]);
+        println!();
+        println!("  {}", entry.network);
+        println!("    {:14}{}", "Chain ID:", entry.chain_id);
+        println!("    {:14}{}", "Fork URL:", entry.rpc_url);
+        println!("    {:14}{}", "Anvil PID:", entry.anvil_pid);
+        println!("    {:14}{}", "Status:", status);
+        println!("    {:14}{}", "Uptime:", uptime);
+        println!("    {:14}{}", "Snapshots:", snapshot_count);
+        if !entry.log_file.is_empty() {
+            println!("    {:14}{}", "Logs:", entry.log_file);
+        }
     }
 
-    crate::output::print_table(&table);
+    println!();
     Ok(())
 }
 
