@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 pub mod io;
 pub mod lookup;
 pub mod registry;
+pub mod solidity_registry;
 pub mod store;
 pub mod types;
 
@@ -18,6 +19,7 @@ pub use store::{
     TransactionStore,
     fork_state::{remove_snapshot, restore_registry, snapshot_registry},
 };
+pub use solidity_registry::SolidityRegistryStore;
 pub use types::LookupIndex;
 
 // ── File-name constants ────────────────────────────────────────────────────
@@ -45,6 +47,9 @@ pub const REGISTRY_DIR: &str = ".treb";
 
 /// File storing fork-mode state (active forks, history).
 pub const FORK_STATE_FILE: &str = "fork.json";
+
+/// File storing the Solidity registry for cross-contract address lookups.
+pub const SOLIDITY_REGISTRY_FILE: &str = "registry.json";
 
 /// Current on-disk wrapper format for registry store files.
 pub const STORE_FORMAT: &str = "treb-v1";
