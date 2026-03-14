@@ -161,6 +161,7 @@ impl RunPipeline {
             }
             for (_, arena) in &mut execution.traces {
                 decode_trace_arena(&mut arena.arena, &decoder).await;
+                collapse_decoded_bytecode_args(&mut arena.arena, &artifact_index);
                 let rendered = render_trace_arena(arena);
                 if !rendered.trim().is_empty() {
                     err_parts.push(rendered);
