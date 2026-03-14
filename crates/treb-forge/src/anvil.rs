@@ -325,6 +325,16 @@ pub fn spawn_background_anvil(
         args.push("--fork-block-number".to_string());
         args.push(block.to_string());
     }
+    // Enable L2-specific features based on chain ID
+    if let Some(chain_id) = config.chain_id {
+        match chain_id {
+            42220 | 44787 | 62320 => args.push("--celo".to_string()),
+            10 | 420 | 8453 | 84532 | 7777777 | 999999999 => {
+                args.push("--optimism".to_string())
+            }
+            _ => {}
+        }
+    }
 
     // Open log file for stdout/stderr redirection.
     let log_file = fs::File::create(&config.log_file)
