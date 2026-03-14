@@ -244,6 +244,16 @@ impl RunPipeline {
                 labeled_addresses.entry(addr).or_insert(label);
             }
         }
+        // Include addressbook entries for the current chain
+        let chain_id_str = self.context.config.chain_id.to_string();
+        let mut addressbook = treb_registry::AddressbookStore::new(&self.context.project_root.join(".treb"));
+        if addressbook.load().is_ok() {
+            for (name, address) in addressbook.list_entries(&chain_id_str) {
+                if let Ok(addr) = address.parse::<Address>() {
+                    labeled_addresses.entry(addr).or_insert(name);
+                }
+            }
+        }
 
         // 10. Render traces and extract per-transaction sub-trees
         let (execution_traces, setup_traces) = render_traces_for_verbosity(

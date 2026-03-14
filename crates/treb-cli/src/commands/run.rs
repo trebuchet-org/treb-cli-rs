@@ -631,11 +631,14 @@ pub async fn run(
     // Wire broadcast confirmation hook (interactive broadcast flow).
     // Foundry's own SpinnerReporter handles compilation progress.
     let wants_broadcast = broadcast && !dry_run && !is_safe && !is_gov;
+    let broadcast_previewed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     if wants_broadcast && prompts_enabled && !json {
+        let previewed = broadcast_previewed.clone();
         let hook: BroadcastHook = Box::new(move |transactions: &[RecordedTransaction]| {
             display_transactions_grouped(transactions, 0);
             let confirmed = crate::ui::prompt::confirm("Broadcast these transactions?", false);
             if confirmed {
+                previewed.store(true, std::sync::atomic::Ordering::Relaxed);
                 println!();
             }
             confirmed
@@ -649,7 +652,10 @@ pub async fn run(
     };
 
     // ── Display results ──────────────────────────────────────────────────
-    display_result(&result, json, verbose, resolved.network.as_deref(), &resolved.namespace)?;
+    let skip_traces = broadcast_previewed.load(std::sync::atomic::Ordering::Relaxed);
+    display_result(
+        &result, json, verbose, resolved.network.as_deref(), &resolved.namespace, skip_traces,
+    )?;
 
     Ok(())
 }
@@ -714,11 +720,12 @@ fn display_result(
     verbose: u8,
     network: Option<&str>,
     namespace: &str,
+    skip_traces: bool,
 ) -> anyhow::Result<()> {
     if json {
         display_result_json(result)?;
     } else {
-        display_result_human(result, verbose, network, namespace);
+        display_result_human(result, verbose, network, namespace, skip_traces);
     }
     Ok(())
 }
@@ -943,6 +950,39 @@ fn display_transactions_grouped(transactions: &[RecordedTransaction], verbose: u
     println!();
 }
 
+/// Display compact broadcast receipts (hash, block, gas) after confirmation.
+fn display_broadcast_receipts(transactions: &[RecordedTransaction]) {
+    let use_color = color::is_color_enabled();
+    for rt in transactions {
+        let tx = &rt.transaction;
+        let sender_label = tx_sender_label(rt);
+        let status = format_tx_status(&tx.status);
+
+        let mut parts = Vec::new();
+        if !tx.hash.is_empty() {
+            parts.push(format!("Tx: {}", tx.hash));
+        }
+        if tx.block_number > 0 {
+            parts.push(format!("Block: {}", tx.block_number));
+        }
+        if let Some(gas) = rt.gas_used.filter(|g| *g > 0) {
+            parts.push(format!("Gas: {}", output::format_gas(gas)));
+        }
+
+        let detail = if parts.is_empty() { String::new() } else { parts.join(" | ") };
+        if use_color {
+            println!(
+                "  {} {} {}",
+                status,
+                sender_label.style(color::CYAN),
+                detail.style(color::GRAY),
+            );
+        } else {
+            println!("  {} {} {}", status, sender_label, detail);
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Transaction rendering helpers (Go: render/transaction.go)
 // ---------------------------------------------------------------------------
@@ -1016,7 +1056,7 @@ fn format_skipped_deployment_line(skipped: &treb_forge::SkippedDeployment) -> St
     )
 }
 
-fn display_result_human(result: &PipelineResult, verbose: u8, network: Option<&str>, namespace: &str) {
+fn display_result_human(result: &PipelineResult, verbose: u8, network: Option<&str>, namespace: &str, skip_traces: bool) {
     // ── Transactions ────────────────────────────────────────────────────
     if result.transactions.is_empty() && result.deployments.is_empty() {
         let msg = "No transactions recorded";
@@ -1026,7 +1066,12 @@ fn display_result_human(result: &PipelineResult, verbose: u8, network: Option<&s
             println!("\n  {}", msg);
         }
     } else if !result.transactions.is_empty() {
-        display_transactions_grouped(&result.transactions, verbose);
+        if skip_traces {
+            // Preview already shown — just display the broadcast receipts
+            display_broadcast_receipts(&result.transactions);
+        } else {
+            display_transactions_grouped(&result.transactions, verbose);
+        }
     }
     println!();
 
