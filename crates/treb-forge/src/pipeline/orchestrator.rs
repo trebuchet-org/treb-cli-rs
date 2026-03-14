@@ -408,18 +408,6 @@ async fn render_traces_for_verbosity(
         decoder.identify(&arena.arena, &mut identifier);
     }
 
-    // Ensure every identified contract also has a label.
-    // `identify` sometimes populates `contracts` (ABI matched by bytecode)
-    // but not `labels` (bytecode fuzzy match failed). Copy contract names
-    // as labels for any addresses missing one.
-    let contract_labels: Vec<(Address, String)> = decoder
-        .contracts
-        .iter()
-        .map(|(addr, name)| (*addr, name.clone()))
-        .collect();
-    for (addr, name) in contract_labels {
-        decoder.labels.entry(addr).or_insert(name);
-    }
 
     let mut execution_parts = Vec::new();
     let mut setup_parts = Vec::new();
