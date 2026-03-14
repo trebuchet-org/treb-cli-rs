@@ -383,10 +383,24 @@ pub async fn run(
     .context("failed to resolve configuration")?;
 
     // If --rpc-url is provided, it overrides the network-derived RPC URL.
-    let effective_rpc_url = rpc_url.or_else(|| resolved.network.clone());
+    let mut effective_rpc_url = rpc_url.or_else(|| resolved.network.clone());
 
     // ── Derive effective network name from CLI flag or resolved config ──
     let effective_network = network.clone().or_else(|| resolved.network.clone());
+
+    // ── Fork override: swap RPC URL to the fork's Anvil instance ────────
+    let active_fork = {
+        let net = effective_network.as_deref();
+        let mut store = ForkStateStore::new(&cwd.join(TREB_DIR));
+        if store.load().is_ok() {
+            net.and_then(|n| store.get_active_fork(n).cloned())
+        } else {
+            None
+        }
+    };
+    if let Some(ref fork_entry) = active_fork {
+        effective_rpc_url = Some(fork_entry.rpc_url.clone());
+    }
 
     // ── Sender resolution ────────────────────────────────────────────────
     let mut resolved_senders =
@@ -459,8 +473,8 @@ pub async fn run(
     if !json {
         let separator: String = "─".repeat(50);
         let use_color = color::is_color_enabled();
-        let active_fork =
-            is_active_fork_run(&cwd, network.as_deref(), effective_rpc_url.as_deref());
+        let is_fork = active_fork.is_some()
+            || is_active_fork_run(&cwd, network.as_deref(), effective_rpc_url.as_deref());
 
         // Header
         if use_color {
@@ -503,7 +517,7 @@ pub async fn run(
         }
 
         // Mode
-        let (mode_label, mode_style) = deployment_banner_mode(dry_run, broadcast, active_fork);
+        let (mode_label, mode_style) = deployment_banner_mode(dry_run, broadcast, is_fork);
         if use_color {
             println!("  {:10} {}", "Mode:", mode_label.style(mode_style));
         } else {
