@@ -30,7 +30,7 @@ use crate::{
         decoder::{ParsedEvent, TrebEvent},
         detect_proxy_relationships, extract_collisions, extract_deployments,
     },
-    script::{BroadcastReceipt, ScriptConfig, broadcast_script, execute_script},
+    script::{BroadcastReceipt, ScriptConfig, execute_script},
 };
 
 use super::{
@@ -43,51 +43,28 @@ use super::{
     types::{PipelineResult, RecordedDeployment, RecordedTransaction},
 };
 
-/// Callback invoked between simulation and broadcast.
-///
-/// Receives the hydrated transactions so the caller can display a preview
-/// and prompt for confirmation. Return `true` to proceed with broadcast,
-/// `false` to abort (the result will be returned as a dry-run).
-pub type BroadcastHook = Box<dyn FnOnce(&[RecordedTransaction]) -> bool + Send>;
-
 /// Orchestrator for the deployment recording pipeline.
-///
-/// Drives the end-to-end flow: compile → execute → decode → extract →
-/// hydrate → deduplicate → record. Supports dry-run mode where the
-/// result is fully populated but the registry is left unchanged.
 pub struct RunPipeline {
     context: PipelineContext,
-    /// Optional pre-built ScriptConfig. When provided, this is used instead
-    /// of building one from PipelineConfig. This allows the CLI layer to wire
-    /// in all flags (broadcast, sender credentials, legacy, etc.) directly.
     script_config: Option<ScriptConfig>,
-    /// Optional hook called after simulation to confirm broadcast.
-    broadcast_hook: Option<BroadcastHook>,
+    /// Optional callback: called after script execution, before broadcast.
+    /// Return `true` to proceed, `false` to skip broadcast.
+    broadcast_confirm: Option<Box<dyn FnOnce() -> bool + Send>>,
 }
 
 impl RunPipeline {
-    /// Create a new pipeline orchestrator with the given execution context.
     pub fn new(context: PipelineContext) -> Self {
-        Self { context, script_config: None, broadcast_hook: None }
+        Self { context, script_config: None, broadcast_confirm: None }
     }
 
-    /// Set a pre-built ScriptConfig for this pipeline.
-    ///
-    /// When set, the pipeline uses this config instead of building one from
-    /// `PipelineConfig`. This allows the CLI layer to wire in all flags
-    /// (broadcast, sender credentials, legacy, verify, etc.) directly.
     pub fn with_script_config(mut self, config: ScriptConfig) -> Self {
         self.script_config = Some(config);
         self
     }
 
-    /// Set a broadcast confirmation hook.
-    ///
-    /// When set, the hook is called after simulation with the hydrated
-    /// transaction list. If it returns `false`, the pipeline skips
-    /// broadcast and recording, returning a dry-run result.
-    pub fn with_broadcast_hook(mut self, hook: BroadcastHook) -> Self {
-        self.broadcast_hook = Some(hook);
+    /// Set a broadcast confirmation callback.
+    pub fn with_broadcast_confirm(mut self, f: Box<dyn FnOnce() -> bool + Send>) -> Self {
+        self.broadcast_confirm = Some(f);
         self
     }
 
@@ -130,18 +107,7 @@ impl RunPipeline {
         };
 
         let script_args = script_config.into_script_args()?;
-
-        // Clone args for potential broadcast (before simulation consumes them)
-        let wants_broadcast = script_args.broadcast
-            && self.context.config.broadcast
-            && !self.context.deployer_sender.as_ref().is_some_and(|s| s.is_safe())
-            && !self.context.deployer_sender.as_ref().is_some_and(|s| s.is_governor());
-        let broadcast_args = if wants_broadcast { Some(script_args.clone()) } else { None };
-
-        // Force simulation mode for initial execution
-        let mut sim_args = script_args;
-        sim_args.broadcast = false;
-        let mut execution = execute_script(sim_args).await?;
+        let mut execution = execute_script(script_args, self.broadcast_confirm).await?;
 
         // 3. Check for failed execution
         if !execution.success {
@@ -291,40 +257,17 @@ impl RunPipeline {
             })
             .collect();
 
-        // 13. Broadcast hook: let the CLI confirm before broadcasting
-        let broadcast_confirmed = if let Some(broadcast_args) = broadcast_args {
-            if recorded_transactions.is_empty() {
-                false
-            } else {
-                let confirmed = self
-                    .broadcast_hook
-                    .map_or(true, |hook| hook(&recorded_transactions));
-
-                if confirmed {
-                    // Silence foundry shell during re-execution so the user
-                    // does not see a second "[⠒] Compiling..." line.
-                    *foundry_common::Shell::get() = foundry_common::Shell::empty();
-                    // Skip forge's own "Do you wish to continue?" prompt —
-                    // the user already confirmed through our hook.
-                    let mut broadcast_args = broadcast_args;
-                    broadcast_args.non_interactive = true;
-                    let receipts = broadcast_script(broadcast_args).await?;
-                    apply_broadcast_receipts(&mut recorded_transactions, &receipts);
-                    true
-                } else {
-                    false
-                }
-            }
-        } else {
-            false
-        };
+        // 13. Apply broadcast receipts if broadcast happened
+        if let Some(receipts) = &execution.broadcast_receipts {
+            apply_broadcast_receipts(&mut recorded_transactions, receipts);
+        }
 
         // 14. Duplicate detection
         let resolved = resolve_duplicates(hydrated_deployments, registry, DuplicateStrategy::Skip)?;
         let skipped = resolved.skipped;
 
-        // Record to registry only when broadcast was confirmed and completed.
-        let should_record = broadcast_confirmed;
+        // Record to registry only when broadcast completed.
+        let should_record = execution.broadcast_receipts.is_some();
 
         let registry_updated = should_record
             && (!resolved.to_insert.is_empty()
