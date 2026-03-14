@@ -38,6 +38,7 @@ foundry-linking = { git = "https://github.com/foundry-rs/foundry", tag = "v1.5.1
 foundry-cli = { git = "https://github.com/foundry-rs/foundry", tag = "v1.5.1" }
 forge-verify = { git = "https://github.com/foundry-rs/foundry", tag = "v1.5.1" }
 anvil = { git = "https://github.com/foundry-rs/foundry", tag = "v1.5.1" }
+revm-inspectors = "0.33.2"
 
 # Alloy — versions aligned with foundry v1.5.1 (alloy 1.1.x)
 alloy-chains = "0.2"

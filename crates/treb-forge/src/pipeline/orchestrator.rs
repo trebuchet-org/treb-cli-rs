@@ -10,7 +10,8 @@ use alloy_primitives::{Address, B256, U256};
 use alloy_signer::Signer;
 use foundry_config::Config;
 use foundry_evm::traces::{
-    CallKind, CallTraceDecoderBuilder, TraceKind, Traces, decode_trace_arena, render_trace_arena,
+    CallKind, CallTraceDecoderBuilder, TraceKind, Traces, decode_trace_arena,
+    identifier::TraceIdentifiers, render_trace_arena,
 };
 use treb_core::error::TrebError;
 use treb_registry::Registry;
@@ -151,9 +152,47 @@ impl RunPipeline {
             &tx_events,
             &extracted_deployments,
             &execution.traces,
+            &self.context.sender_labels,
         );
 
-        // 9. Safe sender: populate safe_context and propose to Safe Service
+        // 9. Build combined address labels for trace decoding:
+        //    execution labels + senders + current deployments + existing registry entries.
+        let mut labeled_addresses = execution.labeled_addresses.clone();
+        // Label sender addresses from resolved sender config
+        for (addr, role) in &self.context.sender_labels {
+            labeled_addresses.entry(*addr).or_insert_with(|| role.clone());
+        }
+        for dep in &extracted_deployments {
+            let label = if dep.label.is_empty() {
+                dep.contract_name.clone()
+            } else {
+                format!("{}:{}", dep.contract_name, dep.label)
+            };
+            labeled_addresses.insert(dep.address, label);
+        }
+        for dep in registry.list_deployments() {
+            if let Ok(addr) = dep.address.parse::<Address>() {
+                let label = if dep.label.is_empty() {
+                    dep.contract_name.clone()
+                } else {
+                    format!("{}:{}", dep.contract_name, dep.label)
+                };
+                labeled_addresses.entry(addr).or_insert(label);
+            }
+        }
+
+        // 10. Render traces and extract per-transaction sub-trees (before
+        //     metadata is consumed by the recording loop below).
+        let (execution_traces, setup_traces) = render_traces_for_verbosity(
+            execution.traces,
+            &labeled_addresses,
+            &artifact_index,
+            self.context.config.verbosity,
+            &mut transaction_metadata,
+        )
+        .await;
+
+        // 10. Safe sender: populate safe_context and propose to Safe Service
         let is_safe_sender = self.context.deployer_sender.as_ref().is_some_and(|s| s.is_safe());
 
         let is_governor_sender =
@@ -169,7 +208,7 @@ impl RunPipeline {
             }
         }
 
-        // 10. Duplicate detection
+        // 11. Duplicate detection
         let resolved = resolve_duplicates(hydrated_deployments, registry, DuplicateStrategy::Skip)?;
         let skipped = resolved.skipped;
         let registry_updated = !self.context.config.dry_run
@@ -179,7 +218,7 @@ impl RunPipeline {
                 || !safe_transactions.is_empty()
                 || (is_governor_sender && !governor_proposals.is_empty()));
 
-        // 11. Record to registry (or build dry-run result)
+        // 12. Record to registry (or build dry-run result)
         let mut recorded_deployments = Vec::new();
         let mut recorded_transactions = Vec::new();
 
@@ -206,6 +245,7 @@ impl RunPipeline {
                     transaction: tx,
                     sender_name: metadata.sender_name,
                     gas_used: metadata.gas_used,
+                    trace: metadata.trace,
                 });
             }
 
@@ -232,17 +272,10 @@ impl RunPipeline {
                     transaction: tx,
                     sender_name: metadata.sender_name,
                     gas_used: metadata.gas_used,
+                    trace: metadata.trace,
                 });
             }
         }
-
-        // 12. Render traces based on verbosity level
-        let (execution_traces, setup_traces) = render_traces_for_verbosity(
-            execution.traces,
-            &execution.labeled_addresses,
-            self.context.config.verbosity,
-        )
-        .await;
 
         Ok(PipelineResult {
             deployments: recorded_deployments,
@@ -262,28 +295,42 @@ impl RunPipeline {
     }
 }
 
-/// Render traces into human-readable strings based on verbosity level.
+/// Render traces into human-readable strings and extract per-transaction sub-trees.
 ///
-/// - `verbosity >= 1`: render execution traces
-/// - `verbosity >= 3`: also render setup traces
+/// Execution traces are always rendered.
+/// Setup traces are rendered when `verbosity >= 3`.
+/// Per-transaction traces are extracted for every matched transaction.
 async fn render_traces_for_verbosity(
     mut traces: Traces,
     labeled_addresses: &HashMap<Address, String>,
+    artifact_index: &ArtifactIndex,
     verbosity: u8,
+    transaction_metadata: &mut HashMap<String, RecordedTransactionMetadata>,
 ) -> (Option<String>, Option<String>) {
-    if verbosity == 0 {
-        return (None, None);
-    }
+    let contracts = artifact_index.inner();
 
-    let decoder = CallTraceDecoderBuilder::new()
+    let mut decoder = CallTraceDecoderBuilder::new()
         .with_labels(labeled_addresses.clone())
+        .with_known_contracts(contracts)
         .build();
+
+    // Identify deployed contracts by bytecode matching
+    let mut identifier = TraceIdentifiers::new().with_local(contracts);
+    for (_, arena) in &traces {
+        decoder.identify(&arena.arena, &mut identifier);
+    }
 
     let mut execution_parts = Vec::new();
     let mut setup_parts = Vec::new();
 
     for (kind, arena) in &mut traces {
         decode_trace_arena(&mut arena.arena, &decoder).await;
+
+        // Extract per-transaction sub-trees from execution arenas
+        if matches!(kind, TraceKind::Execution) {
+            extract_per_transaction_traces(&arena.arena, transaction_metadata);
+        }
+
         let rendered = render_trace_arena(arena);
         match kind {
             TraceKind::Execution => execution_parts.push(rendered),
@@ -353,23 +400,29 @@ fn extract_governor_proposal_created(events: &[ParsedEvent]) -> Vec<GovernorProp
 struct RecordedTransactionMetadata {
     sender_name: Option<String>,
     gas_used: Option<u64>,
+    /// Index of the matched node in the execution trace arena.
+    trace_node_idx: Option<usize>,
+    /// Pre-rendered per-transaction trace sub-tree.
+    trace: Option<String>,
 }
 
 #[derive(Clone, Debug)]
 struct PendingExecutionTrace {
-    from: Address,
     to: Address,
     kind: CallKind,
     data: Vec<u8>,
     value: U256,
     gas_used: Option<u64>,
     matched: bool,
+    /// Index of this node in the arena.
+    node_idx: usize,
 }
 
 fn build_recorded_transaction_metadata(
     tx_events: &[TransactionSimulated],
     extracted_deployments: &[ExtractedDeployment],
     traces: &Traces,
+    sender_labels: &HashMap<Address, String>,
 ) -> HashMap<String, RecordedTransactionMetadata> {
     let transaction_deployments = build_transaction_deployment_index(extracted_deployments);
     let mut pending_traces = traces
@@ -377,17 +430,17 @@ fn build_recorded_transaction_metadata(
         .filter(|(kind, _)| matches!(kind, TraceKind::Execution))
         .flat_map(|(_, arena)| arena.nodes().iter())
         .map(|node| PendingExecutionTrace {
-            from: node.trace.caller,
             to: node.trace.address,
             kind: node.trace.kind,
             data: node.trace.data.to_vec(),
             value: node.trace.value,
             gas_used: Some(node.trace.gas_used).filter(|gas| *gas > 0),
             matched: false,
+            node_idx: node.idx,
         })
         .collect::<Vec<_>>();
 
-    collect_recorded_transaction_metadata(tx_events, &transaction_deployments, &mut pending_traces)
+    collect_recorded_transaction_metadata(tx_events, &transaction_deployments, &mut pending_traces, sender_labels)
 }
 
 fn build_transaction_deployment_index(
@@ -407,6 +460,7 @@ fn collect_recorded_transaction_metadata(
     tx_events: &[TransactionSimulated],
     transaction_deployments: &HashMap<String, Vec<Address>>,
     pending_traces: &mut [PendingExecutionTrace],
+    sender_labels: &HashMap<Address, String>,
 ) -> HashMap<String, RecordedTransactionMetadata> {
     tx_events
         .iter()
@@ -414,21 +468,29 @@ fn collect_recorded_transaction_metadata(
         .map(|sim_tx| {
             let tx_id = format!("tx-{:#x}", sim_tx.transactionId);
             let deployment_targets = transaction_deployments.get(&tx_id).map(Vec::as_slice);
-            let gas_used = pending_traces
+            let matched = pending_traces
                 .iter_mut()
                 .find(|candidate| {
                     matches_simulated_transaction(candidate, sim_tx, deployment_targets)
                 })
-                .and_then(|candidate| {
+                .map(|candidate| {
                     candidate.matched = true;
-                    candidate.gas_used
+                    (candidate.gas_used, candidate.node_idx)
                 });
+
+            // Resolve sender name: prefer config role name, fall back to senderId hex
+            let sender_name = sender_labels
+                .get(&sim_tx.sender)
+                .cloned()
+                .or_else(|| (!sim_tx.senderId.is_zero()).then(|| format!("{:#x}", sim_tx.senderId)));
 
             (
                 tx_id,
                 RecordedTransactionMetadata {
-                    sender_name: (!sim_tx.senderId.is_zero()).then(|| format!("{:#x}", sim_tx.senderId)),
-                    gas_used,
+                    sender_name,
+                    gas_used: matched.and_then(|(gas, _)| gas),
+                    trace_node_idx: matched.map(|(_, idx)| idx),
+                    trace: None,
                 },
             )
         })
@@ -440,10 +502,11 @@ fn matches_simulated_transaction(
     sim_tx: &SimulatedTransaction,
     deployment_targets: Option<&[Address]>,
 ) -> bool {
-    if candidate.matched
-        || candidate.from != sim_tx.sender
-        || candidate.value != sim_tx.transaction.value
-    {
+    // Note: candidate.from is NOT compared to sim_tx.sender because forge
+    // script traces show the script contract as the EVM caller, while
+    // sim_tx.sender reflects the intended broadcast sender set via
+    // vm.startBroadcast().
+    if candidate.matched || candidate.value != sim_tx.transaction.value {
         return false;
     }
 
@@ -460,6 +523,49 @@ fn matches_simulated_transaction(
     !candidate.kind.is_any_create()
         && candidate.to == sim_tx.transaction.to
         && candidate.data == sim_tx.transaction.data.as_ref()
+}
+
+/// Extract per-transaction trace sub-trees from a decoded execution arena.
+///
+/// For each transaction in `metadata` that has a `trace_node_idx`, renders
+/// just that node and its children by cloning the arena and swapping the
+/// target node into position 0 so the renderer treats it as the root.
+fn extract_per_transaction_traces(
+    arena: &foundry_evm::traces::CallTraceArena,
+    metadata: &mut HashMap<String, RecordedTransactionMetadata>,
+) {
+    use foundry_evm::traces::SparsedTraceArena;
+
+    let nodes = arena.nodes();
+    if nodes.is_empty() {
+        return;
+    }
+
+    for meta in metadata.values_mut() {
+        let Some(target_idx) = meta.trace_node_idx else {
+            continue;
+        };
+
+        // Clone the arena and swap the target node into position 0 so the
+        // renderer treats it as the tree root. All internal references
+        // (children, parent) use the original indices which stay valid
+        // because the underlying Vec isn't resized — only positions 0 and
+        // target_idx are swapped.
+        let mut cloned_arena = arena.clone();
+        if target_idx != 0 {
+            let cloned_nodes = cloned_arena.nodes_mut();
+            cloned_nodes.swap(0, target_idx);
+            // Fix up the swapped nodes' idx fields
+            cloned_nodes[0].idx = 0;
+            cloned_nodes[target_idx].idx = target_idx;
+        }
+
+        let sparsed = SparsedTraceArena { arena: cloned_arena, ignored: Default::default() };
+        let rendered = render_trace_arena(&sparsed);
+        if !rendered.trim().is_empty() {
+            meta.trace = Some(rendered);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -822,23 +928,25 @@ mod tests {
         }];
 
         let mut pending = vec![PendingExecutionTrace {
-            from: sender,
+
             to,
             kind: CallKind::Call,
             data,
             value: U256::ZERO,
             gas_used: Some(123_456),
             matched: false,
+            node_idx: 0,
         }];
 
         let metadata =
-            collect_recorded_transaction_metadata(&events, &HashMap::new(), &mut pending);
+            collect_recorded_transaction_metadata(&events, &HashMap::new(), &mut pending, &HashMap::new());
         let tx_meta = metadata
             .get("tx-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
             .expect("metadata should exist");
 
         assert_eq!(tx_meta.sender_name.as_deref(), Some(&format!("{:#x}", governance_id)[..]));
         assert_eq!(tx_meta.gas_used, Some(123_456));
+        assert_eq!(tx_meta.trace_node_idx, Some(0));
         assert!(pending[0].matched);
     }
 
@@ -887,26 +995,28 @@ mod tests {
         ]);
         let mut pending = vec![
             PendingExecutionTrace {
-                from: sender,
+    
                 to: deployed_2,
                 kind: CallKind::Create,
                 data: vec![1, 2, 3, 4],
                 value: U256::ZERO,
                 gas_used: Some(654_321),
                 matched: false,
+                node_idx: 0,
             },
             PendingExecutionTrace {
-                from: sender,
+    
                 to: deployed_1,
                 kind: CallKind::Create,
                 data: vec![4, 3, 2, 1],
                 value: U256::ZERO,
                 gas_used: Some(111_222),
                 matched: false,
+                node_idx: 1,
             },
         ];
 
-        let metadata = collect_recorded_transaction_metadata(&events, &deployments, &mut pending);
+        let metadata = collect_recorded_transaction_metadata(&events, &deployments, &mut pending, &HashMap::new());
         let tx_meta_1 = metadata
             .get("tx-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
             .expect("metadata should exist");
@@ -963,7 +1073,7 @@ mod tests {
             foundry_evm::traces::SparsedTraceArena { arena, ignored: Default::default() },
         )];
 
-        let metadata = build_recorded_transaction_metadata(&events, &deployments, &traces);
+        let metadata = build_recorded_transaction_metadata(&events, &deployments, &traces, &HashMap::new());
         let tx_meta = metadata
             .get("tx-0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
             .expect("metadata should exist");

@@ -909,6 +909,7 @@ pub async fn run(
                 git_commit,
                 project_root: cwd.clone(),
                 deployer_sender: None,
+                sender_labels: Default::default(),
             };
 
             // Execute pipeline.

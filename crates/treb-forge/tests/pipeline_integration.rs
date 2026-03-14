@@ -41,6 +41,7 @@ fn test_context() -> PipelineContext {
         git_commit: "abc1234".to_string(),
         project_root: PathBuf::from("/tmp/project"),
         deployer_sender: None,
+        sender_labels: Default::default(),
     }
 }
 
@@ -457,7 +458,7 @@ fn dry_run_leaves_registry_unchanged() {
         .collect();
     let recorded_txs: Vec<RecordedTransaction> = transactions
         .into_iter()
-        .map(|t| RecordedTransaction { transaction: t, sender_name: None, gas_used: None })
+        .map(|t| RecordedTransaction { transaction: t, sender_name: None, gas_used: None, trace: None })
         .collect();
 
     let result = build_pipeline_result(recorded_deps, recorded_txs, vec![], vec![], true);

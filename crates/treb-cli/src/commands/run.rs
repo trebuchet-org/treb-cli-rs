@@ -68,10 +68,31 @@ fn format_verbose_sender(role: &str, sender: &ResolvedSender) -> String {
 }
 
 fn format_verbose_senders(resolved_senders: &HashMap<String, ResolvedSender>) -> Vec<String> {
-    let mut senders: Vec<String> =
-        resolved_senders.iter().map(|(role, sender)| format_verbose_sender(role, sender)).collect();
+    let max_role_len = resolved_senders.keys().map(|k| k.len()).max().unwrap_or(0);
+    let mut senders: Vec<String> = resolved_senders
+        .iter()
+        .map(|(role, sender)| format_verbose_sender_padded(role, sender, max_role_len))
+        .collect();
     senders.sort();
     senders
+}
+
+fn format_verbose_sender_padded(role: &str, sender: &ResolvedSender, pad: usize) -> String {
+    match sender {
+        ResolvedSender::Governor { governor_address, timelock_address, proposer } => {
+            let timelock = timelock_address
+                .map(|address| address.to_string())
+                .unwrap_or_else(|| "none".to_string());
+            format!(
+                "{:<pad$}  governor={} timelock={} proposer={}",
+                role,
+                governor_address,
+                timelock,
+                proposer.sender_address()
+            )
+        }
+        _ => format!("{:<pad$}  {}", role, sender.sender_address()),
+    }
 }
 
 fn sorted_env_var_entries(env_vars: &[String]) -> Vec<(String, String)> {
@@ -434,12 +455,9 @@ pub async fn run(
             is_active_fork_run(&cwd, network.as_deref(), effective_rpc_url.as_deref());
 
         // Header
-        println!();
         if use_color {
-            println!("{} {}", emoji::ROCKET, "Running Deployment Script".style(color::BOLD));
             println!("{}", separator.style(color::GRAY));
         } else {
-            println!("{} Running Deployment Script", emoji::ROCKET);
             println!("{separator}");
         }
 
@@ -534,6 +552,12 @@ pub async fn run(
 
     let git_commit = resolve_git_commit();
 
+    // Build sender address → role name mapping for trace labeling.
+    let sender_labels = resolved_senders
+        .iter()
+        .map(|(role, sender)| (sender.sender_address(), role.clone()))
+        .collect();
+
     // Extract the deployer sender so the pipeline can detect Safe/Governor flows.
     let deployer_sender = resolved_senders.remove("deployer");
     let is_governor_sender = deployer_sender.as_ref().is_some_and(|s| s.is_governor());
@@ -544,6 +568,7 @@ pub async fn run(
         git_commit,
         project_root: cwd.clone(),
         deployer_sender,
+        sender_labels,
     };
 
     // ── Broadcast confirmation prompt ──────────────────────────────────
@@ -568,10 +593,6 @@ pub async fn run(
 
     // ── Open registry and execute pipeline ───────────────────────────────
     let mut registry = Registry::open(&cwd).context("failed to open registry")?;
-
-    if !json {
-        output::print_stage("\u{1f528}", &format!("Compiling and executing {}...", script));
-    }
 
     let pipeline = RunPipeline::new(pipeline_context).with_script_config(script_config);
 
@@ -811,10 +832,16 @@ fn format_tx_status(status: &TransactionStatus) -> String {
 }
 
 fn format_tx_operation(operation: &Operation) -> String {
-    if operation.method.is_empty() {
-        format!("{} {}", operation.operation_type, operation.target)
+    let target = if color::is_color_enabled() {
+        format!("{}", output::truncate_address(&operation.target).style(color::CYAN))
     } else {
-        format!("{}::{}({})", operation.target, operation.method, operation.operation_type)
+        output::truncate_address(&operation.target)
+    };
+    if operation.method.is_empty() || operation.method.starts_with("0x") {
+        // No decoded method or raw selector — just show type + target
+        format!("{} {}", operation.operation_type, target)
+    } else {
+        format!("{} {}.{}()", operation.operation_type, target, operation.method)
     }
 }
 
@@ -862,28 +889,41 @@ fn format_skipped_deployment_line(skipped: &treb_forge::SkippedDeployment) -> St
 
 fn display_result_human(result: &PipelineResult, verbose: u8, network: Option<&str>, namespace: &str) {
     // ── Transactions ────────────────────────────────────────────────────
-    output::print_section_header(emoji::REFRESH, "Transactions", 50);
-    if result.transactions.is_empty() {
-        let msg = "No transactions executed (dry run or all deployments skipped)";
+    if result.transactions.is_empty() && result.deployments.is_empty() {
+        let msg = "No transactions recorded";
         if color::is_color_enabled() {
-            println!("  {}", msg.style(color::GRAY));
+            println!("\n  {}", msg.style(color::GRAY));
         } else {
-            println!("  {}", msg);
+            println!("\n  {}", msg);
         }
-    } else {
+    } else if !result.transactions.is_empty() {
+        output::print_section_header(emoji::REFRESH, "Transactions", 50);
         for rt in &result.transactions {
             let tx = &rt.transaction;
             let status_str = format_tx_status(&tx.status);
-            let sender_str = if color::is_color_enabled() {
-                format!("{}", tx_sender_label(rt).style(color::GREEN))
+            let sender_label = tx_sender_label(rt);
+            let tx_id = output::truncate_address(&tx.id);
+
+            // Header: status sender tx-id
+            let sender_display = if color::is_color_enabled() {
+                format!("{}", sender_label.style(color::CYAN))
             } else {
-                tx_sender_label(rt).to_string()
+                sender_label.to_string()
             };
-            let ops_str = format_tx_operations(&tx.operations);
-            if ops_str.is_empty() {
-                println!("\n  {} {}", status_str, sender_str);
+            let id_display = if color::is_color_enabled() {
+                format!("{}", tx_id.style(color::GRAY))
             } else {
-                println!("\n  {} {} → {}", status_str, sender_str, ops_str);
+                tx_id.to_string()
+            };
+            println!("\n{} {} {}", status_str, sender_display, id_display);
+
+            // Per-transaction decoded trace sub-tree (default mode)
+            if verbose == 0 {
+                if let Some(ref trace) = rt.trace {
+                    for line in trace.lines() {
+                        println!("{line}");
+                    }
+                }
             }
             let footer = format_tx_footer(rt);
             if !footer.is_empty() {
@@ -1503,6 +1543,7 @@ needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
             },
             sender_name: Some("deployer".into()),
             gas_used: Some(123456),
+            trace: None,
         };
 
         let footer = format_tx_footer(&recorded);
@@ -1530,6 +1571,7 @@ needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
             },
             sender_name: Some("anvil".into()),
             gas_used: None,
+            trace: None,
         };
 
         assert_eq!(tx_sender_label(&recorded), "anvil");

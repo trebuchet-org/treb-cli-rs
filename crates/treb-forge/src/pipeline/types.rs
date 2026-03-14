@@ -6,6 +6,7 @@
 
 use std::{collections::HashMap, path::PathBuf};
 
+use alloy_primitives::Address;
 use treb_core::types::{
     GovernorProposal, deployment::Deployment, safe_transaction::SafeTransaction,
     transaction::Transaction,
@@ -71,6 +72,8 @@ pub struct PipelineContext {
     pub project_root: PathBuf,
     /// The resolved deployer sender, used to detect Safe/Governor flows.
     pub deployer_sender: Option<ResolvedSender>,
+    /// Sender address → role name mapping for trace labeling.
+    pub sender_labels: HashMap<Address, String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +134,8 @@ pub struct RecordedTransaction {
     pub sender_name: Option<String>,
     /// Per-transaction gas estimate or usage, if available from execution artifacts.
     pub gas_used: Option<u64>,
+    /// Pre-rendered per-transaction trace sub-tree, if available.
+    pub trace: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

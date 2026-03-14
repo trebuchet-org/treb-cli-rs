@@ -8397,6 +8397,7 @@ dependencies = [
  "foundry-wallets",
  "libc",
  "reqwest 0.12.28",
+ "revm-inspectors",
  "serde",
  "serde_json",
  "tempfile",
