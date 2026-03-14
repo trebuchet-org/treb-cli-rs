@@ -8376,6 +8376,7 @@ dependencies = [
 name = "treb-forge"
 version = "0.1.0"
 dependencies = [
+ "alloy-dyn-abi",
  "alloy-json-abi 1.5.7",
  "alloy-primitives 1.5.7",
  "alloy-signer",
