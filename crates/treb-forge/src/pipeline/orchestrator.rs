@@ -681,26 +681,20 @@ fn collapse_decoded_bytecode_args(
         data: &[u8],
         artifact_index: &ArtifactIndex,
     ) -> Option<revm_inspectors::tracing::types::DecodedCallData> {
-        let matched = artifact_index.find_by_creation_code(data)?;
-        Some(revm_inspectors::tracing::types::DecodedCallData {
-            signature: format!("new {}()", matched.name),
-            args: vec![format!("<{} initcode ({} bytes)>", matched.name, data.len())],
-        })
+        build_create_call_data(data, artifact_index)
     }
 
     /// Try to reconstruct a raw hex call (where the "selector" is bytecode)
-    /// into a `new ContractName(...)` form by matching the full calldata
-    /// against the artifact index as creation code.
+    /// into a `create(new ContractName(...))` form by matching the full
+    /// calldata against the artifact index as creation code.
     fn try_collapse_raw_create(
         call_data: &revm_inspectors::tracing::types::DecodedCallData,
         artifact_index: &ArtifactIndex,
     ) -> Option<revm_inspectors::tracing::types::DecodedCallData> {
-        // Reconstruct full calldata: selector bytes + first arg hex
         let sig_hex = &call_data.signature;
         let arg_hex = call_data.args.first()?;
         let arg_hex_clean = arg_hex.strip_prefix("0x").unwrap_or(arg_hex);
 
-        // Both must be pure hex
         if !sig_hex.bytes().all(|b| b.is_ascii_hexdigit())
             || !arg_hex_clean.bytes().all(|b| b.is_ascii_hexdigit())
         {
@@ -713,19 +707,31 @@ fn collapse_decoded_bytecode_args(
         }
 
         let bytes = hex::decode(&full_hex).ok()?;
-        let matched = artifact_index.find_by_creation_code(&bytes)?;
-        let byte_count = bytes.len();
+        build_create_call_data(&bytes, artifact_index)
+    }
+
+    /// Build a `create(new ContractName(arg1, arg2, ...))` decoded call.
+    fn build_create_call_data(
+        code: &[u8],
+        artifact_index: &ArtifactIndex,
+    ) -> Option<revm_inspectors::tracing::types::DecodedCallData> {
+        let (matched, ctor_args) = artifact_index.decode_creation_code(code)?;
+
+        let inner = if ctor_args.is_empty() {
+            format!("new {}()", matched.name)
+        } else {
+            format!("new {}({})", matched.name, ctor_args.join(", "))
+        };
 
         Some(revm_inspectors::tracing::types::DecodedCallData {
-            signature: format!("new {}()", matched.name),
-            args: vec![format!("<{} initcode ({byte_count} bytes)>", matched.name)],
+            signature: "create".to_string(),
+            args: vec![inner],
         })
     }
 
     /// Replace a single string in-place if it contains a long hex blob.
     fn collapse_hex_arg(s: &mut String, artifact_index: &ArtifactIndex) {
-        // Strip leading 0x for the hex check
-        let hex_str = s.strip_prefix("0x").unwrap_or(s);
+        let hex_str = s.strip_prefix("0x").unwrap_or(s.as_str());
         if hex_str.len() < BYTECODE_COLLAPSE_THRESHOLD * 2 {
             return;
         }
@@ -735,8 +741,16 @@ fn collapse_decoded_bytecode_args(
 
         let byte_count = hex_str.len() / 2;
         if let Ok(bytes) = hex::decode(hex_str) {
-            if let Some(matched) = artifact_index.find_by_creation_code(&bytes) {
-                *s = format!("<{} initcode ({byte_count} bytes)>", matched.name);
+            if let Some((matched, ctor_args)) = artifact_index.decode_creation_code(&bytes) {
+                if ctor_args.is_empty() {
+                    *s = format!("new {}() ({byte_count} bytes)", matched.name);
+                } else {
+                    *s = format!(
+                        "new {}({}) ({byte_count} bytes)",
+                        matched.name,
+                        ctor_args.join(", ")
+                    );
+                }
                 return;
             }
         }

@@ -33,6 +33,7 @@ alloy-signer-ledger = { workspace = true }
 alloy-signer-trezor = { workspace = true }
 alloy-sol-types = { workspace = true }
 # Use v1.x to match foundry-common's alloy version (workspace has v0.8 for other crates)
+alloy-dyn-abi = "1.5"
 alloy-json-abi = "1.5"
 
 # Datetime
