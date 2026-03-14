@@ -400,6 +400,12 @@ pub async fn run(
     };
     if let Some(ref fork_entry) = active_fork {
         effective_rpc_url = Some(fork_entry.rpc_url.clone());
+        // Override the RPC env var so that foundry.toml alias resolution
+        // (in forge's load_config_and_evm_opts) resolves to the Anvil URL
+        // instead of the upstream mainnet URL.
+        if !fork_entry.env_var_name.is_empty() {
+            unsafe { env::set_var(&fork_entry.env_var_name, &fork_entry.rpc_url) };
+        }
     }
 
     // ── Sender resolution ────────────────────────────────────────────────
