@@ -56,24 +56,13 @@ pub struct ExecutionResult {
     pub broadcast_receipts: Option<Vec<BroadcastReceipt>>,
 }
 
-/// Callback invoked after script execution but before broadcast.
-/// Receives the simulation result. Return `true` to proceed with
-/// broadcast, `false` to skip.
-pub type PreBroadcastHook = Box<dyn FnOnce(&ExecutionResult) -> bool + Send>;
-
-/// Execute a forge script through the full pipeline.
+/// Execute a forge script (simulation only).
 ///
 /// Chains the state machine stages: preprocess → compile → link →
-/// prepare_execution → execute. If `args.broadcast` is true and
-/// transactions are present, continues through prepare_simulation →
-/// fill_metadata → bundle → wait_for_pending → broadcast.
-///
-/// If `pre_broadcast_hook` is provided, it is called after simulation
-/// with the execution result. If it returns `false`, broadcast is skipped.
-pub async fn execute_script(
-    args: ScriptArgs,
-    pre_broadcast_hook: Option<PreBroadcastHook>,
-) -> treb_core::Result<ExecutionResult> {
+/// prepare_execution → execute, then extracts the `ScriptResult` and
+/// decodes console.log messages. Does NOT broadcast — use
+/// [`broadcast_script`] for that.
+pub async fn execute_script(args: ScriptArgs) -> treb_core::Result<ExecutionResult> {
     let preprocessed = args
         .preprocess()
         .await
@@ -98,80 +87,9 @@ pub async fn execute_script(
         .await
         .map_err(|e| TrebError::Forge(format!("forge execution failed: {e}")))?;
 
-    // Clone execution result before the state machine potentially consumes it.
-    let result = executed.execution_result.clone();
+    let result = executed.execution_result;
     let decoded_logs = crate::console::decode_console_logs(&result.logs);
     let labeled = result.labeled_addresses.into_iter().collect();
-
-    let should_broadcast = executed.args.broadcast
-        && result.transactions.as_ref().is_some_and(|txs| !txs.is_empty());
-
-    // Call the pre-broadcast hook with the simulation result.
-    // If the hook returns false, skip broadcast.
-    let hook_approved = if should_broadcast {
-        if let Some(hook) = pre_broadcast_hook {
-            let sim_result = ExecutionResult {
-                success: result.success,
-                logs: decoded_logs.clone(),
-                raw_logs: result.logs.clone(),
-                gas_used: result.gas_used,
-                returned: result.returned.clone(),
-                labeled_addresses: HashMap::new(),
-                transactions: result.transactions.clone(),
-                traces: Vec::new(),
-                broadcast_receipts: None,
-            };
-            hook(&sim_result)
-        } else {
-            true
-        }
-    } else {
-        true
-    };
-
-    let broadcast_receipts = if should_broadcast && hook_approved {
-        let pre_sim = executed
-            .prepare_simulation()
-            .await
-            .map_err(|e| TrebError::Forge(format!("forge simulation preparation failed: {e}")))?;
-
-        let filled = pre_sim
-            .fill_metadata()
-            .await
-            .map_err(|e| TrebError::Forge(format!("forge metadata fill failed: {e}")))?;
-
-        let bundled = filled
-            .bundle()
-            .await
-            .map_err(|e| TrebError::Forge(format!("forge bundling failed: {e}")))?;
-
-        let bundled = bundled
-            .wait_for_pending()
-            .await
-            .map_err(|e| TrebError::Forge(format!("forge pending transaction wait failed: {e}")))?;
-
-        let broadcasted = bundled
-            .broadcast()
-            .await
-            .map_err(|e| TrebError::Forge(format!("forge broadcast failed: {e}")))?;
-
-        let mut receipts = Vec::new();
-        for seq in broadcasted.sequence.sequences() {
-            for (tx_meta, receipt) in seq.transactions.iter().zip(seq.receipts.iter()) {
-                receipts.push(BroadcastReceipt {
-                    hash: receipt.transaction_hash,
-                    block_number: receipt.block_number.unwrap_or_default(),
-                    gas_used: receipt.gas_used,
-                    status: receipt.inner.inner.inner.receipt.status.coerce_status(),
-                    contract_name: tx_meta.contract_name.clone().filter(|s| !s.is_empty()),
-                    contract_address: receipt.contract_address,
-                });
-            }
-        }
-        Some(receipts)
-    } else {
-        None
-    };
 
     Ok(ExecutionResult {
         success: result.success,
@@ -182,8 +100,93 @@ pub async fn execute_script(
         labeled_addresses: labeled,
         transactions: result.transactions,
         traces: result.traces,
-        broadcast_receipts,
+        broadcast_receipts: None,
     })
+}
+
+/// Broadcast a forge script by driving the full state machine.
+///
+/// Re-executes the script through: preprocess → compile → link →
+/// prepare_execution → execute → prepare_simulation → fill_metadata →
+/// bundle → wait_for_pending → broadcast.
+///
+/// The `args` **must** have `broadcast = true`. Compilation is cached by
+/// forge so the re-execution overhead is minimal.
+pub async fn broadcast_script(args: ScriptArgs) -> treb_core::Result<Vec<BroadcastReceipt>> {
+    let preprocessed = args
+        .preprocess()
+        .await
+        .map_err(|e| TrebError::Forge(format!("forge preprocessing failed: {e}")))?;
+
+    let compiled = preprocessed
+        .compile()
+        .map_err(|e| TrebError::Forge(format!("forge compilation failed: {e}")))?;
+
+    let linked = compiled
+        .link()
+        .await
+        .map_err(|e| TrebError::Forge(format!("forge linking failed: {e}")))?;
+
+    let prepared = linked
+        .prepare_execution()
+        .await
+        .map_err(|e| TrebError::Forge(format!("forge execution preparation failed: {e}")))?;
+
+    let executed = prepared
+        .execute()
+        .await
+        .map_err(|e| TrebError::Forge(format!("forge execution failed: {e}")))?;
+
+    if executed
+        .execution_result
+        .transactions
+        .as_ref()
+        .is_none_or(|txs| txs.is_empty())
+    {
+        return Ok(Vec::new());
+    }
+
+    // Drive forge's full broadcast state machine
+    let pre_sim = executed
+        .prepare_simulation()
+        .await
+        .map_err(|e| TrebError::Forge(format!("forge simulation preparation failed: {e}")))?;
+
+    let filled = pre_sim
+        .fill_metadata()
+        .await
+        .map_err(|e| TrebError::Forge(format!("forge metadata fill failed: {e}")))?;
+
+    let bundled = filled
+        .bundle()
+        .await
+        .map_err(|e| TrebError::Forge(format!("forge bundling failed: {e}")))?;
+
+    let bundled = bundled
+        .wait_for_pending()
+        .await
+        .map_err(|e| TrebError::Forge(format!("forge pending transaction wait failed: {e}")))?;
+
+    let broadcasted = bundled
+        .broadcast()
+        .await
+        .map_err(|e| TrebError::Forge(format!("forge broadcast failed: {e}")))?;
+
+    // Extract receipts from all broadcast sequences
+    let mut receipts = Vec::new();
+    for seq in broadcasted.sequence.sequences() {
+        for (tx_meta, receipt) in seq.transactions.iter().zip(seq.receipts.iter()) {
+            receipts.push(BroadcastReceipt {
+                hash: receipt.transaction_hash,
+                block_number: receipt.block_number.unwrap_or_default(),
+                gas_used: receipt.gas_used,
+                status: receipt.inner.inner.inner.receipt.status.coerce_status(),
+                contract_name: tx_meta.contract_name.clone().filter(|s| !s.is_empty()),
+                contract_address: receipt.contract_address,
+            });
+        }
+    }
+    Ok(receipts)
 }
 
 /// Builder for constructing forge `ScriptArgs` from treb configuration.
