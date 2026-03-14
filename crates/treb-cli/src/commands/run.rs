@@ -111,6 +111,12 @@ fn sorted_env_var_entries(env_vars: &[String]) -> Vec<(String, String)> {
     entries
 }
 
+/// Extract an env var name from a `${VAR}` template string.
+fn extract_env_var_name(template: &str) -> Option<&str> {
+    let s = template.strip_prefix("${")?.strip_suffix('}')?;
+    if s.is_empty() { None } else { Some(s) }
+}
+
 fn env_var_is_truthy(name: &str) -> bool {
     env::var(name).ok().is_some_and(|value| {
         matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
@@ -403,8 +409,18 @@ pub async fn run(
         // Override the RPC env var so that foundry.toml alias resolution
         // (in forge's load_config_and_evm_opts) resolves to the Anvil URL
         // instead of the upstream mainnet URL.
-        if !fork_entry.env_var_name.is_empty() {
-            unsafe { env::set_var(&fork_entry.env_var_name, &fork_entry.rpc_url) };
+        //
+        // Extract the env var name from the foundry.toml raw_url template
+        // (e.g., "${CELO_RPC_URL}" → "CELO_RPC_URL") and set it to the
+        // fork's Anvil URL.
+        if let Some(ref net) = effective_network {
+            if let Ok(endpoints) = treb_config::resolve_rpc_endpoints(&cwd) {
+                if let Some(endpoint) = endpoints.get(net.as_str()) {
+                    if let Some(var) = extract_env_var_name(&endpoint.raw_url) {
+                        unsafe { env::set_var(var, &fork_entry.rpc_url) };
+                    }
+                }
+            }
         }
     }
 
