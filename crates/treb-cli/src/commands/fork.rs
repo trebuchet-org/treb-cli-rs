@@ -531,7 +531,7 @@ pub async fn run_restart(network: String, fork_block_number: Option<u64>) -> any
 
     let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
 
-    // Re-deploy the CreateX factory
+    // Ensure CreateX factory exists (skips if already present on-chain)
     if let Err(e) = deploy_createx_http(&client, &rpc_url).await {
         eprintln!("Warning: failed to deploy CreateX: {e}");
     }
@@ -541,7 +541,6 @@ pub async fn run_restart(network: String, fork_block_number: Option<u64>) -> any
         entry.original_rpc,
         blk.map_or("latest".into(), |b| b.to_string())
     );
-    println!("CreateX factory re-deployed at {CREATEX_ADDRESS}.");
 
     // Take a new EVM snapshot as the fresh baseline
     let snapshot_id = evm_snapshot_http(&client, &rpc_url)
