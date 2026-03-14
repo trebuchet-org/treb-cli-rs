@@ -638,8 +638,32 @@ fn collapse_decoded_bytecode_args(
     for node in arena.nodes_mut() {
         let Some(ref mut decoded) = node.trace.decoded else { continue };
 
-        // Collapse long hex args in the decoded call data
+        // For unrecognized calls, foundry leaves call_data = None and the
+        // renderer falls back to showing raw trace.data. Try to match
+        // the raw data as creation code and inject a DecodedCallData so
+        // the renderer shows a human-readable form instead.
+        if decoded.call_data.is_none() && node.trace.data.len() >= BYTECODE_COLLAPSE_THRESHOLD {
+            if let Some(replacement) =
+                try_collapse_raw_data(&node.trace.data, artifact_index)
+            {
+                decoded.call_data = Some(replacement);
+            }
+        }
+
+        // Check for raw hex "selector" calls — when the signature has no
+        // parentheses it means foundry couldn't decode the call and is
+        // showing the first 4 bytes as a fake selector.
         if let Some(ref mut call_data) = decoded.call_data {
+            if !call_data.signature.contains('(') && !call_data.args.is_empty() {
+                if let Some(replacement) =
+                    try_collapse_raw_create(call_data, artifact_index)
+                {
+                    *call_data = replacement;
+                    continue;
+                }
+            }
+
+            // Normal case: collapse any long hex args individually
             for arg in &mut call_data.args {
                 collapse_hex_arg(arg, artifact_index);
             }
@@ -649,6 +673,53 @@ fn collapse_decoded_bytecode_args(
         if let Some(ref mut ret) = decoded.return_data {
             collapse_hex_arg(ret, artifact_index);
         }
+    }
+
+    /// Try to match raw trace data (from an unrecognized call where
+    /// `decoded.call_data` is None) against the artifact index as creation code.
+    fn try_collapse_raw_data(
+        data: &[u8],
+        artifact_index: &ArtifactIndex,
+    ) -> Option<revm_inspectors::tracing::types::DecodedCallData> {
+        let matched = artifact_index.find_by_creation_code(data)?;
+        Some(revm_inspectors::tracing::types::DecodedCallData {
+            signature: format!("new {}()", matched.name),
+            args: vec![format!("<{} initcode ({} bytes)>", matched.name, data.len())],
+        })
+    }
+
+    /// Try to reconstruct a raw hex call (where the "selector" is bytecode)
+    /// into a `new ContractName(...)` form by matching the full calldata
+    /// against the artifact index as creation code.
+    fn try_collapse_raw_create(
+        call_data: &revm_inspectors::tracing::types::DecodedCallData,
+        artifact_index: &ArtifactIndex,
+    ) -> Option<revm_inspectors::tracing::types::DecodedCallData> {
+        // Reconstruct full calldata: selector bytes + first arg hex
+        let sig_hex = &call_data.signature;
+        let arg_hex = call_data.args.first()?;
+        let arg_hex_clean = arg_hex.strip_prefix("0x").unwrap_or(arg_hex);
+
+        // Both must be pure hex
+        if !sig_hex.bytes().all(|b| b.is_ascii_hexdigit())
+            || !arg_hex_clean.bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            return None;
+        }
+
+        let full_hex = format!("{sig_hex}{arg_hex_clean}");
+        if full_hex.len() < BYTECODE_COLLAPSE_THRESHOLD * 2 {
+            return None;
+        }
+
+        let bytes = hex::decode(&full_hex).ok()?;
+        let matched = artifact_index.find_by_creation_code(&bytes)?;
+        let byte_count = bytes.len();
+
+        Some(revm_inspectors::tracing::types::DecodedCallData {
+            signature: format!("new {}()", matched.name),
+            args: vec![format!("<{} initcode ({byte_count} bytes)>", matched.name)],
+        })
     }
 
     /// Replace a single string in-place if it contains a long hex blob.
