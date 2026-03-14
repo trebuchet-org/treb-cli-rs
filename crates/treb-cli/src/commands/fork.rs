@@ -35,9 +35,9 @@ pub enum ForkSubcommand {
     /// forking from the upstream RPC, deploys CreateX, takes an initial EVM
     /// snapshot, and records a fully populated fork entry in `fork.json`.
     Enter {
-        /// Network name (must match an entry in foundry.toml [rpc_endpoints])
+        /// Network name (resolved from config if omitted)
         #[arg(long)]
-        network: String,
+        network: Option<String>,
         /// Upstream RPC URL to fork (overrides foundry.toml)
         #[arg(long)]
         rpc_url: Option<String>,
@@ -50,18 +50,18 @@ pub enum ForkSubcommand {
     /// Restores the registry to the state it was in before `fork enter` and
     /// removes the fork entry and its snapshot directory.
     Exit {
-        /// Network name to exit
+        /// Network name (resolved from config if omitted)
         #[arg(long)]
-        network: String,
+        network: Option<String>,
     },
     /// Revert the fork to its last snapshot
     ///
     /// Restores the registry from the snapshot taken when fork mode was entered,
     /// discarding any deployments made during the fork session.
     Revert {
-        /// Network name to revert
+        /// Network name (resolved from config if omitted)
         #[arg(long)]
-        network: String,
+        network: Option<String>,
         /// Revert all active forks
         #[arg(long)]
         all: bool,
@@ -71,9 +71,9 @@ pub enum ForkSubcommand {
     /// Resets the local Anvil node to a fresh fork at the given block number
     /// (or at the latest block if omitted) without exiting fork mode.
     Restart {
-        /// Network name to restart
+        /// Network name (resolved from config if omitted)
         #[arg(long)]
-        network: String,
+        network: Option<String>,
         /// Fork block number to reset to (uses latest if omitted)
         #[arg(long)]
         fork_block_number: Option<u64>,
@@ -104,9 +104,9 @@ pub enum ForkSubcommand {
     /// Shows deployments that were added or removed since fork mode was entered
     /// by comparing the current registry against the saved snapshot.
     Diff {
-        /// Network name to diff
+        /// Network name (resolved from config if omitted)
         #[arg(long)]
-        network: String,
+        network: Option<String>,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -118,17 +118,35 @@ pub enum ForkSubcommand {
 pub async fn run(subcommand: ForkSubcommand) -> anyhow::Result<()> {
     match subcommand {
         ForkSubcommand::Enter { network, rpc_url, fork_block_number } => {
+            let network = require_network(network)?;
             run_enter(network, rpc_url, fork_block_number).await
         }
-        ForkSubcommand::Exit { network } => run_exit(network).await,
-        ForkSubcommand::Revert { network, all } => run_revert(network, all).await,
+        ForkSubcommand::Exit { network } => {
+            let network = require_network(network)?;
+            run_exit(network).await
+        }
+        ForkSubcommand::Revert { network, all } => {
+            let network = require_network(network)?;
+            run_revert(network, all).await
+        }
         ForkSubcommand::Restart { network, fork_block_number } => {
+            let network = require_network(network)?;
             run_restart(network, fork_block_number).await
         }
         ForkSubcommand::Status { json } => run_status(json).await,
         ForkSubcommand::History { network, json } => run_history(network, json).await,
-        ForkSubcommand::Diff { network, json } => run_diff(network, json).await,
+        ForkSubcommand::Diff { network, json } => {
+            let network = require_network(network)?;
+            run_diff(network, json).await
+        }
     }
+}
+
+/// Resolve the network from the CLI flag or fall back to config/interactive picker.
+fn require_network(cli_network: Option<String>) -> anyhow::Result<String> {
+    let cwd = env::current_dir().context("failed to determine current directory")?;
+    let resolved = super::run::resolve_network(cli_network, &cwd, true, false)?;
+    resolved.ok_or_else(|| anyhow::anyhow!("no network specified; pass --network or set one in config.local.json"))
 }
 
 // ── run_enter ─────────────────────────────────────────────────────────────────
