@@ -4,6 +4,7 @@
 //! decoding, deployment hydration, duplicate detection, and registry recording.
 //! All pipeline types and the [`RunPipeline`] orchestrator live here.
 
+pub mod compose;
 mod duplicates;
 mod hydration;
 mod orchestrator;

@@ -450,7 +450,7 @@ impl RunPipeline {
 /// Execution traces are always rendered.
 /// Setup traces are rendered when `verbosity >= 3`.
 /// Per-transaction traces are extracted for every matched transaction.
-async fn render_traces_for_verbosity(
+pub(super) async fn render_traces_for_verbosity(
     mut traces: Traces,
     labeled_addresses: &HashMap<Address, String>,
     artifact_index: &ArtifactIndex,
@@ -505,7 +505,7 @@ async fn render_traces_for_verbosity(
 
 /// Strip internal treb event lines (e.g. `emit TransactionSimulated`,
 /// `emit DeploymentRecorded`) from rendered trace output.
-fn strip_internal_events(rendered: &str) -> String {
+pub(super) fn strip_internal_events(rendered: &str) -> String {
     const INTERNAL_EVENTS: &[&str] = &[
         "TransactionSimulated",
         "DeploymentRecorded",
@@ -525,14 +525,14 @@ fn strip_internal_events(rendered: &str) -> String {
 }
 
 /// Load the foundry configuration from the project root.
-fn load_foundry_config(project_root: &Path) -> treb_core::Result<Config> {
+pub(super) fn load_foundry_config(project_root: &Path) -> treb_core::Result<Config> {
     Config::load_with_root(project_root)
         .map(|c| c.sanitized())
         .map_err(|e| TrebError::Forge(format!("failed to load foundry config: {e}")))
 }
 
 /// Extract `TransactionSimulated` events from parsed event list.
-fn extract_transaction_simulated(events: &[ParsedEvent]) -> Vec<TransactionSimulated> {
+pub(super) fn extract_transaction_simulated(events: &[ParsedEvent]) -> Vec<TransactionSimulated> {
     events
         .iter()
         .filter_map(|e| match e {
@@ -546,7 +546,7 @@ fn extract_transaction_simulated(events: &[ParsedEvent]) -> Vec<TransactionSimul
 }
 
 /// Extract `SafeTransactionQueued` events from parsed event list.
-fn extract_safe_transaction_queued(events: &[ParsedEvent]) -> Vec<SafeTransactionQueued> {
+pub(super) fn extract_safe_transaction_queued(events: &[ParsedEvent]) -> Vec<SafeTransactionQueued> {
     events
         .iter()
         .filter_map(|e| match e {
@@ -560,7 +560,7 @@ fn extract_safe_transaction_queued(events: &[ParsedEvent]) -> Vec<SafeTransactio
 }
 
 /// Extract `GovernorProposalCreated` events from parsed event list.
-fn extract_governor_proposal_created(events: &[ParsedEvent]) -> Vec<GovernorProposalCreated> {
+pub(super) fn extract_governor_proposal_created(events: &[ParsedEvent]) -> Vec<GovernorProposalCreated> {
     events
         .iter()
         .filter_map(|e| match e {
@@ -574,13 +574,13 @@ fn extract_governor_proposal_created(events: &[ParsedEvent]) -> Vec<GovernorProp
 }
 
 #[derive(Clone, Debug, Default)]
-struct RecordedTransactionMetadata {
-    sender_name: Option<String>,
-    gas_used: Option<u64>,
+pub(super) struct RecordedTransactionMetadata {
+    pub(super) sender_name: Option<String>,
+    pub(super) gas_used: Option<u64>,
     /// Index of the matched node in the execution trace arena.
-    trace_node_idx: Option<usize>,
+    pub(super) trace_node_idx: Option<usize>,
     /// Pre-rendered per-transaction trace sub-tree.
-    trace: Option<String>,
+    pub(super) trace: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -595,7 +595,7 @@ struct PendingExecutionTrace {
     node_idx: usize,
 }
 
-fn build_recorded_transaction_metadata(
+pub(super) fn build_recorded_transaction_metadata(
     tx_events: &[TransactionSimulated],
     extracted_deployments: &[ExtractedDeployment],
     traces: &Traces,
@@ -758,7 +758,7 @@ const BYTECODE_COLLAPSE_THRESHOLD: usize = 64;
 ///
 /// Modifies `DecodedCallData.args` in-place so that both full-trace
 /// rendering and per-transaction sub-tree extraction see the collapsed form.
-fn collapse_decoded_bytecode_args(
+pub(super) fn collapse_decoded_bytecode_args(
     arena: &mut foundry_evm::traces::CallTraceArena,
     artifact_index: &ArtifactIndex,
 ) {
