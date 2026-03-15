@@ -32,6 +32,7 @@ console = { workspace = true }
 owo-colors = { workspace = true }
 unicode-width = { workspace = true }
 clap_complete = { workspace = true }
+spinoff = "0.8.0"
 
 [build-dependencies]
 clap = { version = "4" }

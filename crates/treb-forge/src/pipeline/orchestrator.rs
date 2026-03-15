@@ -46,16 +46,30 @@ use super::{
 /// Callback that receives hydrated transactions and returns true to broadcast.
 pub type BroadcastHook = Box<dyn FnOnce(&[RecordedTransaction]) -> bool + Send>;
 
+/// Callback for pipeline progress updates.
+pub type BroadcastProgressCallback = Box<dyn Fn(BroadcastPhase) + Send>;
+
+/// Phases of the pipeline, reported via [`BroadcastProgressCallback`].
+#[derive(Debug, Clone, Copy)]
+pub enum BroadcastPhase {
+    Compiling,
+    Executing,
+    Simulating,
+    Broadcasting,
+    Complete,
+}
+
 /// Orchestrator for the deployment recording pipeline.
 pub struct RunPipeline {
     context: PipelineContext,
     script_config: Option<ScriptConfig>,
     broadcast_hook: Option<BroadcastHook>,
+    broadcast_progress: Option<BroadcastProgressCallback>,
 }
 
 impl RunPipeline {
     pub fn new(context: PipelineContext) -> Self {
-        Self { context, script_config: None, broadcast_hook: None }
+        Self { context, script_config: None, broadcast_hook: None, broadcast_progress: None }
     }
 
     pub fn with_script_config(mut self, config: ScriptConfig) -> Self {
@@ -67,6 +81,12 @@ impl RunPipeline {
     /// after simulation, before broadcast. Return false to skip broadcast.
     pub fn with_broadcast_hook(mut self, hook: BroadcastHook) -> Self {
         self.broadcast_hook = Some(hook);
+        self
+    }
+
+    /// Set a progress callback for broadcast pipeline phases.
+    pub fn with_broadcast_progress(mut self, cb: BroadcastProgressCallback) -> Self {
+        self.broadcast_progress = Some(cb);
         self
     }
 
@@ -89,7 +109,14 @@ impl RunPipeline {
     /// Returns `TrebError::Forge` if compilation or script execution fails,
     /// or `TrebError::Registry` if registry operations fail.
     pub async fn execute(self, registry: &mut Registry) -> treb_core::Result<PipelineResult> {
+        let report = |phase: BroadcastPhase| {
+            if let Some(ref cb) = self.broadcast_progress {
+                cb(phase);
+            }
+        };
+
         // 1. Compile project for artifact index
+        report(BroadcastPhase::Compiling);
         let foundry_config = load_foundry_config(&self.context.project_root)?;
         let compilation = compile_project(&foundry_config)?;
         let artifact_index = ArtifactIndex::from_compile_output(compilation);
@@ -115,6 +142,7 @@ impl RunPipeline {
             && !self.context.deployer_sender.as_ref().is_some_and(|s| s.is_governor());
 
         // Run forge: preprocess → compile → link → prepare → execute
+        report(BroadcastPhase::Executing);
         let preprocessed = script_args
             .preprocess()
             .await
@@ -306,6 +334,7 @@ impl RunPipeline {
                 .map_or(true, |hook| hook(&recorded_transactions));
 
             if confirmed {
+                report(BroadcastPhase::Simulating);
                 let pre_sim = executed
                     .prepare_simulation()
                     .await
@@ -322,10 +351,13 @@ impl RunPipeline {
                     .wait_for_pending()
                     .await
                     .map_err(|e| TrebError::Forge(format!("forge pending transaction wait failed: {e}")))?;
+
+                report(BroadcastPhase::Broadcasting);
                 let broadcasted = bundled
                     .broadcast()
                     .await
                     .map_err(|e| TrebError::Forge(format!("forge broadcast failed: {e}")))?;
+                report(BroadcastPhase::Complete);
 
                 // Extract receipts and apply to recorded transactions
                 let mut receipts = Vec::new();

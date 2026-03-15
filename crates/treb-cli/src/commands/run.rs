@@ -5,6 +5,7 @@ use std::{
     env,
     io::{self, BufRead, Write},
     path::PathBuf,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -19,8 +20,8 @@ use treb_config::{ResolveOpts, resolve_config};
 use treb_core::types::{Operation, TransactionStatus};
 use treb_forge::{
     pipeline::{
-        BroadcastHook, PipelineConfig, PipelineContext, PipelineResult, RecordedTransaction,
-        RunPipeline, resolve_git_commit,
+        BroadcastHook, BroadcastPhase, BroadcastProgressCallback, PipelineConfig, PipelineContext,
+        PipelineResult, RecordedTransaction, RunPipeline, resolve_git_commit,
     },
     script::build_script_config_with_senders,
     sender::{ResolvedSender, resolve_all_senders},
@@ -257,7 +258,14 @@ impl FoundryShellGuard {
             color_choice: shell.color_choice(),
             verbosity: shell.verbosity(),
         };
-        *shell = FoundryShell::empty();
+        // Suppress output but preserve color choice so yansi colors
+        // stay enabled for trace rendering.
+        *shell = FoundryShell::new_with(
+            previous.output_format,
+            OutputMode::Quiet,
+            previous.color_choice,
+            0,
+        );
         previous
     }
 }
@@ -647,8 +655,39 @@ pub async fn run(
         pipeline = pipeline.with_broadcast_hook(hook);
     }
 
+    // Wire pipeline progress: suppress forge output and show clean spinner.
+    if !json {
+        let is_broadcast = wants_broadcast;
+        let spinner: Arc<Mutex<Option<spinoff::Spinner>>> = Arc::new(Mutex::new(None));
+        let spinner_ref = spinner.clone();
+        let progress_cb: BroadcastProgressCallback = Box::new(move |phase| {
+            let mut guard = spinner_ref.lock().unwrap();
+            // Stop previous spinner (clears the line)
+            if let Some(mut s) = guard.take() {
+                s.clear();
+            }
+            let msg = match phase {
+                BroadcastPhase::Compiling => Some("Compiling"),
+                BroadcastPhase::Simulating if is_broadcast => Some("Simulating"),
+                BroadcastPhase::Broadcasting => Some("Broadcasting"),
+                // Executing, Complete, and non-broadcast Simulating: no spinner
+                _ => None,
+            };
+            if let Some(msg) = msg {
+                *guard = Some(spinoff::Spinner::new(
+                    spinoff::spinners::Dots2,
+                    msg,
+                    spinoff::Color::Cyan,
+                ));
+            }
+        });
+        pipeline = pipeline.with_broadcast_progress(progress_cb);
+    }
+
     let result = {
-        let _foundry_shell = json.then(FoundryShellGuard::suppress);
+        // Suppress forge shell output: compilation spinner, broadcast chatter, etc.
+        // We show our own progress via the pipeline progress callback.
+        let _foundry_shell = FoundryShellGuard::suppress();
         pipeline.execute(&mut registry).await.context("pipeline execution failed")?
     };
 
