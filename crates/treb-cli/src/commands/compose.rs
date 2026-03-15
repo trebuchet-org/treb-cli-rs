@@ -16,7 +16,6 @@ use owo_colors::{OwoColorize, Style};
 use serde::{Deserialize, Serialize};
 use treb_config::{ResolveOpts, resolve_config};
 use treb_forge::{
-    pipeline::{PipelineConfig, PipelineContext, RunPipeline, resolve_git_commit},
     script::build_script_config_with_senders,
     sender::resolve_all_senders,
     sender_config::encode_sender_configs,
@@ -822,100 +821,77 @@ pub async fn run(
             })
             .with_context(|| format!("failed to resolve config for component '{}'", name))?;
 
-            let effective_rpc_url = rpc_url.clone().or_else(|| resolved.network.clone());
+            let mut effective_rpc_url = rpc_url.clone().or_else(|| resolved.network.clone());
+            let effective_network = network.clone().or_else(|| resolved.network.clone());
+
+            // Fork detection: swap RPC to Anvil if fork is active.
+            let active_fork = {
+                let net = effective_network.as_deref();
+                let mut store = treb_registry::ForkStateStore::new(&cwd.join(super::run::TREB_DIR));
+                if store.load().is_ok() {
+                    let fork = net.and_then(|n| store.get_active_fork(n).cloned());
+                    if let Some(ref fork_entry) = fork {
+                        effective_rpc_url = Some(fork_entry.rpc_url.clone());
+                        if let Some(ref net) = effective_network {
+                            if let Ok(endpoints) = treb_config::resolve_rpc_endpoints(&cwd) {
+                                if let Some(endpoint) = endpoints.get(net.as_str()) {
+                                    if let Some(var) = super::run::extract_env_var_name(&endpoint.raw_url) {
+                                        unsafe { env::set_var(var, &fork_entry.rpc_url) };
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    fork
+                } else {
+                    None
+                }
+            };
 
             // Sender resolution.
-            let resolved_senders = resolve_all_senders(&resolved.senders)
+            let mut resolved_senders = resolve_all_senders(&resolved.senders)
                 .await
                 .with_context(|| format!("failed to resolve senders for component '{}'", name))?;
 
-            // Encode sender configs for Solidity consumption.
+            // Inject treb context env vars for Solidity consumption.
+            unsafe { env::set_var("NAMESPACE", &resolved.namespace) };
+            if let Some(ref net) = effective_network {
+                unsafe { env::set_var("NETWORK", net) };
+            }
             let encoded_senders = encode_sender_configs(&resolved_senders, &resolved.senders)
                 .with_context(|| {
                     format!("failed to encode sender configs for component '{}'", name)
                 })?;
-            // SAFETY: this is single-threaded CLI code; no concurrent env access.
             unsafe { env::set_var("SENDER_CONFIGS", &encoded_senders) };
-
-            // Build ScriptConfig.
-            let mut script_config =
-                build_script_config_with_senders(&resolved, &component.script, &resolved_senders)
-                    .with_context(|| {
-                    format!("failed to build script config for component '{}'", name)
-                })?;
 
             let args = component.args.clone().unwrap_or_default();
 
-            script_config
-                .sig(sig)
-                .args(args)
-                .broadcast(broadcast)
-                .dry_run(false)
-                .slow(slow || resolved.slow)
-                .legacy(legacy)
-                .verify(effective_verify)
-                .non_interactive(true); // Already prompted above
-
-            if let Some(ref url) = effective_rpc_url {
-                script_config.rpc_url(url);
-            }
-
-            // Verbose per-component context.
-            if verbose > 0 && !json {
-                let sig_display = sig.to_string();
-                let verify_display = effective_verify.to_string();
-                let rpc_display = effective_rpc_url.clone().unwrap_or_default();
-                let chain_id_str = if !rpc_display.is_empty() {
-                    let resolved_url = super::run::resolve_rpc_url_for_chain_id(&rpc_display, &cwd);
-                    if let Some(url) = resolved_url {
-                        let cid = super::run::fetch_chain_id(&url).await.unwrap_or(0);
-                        if cid > 0 { cid.to_string() } else { String::new() }
-                    } else {
-                        String::new()
-                    }
-                } else {
-                    String::new()
-                };
-
-                let mut kv_pairs: Vec<(&str, &str)> =
-                    vec![("Script", &component.script), ("Namespace", &resolved.namespace)];
-                if !rpc_display.is_empty() {
-                    kv_pairs.push(("RPC", &rpc_display));
-                }
-                if !chain_id_str.is_empty() {
-                    kv_pairs.push(("Chain ID", &chain_id_str));
-                }
-                kv_pairs.push(("Sig", &sig_display));
-                kv_pairs.push(("Verify", &verify_display));
-                output::eprint_kv(&kv_pairs);
-                eprintln!();
-            }
-
-            // Build pipeline context.
-            let pipeline_config = PipelineConfig {
-                script_path: component.script.clone(),
-                broadcast: true,
-                namespace: resolved.namespace.clone(),
-                script_sig: sig.to_string(),
-                script_args: Vec::new(),
-                ..Default::default()
-            };
-
-            let git_commit = resolve_git_commit();
-
-            let pipeline_context = PipelineContext {
-                config: pipeline_config,
-                script_path: PathBuf::from(&component.script),
-                git_commit,
-                project_root: cwd.clone(),
-                deployer_sender: None,
-                sender_labels: Default::default(),
-                sender_role_names: Default::default(),
-            };
-
-            // Execute pipeline.
-            let pipeline = RunPipeline::new(pipeline_context).with_script_config(script_config);
-            let result = pipeline.execute(&mut registry).await?;
+            // Execute through shared pipeline path.
+            let result = super::run::execute_script(
+                super::run::ExecuteScriptOpts {
+                    script: component.script.clone(),
+                    sig: sig.to_string(),
+                    args,
+                    target_contract: None,
+                    broadcast,
+                    dry_run: false,
+                    verbose,
+                    json,
+                    slow,
+                    legacy,
+                    verify: effective_verify,
+                    non_interactive: true,
+                    effective_rpc_url: effective_rpc_url.clone(),
+                    effective_network: effective_network.clone(),
+                    is_fork: active_fork.is_some(),
+                    broadcast_hook: None,
+                },
+                &resolved,
+                &mut resolved_senders,
+                &cwd,
+                &mut registry,
+            )
+            .await?;
 
             Ok((result, resolved.namespace, effective_rpc_url))
         }
@@ -966,7 +942,27 @@ pub async fn run(
                 save_compose_state(&state)?;
             }
             Err(e) => {
-                let error_msg = format!("{}", e);
+                // Show full trace in the step output, but extract a concise
+                // revert reason for the orchestration summary.
+                let full = format!("{:#}", e);
+                if !json {
+                    eprintln!("{full}");
+                }
+                // Extract just the revert reason: find last Revert line,
+                // strip tree-drawing characters and "[Revert]" prefix.
+                let error_msg = full
+                    .lines()
+                    .rev()
+                    .find(|l| l.contains("[Revert]"))
+                    .map(|l| {
+                        l.trim()
+                            .trim_start_matches(|c: char| "└─├│ ← ".contains(c))
+                            .trim()
+                            .trim_start_matches("[Revert]")
+                            .trim()
+                            .to_string()
+                    })
+                    .unwrap_or_else(|| format!("{e}"));
                 if !json {
                     eprintln!(
                         "{}",

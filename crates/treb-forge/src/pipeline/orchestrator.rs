@@ -198,7 +198,7 @@ impl RunPipeline {
             for (_, arena) in &mut execution.traces {
                 decode_trace_arena(&mut arena.arena, &decoder).await;
                 collapse_decoded_bytecode_args(&mut arena.arena, &artifact_index);
-                let rendered = render_trace_arena(arena);
+                let rendered = strip_internal_events(&render_trace_arena(arena));
                 if !rendered.trim().is_empty() {
                     err_parts.push(rendered);
                 }
@@ -487,7 +487,7 @@ async fn render_traces_for_verbosity(
             extract_per_transaction_traces(&arena.arena, transaction_metadata);
         }
 
-        let rendered = render_trace_arena(arena);
+        let rendered = strip_internal_events(&render_trace_arena(arena));
         match kind {
             TraceKind::Execution => execution_parts.push(rendered),
             TraceKind::Setup if verbosity >= 3 => setup_parts.push(rendered),
@@ -501,6 +501,27 @@ async fn render_traces_for_verbosity(
         (!setup_parts.is_empty()).then(|| setup_parts.join("\n"));
 
     (execution_traces, setup_traces)
+}
+
+/// Strip internal treb event lines (e.g. `emit TransactionSimulated`,
+/// `emit DeploymentRecorded`) from rendered trace output.
+fn strip_internal_events(rendered: &str) -> String {
+    const INTERNAL_EVENTS: &[&str] = &[
+        "TransactionSimulated",
+        "DeploymentRecorded",
+        "ContractDeployed",
+        "SafeTransactionQueued",
+        "GovernorProposalCreated",
+        "CollisionDetected",
+        "ProxyRelationship",
+    ];
+    rendered
+        .lines()
+        .filter(|line| {
+            !INTERNAL_EVENTS.iter().any(|ev| line.contains(&format!("emit {ev}")))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Load the foundry configuration from the project root.
@@ -718,7 +739,7 @@ fn extract_per_transaction_traces(
         }
 
         let sparsed = SparsedTraceArena { arena: cloned_arena, ignored: Default::default() };
-        let rendered = render_trace_arena(&sparsed);
+        let rendered = strip_internal_events(&render_trace_arena(&sparsed));
         if !rendered.trim().is_empty() {
             meta.trace = Some(rendered);
         }

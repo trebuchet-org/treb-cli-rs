@@ -34,8 +34,8 @@ use crate::{
     ui::{color, emoji, interactive::is_non_interactive, selector::fuzzy_select_network},
 };
 
-const FOUNDRY_TOML: &str = "foundry.toml";
-const TREB_DIR: &str = ".treb";
+pub(crate) const FOUNDRY_TOML: &str = "foundry.toml";
+pub(crate) const TREB_DIR: &str = ".treb";
 
 
 /// Parse a `KEY=VALUE` environment variable string.
@@ -113,7 +113,7 @@ fn sorted_env_var_entries(env_vars: &[String]) -> Vec<(String, String)> {
 }
 
 /// Extract an env var name from a `${VAR}` template string.
-fn extract_env_var_name(template: &str) -> Option<&str> {
+pub(crate) fn extract_env_var_name(template: &str) -> Option<&str> {
     let s = template.strip_prefix("${")?.strip_suffix('}')?;
     if s.is_empty() { None } else { Some(s) }
 }
@@ -346,6 +346,158 @@ pub(crate) async fn fetch_chain_id(rpc_url: &str) -> anyhow::Result<u64> {
     Ok(u64::from_str_radix(stripped, 16).unwrap_or(0))
 }
 
+// ── Shared script execution ──────────────────────────────────────────────
+
+/// Options for [`execute_script`].
+pub struct ExecuteScriptOpts {
+    pub script: String,
+    pub sig: String,
+    pub args: Vec<String>,
+    pub target_contract: Option<String>,
+    pub broadcast: bool,
+    pub dry_run: bool,
+    pub verbose: u8,
+    pub json: bool,
+    pub slow: bool,
+    pub legacy: bool,
+    pub verify: bool,
+    pub non_interactive: bool,
+    /// Already-resolved effective RPC URL (after fork override).
+    pub effective_rpc_url: Option<String>,
+    /// Already-resolved effective network name.
+    pub effective_network: Option<String>,
+    /// Whether an active fork is detected.
+    pub is_fork: bool,
+    /// Optional broadcast confirmation hook.
+    pub broadcast_hook: Option<BroadcastHook>,
+}
+
+/// Execute a single script through the full pipeline.
+///
+/// Shared execution path used by both `treb run` and `treb compose`.
+/// Handles chain ID resolution, pipeline construction with full sender
+/// context, shell suppression, and progress spinner.
+pub async fn execute_script(
+    opts: ExecuteScriptOpts,
+    resolved: &treb_config::ResolvedConfig,
+    resolved_senders: &mut HashMap<String, ResolvedSender>,
+    cwd: &std::path::Path,
+    registry: &mut Registry,
+) -> anyhow::Result<PipelineResult> {
+    let is_safe = resolved_senders.get("deployer").is_some_and(|s| s.is_safe());
+    let is_gov = resolved_senders.get("deployer").is_some_and(|s| s.is_governor());
+
+    // Build ScriptConfig
+    let mut script_config =
+        build_script_config_with_senders(resolved, &opts.script, resolved_senders)
+            .context("failed to build script configuration")?;
+
+    script_config
+        .sig(&opts.sig)
+        .args(opts.args.clone())
+        .broadcast(opts.broadcast && !is_safe && !is_gov)
+        .dry_run(opts.dry_run)
+        .slow(opts.slow || resolved.slow)
+        .legacy(opts.legacy)
+        .verify(opts.verify)
+        .non_interactive(opts.non_interactive);
+
+    if let Some(ref tc) = opts.target_contract {
+        script_config.target_contract(tc);
+    }
+    if let Some(ref url) = opts.effective_rpc_url {
+        script_config.rpc_url(url);
+    }
+
+    // Resolve chain ID from RPC
+    let chain_id = if let Some(ref network_or_url) = opts.effective_rpc_url {
+        let actual_url = resolve_rpc_url_for_chain_id(network_or_url, cwd);
+        if let Some(url) = actual_url { fetch_chain_id(&url).await.unwrap_or(0) } else { 0 }
+    } else {
+        0
+    };
+
+    // Build PipelineConfig + PipelineContext
+    let pipeline_config = PipelineConfig {
+        script_path: opts.script.clone(),
+        broadcast: opts.broadcast,
+        namespace: resolved.namespace.clone(),
+        chain_id,
+        script_sig: opts.sig.clone(),
+        script_args: Vec::new(),
+        verbosity: opts.verbose,
+        is_fork: opts.is_fork,
+        ..Default::default()
+    };
+
+    let sender_role_names: Vec<String> = resolved_senders.keys().cloned().collect();
+    let sender_labels = resolved_senders
+        .iter()
+        .map(|(role, sender)| (sender.sender_address(), role.clone()))
+        .collect();
+    let deployer_sender = resolved_senders.remove("deployer");
+
+    let pipeline_context = PipelineContext {
+        config: pipeline_config,
+        script_path: PathBuf::from(&opts.script),
+        git_commit: resolve_git_commit(),
+        project_root: cwd.to_path_buf(),
+        deployer_sender,
+        sender_labels,
+        sender_role_names,
+    };
+
+    let mut pipeline = RunPipeline::new(pipeline_context).with_script_config(script_config);
+
+    let wants_broadcast = opts.broadcast && !opts.dry_run && !is_safe && !is_gov;
+
+    // Wire broadcast hook
+    if let Some(hook) = opts.broadcast_hook {
+        pipeline = pipeline.with_broadcast_hook(hook);
+    }
+
+    // Wire progress spinner (shared handle so we can clear on error)
+    let spinner: Arc<Mutex<Option<spinoff::Spinner>>> = Arc::new(Mutex::new(None));
+    if !opts.json {
+        let is_broadcast = wants_broadcast;
+        let spinner_ref = spinner.clone();
+        let progress_cb: BroadcastProgressCallback = Box::new(move |phase| {
+            let mut guard = spinner_ref.lock().unwrap();
+            if let Some(mut s) = guard.take() {
+                s.clear();
+            }
+            let msg = match phase {
+                BroadcastPhase::Compiling => Some("Compiling"),
+                BroadcastPhase::Simulating if is_broadcast => Some("Simulating"),
+                BroadcastPhase::Broadcasting => Some("Broadcasting"),
+                _ => None,
+            };
+            if let Some(msg) = msg {
+                *guard = Some(spinoff::Spinner::new(
+                    spinoff::spinners::Dots2,
+                    msg,
+                    spinoff::Color::Cyan,
+                ));
+            }
+        });
+        pipeline = pipeline.with_broadcast_progress(progress_cb);
+    }
+
+    // Execute with forge shell suppressed
+    let result = {
+        let _foundry_shell = FoundryShellGuard::suppress();
+        let r = pipeline.execute(registry).await;
+        // Always clear spinner before returning (success or error).
+        // Drop the spinner first (stops the animation thread), then
+        // force-clear the line since spinoff doesn't always erase it.
+        drop(spinner.lock().unwrap().take());
+        eprint!("\x1b[2K\r");
+        r.context("pipeline execution failed")?
+    };
+
+    Ok(result)
+}
+
 /// Execute a deployment script.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
@@ -444,35 +596,11 @@ pub async fn run(
         .context("failed to encode sender configs")?;
     unsafe { env::set_var("SENDER_CONFIGS", &encoded_senders) };
 
-    // ── Build ScriptConfig with all CLI flags ────────────────────────────
-    let mut script_config = build_script_config_with_senders(&resolved, script, &resolved_senders)
-        .context("failed to build script configuration")?;
-
-    // Safe/Governor senders use treb's own proposal flow, not forge broadcast.
-    let is_safe = resolved_senders.get("deployer").is_some_and(|s| s.is_safe());
-    let is_gov = resolved_senders.get("deployer").is_some_and(|s| s.is_governor());
-
-    script_config
-        .sig(sig)
-        .args(args)
-        .broadcast(broadcast && !is_safe && !is_gov)
-        .dry_run(dry_run)
-        .slow(slow || resolved.slow)
-        .legacy(legacy)
-        .verify(verify)
-        .non_interactive(non_interactive);
-
-    if let Some(ref tc) = target_contract {
-        script_config.target_contract(tc);
-    }
-
-    // --rpc-url overrides the network-derived URL
-    if let Some(ref url) = effective_rpc_url {
-        script_config.rpc_url(url);
-    }
-
     // ── Dump command and exit ─────────────────────────────────────────
     if dump_command {
+        let script_config =
+            build_script_config_with_senders(&resolved, script, &resolved_senders)
+                .context("failed to build script configuration")?;
         let cmd_parts = script_config.to_forge_command();
         let cmd_str = cmd_parts
             .iter()
@@ -488,6 +616,9 @@ pub async fn run(
         eprintln!("{}", cmd_str);
         return Ok(());
     }
+
+    let is_safe = resolved_senders.get("deployer").is_some_and(|s| s.is_safe());
+    let is_gov = resolved_senders.get("deployer").is_some_and(|s| s.is_governor());
 
     // ── Resolve chain ID from RPC ──────────────────────────────────────
     let chain_id = if let Some(ref network_or_url) = effective_rpc_url {
@@ -596,52 +727,14 @@ pub async fn run(
         }
     }
 
-    // ── Build PipelineConfig and PipelineContext ─────────────────────────
-    let pipeline_config = PipelineConfig {
-        script_path: script.to_string(),
-        broadcast,
-        namespace: resolved.namespace.clone(),
-        chain_id,
-        script_sig: sig.to_string(),
-        script_args: Vec::new(), // args already in ScriptConfig
-        verbosity: verbose,
-        is_fork: active_fork.is_some(),
-        ..Default::default()
-    };
-
-    let git_commit = resolve_git_commit();
-
-    // Build sender address → role name mapping for trace labeling.
-    let sender_role_names: Vec<String> = resolved_senders.keys().cloned().collect();
-    let sender_labels = resolved_senders
-        .iter()
-        .map(|(role, sender)| (sender.sender_address(), role.clone()))
-        .collect();
-
-    // Extract the deployer sender so the pipeline can detect Safe/Governor flows.
-    let deployer_sender = resolved_senders.remove("deployer");
-    let is_governor_sender = deployer_sender.as_ref().is_some_and(|s| s.is_governor());
-
-    let pipeline_context = PipelineContext {
-        config: pipeline_config,
-        script_path: PathBuf::from(script),
-        git_commit,
-        project_root: cwd.clone(),
-        deployer_sender,
-        sender_labels,
-        sender_role_names,
-    };
-
     // ── Open registry and execute pipeline ───────────────────────────────
     let mut registry = Registry::open(&cwd).context("failed to open registry")?;
 
-    let mut pipeline = RunPipeline::new(pipeline_context).with_script_config(script_config);
-
-    // Wire broadcast confirmation hook (interactive broadcast flow).
-    // Foundry's own SpinnerReporter handles compilation progress.
     let wants_broadcast = broadcast && !dry_run && !is_safe && !is_gov;
     let broadcast_previewed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    if wants_broadcast && prompts_enabled && !json {
+
+    // Build broadcast confirmation hook for interactive mode
+    let broadcast_hook = if wants_broadcast && prompts_enabled && !json {
         let previewed = broadcast_previewed.clone();
         let hook: BroadcastHook = Box::new(move |transactions: &[RecordedTransaction]| {
             display_transactions_grouped(transactions, 0);
@@ -652,44 +745,36 @@ pub async fn run(
             }
             confirmed
         });
-        pipeline = pipeline.with_broadcast_hook(hook);
-    }
-
-    // Wire pipeline progress: suppress forge output and show clean spinner.
-    if !json {
-        let is_broadcast = wants_broadcast;
-        let spinner: Arc<Mutex<Option<spinoff::Spinner>>> = Arc::new(Mutex::new(None));
-        let spinner_ref = spinner.clone();
-        let progress_cb: BroadcastProgressCallback = Box::new(move |phase| {
-            let mut guard = spinner_ref.lock().unwrap();
-            // Stop previous spinner (clears the line)
-            if let Some(mut s) = guard.take() {
-                s.clear();
-            }
-            let msg = match phase {
-                BroadcastPhase::Compiling => Some("Compiling"),
-                BroadcastPhase::Simulating if is_broadcast => Some("Simulating"),
-                BroadcastPhase::Broadcasting => Some("Broadcasting"),
-                // Executing, Complete, and non-broadcast Simulating: no spinner
-                _ => None,
-            };
-            if let Some(msg) = msg {
-                *guard = Some(spinoff::Spinner::new(
-                    spinoff::spinners::Dots2,
-                    msg,
-                    spinoff::Color::Cyan,
-                ));
-            }
-        });
-        pipeline = pipeline.with_broadcast_progress(progress_cb);
-    }
-
-    let result = {
-        // Suppress forge shell output: compilation spinner, broadcast chatter, etc.
-        // We show our own progress via the pipeline progress callback.
-        let _foundry_shell = FoundryShellGuard::suppress();
-        pipeline.execute(&mut registry).await.context("pipeline execution failed")?
+        Some(hook)
+    } else {
+        None
     };
+
+    let result = execute_script(
+        ExecuteScriptOpts {
+            script: script.to_string(),
+            sig: sig.to_string(),
+            args,
+            target_contract,
+            broadcast,
+            dry_run,
+            verbose,
+            json,
+            slow,
+            legacy,
+            verify,
+            non_interactive,
+            effective_rpc_url,
+            effective_network,
+            is_fork: active_fork.is_some(),
+            broadcast_hook,
+        },
+        &resolved,
+        &mut resolved_senders,
+        &cwd,
+        &mut registry,
+    )
+    .await?;
 
     // ── Display results ──────────────────────────────────────────────────
     let skip_traces = broadcast_previewed.load(std::sync::atomic::Ordering::Relaxed);
