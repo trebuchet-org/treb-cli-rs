@@ -13,6 +13,7 @@ use treb_core::{
 use crate::{
     REGISTRY_DIR,
     lookup::LookupStore,
+    solidity_registry::SolidityRegistryStore,
     store::{
         AddressbookStore, DeploymentStore, GovernorProposalStore, SafeTransactionStore,
         TransactionStore,
@@ -35,6 +36,7 @@ pub struct Registry {
     safe_transactions: SafeTransactionStore,
     governor_proposals: GovernorProposalStore,
     lookup: LookupStore,
+    solidity_registry: SolidityRegistryStore,
 }
 
 impl Registry {
@@ -52,6 +54,7 @@ impl Registry {
         let mut safe_transactions = SafeTransactionStore::new(&registry_dir);
         let mut governor_proposals = GovernorProposalStore::new(&registry_dir);
         let lookup = LookupStore::new(&registry_dir);
+        let solidity_registry = SolidityRegistryStore::new(&registry_dir);
 
         // Load existing data (no-ops if files don't exist).
         // Addressbook is loaded lazily so malformed optional data does not
@@ -69,6 +72,7 @@ impl Registry {
             safe_transactions,
             governor_proposals,
             lookup,
+            solidity_registry,
         })
     }
 
@@ -141,24 +145,24 @@ impl Registry {
         self.deployments.get(id)
     }
 
-    /// Insert a new deployment and rebuild the lookup index.
+    /// Insert a new deployment and rebuild derived indexes.
     pub fn insert_deployment(&mut self, deployment: Deployment) -> Result<(), TrebError> {
         self.deployments.insert(deployment)?;
-        self.rebuild_lookup_index()?;
+        self.rebuild_derived_indexes()?;
         Ok(())
     }
 
-    /// Update an existing deployment and rebuild the lookup index.
+    /// Update an existing deployment and rebuild derived indexes.
     pub fn update_deployment(&mut self, deployment: Deployment) -> Result<(), TrebError> {
         self.deployments.update(deployment)?;
-        self.rebuild_lookup_index()?;
+        self.rebuild_derived_indexes()?;
         Ok(())
     }
 
-    /// Remove a deployment by ID and rebuild the lookup index.
+    /// Remove a deployment by ID and rebuild derived indexes.
     pub fn remove_deployment(&mut self, id: &str) -> Result<Deployment, TrebError> {
         let removed = self.deployments.remove(id)?;
-        self.rebuild_lookup_index()?;
+        self.rebuild_derived_indexes()?;
         Ok(removed)
     }
 
@@ -282,6 +286,18 @@ impl Registry {
     /// Rebuild the lookup index from the current deployments and persist it.
     pub fn rebuild_lookup_index(&self) -> Result<LookupIndex, TrebError> {
         self.lookup.rebuild(self.deployments.data())
+    }
+
+    /// Rebuild the Solidity registry (`registry.json`) from the current deployments.
+    pub fn rebuild_solidity_registry(&self) -> Result<(), TrebError> {
+        self.solidity_registry.rebuild(self.deployments.data())
+    }
+
+    /// Rebuild all derived indexes (lookup + solidity registry) after deployment changes.
+    fn rebuild_derived_indexes(&self) -> Result<(), TrebError> {
+        self.rebuild_lookup_index()?;
+        self.rebuild_solidity_registry()?;
+        Ok(())
     }
 
     /// Load the current lookup index from disk.

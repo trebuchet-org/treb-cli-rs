@@ -13,13 +13,19 @@ use treb_core::{
 
 use crate::{
     DEPLOYMENTS_FILE, FORK_STATE_FILE, GOVERNOR_PROPOSALS_FILE, LOOKUP_FILE, SAFE_TXS_FILE,
-    TRANSACTIONS_FILE,
+    SOLIDITY_REGISTRY_FILE, TRANSACTIONS_FILE,
     io::{read_versioned_file_compat, write_versioned_file},
 };
 
 /// Registry JSON files that are snapshotted/restored during fork mode.
-const SNAPSHOT_FILES: &[&str] =
-    &[DEPLOYMENTS_FILE, TRANSACTIONS_FILE, SAFE_TXS_FILE, GOVERNOR_PROPOSALS_FILE, LOOKUP_FILE];
+const SNAPSHOT_FILES: &[&str] = &[
+    DEPLOYMENTS_FILE,
+    TRANSACTIONS_FILE,
+    SAFE_TXS_FILE,
+    GOVERNOR_PROPOSALS_FILE,
+    LOOKUP_FILE,
+    SOLIDITY_REGISTRY_FILE,
+];
 
 /// Maximum number of history entries retained.
 const MAX_HISTORY: usize = 100;
