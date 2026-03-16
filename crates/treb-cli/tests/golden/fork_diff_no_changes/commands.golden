@@ -1,4 +1,2 @@
-=== cmd 0: [fork diff --network mainnet] ===
-Fork Diff: mainnet
-
-No changes since fork entered.
+=== cmd 0: [fork diff] ===
+No changes detected since fork mode was entered.

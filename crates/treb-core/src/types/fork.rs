@@ -110,6 +110,15 @@ pub struct ForkHistoryEntry {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ForkState {
+    /// Whether holistic fork mode is active.
+    #[serde(default)]
+    pub active: bool,
+    /// Directory containing the holistic registry snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_dir: Option<String>,
+    /// When holistic fork mode was entered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entered_at: Option<DateTime<Utc>>,
     /// Active forks keyed by network or `network:name` for named instances.
     pub forks: HashMap<String, ForkEntry>,
     /// History of fork actions (most recent first).

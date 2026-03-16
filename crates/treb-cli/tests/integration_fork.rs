@@ -20,7 +20,7 @@ use framework::{
 /// Build a ForkEntry with fixed, deterministic values for golden file stability.
 fn sample_fork_entry(treb_dir: &std::path::Path) -> ForkEntry {
     let ts = Utc.with_ymd_and_hms(2026, 1, 15, 10, 30, 0).unwrap();
-    let snapshot_dir = treb_dir.join("priv/snapshots").join("mainnet");
+    let snapshot_dir = treb_dir.join("priv/snapshots/holistic");
     ForkEntry {
         network: "mainnet".to_string(),
         instance_name: None,
@@ -44,8 +44,12 @@ fn sample_fork_entry(treb_dir: &std::path::Path) -> ForkEntry {
 /// Pre-populate fork state with one active entry for golden file tests.
 fn seed_fork_status(project_root: &std::path::Path) {
     let treb_dir = project_root.join(".treb");
+    let entry = sample_fork_entry(&treb_dir);
+    let snapshot_dir = std::path::PathBuf::from(&entry.snapshot_dir);
+    std::fs::create_dir_all(&snapshot_dir).unwrap();
     let mut store = ForkStateStore::new(&treb_dir);
-    store.insert_active_fork(sample_fork_entry(&treb_dir)).unwrap();
+    store.enter_fork_mode(&entry.snapshot_dir).unwrap();
+    store.insert_active_fork(entry).unwrap();
 }
 
 // ── fork status: no forks ────────────────────────────────────────────────
@@ -256,7 +260,8 @@ fn fork_history_not_initialized() {
 /// (no changes between current and snapshot).
 fn seed_fork_diff_no_changes(project_root: &std::path::Path) {
     let treb_dir = project_root.join(".treb");
-    let snapshot_dir = treb_dir.join("priv/snapshots").join("mainnet");
+    let entry = sample_fork_entry(&treb_dir);
+    let snapshot_dir = std::path::PathBuf::from(&entry.snapshot_dir);
     std::fs::create_dir_all(&snapshot_dir).unwrap();
 
     // Write identical registry files to both locations
@@ -268,16 +273,18 @@ fn seed_fork_diff_no_changes(project_root: &std::path::Path) {
     std::fs::write(treb_dir.join(TRANSACTIONS_FILE), transactions).unwrap();
     std::fs::write(snapshot_dir.join(TRANSACTIONS_FILE), transactions).unwrap();
 
-    // Insert active fork entry
+    // Enter holistic fork mode and insert active fork entry
     let mut store = ForkStateStore::new(&treb_dir);
-    store.insert_active_fork(sample_fork_entry(&treb_dir)).unwrap();
+    store.enter_fork_mode(&entry.snapshot_dir).unwrap();
+    store.insert_active_fork(entry).unwrap();
 }
 
 /// Pre-populate fork state with an active fork and differing registry files
 /// (added, removed, and modified entries).
 fn seed_fork_diff_with_changes(project_root: &std::path::Path) {
     let treb_dir = project_root.join(".treb");
-    let snapshot_dir = treb_dir.join("priv/snapshots").join("mainnet");
+    let entry = sample_fork_entry(&treb_dir);
+    let snapshot_dir = std::path::PathBuf::from(&entry.snapshot_dir);
     std::fs::create_dir_all(&snapshot_dir).unwrap();
 
     // Snapshot: original state
@@ -295,9 +302,10 @@ fn seed_fork_diff_with_changes(project_root: &std::path::Path) {
     std::fs::write(treb_dir.join(TRANSACTIONS_FILE), transactions).unwrap();
     std::fs::write(snapshot_dir.join(TRANSACTIONS_FILE), transactions).unwrap();
 
-    // Insert active fork entry
+    // Enter holistic fork mode and insert active fork entry
     let mut store = ForkStateStore::new(&treb_dir);
-    store.insert_active_fork(sample_fork_entry(&treb_dir)).unwrap();
+    store.enter_fork_mode(&entry.snapshot_dir).unwrap();
+    store.insert_active_fork(entry).unwrap();
 }
 
 // ── fork diff: no changes ───────────────────────────────────────────────
@@ -312,7 +320,7 @@ fn fork_diff_no_changes() {
     let test = IntegrationTest::new("fork_diff_no_changes")
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_fork_diff_no_changes(ctx.path()))
-        .test(&["fork", "diff", "--network", "mainnet"])
+        .test(&["fork", "diff"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
@@ -330,7 +338,7 @@ fn fork_diff_with_changes() {
     let test = IntegrationTest::new("fork_diff_with_changes")
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_fork_diff_with_changes(ctx.path()))
-        .test(&["fork", "diff", "--network", "mainnet"])
+        .test(&["fork", "diff"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
@@ -348,7 +356,7 @@ fn fork_diff_json() {
     let test = IntegrationTest::new("fork_diff_json")
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_fork_diff_with_changes(ctx.path()))
-        .test(&["fork", "diff", "--network", "mainnet", "--json"])
+        .test(&["fork", "diff", "--json"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
@@ -356,7 +364,7 @@ fn fork_diff_json() {
 
 // ── fork diff: not forked ───────────────────────────────────────────────
 
-/// `treb fork diff --network mainnet` when no fork is active should error
+/// `treb fork diff` when no fork is active should error
 /// with a message mentioning "not in fork mode".
 #[test]
 fn fork_diff_not_forked() {
@@ -365,7 +373,7 @@ fn fork_diff_not_forked() {
 
     let test = IntegrationTest::new("fork_diff_not_forked")
         .setup(&["init"])
-        .test(&["fork", "diff", "--network", "mainnet"])
+        .test(&["fork", "diff"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -391,8 +399,9 @@ fn seed_fork_exit(project_root: &std::path::Path) {
     std::fs::write(treb_dir.join(TRANSACTIONS_FILE), transactions).unwrap();
     std::fs::write(snapshot_dir.join(TRANSACTIONS_FILE), transactions).unwrap();
 
-    // Insert active fork entry
+    // Enter holistic fork mode and insert active fork entry
     let mut store = ForkStateStore::new(&treb_dir);
+    store.enter_fork_mode(&entry.snapshot_dir).unwrap();
     store.insert_active_fork(entry).unwrap();
 }
 
@@ -418,7 +427,7 @@ fn fork_enter_not_initialized() {
 
 // ── fork enter: already forked ──────────────────────────────────────────
 
-/// `treb fork enter --network mainnet` when mainnet is already forked should
+/// `treb fork enter --network mainnet` when already in fork mode should
 /// error and suggest running `treb fork exit`.
 #[test]
 fn fork_enter_already_forked() {
@@ -455,8 +464,8 @@ fn fork_enter_no_rpc_url() {
 
 // ── fork exit: not forked ───────────────────────────────────────────────
 
-/// `treb fork exit --network mainnet` when mainnet is not actively forked
-/// should error with a message containing "not in fork mode".
+/// `treb fork exit` when not in fork mode should error
+/// with a message containing "not in fork mode".
 #[test]
 fn fork_exit_not_forked() {
     let ctx = TestContext::new("minimal-project");
@@ -464,7 +473,7 @@ fn fork_exit_not_forked() {
 
     let test = IntegrationTest::new("fork_exit_not_forked")
         .setup(&["init"])
-        .test(&["fork", "exit", "--network", "mainnet"])
+        .test(&["fork", "exit"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -473,9 +482,9 @@ fn fork_exit_not_forked() {
 
 // ── fork exit: success ──────────────────────────────────────────────────
 
-/// `treb fork exit --network mainnet` with an active fork should succeed,
+/// `treb fork exit` with an active fork should succeed,
 /// printing confirmation lines. A subsequent `fork status` should confirm
-/// the fork state no longer contains mainnet.
+/// the fork mode is no longer active.
 #[test]
 fn fork_exit_success() {
     let ctx = TestContext::new("minimal-project");
@@ -484,7 +493,7 @@ fn fork_exit_success() {
     let test = IntegrationTest::new("fork_exit_success")
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_fork_exit(ctx.path()))
-        .test(&["fork", "exit", "--network", "mainnet"])
+        .test(&["fork", "exit"])
         .test(&["fork", "status"])
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -493,7 +502,7 @@ fn fork_exit_success() {
 
 // ── fork revert: not forked ─────────────────────────────────────────────
 
-/// `treb fork revert --network mainnet` when mainnet is not forked should
+/// `treb fork revert` when not in fork mode should
 /// error with a message mentioning "not in fork mode".
 #[test]
 fn fork_revert_not_forked() {
@@ -502,34 +511,17 @@ fn fork_revert_not_forked() {
 
     let test = IntegrationTest::new("fork_revert_not_forked")
         .setup(&["init"])
-        .test(&["fork", "revert", "--network", "mainnet"])
+        .test(&["fork", "revert"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
 }
 
-// ── fork revert: no active forks ────────────────────────────────────────
+// ── fork revert: port unreachable (skips, doesn't error) ────────────────
 
-/// `treb fork revert --all --network mainnet` when no forks are active
-/// should print "No active forks to revert." (not an error).
-#[test]
-fn fork_revert_no_active_forks() {
-    let ctx = TestContext::new("minimal-project");
-    let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
-
-    let test = IntegrationTest::new("fork_revert_no_active_forks")
-        .setup(&["init"])
-        .test(&["fork", "revert", "--network", "mainnet", "--all"])
-        .extra_normalizer(Box::new(path_normalizer));
-
-    run_integration_test(&test, &ctx);
-}
-
-// ── fork revert: port unreachable ───────────────────────────────────────
-
-/// `treb fork revert --network mainnet` when the fork's Anvil port (18545)
-/// is not reachable should error mentioning the port and "not reachable".
+/// `treb fork revert` when the fork's Anvil port (18545) is not reachable
+/// should still succeed (skipping unreachable forks), and restore the registry.
 #[test]
 fn fork_revert_port_unreachable() {
     let ctx = TestContext::new("minimal-project");
@@ -538,8 +530,7 @@ fn fork_revert_port_unreachable() {
     let test = IntegrationTest::new("fork_revert_port_unreachable")
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_fork_status(ctx.path()))
-        .test(&["fork", "revert", "--network", "mainnet"])
-        .expect_err(true)
+        .test(&["fork", "revert"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
@@ -565,7 +556,7 @@ fn fork_restart_not_forked() {
 
 // ── fork restart: no snapshot dir ────────────────────────────────────────
 
-/// `treb fork restart --network mainnet` when the fork's snapshot directory
+/// `treb fork restart --network mainnet` when the holistic snapshot directory
 /// does not exist should error mentioning "failed to restore registry".
 /// With background Anvil subprocess behavior, restart kills the old process
 /// and starts fresh, but still needs the snapshot directory for registry

@@ -1,2 +1,2 @@
-=== cmd 0: [fork diff --network mainnet] ===
-Error: network 'mainnet' is not in fork mode
+=== cmd 0: [fork diff] ===
+Error: not in fork mode

@@ -1,14 +1,16 @@
 === cmd 0: [fork status --json] ===
-[
-  {
-    "chainId": 1,
-    "deploymentCount": 0,
-    "network": "mainnet",
-    "port": 18545,
-    "rpcUrl": "http://localhost:18545",
-    "snapshotCount": 0,
-    "startedAt": "<TIMESTAMP>",
-    "status": "stopped",
-    "uptime": "<UPTIME>"
-  }
-]
+{
+  "active": true,
+  "enteredAt": "<TIMESTAMP>",
+  "forks": [
+    {
+      "network": "mainnet",
+      "rpcUrl": "http://localhost:18545",
+      "port": 18545,
+      "chainId": 1,
+      "forkBlockNumber": null,
+      "startedAt": "<TIMESTAMP>",
+      "status": "stopped"
+    }
+  ]
+}

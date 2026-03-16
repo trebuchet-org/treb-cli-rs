@@ -1,10 +1,10 @@
 === cmd 0: [fork status] ===
-Active Forks
+Fork mode active since <TIMESTAMP> UTC (0s ago)
 
   mainnet
     Chain ID:     1
-    Fork URL:     http://localhost:18545
-    Status:       stopped
-    Uptime:       <UPTIME>
+    RPC URL:      http://localhost:18545
+    Anvil PID:    0
+    Status:       dead
+    Uptime:       1447h34m
     Snapshots:    0
-    Fork Deploys: 0

@@ -2,9 +2,9 @@
 [
   {
     "action": "restart",
-    "details": "Anvil reset; snapshot: 0x2",
     "network": "mainnet",
-    "timestamp": "<TIMESTAMP>"
+    "timestamp": "<TIMESTAMP>",
+    "details": "Anvil reset; snapshot: 0x2"
   },
   {
     "action": "enter",

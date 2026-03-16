@@ -538,34 +538,20 @@ fn build_migrate() -> ClapCommand {
 
 fn build_fork() -> ClapCommand {
     ClapCommand::new("fork")
-        .about("Fork a network for local testing")
+        .about("Fork networks for local testing")
         .subcommand(
             ClapCommand::new("enter")
-                .about("Enter fork mode for a network: snapshot registry and record fork state")
+                .about("Enter fork mode: snapshot registry, start Anvil for all networks")
                 .arg(
                     Arg::new("network")
-                        .value_name("NETWORK")
-                        .conflicts_with("network-flag")
-                        .help("Network name"),
-                )
-                .arg(
-                    Arg::new("network-flag")
                         .long("network")
-                        .value_name("NETWORK")
-                        .conflicts_with("network")
-                        .help("Network name"),
-                )
-                .group(
-                    ArgGroup::new("enter-network")
-                        .args(["network", "network-flag"])
-                        .required(true)
-                        .multiple(false),
+                        .value_delimiter(',')
+                        .help("Fork specific networks (comma-separated)"),
                 )
                 .arg(
                     Arg::new("rpc-url")
                         .long("rpc-url")
-                        .visible_alias("url")
-                        .help("Upstream RPC URL to fork"),
+                        .help("Upstream RPC URL (only with single --network)"),
                 )
                 .arg(
                     Arg::new("fork-block-number")
@@ -575,66 +561,24 @@ fn build_fork() -> ClapCommand {
         )
         .subcommand(
             ClapCommand::new("exit")
-                .about("Exit fork mode: restore registry from snapshot and remove fork state")
-                .arg(Arg::new("network").value_name("NETWORK").help("Network name to exit"))
-                .arg(
-                    Arg::new("network-flag")
-                        .long("network")
-                        .value_name("NETWORK")
-                        .help("Network name to exit"),
-                )
-                .arg(
-                    Arg::new("all")
-                        .long("all")
-                        .action(ArgAction::SetTrue)
-                        .help("Exit all active forks"),
-                )
-                .group(
-                    ArgGroup::new("exit-network").args(["network", "network-flag"]).multiple(false),
-                ),
+                .about("Exit fork mode: stop all Anvils, restore registry"),
         )
         .subcommand(
             ClapCommand::new("revert")
-                .about("Revert the fork to its last snapshot")
-                .arg(Arg::new("network").value_name("NETWORK").help("Network name to revert"))
-                .arg(
-                    Arg::new("network-flag")
-                        .long("network")
-                        .value_name("NETWORK")
-                        .help("Network name to revert"),
-                )
-                .arg(
-                    Arg::new("all")
-                        .long("all")
-                        .action(ArgAction::SetTrue)
-                        .help("Revert all active forks"),
-                )
-                .group(
-                    ArgGroup::new("revert-network")
-                        .args(["network", "network-flag"])
-                        .multiple(false),
-                ),
+                .about("Revert all forks to their initial state"),
         )
         .subcommand(
             ClapCommand::new("restart")
-                .about("Restart the fork from a new block")
-                .arg(Arg::new("network").value_name("NETWORK").help("Network name to restart"))
+                .about("Restart a fork from a new block")
                 .arg(
-                    Arg::new("network-flag")
+                    Arg::new("network")
                         .long("network")
-                        .value_name("NETWORK")
                         .help("Network name to restart"),
                 )
                 .arg(
                     Arg::new("fork-block-number")
                         .long("fork-block-number")
                         .help("Fork block number to reset to"),
-                )
-                .group(
-                    ArgGroup::new("restart-network")
-                        .args(["network", "network-flag"])
-                        .required(true)
-                        .multiple(false),
                 ),
         )
         .subcommand(
@@ -645,17 +589,10 @@ fn build_fork() -> ClapCommand {
         .subcommand(
             ClapCommand::new("history")
                 .about("Show fork history")
-                .arg(Arg::new("network").value_name("NETWORK").help("Filter by network name"))
                 .arg(
-                    Arg::new("network-flag")
+                    Arg::new("network")
                         .long("network")
-                        .value_name("NETWORK")
                         .help("Filter by network name"),
-                )
-                .group(
-                    ArgGroup::new("history-network")
-                        .args(["network", "network-flag"])
-                        .multiple(false),
                 )
                 .arg(
                     Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"),
@@ -664,21 +601,24 @@ fn build_fork() -> ClapCommand {
         .subcommand(
             ClapCommand::new("diff")
                 .about("Diff current registry vs snapshot")
-                .arg(Arg::new("network").value_name("NETWORK").help("Network name to diff"))
-                .arg(
-                    Arg::new("network-flag")
-                        .long("network")
-                        .value_name("NETWORK")
-                        .help("Network name to diff"),
-                )
-                .group(
-                    ArgGroup::new("diff-network")
-                        .args(["network", "network-flag"])
-                        .required(true)
-                        .multiple(false),
-                )
                 .arg(
                     Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"),
+                ),
+        )
+        .subcommand(
+            ClapCommand::new("logs")
+                .about("Tail Anvil log files for active forks")
+                .arg(
+                    Arg::new("follow")
+                        .long("follow")
+                        .short('f')
+                        .action(ArgAction::SetTrue)
+                        .help("Continuously tail log files"),
+                )
+                .arg(
+                    Arg::new("network")
+                        .long("network")
+                        .help("Filter to a specific network"),
                 ),
         )
 }

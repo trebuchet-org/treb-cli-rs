@@ -1,2 +1,3 @@
-=== cmd 0: [fork revert --network mainnet] ===
-Error: Anvil node for network 'mainnet' is not reachable at port 18545; cannot revert
+=== cmd 0: [fork revert] ===
+Registry restored from snapshot.
+Warning: Anvil for 'mainnet' not reachable at port 18545; skipping EVM revert

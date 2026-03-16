@@ -471,6 +471,20 @@ pub fn stop_background_anvil(pid_file: &std::path::Path) -> Result<(), TrebError
     Ok(())
 }
 
+/// Deterministic port for a chain ID: `9700 + (chain_id % 79)`.
+///
+/// Range 9700–9778. Prime 79 gives only 1 collision across 24 common chains.
+/// If the deterministic port is occupied, callers should fall back to
+/// [`find_available_port`].
+pub fn deterministic_fork_port(chain_id: u64) -> u16 {
+    9700 + (chain_id % 79) as u16
+}
+
+/// Check whether a deterministic port is available by trying to bind it.
+pub fn is_port_available(port: u16) -> bool {
+    std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
+}
+
 /// Find an available TCP port by binding to port 0 and reading back the assigned port.
 pub fn find_available_port() -> Result<u16, TrebError> {
     let listener = std::net::TcpListener::bind("127.0.0.1:0")

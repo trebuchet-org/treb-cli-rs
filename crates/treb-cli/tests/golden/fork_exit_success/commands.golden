@@ -1,7 +1,5 @@
-=== cmd 0: [fork exit --network mainnet] ===
-Exited fork mode.
-
-  - mainnet: registry restored, fork cleaned up
+=== cmd 0: [fork exit] ===
+Exited fork mode. 1 Anvil instances stopped, registry restored.
 
 === cmd 1: [fork status] ===
-No active forks.
+Not in fork mode.

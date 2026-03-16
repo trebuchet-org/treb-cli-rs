@@ -110,7 +110,7 @@ fn sample_fork_entry(treb_dir: &Path, network: &str) -> ForkEntry {
         chain_id: 1,
         fork_url: "https://eth.example.com".to_string(),
         fork_block_number: None,
-        snapshot_dir: treb_dir.join("priv/snapshots").join(network).to_string_lossy().into_owned(),
+        snapshot_dir: treb_dir.join("priv/snapshots/holistic").to_string_lossy().into_owned(),
         started_at: timestamp,
         env_var_name: format!("ETH_RPC_URL_{}", network.to_uppercase()),
         original_rpc: "https://eth.example.com".to_string(),
@@ -133,6 +133,7 @@ fn seed_fork_exit(project_root: &Path) {
     fs::write(snapshot_dir.join(TRANSACTIONS_FILE), r#"{"tx_1":{"hash":"0x111"}}"#).unwrap();
 
     let mut store = ForkStateStore::new(&treb_dir);
+    store.enter_fork_mode(&entry.snapshot_dir).unwrap();
     store.insert_active_fork(entry).unwrap();
 }
 
@@ -184,6 +185,7 @@ fn seed_fork_diff(project_root: &Path) {
     fs::write(snapshot_dir.join(TRANSACTIONS_FILE), r#"{"tx_1":{"hash":"0x111"}}"#).unwrap();
 
     let mut store = ForkStateStore::new(&treb_dir);
+    store.enter_fork_mode(&entry.snapshot_dir).unwrap();
     store.insert_active_fork(entry).unwrap();
 }
 
@@ -205,6 +207,7 @@ fn seed_fork_runtime_for_revert(project_root: &Path, rpc_url: &str, port: u16) {
     fs::write(snapshot_dir.join(DEPLOYMENTS_FILE), r#"{"Counter_1":{"address":"0xaaa"}}"#).unwrap();
 
     let mut store = ForkStateStore::new(&treb_dir);
+    store.enter_fork_mode(&entry.snapshot_dir).unwrap();
     store.insert_active_fork(entry).unwrap();
 }
 
@@ -220,6 +223,7 @@ fn seed_fork_runtime_for_restart(project_root: &Path, rpc_url: &str, port: u16) 
     fs::write(snapshot_dir.join(DEPLOYMENTS_FILE), r#"{"Counter_1":{"address":"0xaaa"}}"#).unwrap();
 
     let mut store = ForkStateStore::new(&treb_dir);
+    store.enter_fork_mode(&entry.snapshot_dir).unwrap();
     store.insert_active_fork(entry).unwrap();
 }
 
@@ -465,113 +469,70 @@ fn list_short_flags_match_long_filter_output() {
     assert_eq!(long.stderr, short.stderr, "short-form list filters should match long-form stderr");
 }
 
+/// Holistic fork exit: `treb fork exit` restores registry and reports success.
 #[test]
-fn fork_enter_positional_network_matches_flag_output() {
-    let port = spawn_json_rpc_server(|request| match request["method"].as_str().unwrap() {
-        "eth_chainId" => serde_json::json!("0x1"),
-        "eth_blockNumber" => serde_json::json!("0x1"),
-        // Catch-all for additional RPC methods fork enter may call
-        _ => serde_json::json!(null),
-    })
-    .unwrap();
-    let rpc_url = format!("http://127.0.0.1:{port}");
+fn fork_exit_holistic_succeeds() {
+    let tmp = setup_config_project();
+    seed_fork_exit(tmp.path());
 
-    assert_matching_command_output(
-        "fork enter positional network",
-        &["fork", "enter", "mainnet", "--rpc-url", &rpc_url],
-        &["fork", "enter", "--network", "mainnet", "--rpc-url", &rpc_url],
-        |_| {},
+    let output = run_treb_in(tmp.path(), &["fork", "exit"]);
+    assert!(
+        output.status.success(),
+        "fork exit should succeed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Exited fork mode"),
+        "exit output should confirm exit: {stdout}"
     );
 }
 
+/// Holistic fork diff: `treb fork diff --json` works against holistic snapshot.
 #[test]
-fn fork_enter_url_alias_matches_rpc_url_output() {
-    let port = spawn_json_rpc_server(|request| match request["method"].as_str().unwrap() {
-        "eth_chainId" => serde_json::json!("0x1"),
-        "eth_blockNumber" => serde_json::json!("0x1"),
-        // Catch-all for additional RPC methods fork enter may call
-        _ => serde_json::json!(null),
-    })
-    .unwrap();
-    let rpc_url = format!("http://127.0.0.1:{port}");
+fn fork_diff_holistic_json() {
+    let tmp = setup_config_project();
+    seed_fork_diff(tmp.path());
 
-    assert_matching_command_output(
-        "fork enter url alias",
-        &["fork", "enter", "mainnet", "--rpc-url", &rpc_url],
-        &["fork", "enter", "mainnet", "--url", &rpc_url],
-        |_| {},
+    let output = run_treb_in(tmp.path(), &["fork", "diff", "--json"]);
+    assert!(
+        output.status.success(),
+        "fork diff --json should succeed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
     );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(!json["clean"].as_bool().unwrap(), "diff should not be clean");
+    assert!(json["changes"].as_array().unwrap().len() >= 2);
 }
 
+/// Fork history: `--network` flag filters correctly.
 #[test]
-fn fork_exit_positional_network_matches_flag_output() {
-    assert_matching_command_output(
-        "fork exit positional network",
-        &["fork", "exit", "mainnet", "--json"],
-        &["fork", "exit", "--network", "mainnet", "--json"],
-        seed_fork_exit,
-    );
+fn fork_history_network_filter() {
+    let tmp = setup_config_project();
+    seed_fork_history(tmp.path());
+
+    let all = run_treb_in(tmp.path(), &["fork", "history", "--json"]);
+    assert!(all.status.success());
+    let all_json: serde_json::Value = serde_json::from_slice(&all.stdout).unwrap();
+    assert_eq!(all_json.as_array().unwrap().len(), 3);
+
+    let filtered = run_treb_in(tmp.path(), &["fork", "history", "--network", "mainnet", "--json"]);
+    assert!(filtered.status.success());
+    let filtered_json: serde_json::Value = serde_json::from_slice(&filtered.stdout).unwrap();
+    assert_eq!(filtered_json.as_array().unwrap().len(), 2);
 }
 
+/// Fork status: `--json` output includes holistic `active` field.
 #[test]
-fn fork_revert_positional_network_matches_flag_output() {
-    let port = spawn_json_rpc_server(|request| match request["method"].as_str().unwrap() {
-        "evm_revert" => serde_json::json!(true),
-        "evm_snapshot" => serde_json::json!("0xnew-snapshot"),
-        "eth_blockNumber" => serde_json::json!("0x1"),
-        // Catch-all for additional RPC methods fork revert may call
-        _ => serde_json::json!(null),
-    })
-    .unwrap();
-    let rpc_url = format!("http://127.0.0.1:{port}");
+fn fork_status_json_includes_active_field() {
+    let tmp = setup_config_project();
+    seed_fork_exit(tmp.path()); // re-use seed since it enters fork mode
 
-    assert_matching_command_output(
-        "fork revert positional network",
-        &["fork", "revert", "mainnet", "--json"],
-        &["fork", "revert", "--network", "mainnet", "--json"],
-        |project_root| seed_fork_runtime_for_revert(project_root, &rpc_url, port),
-    );
-}
-
-#[test]
-fn fork_restart_positional_network_matches_flag_output() {
-    let port = spawn_json_rpc_server(|request| match request["method"].as_str().unwrap() {
-        "anvil_reset" => serde_json::json!(true),
-        "anvil_setCode" => serde_json::json!(true),
-        "evm_snapshot" => serde_json::json!("0xrestart-snapshot"),
-        "eth_blockNumber" => serde_json::json!("0x1"),
-        // Catch-all for additional RPC methods fork restart may call
-        _ => serde_json::json!(null),
-    })
-    .unwrap();
-    let rpc_url = format!("http://127.0.0.1:{port}");
-
-    assert_matching_command_output(
-        "fork restart positional network",
-        &["fork", "restart", "mainnet", "--json"],
-        &["fork", "restart", "--network", "mainnet", "--json"],
-        |project_root| seed_fork_runtime_for_restart(project_root, &rpc_url, port),
-    );
-}
-
-#[test]
-fn fork_history_positional_network_matches_flag_output() {
-    assert_matching_command_output(
-        "fork history positional network",
-        &["fork", "history", "mainnet", "--json"],
-        &["fork", "history", "--network", "mainnet", "--json"],
-        seed_fork_history,
-    );
-}
-
-#[test]
-fn fork_diff_positional_network_matches_flag_output() {
-    assert_matching_command_output(
-        "fork diff positional network",
-        &["fork", "diff", "mainnet", "--json"],
-        &["fork", "diff", "--network", "mainnet", "--json"],
-        seed_fork_diff,
-    );
+    let output = run_treb_in(tmp.path(), &["fork", "status", "--json"]);
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(json["active"].as_bool().unwrap(), "status should show active=true");
+    assert!(json["forks"].as_array().unwrap().len() >= 1);
 }
 
 #[test]

@@ -1,4 +1,4 @@
-=== cmd 0: [fork enter mainnet] ===
+=== cmd 0: [fork enter --network mainnet] ===
 Error: project not initialized — .treb/ directory not found
 
 Run `treb init` first.

@@ -1,5 +1,8 @@
-=== cmd 0: [fork diff --network mainnet] ===
-Fork Diff: mainnet
-
-New Deployments (1):
-  + Token_3              0xbbb
+=== cmd 0: [fork diff] ===
+┌─────────┬─────────────┬───────────┐
+│ Change  ┆ File        ┆ Key       │
+╞═════════╪═════════════╪═══════════╡
+│ removed ┆ deployments ┆ Removed_2 │
+├╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌┤
+│ added   ┆ deployments ┆ Token_3   │
+└─────────┴─────────────┴───────────┘

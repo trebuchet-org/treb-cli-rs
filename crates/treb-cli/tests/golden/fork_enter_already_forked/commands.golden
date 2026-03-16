@@ -1,2 +1,2 @@
-=== cmd 0: [fork enter mainnet] ===
-Error: network 'mainnet' is already forked; run `treb fork exit --network mainnet` first
+=== cmd 0: [fork enter --network mainnet] ===
+Error: already in fork mode (entered at <TIMESTAMP> UTC); run `treb fork exit` first

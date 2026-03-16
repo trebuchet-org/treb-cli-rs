@@ -609,9 +609,10 @@ fn fork_subcommand_json_flag(subcommand: &commands::fork::ForkSubcommand) -> boo
         | commands::fork::ForkSubcommand::History { json, .. }
         | commands::fork::ForkSubcommand::Diff { json, .. } => *json,
         commands::fork::ForkSubcommand::Enter { .. }
-        | commands::fork::ForkSubcommand::Exit { .. }
-        | commands::fork::ForkSubcommand::Revert { .. }
-        | commands::fork::ForkSubcommand::Restart { .. } => false,
+        | commands::fork::ForkSubcommand::Exit
+        | commands::fork::ForkSubcommand::Revert
+        | commands::fork::ForkSubcommand::Restart { .. }
+        | commands::fork::ForkSubcommand::Logs { .. } => false,
     }
 }
 

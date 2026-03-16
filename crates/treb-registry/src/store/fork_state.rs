@@ -6,6 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use chrono::{DateTime, Utc};
 use treb_core::{
     TrebError,
     types::fork::{ForkEntry, ForkHistoryEntry, ForkState},
@@ -33,6 +34,11 @@ const MAX_HISTORY: usize = 100;
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedForkState {
+    active: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snapshot_dir: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    entered_at: Option<DateTime<Utc>>,
     forks: BTreeMap<String, ForkEntry>,
     history: Vec<ForkHistoryEntry>,
 }
@@ -40,6 +46,9 @@ struct PersistedForkState {
 impl From<&ForkState> for PersistedForkState {
     fn from(state: &ForkState) -> Self {
         Self {
+            active: state.active,
+            snapshot_dir: state.snapshot_dir.clone(),
+            entered_at: state.entered_at,
             forks: state.forks.iter().map(|(key, entry)| (key.clone(), entry.clone())).collect(),
             history: state.history.clone(),
         }
@@ -282,6 +291,28 @@ impl ForkStateStore {
         self.data.history.insert(0, entry);
         self.data.history.truncate(MAX_HISTORY);
         self.save()
+    }
+
+    /// Enter holistic fork mode: sets `active=true`, records snapshot dir and timestamp.
+    pub fn enter_fork_mode(&mut self, snapshot_dir: &str) -> Result<(), TrebError> {
+        self.data.active = true;
+        self.data.snapshot_dir = Some(snapshot_dir.to_string());
+        self.data.entered_at = Some(Utc::now());
+        self.save()
+    }
+
+    /// Exit holistic fork mode: clears active flag, snapshot dir, entered_at, and all fork entries.
+    pub fn exit_fork_mode(&mut self) -> Result<(), TrebError> {
+        self.data.active = false;
+        self.data.snapshot_dir = None;
+        self.data.entered_at = None;
+        self.data.forks.clear();
+        self.save()
+    }
+
+    /// Whether holistic fork mode is active.
+    pub fn is_fork_mode_active(&self) -> bool {
+        self.data.active
     }
 
     /// Return a reference to the underlying fork state.

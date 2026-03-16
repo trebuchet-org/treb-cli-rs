@@ -1,4 +1,9 @@
-//! `treb fork` subcommands — enter/exit fork mode, status, history, diff, revert, restart.
+//! `treb fork` subcommands — holistic fork mode with multi-network Anvil orchestration.
+//!
+//! Fork mode snapshots the registry once, then spawns background Anvil nodes for
+//! ALL configured networks (or a subset via `--network`). Commands like `run` and
+//! `compose` automatically detect active forks and route RPC traffic to the local
+//! Anvil instances.
 
 use std::{
     collections::BTreeSet,
@@ -13,7 +18,10 @@ use clap::Subcommand;
 use tokio::net::TcpStream;
 use treb_core::types::fork::{ForkEntry, ForkHistoryEntry, SnapshotEntry};
 use treb_forge::{
-    anvil::{BackgroundAnvilConfig, find_available_port, poll_anvil_health, stop_background_anvil},
+    anvil::{
+        BackgroundAnvilConfig, deterministic_fork_port, find_available_port, is_port_available,
+        poll_anvil_health, stop_background_anvil,
+    },
     createx::createx_deployed_bytecode,
 };
 use treb_registry::{
@@ -41,49 +49,40 @@ const CREATEX_ADDRESS: &str = "0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed";
 
 #[derive(Subcommand, Debug)]
 pub enum ForkSubcommand {
-    /// Enter fork mode for a network: snapshot registry, start Anvil, record fork state
+    /// Enter fork mode: snapshot registry and start Anvil for all configured networks
     ///
-    /// Snapshots the current registry, spawns Anvil as a background subprocess
-    /// forking from the upstream RPC, deploys CreateX, takes an initial EVM
-    /// snapshot, and records a fully populated fork entry in `fork.json`.
+    /// Snapshots the current registry once, then spawns a background Anvil
+    /// subprocess for every network in `foundry.toml [rpc_endpoints]` (or a
+    /// subset via `--network`). Each Anvil gets a deterministic port based on
+    /// chain ID, deploys CreateX, and takes an initial EVM snapshot.
     Enter {
-        /// Network name (resolved from config if omitted)
-        #[arg(long)]
-        network: Option<String>,
-        /// Upstream RPC URL to fork (overrides foundry.toml)
+        /// Fork specific networks only (comma-separated or repeated)
+        #[arg(long, value_delimiter = ',')]
+        network: Vec<String>,
+        /// Upstream RPC URL override (only valid with a single --network)
         #[arg(long)]
         rpc_url: Option<String>,
-        /// Fork at a specific block number
+        /// Fork at a specific block number (applies to all networks)
         #[arg(long)]
         fork_block_number: Option<u64>,
     },
-    /// Exit fork mode: restore registry from snapshot and remove fork state
+    /// Exit fork mode: stop all Anvils, restore registry from snapshot
     ///
-    /// Restores the registry to the state it was in before `fork enter` and
-    /// removes the fork entry and its snapshot directory.
-    Exit {
-        /// Network name (resolved from config if omitted)
-        #[arg(long)]
-        network: Option<String>,
-    },
-    /// Revert the fork to its last snapshot
+    /// Stops every running Anvil process, restores the registry to the state
+    /// it was in before `fork enter`, and clears all fork state.
+    Exit,
+    /// Revert all forks to their initial state
     ///
-    /// Restores the registry from the snapshot taken when fork mode was entered,
-    /// discarding any deployments made during the fork session.
-    Revert {
-        /// Network name (resolved from config if omitted)
-        #[arg(long)]
-        network: Option<String>,
-        /// Revert all active forks
-        #[arg(long)]
-        all: bool,
-    },
+    /// Restores the registry from the holistic snapshot and reverts every
+    /// running Anvil to its initial EVM snapshot, discarding any deployments
+    /// made during the fork session.
+    Revert,
     /// Restart the fork from a new block
     ///
     /// Resets the local Anvil node to a fresh fork at the given block number
     /// (or at the latest block if omitted) without exiting fork mode.
     Restart {
-        /// Network name (resolved from config if omitted)
+        /// Network name (required)
         #[arg(long)]
         network: Option<String>,
         /// Fork block number to reset to (uses latest if omitted)
@@ -116,12 +115,21 @@ pub enum ForkSubcommand {
     /// Shows deployments that were added or removed since fork mode was entered
     /// by comparing the current registry against the saved snapshot.
     Diff {
-        /// Network name (resolved from config if omitted)
-        #[arg(long)]
-        network: Option<String>,
         /// Output as JSON
         #[arg(long)]
         json: bool,
+    },
+    /// Tail Anvil log files for active forks
+    ///
+    /// Shows logs from all active fork Anvil instances with colored network
+    /// prefixes (foreman-style). Use `--follow` for continuous tailing.
+    Logs {
+        /// Continuously tail log files (Ctrl+C to exit)
+        #[arg(long, short)]
+        follow: bool,
+        /// Filter to a specific network
+        #[arg(long)]
+        network: Option<String>,
     },
 }
 
@@ -130,27 +138,18 @@ pub enum ForkSubcommand {
 pub async fn run(subcommand: ForkSubcommand) -> anyhow::Result<()> {
     match subcommand {
         ForkSubcommand::Enter { network, rpc_url, fork_block_number } => {
-            let network = require_network(network)?;
             run_enter(network, rpc_url, fork_block_number).await
         }
-        ForkSubcommand::Exit { network } => {
-            let network = require_network(network)?;
-            run_exit(network).await
-        }
-        ForkSubcommand::Revert { network, all } => {
-            let network = require_network(network)?;
-            run_revert(network, all).await
-        }
+        ForkSubcommand::Exit => run_exit().await,
+        ForkSubcommand::Revert => run_revert().await,
         ForkSubcommand::Restart { network, fork_block_number } => {
             let network = require_network(network)?;
             run_restart(network, fork_block_number).await
         }
         ForkSubcommand::Status { json } => run_status(json).await,
         ForkSubcommand::History { network, json } => run_history(network, json).await,
-        ForkSubcommand::Diff { network, json } => {
-            let network = require_network(network)?;
-            run_diff(network, json).await
-        }
+        ForkSubcommand::Diff { json } => run_diff(json).await,
+        ForkSubcommand::Logs { follow, network } => run_logs(follow, network).await,
     }
 }
 
@@ -158,21 +157,25 @@ pub async fn run(subcommand: ForkSubcommand) -> anyhow::Result<()> {
 fn require_network(cli_network: Option<String>) -> anyhow::Result<String> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     let resolved = super::run::resolve_network(cli_network, &cwd, true, false)?;
-    resolved.ok_or_else(|| anyhow::anyhow!("no network specified; pass --network or set one in config.local.json"))
+    resolved.ok_or_else(|| {
+        anyhow::anyhow!(
+            "no network specified; pass --network or set one in config.local.json"
+        )
+    })
 }
 
 // ── run_enter ─────────────────────────────────────────────────────────────────
 
-/// Enter fork mode for a network.
+/// Enter holistic fork mode.
 ///
-/// 1. Validates the project is initialized and the network is not already forked.
-/// 2. Resolves the upstream RPC URL and fetches the chain ID.
-/// 3. Snapshots the registry.
-/// 4. Finds an available port and spawns Anvil as a background subprocess.
-/// 5. Polls until healthy, deploys CreateX, and takes an initial EVM snapshot.
-/// 6. Records a fully populated [`ForkEntry`] in `fork.json`.
+/// 1. Check not already in fork mode.
+/// 2. Resolve networks from foundry.toml (or filter by `--network`).
+/// 3. Snapshot registry ONCE.
+/// 4. For each network: resolve RPC, fetch chain ID, spawn Anvil, deploy CreateX,
+///    take EVM snapshot, record ForkEntry.
+/// 5. Record history entry.
 pub async fn run_enter(
-    network: String,
+    network_filter: Vec<String>,
     rpc_url_override: Option<String>,
     fork_block_number: Option<u64>,
 ) -> anyhow::Result<()> {
@@ -181,268 +184,340 @@ pub async fn run_enter(
 
     ensure_treb_dir(&treb_dir)?;
 
-    // Load fork state and check not already forked (before any HTTP calls)
+    // Validate --rpc-url only with a single network
+    if rpc_url_override.is_some() && network_filter.len() != 1 {
+        bail!("--rpc-url can only be used with a single --network");
+    }
+
+    // Load fork state and check not already in fork mode
     let mut store = ForkStateStore::new(&treb_dir);
     store.load().context("failed to load fork state")?;
 
-    if store.get_active_fork(&network).is_some() {
+    if store.is_fork_mode_active() {
         bail!(
-            "network '{}' is already forked; run `treb fork exit --network {}` first",
-            network,
-            network
+            "already in fork mode (entered at {}); run `treb fork exit` first",
+            store
+                .data()
+                .entered_at
+                .map(|t| t.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                .unwrap_or_else(|| "unknown".into())
         );
     }
 
-    // Resolve upstream RPC URL
-    let fork_url = resolve_fork_url(&cwd, &network, rpc_url_override)?;
+    // Resolve networks to fork
+    let networks = resolve_fork_networks(&cwd, &network_filter)?;
+    if networks.is_empty() {
+        bail!(
+            "no networks found in foundry.toml [rpc_endpoints]\n\n\
+             Add RPC endpoints to your foundry.toml or pass --network explicitly."
+        );
+    }
 
-    // Get chain_id from upstream
-    let chain_id = fetch_chain_id(&fork_url)
-        .await
-        .with_context(|| format!("failed to get chain ID from RPC URL: {fork_url}"))?;
-
-    // Create snapshot dir and snapshot registry
-    let snapshot_dir = treb_dir.join(SNAPSHOT_BASE).join(&network);
+    // Holistic snapshot — one snapshot for all networks
+    let snapshot_dir = treb_dir.join(SNAPSHOT_BASE).join("holistic");
     snapshot_registry(&treb_dir, &snapshot_dir).context("failed to snapshot registry")?;
 
-    // Find an available port
-    let port = find_available_port().map_err(|e| anyhow::anyhow!("{e}"))?;
+    // Enter fork mode
+    store
+        .enter_fork_mode(&snapshot_dir.to_string_lossy())
+        .context("failed to enter fork mode")?;
 
-    // Set up .treb/priv/ directory for PID/log files (Go-compatible)
+    // Set up priv dir
     let priv_dir = treb_dir.join("priv");
     std::fs::create_dir_all(&priv_dir).context("failed to create priv directory")?;
 
-    let pid_file = priv_dir.join(format!("fork-{network}.pid"));
-    let log_file = priv_dir.join(format!("fork-{network}.log"));
-
-    // Spawn Anvil as a background subprocess
-    let anvil_config = BackgroundAnvilConfig {
-        port,
-        chain_id: Some(chain_id),
-        fork_url: Some(fork_url.clone()),
-        fork_block_number,
-        pid_file: pid_file.clone(),
-        log_file: log_file.clone(),
-    };
-
-    let bg_anvil = treb_forge::anvil::spawn_background_anvil(&anvil_config)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    let rpc_url = bg_anvil.rpc_url.clone();
-    let anvil_pid = bg_anvil.pid as i32;
-
-    // Poll until healthy
-    let is_forked = anvil_config.fork_url.is_some();
-    if let Err(e) = poll_anvil_health(&rpc_url, is_forked) {
-        // Clean up on failure
-        let _ = stop_background_anvil(&pid_file);
-        bail!("failed to start fork anvil: {e}");
-    }
-
-    // Deploy CreateX factory via HTTP
     let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
-    if let Err(e) = deploy_createx_http(&client, &rpc_url).await {
-        eprintln!("Warning: failed to deploy CreateX: {e}");
+    let mut started = Vec::new();
+    let mut errors = Vec::new();
+
+    for (i, network_name) in networks.iter().enumerate() {
+        // Resolve RPC URL
+        let fork_url = if i == 0 {
+            resolve_fork_url(&cwd, network_name, rpc_url_override.clone())?
+        } else {
+            resolve_fork_url(&cwd, network_name, None)?
+        };
+
+        // Fetch chain ID
+        let chain_id = match fetch_chain_id(&fork_url).await {
+            Ok(id) => id,
+            Err(e) => {
+                errors.push((network_name.clone(), format!("failed to fetch chain ID: {e}")));
+                continue;
+            }
+        };
+
+        // Deterministic port with fallback
+        let det_port = deterministic_fork_port(chain_id);
+        let port = if is_port_available(det_port) {
+            det_port
+        } else {
+            match find_available_port() {
+                Ok(p) => p,
+                Err(e) => {
+                    errors.push((network_name.clone(), format!("no available port: {e}")));
+                    continue;
+                }
+            }
+        };
+
+        let pid_file = priv_dir.join(format!("fork-{network_name}.pid"));
+        let log_file = priv_dir.join(format!("fork-{network_name}.log"));
+
+        // Spawn Anvil
+        let anvil_config = BackgroundAnvilConfig {
+            port,
+            chain_id: Some(chain_id),
+            fork_url: Some(fork_url.clone()),
+            fork_block_number,
+            pid_file: pid_file.clone(),
+            log_file: log_file.clone(),
+        };
+
+        let bg_anvil = match treb_forge::anvil::spawn_background_anvil(&anvil_config) {
+            Ok(a) => a,
+            Err(e) => {
+                errors.push((network_name.clone(), format!("failed to spawn anvil: {e}")));
+                continue;
+            }
+        };
+
+        let rpc_url = bg_anvil.rpc_url.clone();
+        let anvil_pid = bg_anvil.pid as i32;
+
+        // Poll until healthy
+        let is_forked = anvil_config.fork_url.is_some();
+        if let Err(e) = poll_anvil_health(&rpc_url, is_forked) {
+            let _ = stop_background_anvil(&pid_file);
+            errors.push((network_name.clone(), format!("anvil not ready: {e}")));
+            continue;
+        }
+
+        // Deploy CreateX
+        if let Err(e) = deploy_createx_http(&client, &rpc_url).await {
+            eprintln!("Warning: failed to deploy CreateX on {network_name}: {e}");
+        }
+
+        // Take initial EVM snapshot
+        let snapshot_id = match evm_snapshot_http(&client, &rpc_url).await {
+            Ok(id) => id,
+            Err(e) => {
+                let _ = stop_background_anvil(&pid_file);
+                errors.push((network_name.clone(), format!("failed to take EVM snapshot: {e}")));
+                continue;
+            }
+        };
+
+        // Build and insert fork entry
+        let now = Utc::now();
+        let entry = ForkEntry {
+            network: network_name.clone(),
+            instance_name: None,
+            rpc_url: rpc_url.clone(),
+            port,
+            chain_id,
+            fork_url: fork_url.clone(),
+            fork_block_number,
+            snapshot_dir: snapshot_dir.to_string_lossy().into_owned(),
+            started_at: now,
+            env_var_name: format!("ETH_RPC_URL_{}", network_name.to_uppercase()),
+            original_rpc: fork_url,
+            anvil_pid,
+            pid_file: pid_file.to_string_lossy().into_owned(),
+            log_file: log_file.to_string_lossy().into_owned(),
+            entered_at: now,
+            snapshots: vec![SnapshotEntry {
+                index: 0,
+                snapshot_id,
+                command: "fork enter".into(),
+                timestamp: now,
+            }],
+        };
+        store.insert_active_fork(entry).context("failed to record fork entry")?;
+
+        started.push((network_name.clone(), chain_id, port, rpc_url, anvil_pid));
     }
 
-    // Take initial EVM snapshot
-    let snapshot_id = match evm_snapshot_http(&client, &rpc_url).await {
-        Ok(id) => id,
-        Err(e) => {
-            let _ = stop_background_anvil(&pid_file);
-            bail!("failed to take initial EVM snapshot: {e}");
-        }
-    };
-
-    // Build and insert fork entry with real values
-    let now = Utc::now();
-    let entry = ForkEntry {
-        network: network.clone(),
-        instance_name: None,
-        rpc_url: rpc_url.clone(),
-        port,
-        chain_id,
-        fork_url: fork_url.clone(),
-        fork_block_number,
-        snapshot_dir: snapshot_dir.to_string_lossy().into_owned(),
-        started_at: now,
-        env_var_name: format!("ETH_RPC_URL_{}", network.to_uppercase()),
-        original_rpc: fork_url,
-        anvil_pid,
-        pid_file: pid_file.to_string_lossy().into_owned(),
-        log_file: log_file.to_string_lossy().into_owned(),
-        entered_at: now,
-        snapshots: vec![SnapshotEntry {
-            index: 0,
-            snapshot_id,
-            command: "fork enter".into(),
-            timestamp: now,
-        }],
-    };
-    store.insert_active_fork(entry).context("failed to record fork entry")?;
-
-    // Add history entry
+    // Record history
+    let network_list: String = started.iter().map(|(n, ..)| n.as_str()).collect::<Vec<_>>().join(", ");
     store
         .add_history(ForkHistoryEntry {
             action: "enter".into(),
-            network: network.clone(),
+            network: network_list.clone(),
             timestamp: Utc::now(),
-            details: None,
+            details: Some(format!("{} networks", started.len())),
         })
         .context("failed to record fork history")?;
 
     // Ensure .treb/priv/ is in .gitignore
     ensure_gitignore_entry(&cwd, ".treb/priv/");
 
-    println!("Fork mode entered for network '{network}'");
+    // Print summary
+    if started.is_empty() && !errors.is_empty() {
+        // All networks failed — exit fork mode
+        let _ = restore_registry(&snapshot_dir, &treb_dir);
+        let _ = remove_snapshot(&snapshot_dir);
+        store.exit_fork_mode().ok();
+        bail!(
+            "failed to start any forks:\n{}",
+            errors.iter().map(|(n, e)| format!("  {n}: {e}")).collect::<Vec<_>>().join("\n")
+        );
+    }
+
+    println!("Fork mode entered ({} networks)", started.len());
     println!();
-    println!("  {:14}{}", "Network:", network);
-    println!("  {:14}{}", "Chain ID:", chain_id);
-    println!("  {:14}{}", "Fork URL:", rpc_url);
-    println!("  {:14}{}", "Anvil PID:", anvil_pid);
-    println!(
-        "  {:14}{}={}",
-        "Env Override:",
-        format!("ETH_RPC_URL_{}", network.to_uppercase()),
-        rpc_url,
-    );
-    println!("  {:14}{}", "Logs:", log_file.display());
+
+    for (net, chain_id, port, rpc_url, pid) in &started {
+        println!("  {net}");
+        println!("    {:14}{}", "Chain ID:", chain_id);
+        println!("    {:14}{}", "Port:", port);
+        println!("    {:14}{}", "RPC URL:", rpc_url);
+        println!("    {:14}{}", "Anvil PID:", pid);
+    }
+
+    if !errors.is_empty() {
+        println!();
+        eprintln!("Failed to start:");
+        for (net, err) in &errors {
+            eprintln!("  {net}: {err}");
+        }
+    }
+
     println!();
     println!("Run 'treb fork status' to check fork state");
-    println!("Run 'treb fork exit' to stop fork and restore original state");
+    println!("Run 'treb fork logs -f' to tail all Anvil logs");
+    println!("Run 'treb fork exit' to stop all forks and restore original state");
 
     Ok(())
 }
 
 // ── run_exit ──────────────────────────────────────────────────────────────────
 
-/// Exit fork mode for a network.
+/// Exit holistic fork mode.
 ///
-/// Stops the background Anvil process, restores the registry from its snapshot,
-/// removes the snapshot directory, and removes the [`ForkEntry`] from `fork.json`.
-pub async fn run_exit(network: String) -> anyhow::Result<()> {
+/// Stops all Anvil processes, restores the registry from the holistic snapshot,
+/// removes the snapshot, and clears fork state.
+pub async fn run_exit() -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     let treb_dir = cwd.join(TREB_DIR);
 
     let mut store = ForkStateStore::new(&treb_dir);
     store.load().context("failed to load fork state")?;
 
-    // Check if actively forked first (consistent error message with revert/restart/diff)
-    if store.get_active_fork(&network).is_none() {
-        bail!("network '{}' is not in fork mode", network);
+    if !store.is_fork_mode_active() {
+        bail!("not in fork mode");
     }
 
-    // Remove active fork entry
-    let entry = store.remove_active_fork(&network).context("failed to remove fork entry")?;
-
-    // Stop the Anvil background process (safe to call if already dead)
-    if !entry.pid_file.is_empty() {
-        let pid_path = PathBuf::from(&entry.pid_file);
-        if let Err(e) = stop_background_anvil(&pid_path) {
-            eprintln!("Warning: failed to stop anvil for '{}': {}", network, e);
+    // Stop all Anvil processes
+    let forks: Vec<ForkEntry> = store.list_active_forks().into_iter().cloned().collect();
+    for entry in &forks {
+        if !entry.pid_file.is_empty() {
+            let pid_path = PathBuf::from(&entry.pid_file);
+            if let Err(e) = stop_background_anvil(&pid_path) {
+                eprintln!("Warning: failed to stop anvil for '{}': {}", entry.network, e);
+            }
         }
     }
 
-    // Restore registry from snapshot
-    let snapshot_dir = PathBuf::from(&entry.snapshot_dir);
+    // Restore registry from holistic snapshot
+    let snapshot_dir = store
+        .data()
+        .snapshot_dir
+        .as_ref()
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow::anyhow!("fork state has no snapshot directory"))?;
+
     restore_registry(&snapshot_dir, &treb_dir)
         .context("failed to restore registry from snapshot")?;
 
     // Remove snapshot dir
     remove_snapshot(&snapshot_dir).context("failed to remove snapshot directory")?;
 
-    // Add history entry
+    // Record history
+    let network_list: String =
+        forks.iter().map(|e| e.network.as_str()).collect::<Vec<_>>().join(", ");
     store
         .add_history(ForkHistoryEntry {
             action: "exit".into(),
-            network: network.clone(),
+            network: network_list,
             timestamp: Utc::now(),
-            details: None,
+            details: Some(format!("{} networks stopped", forks.len())),
         })
         .context("failed to record exit history")?;
 
-    println!("Exited fork mode for network '{network}'.");
-    println!("Registry restored from snapshot.");
+    // Clear fork mode
+    store.exit_fork_mode().context("failed to clear fork state")?;
+
+    println!(
+        "Exited fork mode. {} Anvil instances stopped, registry restored.",
+        forks.len()
+    );
 
     Ok(())
 }
 
 // ── run_revert ────────────────────────────────────────────────────────────────
 
-/// Revert one or all active forks to their initial state.
+/// Revert all active forks to their initial state.
 ///
-/// For each target network:
-/// 1. Calls `evm_revert` via Anvil JSON-RPC to restore EVM state (if a snapshot ID is stored).
-/// 2. Takes a new EVM snapshot to establish a fresh baseline.
-/// 3. Restores registry files from the snapshot directory.
-/// 4. Adds a revert history entry.
-pub async fn run_revert(network: String, all: bool) -> anyhow::Result<()> {
+/// For each active fork with a running Anvil:
+/// 1. Calls `evm_revert` to restore EVM state.
+/// 2. Takes a new EVM snapshot for the next revert.
+/// 3. Restores registry from the holistic snapshot.
+pub async fn run_revert() -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     let treb_dir = cwd.join(TREB_DIR);
 
     let mut store = ForkStateStore::new(&treb_dir);
     store.load().context("failed to load fork state")?;
 
-    let networks: Vec<String> = if all {
-        store.list_active_forks().into_iter().map(|e| e.network.clone()).collect()
-    } else {
-        vec![network]
-    };
+    if !store.is_fork_mode_active() {
+        bail!("not in fork mode");
+    }
 
-    if networks.is_empty() {
+    let forks: Vec<ForkEntry> = store.list_active_forks().into_iter().cloned().collect();
+    if forks.is_empty() {
         println!("No active forks to revert.");
         return Ok(());
     }
 
     let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
 
-    for net in &networks {
-        let entry = store
-            .get_active_fork(net)
-            .ok_or_else(|| anyhow::anyhow!("network '{}' is not in fork mode", net))?
-            .clone();
-
+    for entry in &forks {
         if !is_port_reachable(entry.port).await {
-            bail!(
-                "Anvil node for network '{}' is not reachable at port {}; cannot revert",
-                net,
-                entry.port
+            eprintln!(
+                "Warning: Anvil for '{}' not reachable at port {}; skipping EVM revert",
+                entry.network, entry.port
             );
+            continue;
         }
 
-        // Revert EVM state to the last snapshot (if we have one).
+        // Revert EVM state to the last snapshot
         if let Some(last_snapshot) = entry.snapshots.last() {
             let reverted = evm_revert_http(&client, &entry.rpc_url, &last_snapshot.snapshot_id)
                 .await
-                .with_context(|| format!("failed to revert EVM state for network '{net}'"))?;
+                .with_context(|| {
+                    format!("failed to revert EVM state for network '{}'", entry.network)
+                })?;
             if !reverted {
-                bail!(
-                    "EVM revert failed for network '{}' (snapshot ID: {})",
-                    net,
-                    last_snapshot.snapshot_id
+                eprintln!(
+                    "Warning: EVM revert failed for '{}' (snapshot: {})",
+                    entry.network, last_snapshot.snapshot_id
                 );
             }
-            println!("EVM state reverted for network '{net}'.");
-        } else {
-            println!(
-                "No EVM snapshots stored for network '{net}'; skipping EVM revert (registry will still be restored)."
-            );
         }
 
-        // Take a new EVM snapshot for the next revert.
+        // Take a new EVM snapshot for the next revert
         let new_snapshot_id = evm_snapshot_http(&client, &entry.rpc_url)
             .await
-            .with_context(|| format!("failed to take new EVM snapshot for network '{net}'"))?;
+            .with_context(|| {
+                format!("failed to take new EVM snapshot for network '{}'", entry.network)
+            })?;
 
-        // Restore registry files from the snapshot directory.
-        let snapshot_dir = PathBuf::from(&entry.snapshot_dir);
-        restore_registry(&snapshot_dir, &treb_dir)
-            .context("failed to restore registry from snapshot")?;
-
-        // Update the fork entry with the new snapshot.
+        // Update the fork entry with the new snapshot
         let mut updated = entry.clone();
         let next_index = updated.snapshots.len() as u32;
-        updated.snapshots.push(treb_core::types::fork::SnapshotEntry {
+        updated.snapshots.push(SnapshotEntry {
             index: next_index,
             snapshot_id: new_snapshot_id.clone(),
             command: "revert".into(),
@@ -450,19 +525,33 @@ pub async fn run_revert(network: String, all: bool) -> anyhow::Result<()> {
         });
         store.update_active_fork(updated).context("failed to update fork entry")?;
 
-        // Add history entry.
-        store
-            .add_history(ForkHistoryEntry {
-                action: "revert".into(),
-                network: net.clone(),
-                timestamp: Utc::now(),
-                details: Some(format!("new EVM snapshot: {new_snapshot_id}")),
-            })
-            .context("failed to record revert history")?;
-
-        println!("Reverted fork for network '{net}' to initial state.");
+        println!("Reverted EVM state for '{}'.", entry.network);
     }
 
+    // Restore registry from holistic snapshot
+    let snapshot_dir = store
+        .data()
+        .snapshot_dir
+        .as_ref()
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow::anyhow!("fork state has no snapshot directory"))?;
+
+    restore_registry(&snapshot_dir, &treb_dir)
+        .context("failed to restore registry from snapshot")?;
+
+    // Record history
+    let network_list: String =
+        forks.iter().map(|e| e.network.as_str()).collect::<Vec<_>>().join(", ");
+    store
+        .add_history(ForkHistoryEntry {
+            action: "revert".into(),
+            network: network_list,
+            timestamp: Utc::now(),
+            details: Some(format!("{} networks reverted", forks.len())),
+        })
+        .context("failed to record revert history")?;
+
+    println!("Registry restored from snapshot.");
     Ok(())
 }
 
@@ -491,12 +580,17 @@ pub async fn run_restart(network: String, fork_block_number: Option<u64>) -> any
         let _ = stop_background_anvil(&pid_path);
     }
 
-    // Restore registry from snapshot
-    let snapshot_dir = PathBuf::from(&entry.snapshot_dir);
-    restore_registry(&snapshot_dir, &treb_dir).context("failed to restore registry")?;
+    // Restore registry from holistic snapshot
+    if let Some(ref snap_dir) = store.data().snapshot_dir {
+        let snapshot_dir = PathBuf::from(snap_dir);
+        restore_registry(&snapshot_dir, &treb_dir).context("failed to restore registry")?;
+    }
 
-    // Find a new available port
-    let port = find_available_port().map_err(|e| anyhow::anyhow!("{e}"))?;
+    // Deterministic port with fallback
+    let det_port = deterministic_fork_port(entry.chain_id);
+    let port = if is_port_available(det_port) { det_port } else {
+        find_available_port().map_err(|e| anyhow::anyhow!("{e}"))?
+    };
 
     // Determine the block to fork from
     let blk = fork_block_number.or(entry.fork_block_number);
@@ -608,16 +702,32 @@ pub async fn run_status(json: bool) -> anyhow::Result<()> {
                 "status":          if running { "running" } else { "stopped" },
             }));
         }
-        println!("{}", serde_json::to_string_pretty(&statuses)?);
+        let output = serde_json::json!({
+            "active": store.is_fork_mode_active(),
+            "enteredAt": store.data().entered_at,
+            "forks": statuses,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
         return Ok(());
+    }
+
+    if !store.is_fork_mode_active() {
+        println!("Not in fork mode.");
+        return Ok(());
+    }
+
+    // Show holistic header
+    if let Some(entered_at) = store.data().entered_at {
+        let uptime = format_duration(Utc::now() - entered_at);
+        println!("Fork mode active since {} ({} ago)", entered_at.format("%Y-%m-%d %H:%M:%S UTC"), uptime);
+    } else {
+        println!("Fork mode active");
     }
 
     if forks.is_empty() {
-        println!("No active forks");
+        println!("\nNo active forks.");
         return Ok(());
     }
-
-    println!("Active Forks");
 
     for entry in &forks {
         let running = is_port_reachable(entry.port).await;
@@ -628,7 +738,7 @@ pub async fn run_status(json: bool) -> anyhow::Result<()> {
         println!();
         println!("  {}", entry.network);
         println!("    {:14}{}", "Chain ID:", entry.chain_id);
-        println!("    {:14}{}", "Fork URL:", entry.rpc_url);
+        println!("    {:14}{}", "RPC URL:", entry.rpc_url);
         println!("    {:14}{}", "Anvil PID:", entry.anvil_pid);
         println!("    {:14}{}", "Status:", status);
         println!("    {:14}{}", "Uptime:", uptime);
@@ -657,7 +767,7 @@ pub async fn run_history(network: Option<String>, json: bool) -> anyhow::Result<
         .data()
         .history
         .iter()
-        .filter(|e| network.as_deref().is_none_or(|n| e.network == n))
+        .filter(|e| network.as_deref().is_none_or(|n| e.network.contains(n)))
         .collect();
 
     if json {
@@ -689,22 +799,27 @@ pub async fn run_history(network: Option<String>, json: bool) -> anyhow::Result<
 
 // ── run_diff ──────────────────────────────────────────────────────────────────
 
-/// Compare the current registry against the fork snapshot for a network.
+/// Compare the current registry against the holistic fork snapshot.
 ///
 /// Reports added, removed, and modified entries in `deployments.json` and
 /// `transactions.json`. Supports `--json` output.
-pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
+pub async fn run_diff(json: bool) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     let treb_dir = cwd.join(TREB_DIR);
 
     let mut store = ForkStateStore::new(&treb_dir);
     store.load().context("failed to load fork state")?;
 
-    let entry = store
-        .get_active_fork(&network)
-        .ok_or_else(|| anyhow::anyhow!("network '{}' is not in fork mode", network))?;
+    if !store.is_fork_mode_active() {
+        bail!("not in fork mode");
+    }
 
-    let snapshot_dir = PathBuf::from(&entry.snapshot_dir);
+    let snapshot_dir = store
+        .data()
+        .snapshot_dir
+        .as_ref()
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow::anyhow!("fork state has no snapshot directory"))?;
 
     // Files to diff.
     let diff_files = [DEPLOYMENTS_FILE, TRANSACTIONS_FILE];
@@ -749,7 +864,6 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
-                "network": network,
                 "changes": changes,
                 "clean":   changes.is_empty(),
             }))?
@@ -758,7 +872,7 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
     }
 
     if changes.is_empty() {
-        println!("No changes detected for network '{network}'.");
+        println!("No changes detected since fork mode was entered.");
         return Ok(());
     }
 
@@ -774,6 +888,173 @@ pub async fn run_diff(network: String, json: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+// ── run_logs ──────────────────────────────────────────────────────────────────
+
+/// Color palette for foreman-style log output (rotating by sorted network index).
+const LOG_COLORS: &[&str] = &[
+    "\x1b[36m", // cyan
+    "\x1b[32m", // green
+    "\x1b[33m", // yellow
+    "\x1b[35m", // magenta
+    "\x1b[34m", // blue
+    "\x1b[31m", // red
+];
+const RESET: &str = "\x1b[0m";
+
+/// Tail Anvil log files for active forks with colored network prefixes.
+pub async fn run_logs(follow: bool, network_filter: Option<String>) -> anyhow::Result<()> {
+    let cwd = env::current_dir().context("failed to determine current directory")?;
+    let treb_dir = cwd.join(TREB_DIR);
+    ensure_treb_dir(&treb_dir)?;
+
+    let mut store = ForkStateStore::new(&treb_dir);
+    store.load().context("failed to load fork state")?;
+
+    if !store.is_fork_mode_active() {
+        bail!("not in fork mode");
+    }
+
+    // Collect forks, optionally filtered
+    let mut forks: Vec<ForkEntry> = store
+        .list_active_forks()
+        .into_iter()
+        .filter(|e| {
+            network_filter.as_deref().is_none_or(|n| e.network == n)
+        })
+        .cloned()
+        .collect();
+
+    if forks.is_empty() {
+        if let Some(ref net) = network_filter {
+            bail!("no active fork for network '{net}'");
+        }
+        bail!("no active forks");
+    }
+
+    // Sort by network name for deterministic color assignment
+    forks.sort_by(|a, b| a.network.cmp(&b.network));
+
+    // Compute max network name length for aligned padding
+    let max_name_len = forks.iter().map(|e| e.network.len()).max().unwrap_or(0);
+
+    // Check NO_COLOR
+    let no_color = std::env::var("NO_COLOR").is_ok()
+        || std::env::var("TERM").ok().as_deref() == Some("dumb");
+
+    if follow {
+        run_logs_follow(&forks, max_name_len, no_color).await
+    } else {
+        run_logs_static(&forks, max_name_len, no_color)
+    }
+}
+
+/// Print all existing log lines from each fork's log file (non-follow mode).
+fn run_logs_static(
+    forks: &[ForkEntry],
+    max_name_len: usize,
+    no_color: bool,
+) -> anyhow::Result<()> {
+    for (i, entry) in forks.iter().enumerate() {
+        if entry.log_file.is_empty() {
+            continue;
+        }
+        let path = PathBuf::from(&entry.log_file);
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                eprintln!("Warning: failed to read log for '{}': {e}", entry.network);
+                continue;
+            }
+        };
+
+        let color = if no_color { "" } else { LOG_COLORS[i % LOG_COLORS.len()] };
+        let reset = if no_color { "" } else { RESET };
+
+        for line in content.lines() {
+            println!(
+                "{color}{:>width$}{reset} | {line}",
+                entry.network,
+                width = max_name_len
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Continuously tail all log files with colored prefixes (follow mode).
+async fn run_logs_follow(
+    forks: &[ForkEntry],
+    max_name_len: usize,
+    no_color: bool,
+) -> anyhow::Result<()> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    use tokio::sync::mpsc;
+
+    let (tx, mut rx) = mpsc::channel::<(usize, String)>(256);
+
+    // Spawn a tail task per log file
+    for (i, entry) in forks.iter().enumerate() {
+        if entry.log_file.is_empty() {
+            continue;
+        }
+        let log_path = PathBuf::from(&entry.log_file);
+        let tx = tx.clone();
+
+        tokio::spawn(async move {
+            // Wait for the file to exist
+            loop {
+                if log_path.exists() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+
+            let file = match tokio::fs::File::open(&log_path).await {
+                Ok(f) => f,
+                Err(_) => return,
+            };
+            let mut reader = BufReader::new(file);
+            let mut line = String::new();
+
+            loop {
+                line.clear();
+                match reader.read_line(&mut line).await {
+                    Ok(0) => {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                    Ok(_) => {
+                        let trimmed = line.trim_end().to_string();
+                        if tx.send((i, trimmed)).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(_) => return,
+                }
+            }
+        });
+    }
+
+    // Drop the sender so rx closes when all tasks are done
+    drop(tx);
+
+    // Print incoming lines with colored prefixes
+    let network_names: Vec<&str> = forks.iter().map(|e| e.network.as_str()).collect();
+
+    while let Some((idx, line)) = rx.recv().await {
+        let name = network_names.get(idx).unwrap_or(&"unknown");
+        let color = if no_color { "" } else { LOG_COLORS[idx % LOG_COLORS.len()] };
+        let reset = if no_color { "" } else { RESET };
+        println!(
+            "{color}{:>width$}{reset} | {line}",
+            name,
+            width = max_name_len
+        );
+    }
+
+    Ok(())
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 fn ensure_treb_dir(treb_dir: &Path) -> anyhow::Result<()> {
@@ -784,6 +1065,29 @@ fn ensure_treb_dir(treb_dir: &Path) -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+/// Resolve which networks to fork.
+///
+/// If `filter` is non-empty, uses those network names directly.
+/// Otherwise, resolves ALL networks from `foundry.toml [rpc_endpoints]`.
+fn resolve_fork_networks(cwd: &Path, filter: &[String]) -> anyhow::Result<Vec<String>> {
+    if !filter.is_empty() {
+        return Ok(filter.to_vec());
+    }
+
+    let endpoints =
+        treb_config::resolve_rpc_endpoints(cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    // Filter out unresolved endpoints (missing env vars)
+    let mut networks: Vec<String> = endpoints
+        .into_iter()
+        .filter(|(_, ep)| !ep.unresolved)
+        .map(|(name, _)| name)
+        .collect();
+
+    networks.sort();
+    Ok(networks)
 }
 
 fn resolve_fork_url(
@@ -1010,11 +1314,11 @@ mod tests {
     // ── clap parsing tests ────────────────────────────────────────────────
 
     #[test]
-    fn parse_enter_network_only() {
-        let sub = parse_fork(&["enter", "--network", "mainnet"]).unwrap();
+    fn parse_enter_no_network() {
+        let sub = parse_fork(&["enter"]).unwrap();
         match sub {
             ForkSubcommand::Enter { network, rpc_url, fork_block_number } => {
-                assert_eq!(network.as_deref(), Some("mainnet"));
+                assert!(network.is_empty());
                 assert!(rpc_url.is_none());
                 assert!(fork_block_number.is_none());
             }
@@ -1023,7 +1327,29 @@ mod tests {
     }
 
     #[test]
-    fn parse_enter_with_all_flags() {
+    fn parse_enter_single_network() {
+        let sub = parse_fork(&["enter", "--network", "mainnet"]).unwrap();
+        match sub {
+            ForkSubcommand::Enter { network, .. } => {
+                assert_eq!(network, vec!["mainnet"]);
+            }
+            _ => panic!("expected Enter"),
+        }
+    }
+
+    #[test]
+    fn parse_enter_comma_separated_networks() {
+        let sub = parse_fork(&["enter", "--network", "mainnet,sepolia"]).unwrap();
+        match sub {
+            ForkSubcommand::Enter { network, .. } => {
+                assert_eq!(network, vec!["mainnet", "sepolia"]);
+            }
+            _ => panic!("expected Enter"),
+        }
+    }
+
+    #[test]
+    fn parse_enter_with_rpc_url_and_block() {
         let sub = parse_fork(&[
             "enter",
             "--network",
@@ -1036,7 +1362,7 @@ mod tests {
         .unwrap();
         match sub {
             ForkSubcommand::Enter { network, rpc_url, fork_block_number } => {
-                assert_eq!(network.as_deref(), Some("mainnet"));
+                assert_eq!(network, vec!["mainnet"]);
                 assert_eq!(rpc_url.as_deref(), Some("https://eth.example.com"));
                 assert_eq!(fork_block_number, Some(19_000_000));
             }
@@ -1045,12 +1371,15 @@ mod tests {
     }
 
     #[test]
-    fn parse_exit() {
-        let sub = parse_fork(&["exit", "--network", "sepolia"]).unwrap();
-        match sub {
-            ForkSubcommand::Exit { network } => assert_eq!(network.as_deref(), Some("sepolia")),
-            _ => panic!("expected Exit"),
-        }
+    fn parse_exit_no_args() {
+        let sub = parse_fork(&["exit"]).unwrap();
+        assert!(matches!(sub, ForkSubcommand::Exit));
+    }
+
+    #[test]
+    fn parse_revert_no_args() {
+        let sub = parse_fork(&["revert"]).unwrap();
+        assert!(matches!(sub, ForkSubcommand::Revert));
     }
 
     #[test]
@@ -1076,13 +1405,34 @@ mod tests {
 
     #[test]
     fn parse_diff_with_json() {
-        let sub = parse_fork(&["diff", "--network", "mainnet", "--json"]).unwrap();
+        let sub = parse_fork(&["diff", "--json"]).unwrap();
         match sub {
-            ForkSubcommand::Diff { network, json } => {
-                assert_eq!(network.as_deref(), Some("mainnet"));
-                assert!(json);
-            }
+            ForkSubcommand::Diff { json } => assert!(json),
             _ => panic!("expected Diff"),
+        }
+    }
+
+    #[test]
+    fn parse_logs_follow() {
+        let sub = parse_fork(&["logs", "-f"]).unwrap();
+        match sub {
+            ForkSubcommand::Logs { follow, network } => {
+                assert!(follow);
+                assert!(network.is_none());
+            }
+            _ => panic!("expected Logs"),
+        }
+    }
+
+    #[test]
+    fn parse_logs_with_network() {
+        let sub = parse_fork(&["logs", "--follow", "--network", "celo"]).unwrap();
+        match sub {
+            ForkSubcommand::Logs { follow, network } => {
+                assert!(follow);
+                assert_eq!(network.as_deref(), Some("celo"));
+            }
+            _ => panic!("expected Logs"),
         }
     }
 
@@ -1105,7 +1455,10 @@ mod tests {
             chain_id: 1,
             fork_url: "https://eth.example.com".into(),
             fork_block_number: None,
-            snapshot_dir: treb_dir.join("priv/snapshots").join(network).to_string_lossy().into_owned(),
+            snapshot_dir: treb_dir
+                .join("priv/snapshots/holistic")
+                .to_string_lossy()
+                .into_owned(),
             started_at: now,
             env_var_name: String::new(),
             original_rpc: String::new(),
@@ -1120,16 +1473,23 @@ mod tests {
     // ── fork state written on enter ───────────────────────────────────────
 
     #[test]
-    fn fork_state_written_on_enter() {
+    fn holistic_fork_state_written_on_enter() {
         let (_root, treb_dir) = make_treb_dir();
         let mut store = ForkStateStore::new(&treb_dir);
+
+        // Enter holistic mode
+        store.enter_fork_mode(".treb/priv/snapshots/holistic").unwrap();
+        assert!(store.is_fork_mode_active());
+
         store.insert_active_fork(sample_entry(&treb_dir, "mainnet")).unwrap();
+        store.insert_active_fork(sample_entry(&treb_dir, "sepolia")).unwrap();
+
         store
             .add_history(ForkHistoryEntry {
                 action: "enter".into(),
-                network: "mainnet".into(),
+                network: "mainnet, sepolia".into(),
                 timestamp: Utc::now(),
-                details: None,
+                details: Some("2 networks".into()),
             })
             .unwrap();
 
@@ -1137,11 +1497,48 @@ mod tests {
         let mut store2 = ForkStateStore::new(&treb_dir);
         store2.load().unwrap();
 
-        let fork = store2.get_active_fork("mainnet").unwrap();
-        assert_eq!(fork.network, "mainnet");
-        assert_eq!(fork.chain_id, 1);
+        assert!(store2.is_fork_mode_active());
+        assert!(store2.get_active_fork("mainnet").is_some());
+        assert!(store2.get_active_fork("sepolia").is_some());
+        assert_eq!(store2.list_active_forks().len(), 2);
         assert_eq!(store2.data().history.len(), 1);
-        assert_eq!(store2.data().history[0].action, "enter");
+    }
+
+    // ── exit clears all state ─────────────────────────────────────────────
+
+    #[test]
+    fn holistic_exit_clears_all_state() {
+        let (_root, treb_dir) = make_treb_dir();
+        let mut store = ForkStateStore::new(&treb_dir);
+
+        store.enter_fork_mode(".treb/priv/snapshots/holistic").unwrap();
+        store.insert_active_fork(sample_entry(&treb_dir, "mainnet")).unwrap();
+        store.insert_active_fork(sample_entry(&treb_dir, "sepolia")).unwrap();
+
+        // Exit fork mode
+        store.exit_fork_mode().unwrap();
+
+        assert!(!store.is_fork_mode_active());
+        assert!(store.list_active_forks().is_empty());
+        assert!(store.data().snapshot_dir.is_none());
+        assert!(store.data().entered_at.is_none());
+    }
+
+    // ── backward compat: old fork.json without active field ───────────────
+
+    #[test]
+    fn backward_compat_old_fork_json_without_active() {
+        let (_root, treb_dir) = make_treb_dir();
+        let fork_json = r#"{"forks": {}, "history": []}"#;
+        fs::write(treb_dir.join("fork.json"), fork_json).unwrap();
+
+        let mut store = ForkStateStore::new(&treb_dir);
+        store.load().unwrap();
+
+        // active defaults to false
+        assert!(!store.is_fork_mode_active());
+        assert!(store.data().snapshot_dir.is_none());
+        assert!(store.data().entered_at.is_none());
     }
 
     // ── registry snapshot/restore round-trip ─────────────────────────────
@@ -1149,7 +1546,7 @@ mod tests {
     #[test]
     fn registry_snapshot_restore_round_trip() {
         let (_root, treb_dir) = make_treb_dir();
-        let snapshot_dir = treb_dir.join("priv/snapshots").join("mainnet");
+        let snapshot_dir = treb_dir.join("priv/snapshots/holistic");
 
         // Write initial registry state
         fs::write(treb_dir.join(DEPLOYMENTS_FILE), r#"{"original": true}"#).unwrap();
@@ -1284,7 +1681,7 @@ mod tests {
     #[test]
     fn diff_detects_changes() {
         let (_root, treb_dir) = make_treb_dir();
-        let snapshot_dir = treb_dir.join("priv/snapshots").join("mainnet");
+        let snapshot_dir = treb_dir.join("priv/snapshots/holistic");
         fs::create_dir_all(&snapshot_dir).unwrap();
 
         // Write matching state to both locations first.
@@ -1315,7 +1712,7 @@ mod tests {
     #[test]
     fn diff_shows_clean_when_matching() {
         let (_root, treb_dir) = make_treb_dir();
-        let snapshot_dir = treb_dir.join("priv/snapshots").join("mainnet");
+        let snapshot_dir = treb_dir.join("priv/snapshots/holistic");
         fs::create_dir_all(&snapshot_dir).unwrap();
 
         let deployments_json = r#"{"Counter_1": {"address": "0xaaa"}}"#;
@@ -1331,5 +1728,17 @@ mod tests {
             .chain(snapshot_map.keys().filter(|k| !current_map.contains_key(*k)))
             .collect();
         assert!(changes.is_empty(), "expected no changes: {changes:?}");
+    }
+
+    // ── deterministic fork port ───────────────────────────────────────────
+
+    #[test]
+    fn deterministic_port_examples() {
+        use treb_forge::anvil::deterministic_fork_port;
+        assert_eq!(deterministic_fork_port(42220), 9734); // celo
+        assert_eq!(deterministic_fork_port(1), 9701);     // ethereum
+        assert_eq!(deterministic_fork_port(42161), 9754); // arbitrum
+        assert_eq!(deterministic_fork_port(11155111), 9774); // sepolia
+        assert_eq!(deterministic_fork_port(44787), 9773); // alfajores
     }
 }

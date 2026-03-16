@@ -1,15 +1,15 @@
 === cmd 0: [fork enter --help] ===
-Enter fork mode for a network: snapshot registry, start Anvil, record fork state
+Enter fork mode: snapshot registry and start Anvil for all configured networks
 
-Snapshots the current registry, spawns Anvil as a background subprocess forking from the upstream
-RPC, deploys CreateX, takes an initial EVM snapshot, and records a fully populated fork entry in
-`fork.json`.
+Snapshots the current registry once, then spawns a background Anvil subprocess for every network in
+`foundry.toml [rpc_endpoints]` (or a subset via `--network`). Each Anvil gets a deterministic port
+based on chain ID, deploys CreateX, and takes an initial EVM snapshot.
 
 Usage: treb fork enter [OPTIONS]
 
 Options:
       --network <NETWORK>
-          Network name (resolved from config if omitted)
+          Fork specific networks only (comma-separated or repeated)
 
       --no-color
           Disable colored output (also respected via NO_COLOR env var)
@@ -19,10 +19,10 @@ Options:
           stdin/stdout)
 
       --rpc-url <RPC_URL>
-          Upstream RPC URL to fork (overrides foundry.toml)
+          Upstream RPC URL override (only valid with a single --network)
 
       --fork-block-number <FORK_BLOCK_NUMBER>
-          Fork at a specific block number
+          Fork at a specific block number (applies to all networks)
 
   -h, --help
           Print help (see a summary with '-h')
