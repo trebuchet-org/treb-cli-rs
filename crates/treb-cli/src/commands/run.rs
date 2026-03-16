@@ -427,6 +427,7 @@ pub async fn execute_script(
         script_args: Vec::new(),
         verbosity: opts.verbose,
         is_fork: opts.is_fork,
+        rpc_url: opts.effective_rpc_url.clone(),
         ..Default::default()
     };
 
@@ -445,6 +446,7 @@ pub async fn execute_script(
         git_commit: resolve_git_commit(),
         project_root: cwd.to_path_buf(),
         resolved_senders: owned_senders,
+        sender_configs: resolved.senders.clone(),
         sender_labels,
         sender_role_names,
     };

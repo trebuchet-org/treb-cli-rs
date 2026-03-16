@@ -15,7 +15,7 @@ use owo_colors::{OwoColorize, Style};
 use serde::{Deserialize, Serialize};
 use treb_config::{ResolveOpts, resolve_config};
 use treb_forge::{
-    pipeline::{PipelineConfig, PipelineContext, RunPipeline, resolve_git_commit},
+    pipeline::{PipelineConfig, PipelineContext, resolve_git_commit},
     script::build_script_config_with_senders,
     sender::resolve_all_senders,
     sender_config::encode_sender_configs,
@@ -771,6 +771,7 @@ async fn setup_component(
         script_args: Vec::new(),
         verbosity: params.verbose,
         is_fork,
+        rpc_url: effective_rpc_url.clone(),
         ..Default::default()
     };
 
@@ -780,6 +781,7 @@ async fn setup_component(
         git_commit: resolve_git_commit(),
         project_root: params.cwd.to_path_buf(),
         resolved_senders,
+        sender_configs: resolved.senders.clone(),
         sender_labels,
         sender_role_names,
     };
@@ -1113,7 +1115,7 @@ pub async fn run(
     // so the in-memory Registry is stale. Re-open before Phase 4 broadcast.
     registry = Registry::open(&cwd).context("failed to reload registry")?;
 
-    let simulations = match sim_result {
+    let mut simulations = match sim_result {
         Ok(sims) => sims,
         Err((partial_sims, failed_name, err)) => {
             // Record successful simulations
@@ -1327,16 +1329,12 @@ pub async fn run(
 
         // ── Phase 4: Broadcast (if requested) ───────────────────────
         //
-        // Re-execute each component against the upstream URL (not the
-        // ephemeral Anvil) through RunPipeline::execute(). This gives
-        // us forge's full broadcast state machine (signing, gas, nonces,
-        // receipt collection) and natural extensibility for future Safe/
-        // Governor proposal routing.
+        // Route each component's already-captured BroadcastableTransactions
+        // to the upstream URL. No re-execution — simulation gave us everything.
         let total_txs: usize = simulations.iter().map(|s| s.result.transactions.len()).sum();
         if broadcast && !simulations.is_empty() && total_txs > 0 {
             // Confirmation prompt (interactive mode only)
             if prompts_enabled && !json {
-                // Show broadcast target(s)
                 let network_name = network.as_deref()
                     .or(banner_network)
                     .unwrap_or("unknown");
@@ -1371,57 +1369,72 @@ pub async fn run(
                     styled(&format!("Broadcasting to {network_label}..."), color::CYAN),
                 );
             }
-            for name in &components_to_run {
-                let component = &compose.components[name];
+
+            // Resolve the upstream URL for routing
+            let upstream_url = banner_rpc_url.as_deref().ok_or_else(|| {
+                anyhow::anyhow!("no RPC URL available for broadcast")
+            })?;
+
+            // Resolve sender context once (shared across components)
+            let setup = setup_component(
+                components_to_run.first().unwrap(),
+                &compose.components[components_to_run.first().unwrap()],
+                &compose_params,
+            ).await.context("failed to resolve broadcast context")?;
+
+            for sim in &mut simulations {
+                if sim.result.transactions.is_empty() {
+                    continue;
+                }
 
                 // Show per-component spinner
-                let spinner: std::sync::Arc<std::sync::Mutex<Option<spinoff::Spinner>>> =
-                    std::sync::Arc::new(std::sync::Mutex::new(None));
+                let mut comp_spinner: Option<spinoff::Spinner> = None;
                 if !json {
-                    let mut guard = spinner.lock().unwrap();
-                    *guard = Some(spinoff::Spinner::new(
+                    comp_spinner = Some(spinoff::Spinner::new(
                         spinoff::spinners::Dots2,
-                        format!("  {name}"),
+                        format!("  {}", sim.name),
                         spinoff::Color::Cyan,
                     ));
                 }
 
-                // Rebuild config targeting the original upstream URL
-                let setup = setup_component(name, component, &compose_params).await;
-                let setup = match setup {
-                    Ok(s) => s,
-                    Err(e) => {
-                        drop(spinner.lock().unwrap().take());
-                        eprint!("\x1b[2K\r");
-                        if !json {
-                            eprintln!(
-                                "  {} {}",
-                                styled(&emoji::CROSS.to_string(), color::RED),
-                                styled(&format!("{name}: {e}"), color::RED),
-                            );
-                        }
-                        failed_component = Some(name.clone());
-                        break;
-                    }
+                let route_result = if let Some(ref btxs) = sim.result_transactions {
+                    let ctx = treb_forge::pipeline::RouteContext {
+                        rpc_url: upstream_url,
+                        chain_id: setup.pipeline_context.config.chain_id,
+                        is_fork: setup.pipeline_context.config.is_fork,
+                        resolved_senders: &setup.pipeline_context.resolved_senders,
+                        sender_labels: &setup.pipeline_context.sender_labels,
+                        sender_configs: &setup.pipeline_context.sender_configs,
+                    };
+                    treb_forge::pipeline::route_all(btxs, &ctx).await
+                } else {
+                    Ok(Vec::new())
                 };
 
-                // Run through the full pipeline (compile → execute → broadcast → record)
-                let pipeline = RunPipeline::new(setup.pipeline_context)
-                    .with_script_config(setup.script_config);
-
-                let result = {
-                    let _foundry_shell = super::run::FoundryShellGuard::suppress();
-                    pipeline.execute(&mut registry).await
-                };
-
-                // Clear spinner
-                drop(spinner.lock().unwrap().take());
+                // Stop spinner and clear its line
+                if let Some(mut s) = comp_spinner.take() {
+                    s.clear();
+                }
                 eprint!("\x1b[2K\r");
 
-                match result {
-                    Ok(res) => {
-                        let tx_count = res.transactions.len();
-                        let dep_count = res.deployments.len();
+                match route_result {
+                    Ok(run_results) => {
+                        let receipts = treb_forge::pipeline::flatten_receipts(&run_results);
+                        treb_forge::pipeline::apply_receipts(
+                            &mut sim.result.transactions,
+                            &receipts,
+                        );
+
+                        // Record to registry
+                        for rd in &sim.result.deployments {
+                            let _ = registry.insert_deployment(rd.deployment.clone());
+                        }
+                        for rt in &sim.result.transactions {
+                            let _ = registry.insert_transaction(rt.transaction.clone());
+                        }
+
+                        let tx_count = sim.result.transactions.len();
+                        let dep_count = sim.result.deployments.len();
                         if !json {
                             let mut detail = format!("{tx_count} tx");
                             if dep_count > 0 {
@@ -1430,11 +1443,10 @@ pub async fn run(
                             eprintln!(
                                 "  {} {}  ({})",
                                 styled(&emoji::CHECK_MARK.to_string(), color::GREEN),
-                                name,
+                                &sim.name,
                                 styled(&detail, color::GRAY),
                             );
-                            // Show per-tx receipt details
-                            for rt in &res.transactions {
+                            for rt in &sim.result.transactions {
                                 let tx = &rt.transaction;
                                 let sender_label = rt.sender_name.as_deref()
                                     .unwrap_or(&tx.sender);
@@ -1460,10 +1472,10 @@ pub async fn run(
                             eprintln!(
                                 "  {} {}",
                                 styled(&emoji::CROSS.to_string(), color::RED),
-                                styled(&format!("{name}: {error_msg}"), color::RED),
+                                styled(&format!("{}: {error_msg}", sim.name), color::RED),
                             );
                         }
-                        failed_component = Some(name.clone());
+                        failed_component = Some(sim.name.clone());
                         break;
                     }
                 }

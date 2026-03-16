@@ -495,6 +495,31 @@ pub fn build_v2_transaction_metadata(
         .collect()
 }
 
+/// Apply broadcast receipts to already-hydrated recorded transactions.
+///
+/// Updates each transaction's hash, block number, status, and gas based on
+/// the corresponding receipt. Receipts and transactions must be in the same
+/// order (aligned by index).
+pub fn apply_receipts(
+    transactions: &mut [super::types::RecordedTransaction],
+    receipts: &[crate::script::BroadcastReceipt],
+) {
+    use treb_core::types::enums::TransactionStatus;
+
+    for (rt, receipt) in transactions.iter_mut().zip(receipts.iter()) {
+        rt.transaction.hash = format!("{:#x}", receipt.hash);
+        rt.transaction.block_number = receipt.block_number;
+        rt.transaction.status = if receipt.status {
+            TransactionStatus::Executed
+        } else {
+            TransactionStatus::Failed
+        };
+        if receipt.gas_used > 0 {
+            rt.gas_used = Some(receipt.gas_used);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

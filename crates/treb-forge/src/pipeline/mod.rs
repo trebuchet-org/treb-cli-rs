@@ -8,6 +8,7 @@ pub mod compose;
 mod duplicates;
 mod hydration;
 mod orchestrator;
+pub mod routing;
 mod types;
 
 pub use duplicates::{
@@ -15,11 +16,12 @@ pub use duplicates::{
     resolve_duplicates,
 };
 pub use hydration::{
-    V2TransactionMetadata, build_v2_transaction_metadata, generate_deployment_id,
+    V2TransactionMetadata, apply_receipts, build_v2_transaction_metadata, generate_deployment_id,
     hydrate_deployment, hydrate_governor_proposals, hydrate_safe_transactions,
     hydrate_transactions, hydrate_transactions_from_broadcast, populate_safe_context,
 };
 pub use orchestrator::{BroadcastHook, BroadcastPhase, BroadcastProgressCallback, RunPipeline};
+pub use routing::{RouteContext, RunResult, TransactionRun, flatten_receipts, route_all};
 pub use types::{
     PipelineConfig, PipelineContext, PipelineResult, RecordedDeployment, RecordedTransaction,
     SkippedDeployment,

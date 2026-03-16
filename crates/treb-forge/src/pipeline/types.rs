@@ -39,6 +39,8 @@ pub struct PipelineConfig {
     pub verbosity: u8,
     /// Whether the pipeline is running against an Anvil fork.
     pub is_fork: bool,
+    /// The effective RPC URL for transaction routing.
+    pub rpc_url: Option<String>,
 }
 
 impl Default for PipelineConfig {
@@ -53,6 +55,7 @@ impl Default for PipelineConfig {
             env_vars: HashMap::new(),
             verbosity: 0,
             is_fork: false,
+            rpc_url: None,
         }
     }
 }
@@ -78,6 +81,8 @@ pub struct PipelineContext {
     pub resolved_senders: HashMap<String, ResolvedSender>,
     /// Sender address → role name mapping for trace labeling.
     pub sender_labels: HashMap<Address, String>,
+    /// Original sender configs (for key extraction in Safe/Governor routing).
+    pub sender_configs: HashMap<String, treb_config::SenderConfig>,
     /// All sender role names (for transaction sender resolution).
     pub sender_role_names: Vec<String>,
 }

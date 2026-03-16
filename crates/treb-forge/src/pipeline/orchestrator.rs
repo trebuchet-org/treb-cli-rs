@@ -139,12 +139,9 @@ impl RunPipeline {
         };
 
         let script_args = script_config.into_script_args()?;
-        // Wallet-only senders can broadcast directly through forge.
-        // Safe/Governor senders route through Rust after execution.
+        // All sender types can broadcast — routing handles Safe/Governor.
         let wants_broadcast = script_args.broadcast
-            && self.context.config.broadcast
-            && !deployer_is_safe
-            && !deployer_is_governor;
+            && self.context.config.broadcast;
 
         // Run forge: preprocess → compile → link → prepare → execute
         report(BroadcastPhase::Executing);
@@ -340,52 +337,33 @@ impl RunPipeline {
             })
             .collect();
 
-        // 12. Broadcast: hook → confirm → broadcast
+        // 12. Broadcast: hook → confirm → route by sender type
         let broadcast_confirmed = if wants_broadcast && !recorded_transactions.is_empty() {
             let confirmed = self
                 .broadcast_hook
                 .map_or(true, |hook| hook(&recorded_transactions));
 
             if confirmed {
-                report(BroadcastPhase::Simulating);
-                let pre_sim = executed
-                    .prepare_simulation()
-                    .await
-                    .map_err(|e| TrebError::Forge(format!("forge simulation preparation failed: {e}")))?;
-                let filled = pre_sim
-                    .fill_metadata()
-                    .await
-                    .map_err(|e| TrebError::Forge(format!("forge metadata fill failed: {e}")))?;
-                let bundled = filled
-                    .bundle()
-                    .await
-                    .map_err(|e| TrebError::Forge(format!("forge bundling failed: {e}")))?;
-                let bundled = bundled
-                    .wait_for_pending()
-                    .await
-                    .map_err(|e| TrebError::Forge(format!("forge pending transaction wait failed: {e}")))?;
+                if let Some(btxs) = &execution.transactions {
+                    let rpc_url = self.context.config.rpc_url.as_deref()
+                        .ok_or_else(|| TrebError::Forge(
+                            "RPC URL required for broadcast".into(),
+                        ))?;
 
-                report(BroadcastPhase::Broadcasting);
-                let broadcasted = bundled
-                    .broadcast()
-                    .await
-                    .map_err(|e| TrebError::Forge(format!("forge broadcast failed: {e}")))?;
-                report(BroadcastPhase::Complete);
-
-                let mut receipts = Vec::new();
-                for seq in broadcasted.sequence.sequences() {
-                    for (tx_meta, receipt) in seq.transactions.iter().zip(seq.receipts.iter()) {
-                        receipts.push(crate::script::BroadcastReceipt {
-                            hash: receipt.transaction_hash,
-                            block_number: receipt.block_number.unwrap_or_default(),
-                            gas_used: receipt.gas_used,
-                            status: receipt.inner.inner.inner.receipt.status.coerce_status(),
-                            contract_name: tx_meta.contract_name.clone().filter(|s| !s.is_empty()),
-                            contract_address: receipt.contract_address,
-                        });
-                    }
+                    report(BroadcastPhase::Broadcasting);
+                    let ctx = super::routing::RouteContext {
+                        rpc_url,
+                        chain_id: self.context.config.chain_id,
+                        is_fork: self.context.config.is_fork,
+                        resolved_senders: &self.context.resolved_senders,
+                        sender_labels: &self.context.sender_labels,
+                        sender_configs: &self.context.sender_configs,
+                    };
+                    let run_results = super::routing::route_all(btxs, &ctx).await?;
+                    let receipts = super::routing::flatten_receipts(&run_results);
+                    super::hydration::apply_receipts(&mut recorded_transactions, &receipts);
+                    report(BroadcastPhase::Complete);
                 }
-                apply_broadcast_receipts(&mut recorded_transactions, &receipts);
                 true
             } else {
                 false
@@ -997,25 +975,6 @@ pub(super) fn collapse_decoded_bytecode_args(
 /// Apply broadcast receipts to recorded transactions.
 ///
 /// Uses positional matching: `TransactionSimulated` events and
-/// `BroadcastableTransactions` are collected in the same order during
-/// script execution, so the i-th receipt corresponds to the i-th transaction.
-fn apply_broadcast_receipts(
-    transactions: &mut [RecordedTransaction],
-    receipts: &[BroadcastReceipt],
-) {
-    for (rt, receipt) in transactions.iter_mut().zip(receipts.iter()) {
-        rt.transaction.hash = format!("{:#x}", receipt.hash);
-        rt.transaction.block_number = receipt.block_number;
-        rt.transaction.status = if receipt.status {
-            TransactionStatus::Executed
-        } else {
-            TransactionStatus::Failed
-        };
-        // Override simulated gas estimate with actual on-chain gas
-        rt.gas_used = Some(receipt.gas_used);
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Safe proposal helpers (will be wired for Rust-side Safe proposals)
 // ---------------------------------------------------------------------------

@@ -16,6 +16,7 @@ use treb_core::error::TrebError;
 use crate::sender::ResolvedSender;
 
 /// Receipt from a successfully broadcast transaction.
+#[derive(Debug, Clone)]
 pub struct BroadcastReceipt {
     /// On-chain transaction hash.
     pub hash: B256,

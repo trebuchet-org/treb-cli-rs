@@ -143,12 +143,12 @@ impl SafeServiceClient {
             .map_err(|e| TrebError::Safe(format!("failed to parse transaction response: {e}")))
     }
 
-    // ── Nonce ────────────────────────────────────────────────────────────
+    // ── Safe info ─────────────────────────────────────────────────────
 
-    /// Retrieve the current nonce for a Safe.
+    /// Fetch Safe metadata (nonce, threshold, owners).
     ///
     /// Endpoint: `GET /safes/{safe_address}/`
-    pub async fn get_nonce(&self, safe_address: &str) -> Result<u64, TrebError> {
+    pub async fn get_safe_info(&self, safe_address: &str) -> Result<SafeInfoResponse, TrebError> {
         let url = format!("{}/safes/{}/", self.base_url, safe_address);
         let resp = self
             .http
@@ -164,9 +164,13 @@ impl SafeServiceClient {
         }
 
         let body = resp.text().await.unwrap_or_default();
-        let info: SafeInfoResponse = serde_json::from_str(&body)
-            .map_err(|e| TrebError::Safe(format!("failed to parse safe info response: {e}")))?;
-        Ok(info.nonce)
+        serde_json::from_str(&body)
+            .map_err(|e| TrebError::Safe(format!("failed to parse safe info response: {e}")))
+    }
+
+    /// Retrieve the current nonce for a Safe.
+    pub async fn get_nonce(&self, safe_address: &str) -> Result<u64, TrebError> {
+        Ok(self.get_safe_info(safe_address).await?.nonce)
     }
 }
 
