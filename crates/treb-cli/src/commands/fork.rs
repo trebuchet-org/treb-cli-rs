@@ -6,7 +6,7 @@
 //! Anvil instances.
 
 use std::{
-    collections::BTreeSet,
+    collections::HashMap,
     env,
     path::{Path, PathBuf},
     time::Duration,
@@ -16,7 +16,9 @@ use anyhow::{Context, bail};
 use chrono::Utc;
 use clap::Subcommand;
 use tokio::net::TcpStream;
-use treb_core::types::fork::{ForkEntry, ForkHistoryEntry, SnapshotEntry};
+use treb_core::types::fork::{
+    ForkEntry, ForkHistoryEntry, ForkRunSnapshot, ForkRunSource, SnapshotEntry,
+};
 use treb_forge::{
     anvil::{
         BackgroundAnvilConfig, deterministic_fork_port, find_available_port, is_port_available,
@@ -24,10 +26,7 @@ use treb_forge::{
     },
     createx::createx_deployed_bytecode,
 };
-use treb_registry::{
-    DEPLOYMENTS_FILE, ForkStateStore, TRANSACTIONS_FILE, remove_snapshot, restore_registry,
-    snapshot_registry,
-};
+use treb_registry::{ForkStateStore, remove_snapshot, restore_registry, snapshot_registry};
 
 const TREB_DIR: &str = ".treb";
 const SNAPSHOT_BASE: &str = "priv/snapshots";
@@ -110,15 +109,6 @@ pub enum ForkSubcommand {
         #[arg(long)]
         json: bool,
     },
-    /// Diff current registry vs snapshot
-    ///
-    /// Shows deployments that were added or removed since fork mode was entered
-    /// by comparing the current registry against the saved snapshot.
-    Diff {
-        /// Output as JSON
-        #[arg(long)]
-        json: bool,
-    },
     /// Tail Anvil log files for active forks
     ///
     /// Shows logs from all active fork Anvil instances with colored network
@@ -143,25 +133,12 @@ pub async fn run(subcommand: ForkSubcommand) -> anyhow::Result<()> {
         ForkSubcommand::Exit => run_exit().await,
         ForkSubcommand::Revert => run_revert().await,
         ForkSubcommand::Restart { network, fork_block_number } => {
-            let network = require_network(network)?;
             run_restart(network, fork_block_number).await
         }
         ForkSubcommand::Status { json } => run_status(json).await,
         ForkSubcommand::History { network, json } => run_history(network, json).await,
-        ForkSubcommand::Diff { json } => run_diff(json).await,
         ForkSubcommand::Logs { follow, network } => run_logs(follow, network).await,
     }
-}
-
-/// Resolve the network from the CLI flag or fall back to config/interactive picker.
-fn require_network(cli_network: Option<String>) -> anyhow::Result<String> {
-    let cwd = env::current_dir().context("failed to determine current directory")?;
-    let resolved = super::run::resolve_network(cli_network, &cwd, true, false)?;
-    resolved.ok_or_else(|| {
-        anyhow::anyhow!(
-            "no network specified; pass --network or set one in config.local.json"
-        )
-    })
 }
 
 // ── run_enter ─────────────────────────────────────────────────────────────────
@@ -298,6 +275,7 @@ pub async fn run_enter(
     }
 
     // Spawn all Anvil nodes and run post-spawn setup in parallel
+    let mut spinner = spinoff::Spinner::new(spinoff::spinners::Dots2, "Starting forks...", spinoff::Color::Cyan);
     let mut spawn_set = tokio::task::JoinSet::new();
     for setup in setups {
         let client = client.clone();
@@ -358,6 +336,8 @@ pub async fn run_enter(
             Err(e) => errors.push(("unknown".into(), format!("task panicked: {e}"))),
         }
     }
+
+    spinner.stop();
 
     // Write results to store sequentially
     let mut started = Vec::new();
@@ -449,6 +429,71 @@ pub async fn run_enter(
     Ok(())
 }
 
+// ── snapshot_fork_before_broadcast ─────────────────────────────────────────────
+
+/// Take a pre-broadcast snapshot of the registry and EVM state for each active fork.
+///
+/// Called from `run.rs` and `compose.rs` after user confirms broadcast but before
+/// `broadcast_all()`. Returns the snapshot that was pushed onto the store stack.
+pub async fn snapshot_fork_before_broadcast(
+    treb_dir: &Path,
+    store: &mut ForkStateStore,
+    source: ForkRunSource,
+) -> anyhow::Result<ForkRunSnapshot> {
+    let index = store.next_run_snapshot_index();
+    let snapshot_dir = treb_dir.join(SNAPSHOT_BASE).join(format!("run-{index}"));
+
+    // 1. Copy current registry JSON
+    snapshot_registry(treb_dir, &snapshot_dir)
+        .context("failed to snapshot registry before broadcast")?;
+
+    // 2. Take EVM snapshot for each active fork
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
+    let mut evm_snapshots: HashMap<String, String> = HashMap::new();
+
+    let forks: Vec<(String, ForkEntry)> = store
+        .list_active_forks()
+        .into_iter()
+        .map(|e| {
+            let key = match &e.instance_name {
+                Some(name) if name != &e.network => format!("{}:{}", e.network, name),
+                _ => e.network.clone(),
+            };
+            (key, e.clone())
+        })
+        .collect();
+
+    for (key, entry) in &forks {
+        if is_port_reachable(entry.port).await {
+            match evm_snapshot_http(&client, &entry.rpc_url).await {
+                Ok(snap_id) => {
+                    evm_snapshots.insert(key.clone(), snap_id);
+                }
+                Err(e) => {
+                    eprintln!(
+                        "Warning: failed to take EVM snapshot for '{}': {e}",
+                        entry.network
+                    );
+                }
+            }
+        }
+    }
+
+    // 3. Build and push the snapshot (counts updated after broadcast)
+    let snapshot = ForkRunSnapshot {
+        index,
+        source,
+        registry_snapshot_dir: snapshot_dir.to_string_lossy().into_owned(),
+        evm_snapshots,
+        deployment_count: 0,
+        transaction_count: 0,
+        timestamp: Utc::now(),
+    };
+
+    store.push_run_snapshot(snapshot.clone())?;
+    Ok(snapshot)
+}
+
 // ── run_exit ──────────────────────────────────────────────────────────────────
 
 /// Exit holistic fork mode.
@@ -488,7 +533,14 @@ pub async fn run_exit() -> anyhow::Result<()> {
     restore_registry(&snapshot_dir, &treb_dir)
         .context("failed to restore registry from snapshot")?;
 
-    // Remove snapshot dir
+    // Clean up per-run snapshot dirs
+    let cleared = store.clear_run_snapshots().unwrap_or_default();
+    for snap in &cleared {
+        let snap_path = PathBuf::from(&snap.registry_snapshot_dir);
+        let _ = remove_snapshot(&snap_path);
+    }
+
+    // Remove holistic snapshot dir
     remove_snapshot(&snapshot_dir).context("failed to remove snapshot directory")?;
 
     // Record history
@@ -516,12 +568,11 @@ pub async fn run_exit() -> anyhow::Result<()> {
 
 // ── run_revert ────────────────────────────────────────────────────────────────
 
-/// Revert all active forks to their initial state.
+/// Revert the last run broadcast in fork mode.
 ///
-/// For each active fork with a running Anvil:
-/// 1. Calls `evm_revert` to restore EVM state.
-/// 2. Takes a new EVM snapshot for the next revert.
-/// 3. Restores registry from the holistic snapshot.
+/// Pops the most recent `ForkRunSnapshot` from the stack, reverts each
+/// per-network EVM snapshot, restores the registry from the snapshot dir,
+/// and cleans up the snapshot directory.
 pub async fn run_revert() -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     let treb_dir = cwd.join(TREB_DIR);
@@ -533,109 +584,117 @@ pub async fn run_revert() -> anyhow::Result<()> {
         bail!("not in fork mode");
     }
 
-    let forks: Vec<ForkEntry> = store.list_active_forks().into_iter().cloned().collect();
-    if forks.is_empty() {
-        println!("No active forks to revert.");
-        return Ok(());
-    }
+    let snapshot = store
+        .pop_run_snapshot()?
+        .ok_or_else(|| anyhow::anyhow!("no run snapshots to revert"))?;
 
     let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
 
-    for entry in &forks {
-        if !is_port_reachable(entry.port).await {
-            eprintln!(
-                "Warning: Anvil for '{}' not reachable at port {}; skipping EVM revert",
-                entry.network, entry.port
-            );
-            continue;
-        }
-
-        // Revert EVM state to the last snapshot
-        if let Some(last_snapshot) = entry.snapshots.last() {
-            let reverted = evm_revert_http(&client, &entry.rpc_url, &last_snapshot.snapshot_id)
+    // Revert EVM state for each fork that had a snapshot
+    for (fork_key, snap_id) in &snapshot.evm_snapshots {
+        if let Some(entry) = store.get_active_fork(fork_key) {
+            if !is_port_reachable(entry.port).await {
+                eprintln!(
+                    "Warning: Anvil for '{fork_key}' not reachable at port {}; skipping EVM revert",
+                    entry.port
+                );
+                continue;
+            }
+            let reverted = evm_revert_http(&client, &entry.rpc_url, snap_id)
+                .await
+                .with_context(|| format!("failed to revert EVM state for '{fork_key}'"))?;
+            if !reverted {
+                eprintln!("Warning: EVM revert failed for '{fork_key}' (snapshot: {snap_id})");
+            }
+            // Re-snapshot for idempotency (evm_revert consumes the snapshot)
+            let new_snap_id = evm_snapshot_http(&client, &entry.rpc_url)
                 .await
                 .with_context(|| {
-                    format!("failed to revert EVM state for network '{}'", entry.network)
+                    format!("failed to re-snapshot EVM state for '{fork_key}'")
                 })?;
-            if !reverted {
-                eprintln!(
-                    "Warning: EVM revert failed for '{}' (snapshot: {})",
-                    entry.network, last_snapshot.snapshot_id
-                );
-            }
+            // Update the fork entry's snapshots
+            let mut updated = entry.clone();
+            let next_index = updated.snapshots.len() as u32;
+            updated.snapshots.push(SnapshotEntry {
+                index: next_index,
+                snapshot_id: new_snap_id,
+                command: "revert".into(),
+                timestamp: Utc::now(),
+            });
+            store.update_active_fork(updated).context("failed to update fork entry")?;
         }
-
-        // Take a new EVM snapshot for the next revert
-        let new_snapshot_id = evm_snapshot_http(&client, &entry.rpc_url)
-            .await
-            .with_context(|| {
-                format!("failed to take new EVM snapshot for network '{}'", entry.network)
-            })?;
-
-        // Update the fork entry with the new snapshot
-        let mut updated = entry.clone();
-        let next_index = updated.snapshots.len() as u32;
-        updated.snapshots.push(SnapshotEntry {
-            index: next_index,
-            snapshot_id: new_snapshot_id.clone(),
-            command: "revert".into(),
-            timestamp: Utc::now(),
-        });
-        store.update_active_fork(updated).context("failed to update fork entry")?;
-
-        println!("Reverted EVM state for '{}'.", entry.network);
     }
 
-    // Restore registry from holistic snapshot
-    let snapshot_dir = store
-        .data()
-        .snapshot_dir
-        .as_ref()
-        .map(PathBuf::from)
-        .ok_or_else(|| anyhow::anyhow!("fork state has no snapshot directory"))?;
-
+    // Restore registry from the run snapshot dir
+    let snapshot_dir = PathBuf::from(&snapshot.registry_snapshot_dir);
     restore_registry(&snapshot_dir, &treb_dir)
-        .context("failed to restore registry from snapshot")?;
+        .context("failed to restore registry from run snapshot")?;
+
+    // Clean up the run snapshot dir
+    let _ = remove_snapshot(&snapshot_dir);
+
+    // Build a human-readable source label
+    let source_label = format_run_source(&snapshot.source);
+    let remaining = store.run_snapshots().len();
 
     // Record history
-    let network_list: String =
-        forks.iter().map(|e| e.network.as_str()).collect::<Vec<_>>().join(", ");
     store
         .add_history(ForkHistoryEntry {
             action: "revert".into(),
-            network: network_list,
+            network: "all".into(),
             timestamp: Utc::now(),
-            details: Some(format!("{} networks reverted", forks.len())),
+            details: Some(format!("reverted: {source_label}")),
         })
         .context("failed to record revert history")?;
 
-    println!("Registry restored from snapshot.");
+    println!("Reverted: {source_label}");
+    let dep_count = snapshot.deployment_count;
+    let tx_count = snapshot.transaction_count;
+    println!("  {} deployment(s), {} transaction(s) undone", dep_count, tx_count);
+    println!("  {} snapshot(s) remaining", remaining);
     Ok(())
 }
 
 // ── run_restart ───────────────────────────────────────────────────────────────
 
-/// Restart a fork: kill old Anvil, restore registry, spawn fresh background Anvil.
+/// Restart forks: kill old Anvil(s), restore registry, spawn fresh background Anvil(s).
 ///
-/// Stops the existing Anvil process, restores registry files from the initial
-/// snapshot, finds a new port, spawns a fresh background Anvil subprocess,
-/// deploys CreateX, takes a new EVM snapshot, and updates the fork state.
-pub async fn run_restart(network: String, fork_block_number: Option<u64>) -> anyhow::Result<()> {
+/// If `network` is `None`, restarts all active forks in parallel.
+/// If `Some(network)`, restarts just that single network.
+pub async fn run_restart(
+    network: Option<String>,
+    fork_block_number: Option<u64>,
+) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     let treb_dir = cwd.join(TREB_DIR);
 
     let mut store = ForkStateStore::new(&treb_dir);
     store.load().context("failed to load fork state")?;
 
-    let entry = store
-        .get_active_fork(&network)
-        .ok_or_else(|| anyhow::anyhow!("network '{}' is not in fork mode", network))?
-        .clone();
+    if !store.is_fork_mode_active() {
+        bail!("not in fork mode");
+    }
 
-    // Stop existing Anvil process (may already be dead)
-    if !entry.pid_file.is_empty() {
-        let pid_path = PathBuf::from(&entry.pid_file);
-        let _ = stop_background_anvil(&pid_path);
+    // Determine which forks to restart
+    let entries: Vec<ForkEntry> = if let Some(ref net) = network {
+        let entry = store
+            .get_active_fork(net)
+            .ok_or_else(|| anyhow::anyhow!("network '{}' is not in fork mode", net))?
+            .clone();
+        vec![entry]
+    } else {
+        store.list_active_forks().into_iter().cloned().collect()
+    };
+
+    if entries.is_empty() {
+        bail!("no active forks to restart");
+    }
+
+    // Stop all targeted Anvil processes
+    for entry in &entries {
+        if !entry.pid_file.is_empty() {
+            let _ = stop_background_anvil(&PathBuf::from(&entry.pid_file));
+        }
     }
 
     // Restore registry from holistic snapshot
@@ -644,91 +703,146 @@ pub async fn run_restart(network: String, fork_block_number: Option<u64>) -> any
         restore_registry(&snapshot_dir, &treb_dir).context("failed to restore registry")?;
     }
 
-    // Deterministic port with fallback
-    let det_port = deterministic_fork_port(entry.chain_id);
-    let port = if is_port_available(det_port) { det_port } else {
-        find_available_port().map_err(|e| anyhow::anyhow!("{e}"))?
-    };
+    // Clear run snapshots (restart = clean slate)
+    let cleared = store.clear_run_snapshots().unwrap_or_default();
+    for snap in &cleared {
+        let _ = remove_snapshot(&PathBuf::from(&snap.registry_snapshot_dir));
+    }
 
-    // Determine the block to fork from
-    let blk = fork_block_number.or(entry.fork_block_number);
-
-    // Set up PID/log file paths (reuse priv dir)
     let priv_dir = treb_dir.join("priv");
     std::fs::create_dir_all(&priv_dir).context("failed to create priv directory")?;
-    let pid_file = priv_dir.join(format!("fork-{network}.pid"));
-    let log_file = priv_dir.join(format!("fork-{network}.log"));
 
-    // Spawn fresh Anvil as a background subprocess
-    let anvil_config = BackgroundAnvilConfig {
-        port,
-        chain_id: Some(entry.chain_id),
-        fork_url: Some(entry.original_rpc.clone()),
-        fork_block_number: blk,
-        pid_file: pid_file.clone(),
-        log_file: log_file.clone(),
+    let spinner_msg = if entries.len() == 1 {
+        "Restarting fork..."
+    } else {
+        "Restarting forks..."
     };
+    let mut spinner = spinoff::Spinner::new(spinoff::spinners::Dots2, spinner_msg, spinoff::Color::Cyan);
 
-    let bg_anvil = treb_forge::anvil::spawn_background_anvil(&anvil_config)
-        .map_err(|e| anyhow::anyhow!("failed to start fresh fork anvil: {e}"))?;
+    // Spawn all Anvil nodes in parallel
+    let mut spawn_set = tokio::task::JoinSet::new();
+    for entry in entries {
+        let priv_dir = priv_dir.clone();
+        let blk = fork_block_number.or(entry.fork_block_number);
+        spawn_set.spawn(async move {
+            let network = entry.network.clone();
+            let det_port = deterministic_fork_port(entry.chain_id);
+            let port = if is_port_available(det_port) {
+                det_port
+            } else {
+                find_available_port().map_err(|e| (network.clone(), format!("{e}")))?
+            };
 
-    let rpc_url = bg_anvil.rpc_url.clone();
-    let anvil_pid = bg_anvil.pid as i32;
+            let pid_file = priv_dir.join(format!("fork-{network}.pid"));
+            let log_file = priv_dir.join(format!("fork-{network}.log"));
 
-    // Poll until healthy
-    if let Err(e) = poll_anvil_health(&rpc_url, true) {
-        let _ = stop_background_anvil(&pid_file);
-        bail!("fresh fork anvil failed to become ready: {e}");
+            let anvil_config = BackgroundAnvilConfig {
+                port,
+                chain_id: Some(entry.chain_id),
+                fork_url: Some(entry.original_rpc.clone()),
+                fork_block_number: blk,
+                pid_file: pid_file.clone(),
+                log_file: log_file.clone(),
+            };
+
+            let bg_anvil = treb_forge::anvil::spawn_background_anvil(&anvil_config)
+                .map_err(|e| (network.clone(), format!("failed to spawn anvil: {e}")))?;
+
+            let rpc_url = bg_anvil.rpc_url.clone();
+            let anvil_pid = bg_anvil.pid as i32;
+
+            // Poll until healthy
+            let health_url = rpc_url.clone();
+            let health_pid = pid_file.clone();
+            let health_result = tokio::task::spawn_blocking(move || {
+                poll_anvil_health(&health_url, true)
+            })
+            .await
+            .map_err(|e| {
+                let _ = stop_background_anvil(&health_pid);
+                (network.clone(), format!("health poll task failed: {e}"))
+            })?;
+
+            if let Err(e) = health_result {
+                let _ = stop_background_anvil(&pid_file);
+                return Err((network.clone(), format!("anvil not ready: {e}")));
+            }
+
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(10))
+                .build()
+                .map_err(|e| (network.clone(), format!("{e}")))?;
+
+            if let Err(e) = deploy_createx_http(&client, &rpc_url).await {
+                eprintln!("Warning: failed to deploy CreateX on {network}: {e}");
+            }
+
+            let snapshot_id = evm_snapshot_http(&client, &rpc_url)
+                .await
+                .map_err(|e| (network.clone(), format!("EVM snapshot failed: {e}")))?;
+
+            Ok((entry, port, rpc_url, anvil_pid, pid_file, log_file, snapshot_id, blk))
+        });
     }
 
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
-
-    // Ensure CreateX factory exists (skips if already present on-chain)
-    if let Err(e) = deploy_createx_http(&client, &rpc_url).await {
-        eprintln!("Warning: failed to deploy CreateX: {e}");
+    let mut results = Vec::new();
+    let mut errors = Vec::new();
+    while let Some(result) = spawn_set.join_next().await {
+        match result {
+            Ok(Ok(r)) => results.push(r),
+            Ok(Err((net, msg))) => errors.push((net, msg)),
+            Err(e) => errors.push(("unknown".into(), format!("task panicked: {e}"))),
+        }
     }
 
-    println!(
-        "Anvil reset to {} (block: {}).",
-        entry.original_rpc,
-        blk.map_or("latest".into(), |b| b.to_string())
-    );
+    spinner.stop();
 
-    // Take a new EVM snapshot as the fresh baseline
-    let snapshot_id = evm_snapshot_http(&client, &rpc_url)
-        .await
-        .with_context(|| format!("failed to take EVM snapshot for network '{network}'"))?;
-
-    // Update the fork entry
-    let mut updated = entry.clone();
-    updated.rpc_url = rpc_url;
-    updated.port = port;
-    updated.anvil_pid = anvil_pid;
-    updated.pid_file = pid_file.to_string_lossy().into_owned();
-    updated.log_file = log_file.to_string_lossy().into_owned();
-    updated.entered_at = Utc::now();
-    if let Some(b) = blk {
-        updated.fork_block_number = Some(b);
+    for (entry, port, rpc_url, anvil_pid, pid_file, log_file, snapshot_id, blk) in &results {
+        let mut updated = entry.clone();
+        updated.rpc_url = rpc_url.clone();
+        updated.port = *port;
+        updated.anvil_pid = *anvil_pid;
+        updated.pid_file = pid_file.to_string_lossy().into_owned();
+        updated.log_file = log_file.to_string_lossy().into_owned();
+        updated.entered_at = Utc::now();
+        if let Some(b) = blk {
+            updated.fork_block_number = Some(*b);
+        }
+        updated.snapshots = vec![SnapshotEntry {
+            index: 0,
+            snapshot_id: snapshot_id.clone(),
+            command: "fork restart".into(),
+            timestamp: Utc::now(),
+        }];
+        store.update_active_fork(updated).context("failed to update fork entry")?;
     }
-    updated.snapshots = vec![SnapshotEntry {
-        index: 0,
-        snapshot_id: snapshot_id.clone(),
-        command: "fork restart".into(),
-        timestamp: Utc::now(),
-    }];
-    store.update_active_fork(updated).context("failed to update fork entry")?;
 
-    // Add history entry
+    // History
+    let network_list: String =
+        results.iter().map(|(e, ..)| e.network.as_str()).collect::<Vec<_>>().join(", ");
     store
         .add_history(ForkHistoryEntry {
             action: "restart".into(),
-            network: network.clone(),
+            network: network_list.clone(),
             timestamp: Utc::now(),
-            details: Some(format!("Anvil reset; snapshot: {snapshot_id}")),
+            details: Some(format!("{} networks restarted", results.len())),
         })
         .context("failed to record restart history")?;
 
-    println!("Restarted fork for network '{network}' (port {port}, PID {anvil_pid}).");
+    // Print summary
+    for (entry, port, _rpc_url, anvil_pid, ..) in &results {
+        println!(
+            "Restarted fork for '{}' (port {port}, PID {anvil_pid}).",
+            entry.network
+        );
+    }
+    if !errors.is_empty() {
+        eprintln!();
+        for (net, err) in &errors {
+            eprintln!("Failed to restart '{net}': {err}");
+        }
+    }
+
     Ok(())
 }
 
@@ -812,7 +926,11 @@ pub async fn run_status(json: bool) -> anyhow::Result<()> {
 
 // ── run_history ───────────────────────────────────────────────────────────────
 
-/// Display fork history, optionally filtered by network.
+/// Display fork history as a snapshot stack.
+///
+/// Shows the run snapshot stack with the current state marked by `→`.
+/// Index 0 is always "initial" (the fork enter point). Each entry above 0
+/// is a run snapshot.
 pub async fn run_history(network: Option<String>, json: bool) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     let treb_dir = cwd.join(TREB_DIR);
@@ -821,130 +939,58 @@ pub async fn run_history(network: Option<String>, json: bool) -> anyhow::Result<
     let mut store = ForkStateStore::new(&treb_dir);
     store.load().context("failed to load fork state")?;
 
-    let history: Vec<_> = store
-        .data()
-        .history
-        .iter()
-        .filter(|e| network.as_deref().is_none_or(|n| e.network.contains(n)))
-        .collect();
-
     if json {
-        println!("{}", serde_json::to_string_pretty(&history)?);
+        let data = store.data();
+        let output = serde_json::json!({
+            "active": data.active,
+            "enteredAt": data.entered_at,
+            "runSnapshots": data.run_snapshots,
+            "history": data.history,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
         return Ok(());
     }
 
-    if history.is_empty() {
-        let filter_msg =
-            network.as_deref().map_or_else(String::new, |n| format!(" for network '{n}'"));
-        println!("No fork history{filter_msg}.");
+    if !store.is_fork_mode_active() {
+        println!("Not in fork mode.");
         return Ok(());
     }
 
-    let mut table = crate::output::build_table(&["Timestamp", "Action", "Network", "Details"]);
+    let data = store.data();
+    let snapshots = &data.run_snapshots;
 
-    for entry in &history {
-        table.add_row(vec![
-            &entry.timestamp.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
-            entry.action.as_str(),
-            entry.network.as_str(),
-            entry.details.as_deref().unwrap_or("-"),
-        ]);
+    // Determine the network list for the header
+    let networks: Vec<String> = store.list_active_networks();
+    let header = if let Some(ref net) = network {
+        format!("Fork History: {net}")
+    } else {
+        format!("Fork History: {}", networks.join(", "))
+    };
+    println!("{header}");
+
+    // Current state is the last snapshot (or initial if empty)
+    let total = snapshots.len();
+
+    // Print snapshots in reverse order (most recent first)
+    for (i, snap) in snapshots.iter().enumerate().rev() {
+        let marker = if i == total - 1 { "→" } else { " " };
+        let source_label = format_run_source(&snap.source);
+        let ts = snap.timestamp.format("%Y-%m-%d %H:%M:%S");
+        println!("  {marker} [{}] {source_label}  ({ts})", snap.index);
     }
 
-    crate::output::print_table(&table);
+    // Always show index 0 as "initial"
+    let marker = if total == 0 { "→" } else { " " };
+    let initial_ts = data
+        .entered_at
+        .map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string())
+        .unwrap_or_else(|| "unknown".into());
+    println!("  {marker} [0] initial  ({initial_ts})");
+
     Ok(())
 }
 
 // ── run_diff ──────────────────────────────────────────────────────────────────
-
-/// Compare the current registry against the holistic fork snapshot.
-///
-/// Reports added, removed, and modified entries in `deployments.json` and
-/// `transactions.json`. Supports `--json` output.
-pub async fn run_diff(json: bool) -> anyhow::Result<()> {
-    let cwd = env::current_dir().context("failed to determine current directory")?;
-    let treb_dir = cwd.join(TREB_DIR);
-
-    let mut store = ForkStateStore::new(&treb_dir);
-    store.load().context("failed to load fork state")?;
-
-    if !store.is_fork_mode_active() {
-        bail!("not in fork mode");
-    }
-
-    let snapshot_dir = store
-        .data()
-        .snapshot_dir
-        .as_ref()
-        .map(PathBuf::from)
-        .ok_or_else(|| anyhow::anyhow!("fork state has no snapshot directory"))?;
-
-    // Files to diff.
-    let diff_files = [DEPLOYMENTS_FILE, TRANSACTIONS_FILE];
-    let mut changes: Vec<serde_json::Value> = Vec::new();
-
-    for &file_name in &diff_files {
-        let current_path = treb_dir.join(file_name);
-        let snapshot_path = snapshot_dir.join(file_name);
-
-        let current_map = load_json_map(&current_path);
-        let snapshot_map = load_json_map(&snapshot_path);
-
-        // Collect all keys from both maps.
-        let all_keys: BTreeSet<String> = current_map
-            .iter()
-            .flat_map(|m| m.keys().cloned())
-            .chain(snapshot_map.iter().flat_map(|m| m.keys().cloned()))
-            .collect();
-
-        let file_label = file_name.trim_end_matches(".json");
-
-        for key in &all_keys {
-            let in_current = current_map.as_ref().and_then(|m| m.get(key));
-            let in_snapshot = snapshot_map.as_ref().and_then(|m| m.get(key));
-
-            let change_type = match (in_current, in_snapshot) {
-                (Some(_), None) => "added",
-                (None, Some(_)) => "removed",
-                (Some(a), Some(b)) if a != b => "modified",
-                _ => continue, // unchanged
-            };
-
-            changes.push(serde_json::json!({
-                "change": change_type,
-                "file":   file_label,
-                "key":    key,
-            }));
-        }
-    }
-
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "changes": changes,
-                "clean":   changes.is_empty(),
-            }))?
-        );
-        return Ok(());
-    }
-
-    if changes.is_empty() {
-        println!("No changes detected since fork mode was entered.");
-        return Ok(());
-    }
-
-    let mut table = crate::output::build_table(&["Change", "File", "Key"]);
-    for change in &changes {
-        table.add_row(vec![
-            change["change"].as_str().unwrap_or(""),
-            change["file"].as_str().unwrap_or(""),
-            change["key"].as_str().unwrap_or(""),
-        ]);
-    }
-    crate::output::print_table(&table);
-    Ok(())
-}
 
 // ── run_logs ──────────────────────────────────────────────────────────────────
 
@@ -1041,6 +1087,12 @@ fn run_logs_static(
 }
 
 /// Continuously tail all log files with colored prefixes (follow mode).
+///
+/// Detects file rotation (e.g. after `fork exit` + `fork enter`) by
+/// tracking how many bytes we have read and comparing against the current
+/// file length on disk.  `spawn_background_anvil` truncates the log file
+/// in-place (`File::create`), so the inode stays the same but the file
+/// becomes shorter than our read cursor — we detect that and re-open.
 async fn run_logs_follow(
     forks: &[ForkEntry],
     max_name_len: usize,
@@ -1060,34 +1112,69 @@ async fn run_logs_follow(
         let tx = tx.clone();
 
         tokio::spawn(async move {
-            // Wait for the file to exist
-            loop {
-                if log_path.exists() {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(200)).await;
-            }
-
-            let file = match tokio::fs::File::open(&log_path).await {
-                Ok(f) => f,
-                Err(_) => return,
-            };
-            let mut reader = BufReader::new(file);
-            let mut line = String::new();
+            let mut eof_count: u32 = 0;
 
             loop {
-                line.clear();
-                match reader.read_line(&mut line).await {
-                    Ok(0) => {
-                        tokio::time::sleep(Duration::from_millis(100)).await;
+                // Wait for the file to exist
+                loop {
+                    if log_path.exists() {
+                        break;
                     }
-                    Ok(_) => {
-                        let trimmed = line.trim_end().to_string();
-                        if tx.send((i, trimmed)).await.is_err() {
-                            return;
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+
+                let file = match tokio::fs::File::open(&log_path).await {
+                    Ok(f) => f,
+                    Err(_) => {
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        continue;
+                    }
+                };
+                let mut reader = BufReader::new(file);
+                let mut line = String::new();
+                let mut bytes_read: u64 = 0;
+
+                loop {
+                    line.clear();
+                    match reader.read_line(&mut line).await {
+                        Ok(0) => {
+                            eof_count += 1;
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+
+                            // Every ~1s of sustained EOF, check whether the
+                            // file was truncated/replaced or deleted.
+                            if eof_count >= 10 {
+                                eof_count = 0;
+
+                                match std::fs::metadata(&log_path) {
+                                    Ok(meta) => {
+                                        // File was truncated (same inode, shorter
+                                        // than our cursor) — re-open from start.
+                                        if meta.len() < bytes_read {
+                                            break;
+                                        }
+                                    }
+                                    Err(_) => {
+                                        // File deleted — wait for recreation
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        Ok(n) => {
+                            eof_count = 0;
+                            bytes_read += n as u64;
+                            let trimmed = line.trim_end().to_string();
+                            if tx.send((i, trimmed)).await.is_err() {
+                                return;
+                            }
+                        }
+                        Err(_) => {
+                            // Read error — try to re-open
+                            tokio::time::sleep(Duration::from_millis(500)).await;
+                            break;
                         }
                     }
-                    Err(_) => return,
                 }
             }
         });
@@ -1114,6 +1201,14 @@ async fn run_logs_follow(
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+/// Format a `ForkRunSource` into a human-readable label.
+fn format_run_source(source: &ForkRunSource) -> String {
+    match source {
+        ForkRunSource::Run { script } => format!("run {script}"),
+        ForkRunSource::Compose { file, group, .. } => format!("compose {file} ({group})"),
+    }
+}
 
 fn ensure_treb_dir(treb_dir: &Path) -> anyhow::Result<()> {
     if !treb_dir.exists() {
@@ -1296,6 +1391,7 @@ async fn is_port_reachable(port: u16) -> bool {
 }
 
 /// Load a JSON file as an object map.  Returns `None` if the file is missing or not an object.
+#[cfg(test)]
 fn load_json_map(path: &Path) -> Option<serde_json::Map<String, serde_json::Value>> {
     let content = std::fs::read_to_string(path).ok()?;
     let value: serde_json::Value = serde_json::from_str(&content).ok()?;
@@ -1458,15 +1554,6 @@ mod tests {
                 assert!(!json);
             }
             _ => panic!("expected History"),
-        }
-    }
-
-    #[test]
-    fn parse_diff_with_json() {
-        let sub = parse_fork(&["diff", "--json"]).unwrap();
-        match sub {
-            ForkSubcommand::Diff { json } => assert!(json),
-            _ => panic!("expected Diff"),
         }
     }
 

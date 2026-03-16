@@ -136,7 +136,7 @@ enum Commands {
         /// Filter by deployment label
         #[arg(long)]
         label: Option<String>,
-        /// Show only fork deployments (namespace starts with fork/)
+        /// Show only fork deployments (in fork mode: deployments added since fork enter; otherwise: fork/ namespace)
         #[arg(long)]
         fork: bool,
         /// Hide fork deployments
@@ -606,8 +606,7 @@ fn gen_subcommand_json_flag(subcommand: &GenSubcommand) -> bool {
 fn fork_subcommand_json_flag(subcommand: &commands::fork::ForkSubcommand) -> bool {
     match subcommand {
         commands::fork::ForkSubcommand::Status { json, .. }
-        | commands::fork::ForkSubcommand::History { json, .. }
-        | commands::fork::ForkSubcommand::Diff { json, .. } => *json,
+        | commands::fork::ForkSubcommand::History { json, .. } => *json,
         commands::fork::ForkSubcommand::Enter { .. }
         | commands::fork::ForkSubcommand::Exit
         | commands::fork::ForkSubcommand::Revert

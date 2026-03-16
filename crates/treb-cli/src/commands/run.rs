@@ -375,6 +375,8 @@ pub struct ExecuteScriptOpts {
     pub resume: bool,
     /// Optional broadcast confirmation hook.
     pub broadcast_hook: Option<BroadcastHook>,
+    /// Source identifier for fork run snapshots (set when `is_fork` is true).
+    pub fork_run_source: Option<treb_core::types::fork::ForkRunSource>,
 }
 
 /// Execute a single script through the full pipeline.
@@ -526,6 +528,21 @@ pub async fn execute_script(
     };
 
     if should_broadcast {
+        // Pre-broadcast fork snapshot (if in fork mode)
+        if opts.is_fork {
+            if let Some(ref source) = opts.fork_run_source {
+                let treb_dir = cwd.join(TREB_DIR);
+                let mut store = ForkStateStore::new(&treb_dir);
+                if store.load().is_ok() && store.is_fork_mode_active() {
+                    super::fork::snapshot_fork_before_broadcast(
+                        &treb_dir, &mut store, source.clone(),
+                    )
+                    .await
+                    .ok(); // best-effort
+                }
+            }
+        }
+
         let spinner2: Arc<Mutex<Option<spinoff::Spinner>>> = Arc::new(Mutex::new(None));
         if !opts.json {
             let spinner_ref = spinner2.clone();
@@ -550,6 +567,20 @@ pub async fn execute_script(
                 Err((_partial, _name, e)) => Err(anyhow::anyhow!(e)),
             }
         }?;
+
+        // Update deployment/transaction counts on the fork snapshot
+        if opts.is_fork {
+            let treb_dir = cwd.join(TREB_DIR);
+            let mut store = ForkStateStore::new(&treb_dir);
+            if store.load().is_ok() && store.is_fork_mode_active() {
+                if let Some(last) = store.data_mut().run_snapshots.last_mut() {
+                    last.deployment_count = result.deployments.len();
+                    last.transaction_count = result.transactions.len();
+                }
+                let _ = store.save();
+            }
+        }
+
         Ok(result)
     } else {
         Ok(simulated.into_results().into_iter().next()
@@ -829,6 +860,13 @@ pub async fn run(
             is_fork: active_fork.is_some(),
             resume,
             broadcast_hook,
+            fork_run_source: if active_fork.is_some() {
+                Some(treb_core::types::fork::ForkRunSource::Run {
+                    script: script.to_string(),
+                })
+            } else {
+                None
+            },
         },
         &resolved,
         &mut resolved_senders,

@@ -599,13 +599,6 @@ fn build_fork() -> ClapCommand {
                 ),
         )
         .subcommand(
-            ClapCommand::new("diff")
-                .about("Diff current registry vs snapshot")
-                .arg(
-                    Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"),
-                ),
-        )
-        .subcommand(
             ClapCommand::new("logs")
                 .about("Tail Anvil log files for active forks")
                 .arg(

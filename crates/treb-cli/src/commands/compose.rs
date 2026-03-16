@@ -1379,6 +1379,22 @@ pub async fn run(
             );
         }
 
+        // Pre-broadcast fork snapshot (if in fork mode)
+        if banner_is_fork {
+            let treb_dir = cwd.join(super::run::TREB_DIR);
+            let mut store = treb_registry::ForkStateStore::new(&treb_dir);
+            if store.load().is_ok() && store.is_fork_mode_active() {
+                let source = treb_core::types::fork::ForkRunSource::Compose {
+                    file: file.clone(),
+                    group: compose.group.clone(),
+                    components: components_to_run.clone(),
+                };
+                super::fork::snapshot_fork_before_broadcast(&treb_dir, &mut store, source)
+                    .await
+                    .ok(); // best-effort
+            }
+        }
+
         // Broadcast with spinner
         let broadcast_spinner: std::sync::Arc<std::sync::Mutex<Option<spinoff::Spinner>>> =
             std::sync::Arc::new(std::sync::Mutex::new(None));
@@ -1443,6 +1459,21 @@ pub async fn run(
     } else {
         simulated.into_results()
     };
+
+    // Update fork run snapshot counts after broadcast
+    if should_broadcast && banner_is_fork && !script_results.is_empty() {
+        let treb_dir = cwd.join(super::run::TREB_DIR);
+        let mut store = treb_registry::ForkStateStore::new(&treb_dir);
+        if store.load().is_ok() && store.is_fork_mode_active() {
+            let total_deps: usize = script_results.iter().map(|sr| sr.result.deployments.len()).sum();
+            let total_txs: usize = script_results.iter().map(|sr| sr.result.transactions.len()).sum();
+            if let Some(last) = store.data_mut().run_snapshots.last_mut() {
+                last.deployment_count = total_deps;
+                last.transaction_count = total_txs;
+            }
+            let _ = store.save();
+        }
+    }
 
     // Record successful results and display broadcast output
     if !script_results.is_empty() {

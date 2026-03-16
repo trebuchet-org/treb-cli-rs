@@ -9,6 +9,41 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
+// ForkRunSource / ForkRunSnapshot — revertible run stack
+// ---------------------------------------------------------------------------
+
+/// Identifies what triggered a fork run snapshot.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub enum ForkRunSource {
+    Run { script: String },
+    Compose { file: String, group: String, components: Vec<String> },
+}
+
+/// A snapshot taken before a `treb run` or `treb compose` broadcast in fork mode.
+///
+/// Each snapshot captures the registry state and per-network EVM snapshots so
+/// the broadcast can be individually reverted (stack pop).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForkRunSnapshot {
+    /// Sequential index of this run snapshot (0-based).
+    pub index: u32,
+    /// What triggered this snapshot.
+    pub source: ForkRunSource,
+    /// Directory containing the registry JSON snapshot for this run.
+    pub registry_snapshot_dir: String,
+    /// Per-fork EVM snapshot IDs (fork_key → snapshot_id).
+    pub evm_snapshots: HashMap<String, String>,
+    /// Number of deployments recorded after broadcast.
+    pub deployment_count: usize,
+    /// Number of transactions recorded after broadcast.
+    pub transaction_count: usize,
+    /// When the snapshot was taken.
+    pub timestamp: DateTime<Utc>,
+}
+
+// ---------------------------------------------------------------------------
 // SnapshotEntry
 // ---------------------------------------------------------------------------
 
@@ -123,6 +158,10 @@ pub struct ForkState {
     pub forks: HashMap<String, ForkEntry>,
     /// History of fork actions (most recent first).
     pub history: Vec<ForkHistoryEntry>,
+    /// Stack of run snapshots (most recent last). Each entry represents a
+    /// `treb run` or `treb compose` broadcast that can be individually reverted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub run_snapshots: Vec<ForkRunSnapshot>,
 }
 
 #[cfg(test)]

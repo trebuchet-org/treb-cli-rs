@@ -236,6 +236,14 @@ fn collect_fork_deployment_ids(deployments: &[&Deployment]) -> HashSet<String> {
     deployments.iter().filter(|d| d.namespace.starts_with("fork/")).map(|d| d.id.clone()).collect()
 }
 
+/// Load deployment IDs from a snapshot file (for fork-only detection).
+fn load_fork_snapshot_ids(path: &Path) -> Option<HashSet<String>> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let map = value.as_object()?;
+    Some(map.keys().cloned().collect())
+}
+
 fn resolve_network_names(
     project_root: &Path,
     deployments: &[&Deployment],
@@ -662,8 +670,50 @@ pub async fn run(
         no_fork,
     };
 
+    // Compute fork deployment IDs: namespace-based + snapshot diff when fork mode is active
+    let mut fork_deployment_ids = collect_fork_deployment_ids(&all_deployments);
+    let fork_mode_active;
+    {
+        let treb_dir = cwd.join(".treb");
+        let mut store = treb_registry::ForkStateStore::new(&treb_dir);
+        fork_mode_active = store.load().is_ok() && store.is_fork_mode_active();
+        if fork_mode_active {
+            if let Some(ref snap_dir) = store.data().snapshot_dir {
+                let snap_path =
+                    std::path::PathBuf::from(snap_dir).join(treb_registry::DEPLOYMENTS_FILE);
+                if let Some(snapshot_ids) = load_fork_snapshot_ids(&snap_path) {
+                    for d in &all_deployments {
+                        if !snapshot_ids.contains(&d.id) {
+                            fork_deployment_ids.insert(d.id.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let implementation_keys = collect_implementation_keys(&all_deployments);
-    let filtered = filter_deployments(&all_deployments, &filters);
+
+    // When --fork is passed and fork mode is active, use snapshot-diff filtering
+    // instead of the namespace-prefix filter in filter_deployments.
+    let filtered = if fork && fork_mode_active {
+        let base_filters = DeploymentFilters {
+            network: filters.network.clone(),
+            namespace: filters.namespace.clone(),
+            deployment_type: filters.deployment_type.clone(),
+            tag: filters.tag.clone(),
+            contract: filters.contract.clone(),
+            label: filters.label.clone(),
+            fork: false,    // skip namespace-based fork filter
+            no_fork: false,
+        };
+        filter_deployments(&all_deployments, &base_filters)
+            .into_iter()
+            .filter(|d| fork_deployment_ids.contains(&d.id))
+            .collect()
+    } else {
+        filter_deployments(&all_deployments, &filters)
+    };
 
     // Build other_namespaces when filtered is empty and namespace filter is set
     let other_namespaces = if filtered.is_empty() {
@@ -675,8 +725,6 @@ pub async fn run(
     } else {
         BTreeMap::new()
     };
-
-    let fork_deployment_ids = collect_fork_deployment_ids(&all_deployments);
     let network_names = resolve_network_names(&cwd, &filtered, filters.network.as_deref());
     let selected_network_label =
         format_selected_network_label(filters.network.as_deref(), &network_names);

@@ -9,7 +9,7 @@ use std::{
 use chrono::{DateTime, Utc};
 use treb_core::{
     TrebError,
-    types::fork::{ForkEntry, ForkHistoryEntry, ForkState},
+    types::fork::{ForkEntry, ForkHistoryEntry, ForkRunSnapshot, ForkState},
 };
 
 use crate::{
@@ -41,6 +41,8 @@ struct PersistedForkState {
     entered_at: Option<DateTime<Utc>>,
     forks: BTreeMap<String, ForkEntry>,
     history: Vec<ForkHistoryEntry>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    run_snapshots: Vec<ForkRunSnapshot>,
 }
 
 impl From<&ForkState> for PersistedForkState {
@@ -51,6 +53,7 @@ impl From<&ForkState> for PersistedForkState {
             entered_at: state.entered_at,
             forks: state.forks.iter().map(|(key, entry)| (key.clone(), entry.clone())).collect(),
             history: state.history.clone(),
+            run_snapshots: state.run_snapshots.clone(),
         }
     }
 }
@@ -294,19 +297,24 @@ impl ForkStateStore {
     }
 
     /// Enter holistic fork mode: sets `active=true`, records snapshot dir and timestamp.
+    /// Clears history and run snapshots for a clean slate.
     pub fn enter_fork_mode(&mut self, snapshot_dir: &str) -> Result<(), TrebError> {
         self.data.active = true;
         self.data.snapshot_dir = Some(snapshot_dir.to_string());
         self.data.entered_at = Some(Utc::now());
+        self.data.history.clear();
+        self.data.run_snapshots.clear();
         self.save()
     }
 
-    /// Exit holistic fork mode: clears active flag, snapshot dir, entered_at, and all fork entries.
+    /// Exit holistic fork mode: clears active flag, snapshot dir, entered_at, all fork entries,
+    /// and run snapshots.
     pub fn exit_fork_mode(&mut self) -> Result<(), TrebError> {
         self.data.active = false;
         self.data.snapshot_dir = None;
         self.data.entered_at = None;
         self.data.forks.clear();
+        self.data.run_snapshots.clear();
         self.save()
     }
 
@@ -318,6 +326,53 @@ impl ForkStateStore {
     /// Return a reference to the underlying fork state.
     pub fn data(&self) -> &ForkState {
         &self.data
+    }
+
+    /// Return a mutable reference to the underlying fork state.
+    pub fn data_mut(&mut self) -> &mut ForkState {
+        &mut self.data
+    }
+
+    // ── Run snapshot stack ────────────────────────────────────────────────
+
+    /// Push a run snapshot onto the stack and persist.
+    pub fn push_run_snapshot(&mut self, snapshot: ForkRunSnapshot) -> Result<(), TrebError> {
+        self.data.run_snapshots.push(snapshot);
+        self.save()
+    }
+
+    /// Pop the last run snapshot from the stack and persist. Returns the
+    /// popped snapshot, or `None` if the stack is empty.
+    pub fn pop_run_snapshot(&mut self) -> Result<Option<ForkRunSnapshot>, TrebError> {
+        let snapshot = self.data.run_snapshots.pop();
+        if snapshot.is_some() {
+            self.save()?;
+        }
+        Ok(snapshot)
+    }
+
+    /// Clear all run snapshots and persist. Returns the cleared snapshots.
+    pub fn clear_run_snapshots(&mut self) -> Result<Vec<ForkRunSnapshot>, TrebError> {
+        let cleared = std::mem::take(&mut self.data.run_snapshots);
+        if !cleared.is_empty() {
+            self.save()?;
+        }
+        Ok(cleared)
+    }
+
+    /// Return the next run snapshot index (last index + 1, or 1 if empty).
+    /// Index 0 is reserved for the "initial" fork-enter state in history display.
+    pub fn next_run_snapshot_index(&self) -> u32 {
+        self.data
+            .run_snapshots
+            .last()
+            .map(|s| s.index + 1)
+            .unwrap_or(1)
+    }
+
+    /// Return the run snapshot stack.
+    pub fn run_snapshots(&self) -> &[ForkRunSnapshot] {
+        &self.data.run_snapshots
     }
 }
 
