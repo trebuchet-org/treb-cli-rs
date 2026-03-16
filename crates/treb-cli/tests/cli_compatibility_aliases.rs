@@ -110,7 +110,7 @@ fn sample_fork_entry(treb_dir: &Path, network: &str) -> ForkEntry {
         chain_id: 1,
         fork_url: "https://eth.example.com".to_string(),
         fork_block_number: None,
-        snapshot_dir: treb_dir.join("snapshots").join(network).to_string_lossy().into_owned(),
+        snapshot_dir: treb_dir.join("priv/snapshots").join(network).to_string_lossy().into_owned(),
         started_at: timestamp,
         env_var_name: format!("ETH_RPC_URL_{}", network.to_uppercase()),
         original_rpc: "https://eth.example.com".to_string(),

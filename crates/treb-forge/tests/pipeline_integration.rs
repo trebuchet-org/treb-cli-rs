@@ -40,8 +40,9 @@ fn test_context() -> PipelineContext {
         script_path: PathBuf::from("script/Deploy.s.sol"),
         git_commit: "abc1234".to_string(),
         project_root: PathBuf::from("/tmp/project"),
-        deployer_sender: None,
+        resolved_senders: Default::default(),
         sender_labels: Default::default(),
+        sender_role_names: Default::default(),
     }
 }
 

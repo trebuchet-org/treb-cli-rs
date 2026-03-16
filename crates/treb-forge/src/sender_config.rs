@@ -131,6 +131,29 @@ pub fn encode_sender_configs(
     Ok(format!("0x{}", alloy_primitives::hex::encode(&encoded)))
 }
 
+/// Encode sender names and addresses for v2 Solidity consumption.
+///
+/// Produces a `0x`-prefixed hex string containing ABI-encoded
+/// `(string[] names, address[] addrs)` for the `SENDER_CONFIGS_V2`
+/// environment variable. Unlike v1, type-specific configuration
+/// (private keys, signer references) stays entirely in Rust.
+pub fn encode_sender_configs_v2(
+    resolved_senders: &HashMap<String, ResolvedSender>,
+) -> String {
+    let mut pairs: Vec<(String, Address)> = resolved_senders
+        .iter()
+        .map(|(name, sender)| (name.clone(), sender.sender_address()))
+        .collect();
+    // Sort by name for deterministic output
+    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let names: Vec<String> = pairs.iter().map(|(n, _)| n.clone()).collect();
+    let addrs: Vec<Address> = pairs.iter().map(|(_, a)| *a).collect();
+
+    let encoded = (names, addrs).abi_encode_params();
+    format!("0x{}", alloy_primitives::hex::encode(&encoded))
+}
+
 /// Build a single `SenderInitConfig` from a resolved sender and its config.
 fn build_sender_init_config(
     name: &str,
@@ -562,5 +585,45 @@ mod tests {
             }
             other => panic!("expected Config error, got {other:?}"),
         }
+    }
+
+    // ── V2 encoding tests ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn encode_v2_produces_0x_prefixed_hex() {
+        let sender_configs =
+            HashMap::from([("deployer".to_string(), pk_sender_config(ANVIL_KEY_0))]);
+        let resolved = crate::sender::resolve_all_senders(&sender_configs).await.unwrap();
+        let encoded = encode_sender_configs_v2(&resolved);
+
+        assert!(encoded.starts_with("0x"), "should be 0x-prefixed");
+        let hex_str = encoded.strip_prefix("0x").unwrap();
+        let decoded = alloy_primitives::hex::decode(hex_str).unwrap();
+        assert!(!decoded.is_empty(), "encoded data should be non-empty");
+    }
+
+    #[tokio::test]
+    async fn encode_v2_is_deterministic() {
+        let sender_configs = HashMap::from([
+            ("deployer".to_string(), pk_sender_config(ANVIL_KEY_0)),
+            (
+                "other".to_string(),
+                pk_sender_config(
+                    "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
+                ),
+            ),
+        ]);
+        let resolved = crate::sender::resolve_all_senders(&sender_configs).await.unwrap();
+
+        let encoded1 = encode_sender_configs_v2(&resolved);
+        let encoded2 = encode_sender_configs_v2(&resolved);
+        assert_eq!(encoded1, encoded2, "v2 encoding should be deterministic");
+    }
+
+    #[test]
+    fn encode_v2_empty_senders() {
+        let resolved: HashMap<String, ResolvedSender> = HashMap::new();
+        let encoded = encode_sender_configs_v2(&resolved);
+        assert!(encoded.starts_with("0x"));
     }
 }

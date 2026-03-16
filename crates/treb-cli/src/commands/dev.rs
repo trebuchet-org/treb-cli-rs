@@ -1691,7 +1691,7 @@ mod tests {
             chain_id: 31337,
             fork_url: String::new(), // no upstream fork for test
             fork_block_number: None,
-            snapshot_dir: treb_dir.join("snapshots").join(network).to_string_lossy().into_owned(),
+            snapshot_dir: treb_dir.join("priv/snapshots").join(network).to_string_lossy().into_owned(),
             started_at: now,
             env_var_name: String::new(),
             original_rpc: String::new(),

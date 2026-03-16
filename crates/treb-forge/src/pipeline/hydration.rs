@@ -127,6 +127,57 @@ pub fn hydrate_deployment(
     }
 }
 
+/// Convert an [`ExtractedCollision`] into a minimal [`Deployment`] for registry lookups.
+///
+/// Used by compose to register collisions (contracts that already exist at the
+/// predicted address) so that `lookup()` finds them in subsequent steps.
+pub fn hydrate_collision(
+    collision: &crate::events::ExtractedCollision,
+    context: &PipelineContext,
+) -> Deployment {
+    let now = Utc::now();
+    let namespace = &context.config.namespace;
+    let chain_id = context.config.chain_id;
+    let id = generate_deployment_id(namespace, chain_id, &collision.contract_name, &collision.label);
+
+    Deployment {
+        id,
+        namespace: namespace.clone(),
+        chain_id,
+        contract_name: collision.contract_name.clone(),
+        label: collision.label.clone(),
+        address: collision.existing_address.to_checksum(None),
+        deployment_type: DeploymentType::Singleton,
+        transaction_id: String::new(),
+        deployment_strategy: DeploymentStrategy {
+            method: collision.strategy.clone(),
+            salt: b256_to_hex(collision.salt),
+            init_code_hash: b256_to_hex(collision.init_code_hash),
+            factory: String::new(),
+            constructor_args: String::new(),
+            entropy: collision.entropy.clone(),
+        },
+        proxy_info: None,
+        artifact: ArtifactInfo {
+            path: String::new(),
+            compiler_version: String::new(),
+            bytecode_hash: b256_to_hex(collision.bytecode_hash),
+            script_path: context.config.script_path.clone(),
+            git_commit: context.git_commit.clone(),
+        },
+        verification: VerificationInfo {
+            status: VerificationStatus::Unverified,
+            etherscan_url: String::new(),
+            verified_at: None,
+            reason: String::new(),
+            verifiers: HashMap::new(),
+        },
+        tags: None,
+        created_at: now,
+        updated_at: now,
+    }
+}
+
 /// Convert [`TransactionSimulated`] events into core-domain [`Transaction`] records.
 ///
 /// Each `SimulatedTransaction` within the event produces one `Transaction`.
@@ -287,8 +338,8 @@ pub fn hydrate_governor_proposals(
 
     // Extract timelock address from the deployer sender if it is a Governor.
     let timelock_str = context
-        .deployer_sender
-        .as_ref()
+        .resolved_senders
+        .get("deployer")
         .and_then(|s| s.timelock_address())
         .map(|addr| addr.to_checksum(None))
         .unwrap_or_default();
@@ -316,6 +367,127 @@ pub fn hydrate_governor_proposals(
         .collect()
 }
 
+/// Convert [`BroadcastableTransactions`] into core-domain [`Transaction`] records.
+///
+/// In v2, scripts use `vm.broadcast()` instead of emitting `TransactionSimulated`
+/// events. This function builds `Transaction` records directly from the collected
+/// broadcastable transactions, using the `from` address to resolve sender names
+/// via the address-to-role reverse map.
+pub fn hydrate_transactions_from_broadcast(
+    broadcastable_txs: &foundry_cheatcodes::BroadcastableTransactions,
+    hydrated_deployments: &[Deployment],
+    context: &PipelineContext,
+) -> Vec<Transaction> {
+    let now = Utc::now();
+
+    broadcastable_txs
+        .iter()
+        .enumerate()
+        .map(|(idx, btx)| {
+            let from_addr = btx.transaction.from().unwrap_or_default();
+            let to_addr = btx.transaction.to().and_then(|kind| match kind {
+                alloy_primitives::TxKind::Call(addr) => Some(addr),
+                alloy_primitives::TxKind::Create => None,
+            });
+            let input = btx.transaction.input().cloned().unwrap_or_default();
+
+            // Generate a deterministic transaction ID from the index.
+            // v2 Solidity uses bytes32(uint256(counter)) as transactionId in
+            // ContractDeployed events, so tx-0x{index:064x} correlates by position.
+            let tx_id = format!("tx-0x{:064x}", idx);
+
+            // Find deployments linked to this transaction by index.
+            // v2 ContractDeployed events use sequential transactionId = bytes32(uint256(i)).
+            let linked_deployment_ids: Vec<String> = hydrated_deployments
+                .iter()
+                .filter(|d| d.transaction_id == tx_id)
+                .map(|d| d.id.clone())
+                .collect();
+
+            let is_create = to_addr.is_none();
+
+            let operations = if !linked_deployment_ids.is_empty() {
+                hydrated_deployments
+                    .iter()
+                    .filter(|d| d.transaction_id == tx_id)
+                    .map(|deployment| Operation {
+                        operation_type: "DEPLOY".to_string(),
+                        target: deployment.address.clone(),
+                        method: deployment.deployment_strategy.method.to_string(),
+                        result: {
+                            let mut result = HashMap::new();
+                            result.insert(
+                                "address".to_string(),
+                                serde_json::Value::String(deployment.address.clone()),
+                            );
+                            result
+                        },
+                    })
+                    .collect()
+            } else {
+                let target = if is_create {
+                    "contract creation".to_string()
+                } else {
+                    to_addr.unwrap().to_checksum(None)
+                };
+                vec![Operation {
+                    operation_type: if is_create { "DEPLOY" } else { "CALL" }.to_string(),
+                    target,
+                    method: selector_hex(&input),
+                    result: HashMap::new(),
+                }]
+            };
+
+            Transaction {
+                id: tx_id,
+                chain_id: context.config.chain_id,
+                hash: String::new(),
+                status: TransactionStatus::Simulated,
+                block_number: 0,
+                sender: from_addr.to_checksum(None),
+                nonce: btx.transaction.nonce().unwrap_or(0),
+                deployments: linked_deployment_ids,
+                operations,
+                safe_context: None,
+                environment: context.config.namespace.clone(),
+                created_at: now,
+            }
+        })
+        .collect()
+}
+
+/// Metadata for a v2 recorded transaction, built from BroadcastableTransactions.
+pub struct V2TransactionMetadata {
+    /// Sender role name resolved from the `from` address.
+    pub sender_name: Option<String>,
+    /// Gas used (from broadcastable transaction gas estimate).
+    pub gas_used: Option<u64>,
+}
+
+/// Build metadata for v2 transactions from BroadcastableTransactions.
+pub fn build_v2_transaction_metadata(
+    broadcastable_txs: &foundry_cheatcodes::BroadcastableTransactions,
+    context: &PipelineContext,
+) -> HashMap<String, V2TransactionMetadata> {
+    let addr_to_role: HashMap<Address, String> = context
+        .sender_labels
+        .iter()
+        .map(|(addr, role)| (*addr, role.clone()))
+        .collect();
+
+    broadcastable_txs
+        .iter()
+        .enumerate()
+        .map(|(idx, btx)| {
+            let from_addr = btx.transaction.from().unwrap_or_default();
+            let tx_id = format!("tx-0x{:064x}", idx);
+            let sender_name = addr_to_role.get(&from_addr).cloned();
+            let gas_used = btx.transaction.gas().map(|g| g as u64);
+            (tx_id, V2TransactionMetadata { sender_name, gas_used })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,7 +508,7 @@ mod tests {
             script_path: PathBuf::from("script/Deploy.s.sol"),
             git_commit: "abc1234".to_string(),
             project_root: PathBuf::from("/tmp/project"),
-            deployer_sender: None,
+            resolved_senders: Default::default(),
             sender_labels: Default::default(),
             sender_role_names: Default::default(),
         }
@@ -944,7 +1116,7 @@ mod tests {
     fn hydrate_governor_proposal_with_timelock_from_sender() {
         let timelock_addr = address!("0000000000000000000000000000000000000088");
         let mut ctx = test_context();
-        ctx.deployer_sender = Some(ResolvedSender::Governor {
+        ctx.resolved_senders.insert("deployer".to_string(), ResolvedSender::Governor {
             governor_address: address!("0000000000000000000000000000000000000099"),
             timelock_address: Some(timelock_addr),
             proposer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),

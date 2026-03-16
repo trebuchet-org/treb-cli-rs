@@ -7,9 +7,8 @@
 
 use std::collections::HashMap;
 
-use alloy_primitives::{Address, B256, map::HashMap as AlloyHashMap};
+use alloy_primitives::{Address, B256};
 use foundry_evm::{
-    backend::Backend,
     traces::{
         CallTraceDecoderBuilder, decode_trace_arena, identifier::TraceIdentifiers,
         render_trace_arena,
@@ -64,13 +63,18 @@ pub struct ComponentSimulation {
     /// Hydrated pipeline result (deployments, transactions, traces, etc.).
     pub result: PipelineResult,
     /// Forge's executed state, stored for later broadcast.
-    /// This is an opaque type — only the compose pipeline can use it.
-    executed_state: Option<ExecutedStateHolder>,
+    /// Opaque — use [`broadcast_component`] to consume this.
+    pub executed_state: Option<ExecutedStateHolder>,
+    /// Raw broadcastable transactions from the script execution.
+    /// Used to replay state on the shared Anvil fork between compose steps.
+    pub result_transactions: Option<foundry_cheatcodes::BroadcastableTransactions>,
+    /// The fork URL this component executed against.
+    pub fork_url: Option<String>,
 }
 
 /// Opaque holder for forge's ExecutedState (private module type).
 /// We store it as a trait object since we can't name the concrete type.
-struct ExecutedStateHolder {
+pub struct ExecutedStateHolder {
     /// The broadcast continuation: prepare_simulation → fill_metadata → bundle → broadcast.
     /// Called with `broadcast()` to continue the forge state machine.
     broadcast_fn: Option<BroadcastFn>,
@@ -109,10 +113,11 @@ impl ComposePipeline {
 
     /// Simulate all scripts sequentially with shared EVM state.
     ///
-    /// Returns one `ComponentSimulation` per script. The simulations share
-    /// a backend so contracts deployed by script N are visible to script N+1.
+    /// Spawns an ephemeral Anvil fork so state changes from each script are
+    /// visible to subsequent scripts without mutating the upstream fork.
+    /// After all scripts simulate, the ephemeral Anvil is killed.
     pub async fn simulate_all(
-        self,
+        mut self,
         registry: &mut Registry,
     ) -> Result<Vec<ComponentSimulation>, (Vec<ComponentSimulation>, String, TrebError)> {
         let report = |phase: ComposePhase| {
@@ -134,8 +139,64 @@ impl ComposePipeline {
             .map_err(|e| (Vec::new(), String::new(), e))?;
         let artifact_index = ArtifactIndex::from_compile_output(compilation);
 
-        // Shared backends: threaded between script executions
-        let mut shared_backends: AlloyHashMap<String, Backend> = AlloyHashMap::default();
+        // Snapshot the registry so we can write intermediate deployments
+        // for Solidity lookup() between scripts, then restore if we don't
+        // end up broadcasting.
+        let registry_dir = project_root.join(".treb");
+        let snapshot_dir = registry_dir.join("priv/snapshots/compose");
+        let _ = treb_registry::snapshot_registry(&registry_dir, &snapshot_dir);
+
+        // 2. Spawn an ephemeral Anvil fork for compose simulation.
+        // All scripts fork from this instance so state flows between steps
+        // without mutating the upstream fork.
+        let upstream_url = self
+            .scripts
+            .first()
+            .and_then(|(_, _, sc)| sc.rpc_url_ref().map(|s| s.to_string()));
+
+        let ephemeral_anvil = if let Some(ref url) = upstream_url {
+            // If the URL is a network name (not http://...), resolve it to
+            // an actual RPC endpoint so Anvil can fork from it.
+            let resolved = if url.starts_with("http://") || url.starts_with("https://") {
+                url.clone()
+            } else {
+                treb_config::resolve_rpc_endpoints(&project_root)
+                    .ok()
+                    .and_then(|eps| eps.get(url.as_str()).cloned())
+                    .filter(|ep| !ep.unresolved && !ep.expanded_url.trim().is_empty())
+                    .map(|ep| ep.expanded_url)
+                    .unwrap_or_else(|| url.clone())
+            };
+            let anvil = crate::anvil::AnvilConfig::new()
+                .fork_url(&resolved)
+                .spawn()
+                .await
+                .map_err(|e| (Vec::new(), String::new(), e))?;
+            Some(anvil)
+        } else {
+            None
+        };
+
+        let ephemeral_url = ephemeral_anvil.as_ref().map(|a| a.rpc_url().to_string());
+
+        // Override each script's fork URL to point at the ephemeral Anvil.
+        // Also override the foundry RPC endpoint env var so that
+        // vm.createFork("network") inside Solidity resolves to the
+        // ephemeral Anvil rather than the original upstream RPC.
+        // The guard restores the env var when compose finishes.
+        let _rpc_override_guard = if let Some(ref url) = ephemeral_url {
+            for (_, _, sc) in &mut self.scripts {
+                sc.rpc_url(url);
+            }
+            upstream_url.as_deref()
+                .filter(|u| !u.starts_with("http://") && !u.starts_with("https://"))
+                .and_then(|network| unsafe {
+                    treb_config::override_rpc_endpoint(&project_root, network, url)
+                })
+        } else {
+            None
+        };
+
         let mut results: Vec<ComponentSimulation> = Vec::new();
 
         for (name, context, script_config) in self.scripts {
@@ -146,16 +207,52 @@ impl ComposePipeline {
                 &context,
                 script_config,
                 &artifact_index,
-                &mut shared_backends,
                 registry,
             )
             .await
             {
-                Ok(sim) => results.push(sim),
-                Err(e) => return Err((results, name, e)),
+                Ok(sim) => {
+                    // Replay broadcastable transactions on the ephemeral Anvil
+                    // so the next script sees this script's state changes.
+                    if let Some(ref btxs) = sim.result_transactions {
+                        if let Some(ref url) = ephemeral_url {
+                            if let Err(e) = replay_transactions_on_fork(url, btxs).await {
+                                let _ = treb_registry::restore_registry(&snapshot_dir, &registry_dir);
+                                let _ = std::fs::remove_dir_all(&snapshot_dir);
+                                return Err((results, name, e));
+                            }
+                        }
+                    }
+
+                    // Write deployments AND collisions to registry between steps
+                    // so the next script's Solidity lookup() finds them via
+                    // vm.readFile("registry.json").
+                    for rd in &sim.result.deployments {
+                        let _ = registry.insert_deployment(rd.deployment.clone());
+                    }
+                    // Collisions are contracts that already exist at the predicted
+                    // address — still register them so lookup() works between steps.
+                    for collision in &sim.result.collisions {
+                        let dep = super::hydration::hydrate_collision(collision, &context);
+                        let _ = registry.insert_deployment(dep);
+                    }
+                    results.push(sim);
+                }
+                Err(e) => {
+                    let _ = treb_registry::restore_registry(&snapshot_dir, &registry_dir);
+                    let _ = std::fs::remove_dir_all(&snapshot_dir);
+                    // Ephemeral Anvil is dropped automatically
+                    return Err((results, name, e));
+                }
             }
         }
 
+        // Restore registry to pre-compose state — the caller decides
+        // whether to commit after broadcast.
+        let _ = treb_registry::restore_registry(&snapshot_dir, &registry_dir);
+        let _ = std::fs::remove_dir_all(&snapshot_dir);
+
+        // Ephemeral Anvil is dropped here (killed automatically)
         report(ComposePhase::SimulationComplete);
         Ok(results)
     }
@@ -165,13 +262,12 @@ impl ComposePipeline {
         context: &PipelineContext,
         script_config: ScriptConfig,
         artifact_index: &ArtifactIndex,
-        shared_backends: &mut AlloyHashMap<String, Backend>,
         registry: &mut Registry,
     ) -> Result<ComponentSimulation, TrebError> {
         let script_args = script_config.into_script_args()?;
         let wants_broadcast = script_args.broadcast && context.config.broadcast;
 
-        // Run forge: preprocess → compile → link
+        // Run forge: preprocess → compile → link → execute
         let preprocessed = script_args
             .preprocess()
             .await
@@ -179,28 +275,21 @@ impl ComposePipeline {
         let compiled = preprocessed
             .compile()
             .map_err(|e| TrebError::Forge(format!("forge compilation failed: {e}")))?;
-        let mut linked = compiled
+        let linked = compiled
             .link()
             .await
             .map_err(|e| TrebError::Forge(format!("forge linking failed: {e}")))?;
-
-        // INJECT: thread shared backends into this script's config
-        // so it sees state from previous scripts.
-        if !shared_backends.is_empty() {
-            linked.script_config.backends = shared_backends.clone();
-        }
-
         let prepared = linked
             .prepare_execution()
             .await
             .map_err(|e| TrebError::Forge(format!("forge execution preparation failed: {e}")))?;
+
+        let fork_url = prepared.script_config.evm_opts.fork_url.clone();
+
         let executed = prepared
             .execute()
             .await
             .map_err(|e| TrebError::Forge(format!("forge execution failed: {e}")))?;
-
-        // EXTRACT: capture updated backends for the next script
-        *shared_backends = executed.script_config.backends.clone();
 
         // Clone execution result for hydration
         let script_result = executed.execution_result.clone();
@@ -397,10 +486,15 @@ impl ComposePipeline {
             setup_traces,
         };
 
+        // Capture broadcastable transactions for replaying on the shared fork
+        let result_transactions = execution.transactions.clone();
+
         Ok(ComponentSimulation {
             name: name.to_string(),
             result,
             executed_state: broadcast_fn.map(|f| ExecutedStateHolder { broadcast_fn: Some(f) }),
+            result_transactions,
+            fork_url,
         })
     }
 }
@@ -422,3 +516,101 @@ pub async fn broadcast_component(
         .ok_or_else(|| TrebError::Forge("broadcast already consumed".into()))?;
     broadcast_fn().await
 }
+
+/// Replay broadcastable transactions on an Anvil fork so subsequent scripts
+/// see the state changes (deployed contracts, storage writes, balance changes).
+///
+/// Uses `anvil_impersonateAccount` + `eth_sendTransaction` for each tx.
+/// Anvil mines each tx immediately, persisting the state for the next script.
+async fn replay_transactions_on_fork(
+    rpc_url: &str,
+    txs: &foundry_cheatcodes::BroadcastableTransactions,
+) -> Result<(), TrebError> {
+    let client = reqwest::Client::new();
+
+    for (i, btx) in txs.iter().enumerate() {
+        let from = btx.transaction.from().unwrap_or_default();
+
+        // Impersonate the sender so Anvil accepts the tx without a signature
+        let impersonate = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "anvil_impersonateAccount",
+            "params": [format!("{:#x}", from)],
+            "id": i * 2 + 1,
+        });
+        client
+            .post(rpc_url)
+            .json(&impersonate)
+            .send()
+            .await
+            .map_err(|e| TrebError::Forge(format!("compose replay: impersonate failed: {e}")))?;
+
+        // Build the eth_sendTransaction request
+        let mut tx_obj = serde_json::Map::new();
+        tx_obj.insert("from".into(), serde_json::json!(format!("{:#x}", from)));
+
+        if let Some(to) = btx.transaction.to() {
+            match to {
+                alloy_primitives::TxKind::Call(addr) => {
+                    tx_obj.insert("to".into(), serde_json::json!(format!("{:#x}", addr)));
+                }
+                alloy_primitives::TxKind::Create => {}
+            }
+        }
+
+        if let Some(input) = btx.transaction.input() {
+            if !input.is_empty() {
+                tx_obj.insert(
+                    "data".into(),
+                    serde_json::json!(format!("0x{}", alloy_primitives::hex::encode(input))),
+                );
+            }
+        }
+
+        let value = btx.transaction.value().unwrap_or_default();
+        if !value.is_zero() {
+            tx_obj.insert("value".into(), serde_json::json!(format!("{:#x}", value)));
+        }
+
+        // Set a high gas limit to avoid estimation issues
+        tx_obj.insert("gas".into(), serde_json::json!("0x1c9c380")); // 30M
+
+        let send_tx = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "eth_sendTransaction",
+            "params": [tx_obj],
+            "id": i * 2 + 2,
+        });
+
+        let resp: serde_json::Value = client
+            .post(rpc_url)
+            .json(&send_tx)
+            .send()
+            .await
+            .map_err(|e| TrebError::Forge(format!("compose replay: send tx failed: {e}")))?
+            .json()
+            .await
+            .map_err(|e| TrebError::Forge(format!("compose replay: parse response failed: {e}")))?;
+
+        if let Some(err) = resp.get("error") {
+            return Err(TrebError::Forge(format!(
+                "compose replay: tx {} from {:#x} failed: {}",
+                i,
+                from,
+                err
+            )));
+        }
+
+        // Stop impersonating
+        let stop = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "anvil_stopImpersonatingAccount",
+            "params": [format!("{:#x}", from)],
+            "id": i * 2 + 3,
+        });
+        let _ = client.post(rpc_url).json(&stop).send().await;
+    }
+
+    Ok(())
+}
+

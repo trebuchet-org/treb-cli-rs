@@ -67,11 +67,13 @@ pub fn snapshot_registry(registry_dir: &Path, snapshot_dir: &Path) -> Result<(),
     fs::create_dir_all(snapshot_dir)?;
     for &file in SNAPSHOT_FILES {
         let src = registry_dir.join(file);
+        // Use read+write instead of fs::copy to avoid cross-user permission
+        // errors from metadata preservation (fchmod/futimens fail across users).
         if src.exists() {
-            fs::copy(&src, snapshot_dir.join(file))?;
+            fs::write(snapshot_dir.join(file), fs::read(&src)?)?;
         } else if let Some(legacy_src) = crate::legacy_registry_store_path(&src) {
             if legacy_src.exists() {
-                fs::copy(&legacy_src, snapshot_dir.join(file))?;
+                fs::write(snapshot_dir.join(file), fs::read(&legacy_src)?)?;
             }
         }
     }
@@ -89,20 +91,22 @@ pub fn restore_registry(snapshot_dir: &Path, registry_dir: &Path) -> Result<(), 
             snapshot_dir.display()
         )));
     }
+    // Use read+write instead of fs::copy to avoid cross-user permission
+    // errors from metadata preservation (fchmod/futimens fail across users).
     for &file in SNAPSHOT_FILES {
         let snapshot_file = snapshot_dir.join(file);
         let registry_file = registry_dir.join(file);
         if snapshot_file.exists() {
-            fs::copy(&snapshot_file, &registry_file)?;
+            fs::write(&registry_file, fs::read(&snapshot_file)?)?;
         } else if let Some(legacy_snapshot_file) = crate::legacy_registry_store_path(&snapshot_file)
         {
             if legacy_snapshot_file.exists() {
-                fs::copy(&legacy_snapshot_file, &registry_file)?;
+                fs::write(&registry_file, fs::read(&legacy_snapshot_file)?)?;
             } else if registry_file.exists() {
-                fs::remove_file(&registry_file)?;
+                fs::write(&registry_file, "{}")?;
             }
         } else if registry_file.exists() {
-            fs::remove_file(&registry_file)?;
+            fs::write(&registry_file, "{}")?;
         }
     }
     Ok(())
@@ -309,7 +313,7 @@ mod tests {
             chain_id: 1,
             fork_url: "https://eth.llamarpc.com".into(),
             fork_block_number: Some(19_000_000),
-            snapshot_dir: format!(".treb/snapshots/{network}"),
+            snapshot_dir: format!(".treb/priv/snapshots/{network}"),
             started_at: ts,
             env_var_name: String::new(),
             original_rpc: String::new(),

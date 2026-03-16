@@ -19,6 +19,17 @@ use foundry_wallets::WalletSigner;
 use treb_config::SenderConfig;
 use treb_core::error::TrebError;
 
+/// Classification of a resolved sender for transaction routing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SenderCategory {
+    /// Direct wallet sender (PrivateKey, Ledger, Trezor, or InMemory).
+    Wallet,
+    /// Safe multisig sender — transactions are proposed via Safe Transaction Service.
+    Safe,
+    /// OZ Governor sender — transactions are submitted as governance proposals.
+    Governor,
+}
+
 /// A fully resolved sender ready for use in script execution.
 ///
 /// Each variant wraps the signing capability (or address-only stub) produced
@@ -115,6 +126,15 @@ impl ResolvedSender {
             _ => None,
         }
     }
+
+    /// Returns the sender category for transaction routing.
+    pub fn category(&self) -> SenderCategory {
+        match self {
+            Self::Wallet(_) | Self::InMemory(_) => SenderCategory::Wallet,
+            Self::Safe { .. } => SenderCategory::Safe,
+            Self::Governor { .. } => SenderCategory::Governor,
+        }
+    }
 }
 
 /// Resolve a single sender by name from its configuration.
@@ -170,6 +190,31 @@ pub async fn resolve_all_senders(
     }
 
     Ok(resolved)
+}
+
+/// Extract the private key hex string for the leaf signing wallet of a sender.
+///
+/// For Wallet/InMemory senders, returns the key directly if available in the config.
+/// For Safe/Governor senders, follows the sub-signer chain to the leaf wallet.
+pub fn extract_signing_key<'a>(
+    role: &str,
+    sender: &ResolvedSender,
+    sender_configs: &'a HashMap<String, SenderConfig>,
+) -> Option<&'a str> {
+    match sender {
+        ResolvedSender::Wallet(_) | ResolvedSender::InMemory(_) => {
+            sender_configs.get(role).and_then(|c| c.private_key.as_deref())
+        }
+        ResolvedSender::Safe { signer, .. } => {
+            // Find the signer's role name in the config
+            let signer_name = sender_configs.get(role).and_then(|c| c.signer.as_deref())?;
+            extract_signing_key(signer_name, signer, sender_configs)
+        }
+        ResolvedSender::Governor { proposer, .. } => {
+            let proposer_name = sender_configs.get(role).and_then(|c| c.proposer.as_deref())?;
+            extract_signing_key(proposer_name, proposer, sender_configs)
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

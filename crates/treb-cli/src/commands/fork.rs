@@ -22,7 +22,7 @@ use treb_registry::{
 };
 
 const TREB_DIR: &str = ".treb";
-const SNAPSHOT_BASE: &str = "snapshots";
+const SNAPSHOT_BASE: &str = "priv/snapshots";
 
 /// Format a chrono duration into a human-readable string matching the Go CLI.
 fn format_duration(d: chrono::Duration) -> String {
@@ -1105,7 +1105,7 @@ mod tests {
             chain_id: 1,
             fork_url: "https://eth.example.com".into(),
             fork_block_number: None,
-            snapshot_dir: treb_dir.join("snapshots").join(network).to_string_lossy().into_owned(),
+            snapshot_dir: treb_dir.join("priv/snapshots").join(network).to_string_lossy().into_owned(),
             started_at: now,
             env_var_name: String::new(),
             original_rpc: String::new(),
@@ -1149,7 +1149,7 @@ mod tests {
     #[test]
     fn registry_snapshot_restore_round_trip() {
         let (_root, treb_dir) = make_treb_dir();
-        let snapshot_dir = treb_dir.join("snapshots").join("mainnet");
+        let snapshot_dir = treb_dir.join("priv/snapshots").join("mainnet");
 
         // Write initial registry state
         fs::write(treb_dir.join(DEPLOYMENTS_FILE), r#"{"original": true}"#).unwrap();
@@ -1284,7 +1284,7 @@ mod tests {
     #[test]
     fn diff_detects_changes() {
         let (_root, treb_dir) = make_treb_dir();
-        let snapshot_dir = treb_dir.join("snapshots").join("mainnet");
+        let snapshot_dir = treb_dir.join("priv/snapshots").join("mainnet");
         fs::create_dir_all(&snapshot_dir).unwrap();
 
         // Write matching state to both locations first.
@@ -1315,7 +1315,7 @@ mod tests {
     #[test]
     fn diff_shows_clean_when_matching() {
         let (_root, treb_dir) = make_treb_dir();
-        let snapshot_dir = treb_dir.join("snapshots").join("mainnet");
+        let snapshot_dir = treb_dir.join("priv/snapshots").join("mainnet");
         fs::create_dir_all(&snapshot_dir).unwrap();
 
         let deployments_json = r#"{"Counter_1": {"address": "0xaaa"}}"#;

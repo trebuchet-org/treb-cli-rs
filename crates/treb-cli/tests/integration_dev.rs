@@ -22,7 +22,7 @@ use framework::{
 /// pid_file, log_file) with fixed values for golden file stability.
 fn sample_anvil_entry(treb_dir: &std::path::Path) -> ForkEntry {
     let ts = Utc.with_ymd_and_hms(2026, 1, 15, 10, 30, 0).unwrap();
-    let snapshot_dir = treb_dir.join("snapshots").join("mainnet");
+    let snapshot_dir = treb_dir.join("priv/snapshots").join("mainnet");
     ForkEntry {
         network: "mainnet".to_string(),
         instance_name: None,
@@ -50,7 +50,7 @@ fn sample_named_anvil_entry(
     port: u16,
 ) -> ForkEntry {
     let ts = Utc.with_ymd_and_hms(2026, 1, 15, 10, 30, 0).unwrap();
-    let snapshot_dir = treb_dir.join("snapshots").join(network);
+    let snapshot_dir = treb_dir.join("priv/snapshots").join(network);
     ForkEntry {
         network: network.to_string(),
         instance_name: Some(instance_name.to_string()),

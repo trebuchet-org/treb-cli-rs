@@ -37,8 +37,8 @@ pub use env::load_dotenv;
 
 // Re-export foundry config integration.
 pub use foundry::{
-    ResolvedRpcEndpoint, extract_treb_senders_from_foundry, load_foundry_config,
-    resolve_rpc_endpoints, rpc_endpoints,
+    ResolvedRpcEndpoint, RpcOverrideGuard, extract_treb_senders_from_foundry, load_foundry_config,
+    override_rpc_endpoint, resolve_rpc_endpoints, rpc_endpoints,
 };
 
 // Re-export resolver.

@@ -177,6 +177,7 @@ pub async fn execute_script(
     })
 }
 
+
 /// Builder for constructing forge `ScriptArgs` from treb configuration.
 pub struct ScriptConfig {
     script_path: String,
@@ -198,6 +199,9 @@ pub struct ScriptConfig {
     /// Private key hex string to inject into `ScriptArgs.wallets`.
     /// When set, the forge execution pipeline can sign transactions with this key.
     private_key_hex: Option<String>,
+    /// Multiple private key hex strings for v2 multi-sender scripts.
+    /// When set, these are injected into `ScriptArgs.wallets.private_keys`.
+    private_keys_hex: Vec<String>,
 }
 
 impl ScriptConfig {
@@ -223,6 +227,7 @@ impl ScriptConfig {
             etherscan_api_key: None,
             verify: false,
             private_key_hex: None,
+            private_keys_hex: Vec::new(),
         }
     }
 
@@ -249,6 +254,11 @@ impl ScriptConfig {
     pub fn rpc_url(&mut self, url: impl Into<String>) -> &mut Self {
         self.rpc_url = Some(url.into());
         self
+    }
+
+    /// Returns a reference to the configured RPC URL, if any.
+    pub fn rpc_url_ref(&self) -> Option<&str> {
+        self.rpc_url.as_deref()
     }
 
     pub fn chain_id(&mut self, chain_id: u64) -> &mut Self {
@@ -303,6 +313,11 @@ impl ScriptConfig {
 
     pub fn private_key_hex(&mut self, key: impl Into<String>) -> &mut Self {
         self.private_key_hex = Some(key.into());
+        self
+    }
+
+    pub fn private_keys_hex(&mut self, keys: Vec<String>) -> &mut Self {
+        self.private_keys_hex = keys;
         self
     }
 
@@ -384,6 +399,10 @@ impl ScriptConfig {
             args.wallets.private_key = Some(key);
         }
 
+        if !self.private_keys_hex.is_empty() {
+            args.wallets.private_keys = Some(self.private_keys_hex);
+        }
+
         Ok(args)
     }
 }
@@ -460,6 +479,46 @@ pub fn build_script_config_with_senders(
             // Safe/Governor: only evm.sender is set (signing deferred to Phase 17)
             ResolvedSender::Safe { .. } | ResolvedSender::Governor { .. } => {}
         }
+    }
+
+    Ok(config)
+}
+
+/// Build a `ScriptConfig` for v2 scripts with all wallet keys injected.
+///
+/// Unlike v1 which only injects the deployer's key, v2 injects ALL wallet/in-memory
+/// private keys (including sub-signers for Safe/Governor senders) into
+/// `ScriptArgs.wallets.private_keys`. This enables `vm.broadcast(address)` for any
+/// configured sender address.
+///
+/// The script is always configured with `broadcast = true` because v2 scripts
+/// use `vm.broadcast()` internally, but the actual broadcast/routing is handled
+/// by the v2 pipeline orchestrator after execution.
+pub fn build_script_config_v2(
+    resolved: &ResolvedConfig,
+    script_path: &str,
+    resolved_senders: &HashMap<String, ResolvedSender>,
+) -> treb_core::Result<ScriptConfig> {
+    let mut config = build_script_config(resolved, script_path)?;
+
+    // Collect all private keys from all senders (including sub-signers).
+    let mut all_keys: Vec<String> = Vec::new();
+    for (role, sender) in resolved_senders {
+        let key = crate::sender::extract_signing_key(role, sender, &resolved.senders);
+        if let Some(k) = key {
+            if !all_keys.contains(&k.to_string()) {
+                all_keys.push(k.to_string());
+            }
+        }
+    }
+
+    if !all_keys.is_empty() {
+        config.private_keys_hex(all_keys);
+    }
+
+    // Set the sender to the deployer's address if available
+    if let Some(deployer) = resolved_senders.get("deployer") {
+        config.sender(deployer.sender_address());
     }
 
     Ok(config)
@@ -653,5 +712,42 @@ mod tests {
 
         assert_eq!(args.evm.sender, Some(ANVIL_ADDR_0));
         assert!(args.wallets.private_key.is_none());
+    }
+
+    #[test]
+    fn v2_script_config_injects_multiple_private_keys() {
+        let deployer_config = SenderConfig {
+            type_: Some(SenderType::PrivateKey),
+            private_key: Some(ANVIL_KEY_0.to_string()),
+            ..Default::default()
+        };
+        let other_key = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
+        let other_config = SenderConfig {
+            type_: Some(SenderType::PrivateKey),
+            private_key: Some(other_key.to_string()),
+            ..Default::default()
+        };
+        let senders = HashMap::from([
+            ("deployer".to_string(), deployer_config.clone()),
+            ("other".to_string(), other_config.clone()),
+        ]);
+        let resolved_cfg = test_resolved_config(senders);
+
+        let mut resolved_senders = HashMap::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let all = rt.block_on(sender::resolve_all_senders(&resolved_cfg.senders)).unwrap();
+        for (k, v) in all {
+            resolved_senders.insert(k, v);
+        }
+
+        let config = build_script_config_v2(&resolved_cfg, "script/Deploy.s.sol", &resolved_senders)
+            .unwrap();
+        let args = config.into_script_args().unwrap();
+
+        // Should have multiple private keys
+        let keys = args.wallets.private_keys.expect("should have private_keys");
+        assert_eq!(keys.len(), 2, "should inject both wallet keys");
+        assert!(keys.contains(&ANVIL_KEY_0.to_string()));
+        assert!(keys.contains(&other_key.to_string()));
     }
 }

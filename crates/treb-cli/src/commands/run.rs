@@ -23,9 +23,9 @@ use treb_forge::{
         BroadcastHook, BroadcastPhase, BroadcastProgressCallback, PipelineConfig, PipelineContext,
         PipelineResult, RecordedTransaction, RunPipeline, resolve_git_commit,
     },
-    script::build_script_config_with_senders,
+    script::{build_script_config_v2, build_script_config_with_senders},
     sender::{ResolvedSender, resolve_all_senders},
-    sender_config::encode_sender_configs,
+    sender_config::{encode_sender_configs, encode_sender_configs_v2},
 };
 use treb_registry::{ForkStateStore, Registry};
 
@@ -242,7 +242,7 @@ fn should_reject_interactive_json_broadcast(
 /// `forge-script` writes compilation and broadcast chatter through this shell.
 /// `treb run --json` needs stdout reserved for the final machine-readable
 /// payload, so suppress Foundry's shell output while the pipeline runs.
-struct FoundryShellGuard {
+pub(crate) struct FoundryShellGuard {
     output_format: OutputFormat,
     output_mode: OutputMode,
     color_choice: ColorChoice,
@@ -250,7 +250,7 @@ struct FoundryShellGuard {
 }
 
 impl FoundryShellGuard {
-    fn suppress() -> Self {
+    pub(crate) fn suppress() -> Self {
         let mut shell = FoundryShell::get();
         let previous = Self {
             output_format: shell.output_format(),
@@ -387,9 +387,9 @@ pub async fn execute_script(
     let is_safe = resolved_senders.get("deployer").is_some_and(|s| s.is_safe());
     let is_gov = resolved_senders.get("deployer").is_some_and(|s| s.is_governor());
 
-    // Build ScriptConfig
+    // Build ScriptConfig (v2: all wallet keys injected)
     let mut script_config =
-        build_script_config_with_senders(resolved, &opts.script, resolved_senders)
+        build_script_config_v2(resolved, &opts.script, resolved_senders)
             .context("failed to build script configuration")?;
 
     script_config
@@ -435,14 +435,16 @@ pub async fn execute_script(
         .iter()
         .map(|(role, sender)| (sender.sender_address(), role.clone()))
         .collect();
-    let deployer_sender = resolved_senders.remove("deployer");
+
+    // Take ownership of all resolved senders for the pipeline context.
+    let owned_senders = std::mem::take(resolved_senders);
 
     let pipeline_context = PipelineContext {
         config: pipeline_config,
         script_path: PathBuf::from(&opts.script),
         git_commit: resolve_git_commit(),
         project_root: cwd.to_path_buf(),
-        deployer_sender,
+        resolved_senders: owned_senders,
         sender_labels,
         sender_role_names,
     };
@@ -588,10 +590,15 @@ pub async fn run(
 
     // ── Inject treb context env vars for Solidity consumption ──────────
     // SAFETY: this is single-threaded CLI code; no concurrent env access.
+    unsafe { env::set_var("TREB_CLI_VERSION", "2") };
     unsafe { env::set_var("NAMESPACE", &resolved.namespace) };
     if let Some(ref net) = effective_network {
         unsafe { env::set_var("NETWORK", net) };
     }
+    // v2: simplified sender encoding (names + addresses only)
+    let encoded_senders_v2 = encode_sender_configs_v2(&resolved_senders);
+    unsafe { env::set_var("SENDER_CONFIGS_V2", &encoded_senders_v2) };
+    // v1 compat: still set SENDER_CONFIGS for scripts that haven't migrated
     let encoded_senders = encode_sender_configs(&resolved_senders, &resolved.senders)
         .context("failed to encode sender configs")?;
     unsafe { env::set_var("SENDER_CONFIGS", &encoded_senders) };
@@ -1474,7 +1481,7 @@ mod tests {
             chain_id: 1,
             fork_url: "https://eth.example.com".into(),
             fork_block_number: Some(19_000_000),
-            snapshot_dir: ".treb/snapshots/mainnet".into(),
+            snapshot_dir: ".treb/priv/snapshots/mainnet".into(),
             started_at: ts,
             env_var_name: env_var_name.into(),
             original_rpc: "https://eth.example.com".into(),

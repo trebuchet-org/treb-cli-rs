@@ -37,14 +37,15 @@ pub use pipeline::{
     hydrate_safe_transactions, hydrate_transactions, resolve_duplicates, resolve_git_commit,
 };
 pub use script::{
-    ExecutionResult, ScriptConfig, build_script_config, build_script_config_with_senders,
-    execute_script,
+    ExecutionResult, ScriptConfig, build_script_config, build_script_config_v2,
+    build_script_config_with_senders, execute_script,
 };
 pub use sender::{
-    ResolvedSender, default_test_signers, in_memory_signer, resolve_all_senders, resolve_sender,
+    ResolvedSender, SenderCategory, default_test_signers, extract_signing_key, in_memory_signer,
+    resolve_all_senders, resolve_sender,
 };
 pub use governor::{is_terminal, query_proposal_state};
-pub use sender_config::encode_sender_configs;
+pub use sender_config::{encode_sender_configs, encode_sender_configs_v2};
 pub use version::{ForgeVersion, detect_forge_version};
 
 // Re-export foundry-linking for downstream use (Phase 8 deployment recording pipeline).

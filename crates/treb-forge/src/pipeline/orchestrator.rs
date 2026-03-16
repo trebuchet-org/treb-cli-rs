@@ -21,7 +21,6 @@ use treb_safe::{
 
 use crate::{
     artifacts::ArtifactIndex,
-    broadcast::read_latest_broadcast,
     compiler::compile_project,
     events::{
         ExtractedDeployment, GovernorProposalCreated, SafeTransactionQueued, TransactionSimulated,
@@ -37,8 +36,9 @@ use super::{
     PipelineContext,
     duplicates::{DuplicateStrategy, resolve_duplicates},
     hydration::{
-        hydrate_deployment, hydrate_governor_proposals, hydrate_safe_transactions,
-        hydrate_transactions, populate_safe_context,
+        build_v2_transaction_metadata, hydrate_deployment, hydrate_governor_proposals,
+        hydrate_safe_transactions, hydrate_transactions, hydrate_transactions_from_broadcast,
+        populate_safe_context,
     },
     types::{PipelineResult, RecordedDeployment, RecordedTransaction},
 };
@@ -115,17 +115,20 @@ impl RunPipeline {
             }
         };
 
+        // Derive deployer sender category from resolved_senders for broadcast gating.
+        let deployer_is_safe = self.context.resolved_senders.get("deployer").is_some_and(|s| s.is_safe());
+        let deployer_is_governor = self.context.resolved_senders.get("deployer").is_some_and(|s| s.is_governor());
+
         // 1. Compile project for artifact index
         report(BroadcastPhase::Compiling);
         let foundry_config = load_foundry_config(&self.context.project_root)?;
         let compilation = compile_project(&foundry_config)?;
         let artifact_index = ArtifactIndex::from_compile_output(compilation);
 
-        // 2. Build script args and execute (simulation only)
+        // 2. Build script args and execute
         let script_config = match self.script_config {
             Some(config) => config,
             None => {
-                // Fallback: build from PipelineConfig (backward compatibility)
                 let mut config = ScriptConfig::new(&self.context.config.script_path);
                 config
                     .sig(&self.context.config.script_sig)
@@ -136,10 +139,12 @@ impl RunPipeline {
         };
 
         let script_args = script_config.into_script_args()?;
+        // Wallet-only senders can broadcast directly through forge.
+        // Safe/Governor senders route through Rust after execution.
         let wants_broadcast = script_args.broadcast
             && self.context.config.broadcast
-            && !self.context.deployer_sender.as_ref().is_some_and(|s| s.is_safe())
-            && !self.context.deployer_sender.as_ref().is_some_and(|s| s.is_governor());
+            && !deployer_is_safe
+            && !deployer_is_governor;
 
         // Run forge: preprocess → compile → link → prepare → execute
         report(BroadcastPhase::Executing);
@@ -181,7 +186,6 @@ impl RunPipeline {
 
         // 3. Check for failed execution
         if !execution.success {
-            // Render traces to show the revert reason
             let mut err_parts = Vec::new();
             if !execution.logs.is_empty() {
                 err_parts.push(execution.logs.join("\n"));
@@ -212,7 +216,7 @@ impl RunPipeline {
             return Err(TrebError::Forge(format!("script execution failed:\n{detail}")));
         }
 
-        // 4. Decode events
+        // 4. Decode events (ContractDeployed, collisions, proxy relationships)
         let parsed_events = decode_events(&execution.raw_logs);
         let event_count = parsed_events.len();
 
@@ -230,34 +234,50 @@ impl RunPipeline {
             })
             .collect::<Vec<_>>();
 
-        // 7. Extract event types for transaction hydration
-        let tx_events = extract_transaction_simulated(&parsed_events);
-        let safe_tx_events = extract_safe_transaction_queued(&parsed_events);
+        // 7. Hydrate transactions from BroadcastableTransactions (v2 model).
+        //    Scripts use vm.broadcast() — forge collects BroadcastableTransactions
+        //    which we hydrate directly instead of relying on TransactionSimulated events.
+        let broadcastable_txs = execution.transactions.as_ref();
+        let transactions = if let Some(btxs) = broadcastable_txs {
+            hydrate_transactions_from_broadcast(btxs, &hydrated_deployments, &self.context)
+        } else {
+            // Fallback to TransactionSimulated events for backward compatibility
+            let tx_events = extract_transaction_simulated(&parsed_events);
+            hydrate_transactions(&tx_events, &hydrated_deployments, &self.context)
+        };
+
+        // Build v2 transaction metadata from broadcastable transactions.
+        let mut v2_metadata = if let Some(btxs) = broadcastable_txs {
+            build_v2_transaction_metadata(btxs, &self.context)
+        } else {
+            // Fallback to v1 metadata from TransactionSimulated events
+            let tx_events = extract_transaction_simulated(&parsed_events);
+            let sender_id_labels: HashMap<B256, String> = self
+                .context
+                .sender_role_names
+                .iter()
+                .map(|role| (alloy_primitives::keccak256(role.as_bytes()), role.clone()))
+                .collect();
+            let v1_meta = build_recorded_transaction_metadata(
+                &tx_events,
+                &extracted_deployments,
+                &execution.traces,
+                &sender_id_labels,
+            );
+            // Convert v1 metadata to v2 format
+            v1_meta.into_iter().map(|(k, v)| {
+                (k, super::hydration::V2TransactionMetadata {
+                    sender_name: v.sender_name,
+                    gas_used: v.gas_used,
+                })
+            }).collect()
+        };
+
+        // Also hydrate governor proposals from events (still emitted in v2).
         let governor_events = extract_governor_proposal_created(&parsed_events);
-
-        // 8. Hydrate transactions
-        let mut transactions =
-            hydrate_transactions(&tx_events, &hydrated_deployments, &self.context);
-        let safe_transactions = hydrate_safe_transactions(&safe_tx_events, &self.context);
         let governor_proposals = hydrate_governor_proposals(&governor_events, &self.context);
-        // Build senderId (keccak of role name) → role name map for accurate
-        // sender resolution when multiple senders share the same address.
-        let sender_id_labels: HashMap<B256, String> = self
-            .context
-            .sender_role_names
-            .iter()
-            .map(|role| (alloy_primitives::keccak256(role.as_bytes()), role.clone()))
-            .collect();
 
-        let mut transaction_metadata = build_recorded_transaction_metadata(
-            &tx_events,
-            &extracted_deployments,
-            &execution.traces,
-            &sender_id_labels,
-        );
-
-        // 9. Build combined address labels for trace decoding:
-        //    execution labels + senders + current deployments + existing registry entries.
+        // 8. Build combined address labels for trace decoding
         let mut labeled_addresses = execution.labeled_addresses.clone();
         for (addr, role) in &self.context.sender_labels {
             labeled_addresses.entry(*addr).or_insert_with(|| role.clone());
@@ -280,7 +300,6 @@ impl RunPipeline {
                 labeled_addresses.entry(addr).or_insert(label);
             }
         }
-        // Include addressbook entries for the current chain
         let chain_id_str = self.context.config.chain_id.to_string();
         let mut addressbook = treb_registry::AddressbookStore::new(&self.context.project_root.join(".treb"));
         if addressbook.load().is_ok() {
@@ -291,43 +310,41 @@ impl RunPipeline {
             }
         }
 
-        // 10. Render traces and extract per-transaction sub-trees
+        // 9. Render traces (v2 doesn't use per-tx trace matching from TransactionSimulated)
+        let mut empty_v1_metadata = HashMap::new();
         let (execution_traces, setup_traces) = render_traces_for_verbosity(
             execution.traces,
             &labeled_addresses,
             &artifact_index,
             self.context.config.verbosity,
-            &mut transaction_metadata,
+            &mut empty_v1_metadata,
         )
         .await;
 
-        // 11. Safe sender: populate safe_context and propose to Safe Service
-        let is_safe_sender = self.context.deployer_sender.as_ref().is_some_and(|s| s.is_safe());
-        let is_governor_sender =
-            self.context.deployer_sender.as_ref().is_some_and(|s| s.is_governor());
-
-        if is_safe_sender {
+        // 10. Safe/Governor proposal routing (currently no-op — Rust-side
+        //     proposal submission will be wired in a follow-up).
+        let safe_tx_events = extract_safe_transaction_queued(&parsed_events);
+        let safe_transactions = hydrate_safe_transactions(&safe_tx_events, &self.context);
+        let mut transactions = transactions;
+        if deployer_is_safe {
             populate_safe_context(&mut transactions, &safe_transactions);
-            if self.context.config.broadcast {
-                propose_safe_transactions(&self.context, &safe_tx_events, &tx_events).await?;
-            }
         }
 
-        // 12. Build recorded transactions (needed for hook preview AND final result)
+        // 11. Build recorded transactions
         let mut recorded_transactions: Vec<RecordedTransaction> = transactions
             .into_iter()
             .map(|tx| {
-                let metadata = transaction_metadata.remove(&tx.id).unwrap_or_default();
+                let metadata = v2_metadata.remove(&tx.id);
                 RecordedTransaction {
                     transaction: tx,
-                    sender_name: metadata.sender_name,
-                    gas_used: metadata.gas_used,
-                    trace: metadata.trace,
+                    sender_name: metadata.as_ref().and_then(|m| m.sender_name.clone()),
+                    gas_used: metadata.as_ref().and_then(|m| m.gas_used),
+                    trace: None,
                 }
             })
             .collect();
 
-        // 13. Broadcast: hook → confirm → broadcast (single pass, no re-execution)
+        // 12. Broadcast: hook → confirm → broadcast
         let broadcast_confirmed = if wants_broadcast && !recorded_transactions.is_empty() {
             let confirmed = self
                 .broadcast_hook
@@ -359,7 +376,6 @@ impl RunPipeline {
                     .map_err(|e| TrebError::Forge(format!("forge broadcast failed: {e}")))?;
                 report(BroadcastPhase::Complete);
 
-                // Extract receipts and apply to recorded transactions
                 let mut receipts = Vec::new();
                 for seq in broadcasted.sequence.sequences() {
                     for (tx_meta, receipt) in seq.transactions.iter().zip(seq.receipts.iter()) {
@@ -382,7 +398,7 @@ impl RunPipeline {
             false
         };
 
-        // 14. Duplicate detection
+        // 13. Duplicate detection
         let resolved = resolve_duplicates(hydrated_deployments, registry, DuplicateStrategy::Skip)?;
         let skipped = resolved.skipped;
 
@@ -393,9 +409,9 @@ impl RunPipeline {
                 || !resolved.to_update.is_empty()
                 || !recorded_transactions.is_empty()
                 || !safe_transactions.is_empty()
-                || (is_governor_sender && !governor_proposals.is_empty()));
+                || (deployer_is_governor && !governor_proposals.is_empty()));
 
-        // 15. Record to registry (or build dry-run result)
+        // 14. Record to registry (or build dry-run result)
         let mut recorded_deployments = Vec::new();
 
         if should_record {
@@ -415,7 +431,7 @@ impl RunPipeline {
             for safe_tx in safe_transactions {
                 registry.insert_safe_transaction(safe_tx)?;
             }
-            if is_governor_sender {
+            if deployer_is_governor {
                 for proposal in &governor_proposals {
                     registry.insert_governor_proposal(proposal.clone())?;
                 }
@@ -920,10 +936,11 @@ fn apply_broadcast_receipts(
 }
 
 // ---------------------------------------------------------------------------
-// Safe proposal helpers
+// Safe proposal helpers (will be wired for Rust-side Safe proposals)
 // ---------------------------------------------------------------------------
 
 /// Build an index of simulated transactions keyed by transaction ID.
+#[allow(dead_code)]
 fn build_sim_tx_index(tx_events: &[TransactionSimulated]) -> HashMap<B256, &SimulatedTransaction> {
     tx_events
         .iter()
@@ -936,6 +953,7 @@ fn build_sim_tx_index(tx_events: &[TransactionSimulated]) -> HashMap<B256, &Simu
 ///
 /// Sets gas-related fields to zero and operation to Call (0), matching
 /// the default Safe transaction parameters.
+#[allow(dead_code)]
 pub fn build_safe_tx(sim_tx: &SimulatedTransaction, nonce: u64) -> SafeTx {
     SafeTx {
         to: sim_tx.transaction.to,
@@ -952,6 +970,7 @@ pub fn build_safe_tx(sim_tx: &SimulatedTransaction, nonce: u64) -> SafeTx {
 }
 
 /// Construct a [`ProposeRequest`] from a Safe transaction's components.
+#[allow(dead_code)]
 pub fn build_propose_request(
     safe_tx: &SafeTx,
     safe_tx_hash: B256,
@@ -988,14 +1007,15 @@ pub fn build_propose_request(
 /// For each `SafeTransactionQueued` event, looks up the linked simulated
 /// transactions, constructs a proposal, signs it with the deployer's
 /// sub-signer, and submits to the Safe Transaction Service.
+#[allow(dead_code)]
 async fn propose_safe_transactions(
     context: &PipelineContext,
     safe_tx_events: &[SafeTransactionQueued],
     tx_events: &[TransactionSimulated],
 ) -> treb_core::Result<()> {
     let deployer = context
-        .deployer_sender
-        .as_ref()
+        .resolved_senders
+        .get("deployer")
         .ok_or_else(|| TrebError::Safe("deployer sender not set".to_string()))?;
 
     let safe_address = deployer

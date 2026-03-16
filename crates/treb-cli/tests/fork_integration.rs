@@ -40,7 +40,7 @@ fn write_wrapped_map(path: &Path, json: &str) {
 
 /// Build a minimal `ForkEntry` suitable for unit-testing fork state operations.
 fn sample_entry(treb_dir: &Path, network: &str) -> ForkEntry {
-    let snapshot_dir = treb_dir.join("snapshots").join(network);
+    let snapshot_dir = treb_dir.join("priv/snapshots").join(network);
     let now = Utc::now();
     ForkEntry {
         network: network.to_string(),
@@ -223,7 +223,7 @@ fn fork_diff_with_no_changes() {
     let (root, treb_dir) = make_project();
 
     let network = "testnet";
-    let snapshot_dir = treb_dir.join("snapshots").join(network);
+    let snapshot_dir = treb_dir.join("priv/snapshots").join(network);
     fs::create_dir_all(&snapshot_dir).unwrap();
 
     // Write identical deployments.json in both locations.
@@ -269,7 +269,7 @@ fn fork_diff_uses_contract_name_for_human_output() {
     let (root, treb_dir) = make_project();
 
     let network = "testnet";
-    let snapshot_dir = treb_dir.join("snapshots").join(network);
+    let snapshot_dir = treb_dir.join("priv/snapshots").join(network);
     fs::create_dir_all(&snapshot_dir).unwrap();
 
     let snapshot_deployments = r#"{
@@ -313,7 +313,7 @@ fn fork_diff_removed_only_human_output_stays_clean() {
     let (root, treb_dir) = make_project();
 
     let network = "testnet";
-    let snapshot_dir = treb_dir.join("snapshots").join(network);
+    let snapshot_dir = treb_dir.join("priv/snapshots").join(network);
     fs::create_dir_all(&snapshot_dir).unwrap();
 
     let snapshot_deployments = r#"{
@@ -351,7 +351,7 @@ fn fork_diff_json_reads_wrapped_deployments() {
     let (root, treb_dir) = make_project();
 
     let network = "testnet";
-    let snapshot_dir = treb_dir.join("snapshots").join(network);
+    let snapshot_dir = treb_dir.join("priv/snapshots").join(network);
     fs::create_dir_all(&snapshot_dir).unwrap();
 
     write_wrapped_map(
@@ -421,7 +421,7 @@ fn fork_exit_restores_registry() {
     let (root, treb_dir) = make_project();
 
     let network = "testnet";
-    let snapshot_dir = treb_dir.join("snapshots").join(network);
+    let snapshot_dir = treb_dir.join("priv/snapshots").join(network);
     fs::create_dir_all(&snapshot_dir).unwrap();
 
     // Write original deployments to both the registry and the snapshot.
@@ -613,7 +613,7 @@ async fn signal_handling_sigterm_shuts_down_anvil_cleanly() {
     let network = "testnet";
 
     {
-        let snapshot_dir = treb_dir.join("snapshots").join(network);
+        let snapshot_dir = treb_dir.join("priv/snapshots").join(network);
         fs::create_dir_all(&snapshot_dir).unwrap();
 
         let now = Utc::now();

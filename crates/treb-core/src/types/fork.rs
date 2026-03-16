@@ -132,7 +132,7 @@ mod tests {
             chain_id: 1,
             fork_url: "https://eth.llamarpc.com".into(),
             fork_block_number: Some(19_000_000),
-            snapshot_dir: ".treb/snapshots/mainnet".into(),
+            snapshot_dir: ".treb/priv/snapshots/mainnet".into(),
             started_at: ts,
             env_var_name: "ETH_RPC_URL".into(),
             original_rpc: "https://eth.llamarpc.com".into(),
@@ -304,7 +304,7 @@ mod tests {
       "chainId": 1,
       "forkUrl": "https://eth.llamarpc.com",
       "forkBlockNumber": 19000000,
-      "snapshotDir": ".treb/snapshots/mainnet",
+      "snapshotDir": ".treb/priv/snapshots/mainnet",
       "startedAt": "2026-03-03T12:00:00Z",
       "envVarName": "ETH_RPC_URL",
       "originalRpc": "https://eth.llamarpc.com",
@@ -349,7 +349,7 @@ mod tests {
         assert_eq!(entry.chain_id, 1);
         assert_eq!(entry.fork_url, "https://eth.llamarpc.com");
         assert_eq!(entry.fork_block_number, Some(19_000_000));
-        assert_eq!(entry.snapshot_dir, ".treb/snapshots/mainnet");
+        assert_eq!(entry.snapshot_dir, ".treb/priv/snapshots/mainnet");
         assert_eq!(entry.env_var_name, "ETH_RPC_URL");
         assert_eq!(entry.original_rpc, "https://eth.llamarpc.com");
         assert_eq!(entry.anvil_pid, 12345);

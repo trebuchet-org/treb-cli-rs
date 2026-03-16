@@ -763,8 +763,13 @@ pub async fn run(
         }
     }
 
-    for (i, name) in order.iter().enumerate() {
-        // Skip already-completed components (resume mode).
+    // ── Phase 1: Build ComposePipeline with all non-skipped components ──
+    use treb_forge::pipeline::compose::{ComposePipeline, ComposePhase, broadcast_component};
+
+    let mut compose_pipeline = ComposePipeline::new();
+
+    // Track skipped components in results
+    for name in &order {
         if skip_set.contains(name) {
             component_results.push(ComponentResultEntry {
                 component: name.clone(),
@@ -774,212 +779,302 @@ pub async fn run(
                 gas_used: 0,
                 error: None,
             });
+        }
+    }
+
+    // Resolve config and build pipeline entries for non-skipped components
+    let mut components_to_run: Vec<String> = Vec::new();
+    for name in &order {
+        if skip_set.contains(name) {
             continue;
         }
-
-        // Mark remaining components as not-executed if a previous component failed.
-        if failed_component.is_some() {
-            component_results.push(ComponentResultEntry {
-                component: name.clone(),
-                status: ComponentStatus::NotExecuted,
-                deployments: 0,
-                transactions: 0,
-                gas_used: 0,
-                error: None,
-            });
-            continue;
-        }
-
         let component = &compose.components[name];
-
-        if !json {
-            print_step_start(i + 1, total, name);
-        }
-
         let sig = component.sig.as_deref().unwrap_or("run()");
         let effective_verify = component.verify.unwrap_or(verify);
 
-        let step_result: anyhow::Result<_> = async {
-            // Re-inject global env vars (reset any previous component overrides).
-            super::run::inject_env_vars(&env_vars)?;
-
-            // Inject per-component env vars (override global for same keys).
-            if let Some(env_map) = &component.env {
-                for (key, value) in env_map {
-                    // SAFETY: single-threaded CLI code; no concurrent env access.
-                    unsafe { env::set_var(key, value) };
-                }
+        // Re-inject global env vars (reset any previous component overrides).
+        super::run::inject_env_vars(&env_vars)?;
+        if let Some(env_map) = &component.env {
+            for (key, value) in env_map {
+                unsafe { env::set_var(key, value) };
             }
+        }
 
-            // Config resolution with global flags.
-            let resolved = resolve_config(ResolveOpts {
-                project_root: cwd.clone(),
-                namespace: namespace.clone(),
-                network: network.clone(),
-                profile: profile.clone(),
-                sender_overrides: HashMap::new(),
-            })
-            .with_context(|| format!("failed to resolve config for component '{}'", name))?;
+        let resolved = resolve_config(ResolveOpts {
+            project_root: cwd.clone(),
+            namespace: namespace.clone(),
+            network: network.clone(),
+            profile: profile.clone(),
+            sender_overrides: HashMap::new(),
+        })
+        .with_context(|| format!("failed to resolve config for component '{}'", name))?;
 
-            let mut effective_rpc_url = rpc_url.clone().or_else(|| resolved.network.clone());
-            let effective_network = network.clone().or_else(|| resolved.network.clone());
+        let mut effective_rpc_url = rpc_url.clone().or_else(|| resolved.network.clone());
+        let effective_network = network.clone().or_else(|| resolved.network.clone());
 
-            // Fork detection: swap RPC to Anvil if fork is active.
-            let active_fork = {
-                let net = effective_network.as_deref();
-                let mut store = treb_registry::ForkStateStore::new(&cwd.join(super::run::TREB_DIR));
-                if store.load().is_ok() {
-                    let fork = net.and_then(|n| store.get_active_fork(n).cloned());
-                    if let Some(ref fork_entry) = fork {
-                        effective_rpc_url = Some(fork_entry.rpc_url.clone());
-                        if let Some(ref net) = effective_network {
-                            if let Ok(endpoints) = treb_config::resolve_rpc_endpoints(&cwd) {
-                                if let Some(endpoint) = endpoints.get(net.as_str()) {
-                                    if let Some(var) = super::run::extract_env_var_name(&endpoint.raw_url) {
-                                        unsafe { env::set_var(var, &fork_entry.rpc_url) };
-                                    }
+        // Fork detection
+        let is_fork = {
+            let net = effective_network.as_deref();
+            let mut store = treb_registry::ForkStateStore::new(&cwd.join(super::run::TREB_DIR));
+            if store.load().is_ok() {
+                if let Some(fork_entry) = net.and_then(|n| store.get_active_fork(n).cloned()) {
+                    effective_rpc_url = Some(fork_entry.rpc_url.clone());
+                    if let Some(ref net) = effective_network {
+                        if let Ok(endpoints) = treb_config::resolve_rpc_endpoints(&cwd) {
+                            if let Some(endpoint) = endpoints.get(net.as_str()) {
+                                if let Some(var) = super::run::extract_env_var_name(&endpoint.raw_url) {
+                                    unsafe { env::set_var(var, &fork_entry.rpc_url) };
                                 }
                             }
                         }
                     }
-                    fork
+                    true
                 } else {
-                    None
+                    false
                 }
-            };
-
-            // Sender resolution.
-            let mut resolved_senders = resolve_all_senders(&resolved.senders)
-                .await
-                .with_context(|| format!("failed to resolve senders for component '{}'", name))?;
-
-            // Inject treb context env vars for Solidity consumption.
-            unsafe { env::set_var("NAMESPACE", &resolved.namespace) };
-            if let Some(ref net) = effective_network {
-                unsafe { env::set_var("NETWORK", net) };
+            } else {
+                false
             }
-            let encoded_senders = encode_sender_configs(&resolved_senders, &resolved.senders)
-                .with_context(|| {
-                    format!("failed to encode sender configs for component '{}'", name)
-                })?;
-            unsafe { env::set_var("SENDER_CONFIGS", &encoded_senders) };
+        };
 
-            let args = component.args.clone().unwrap_or_default();
+        // Sender resolution + env var injection
+        let mut resolved_senders = resolve_all_senders(&resolved.senders)
+            .await
+            .with_context(|| format!("failed to resolve senders for component '{}'", name))?;
 
-            // Execute through shared pipeline path.
-            let result = super::run::execute_script(
-                super::run::ExecuteScriptOpts {
-                    script: component.script.clone(),
-                    sig: sig.to_string(),
-                    args,
-                    target_contract: None,
-                    broadcast,
-                    dry_run: false,
-                    verbose,
-                    json,
-                    slow,
-                    legacy,
-                    verify: effective_verify,
-                    non_interactive: true,
-                    effective_rpc_url: effective_rpc_url.clone(),
-                    effective_network: effective_network.clone(),
-                    is_fork: active_fork.is_some(),
-                    broadcast_hook: None,
-                },
-                &resolved,
-                &mut resolved_senders,
-                &cwd,
-                &mut registry,
-            )
-            .await?;
-
-            Ok((result, resolved.namespace, effective_rpc_url))
+        unsafe { env::set_var("NAMESPACE", &resolved.namespace) };
+        if let Some(ref net) = effective_network {
+            unsafe { env::set_var("NETWORK", net) };
         }
-        .await;
+        let encoded_senders = encode_sender_configs(&resolved_senders, &resolved.senders)
+            .with_context(|| format!("failed to encode sender configs for '{}'", name))?;
+        unsafe { env::set_var("SENDER_CONFIGS", &encoded_senders) };
 
-        match step_result {
-            Ok((result, _resolved_namespace, _effective_rpc_url)) => {
+        // Build ScriptConfig
+        let mut script_config =
+            build_script_config_with_senders(&resolved, &component.script, &resolved_senders)
+                .with_context(|| format!("failed to build script config for '{}'", name))?;
+
+        let args = component.args.clone().unwrap_or_default();
+        script_config
+            .sig(sig)
+            .args(args)
+            .broadcast(broadcast)
+            .dry_run(false)
+            .slow(slow || resolved.slow)
+            .legacy(legacy)
+            .verify(effective_verify)
+            .non_interactive(true);
+
+        if let Some(ref url) = effective_rpc_url {
+            script_config.rpc_url(url);
+        }
+
+        // Resolve chain ID
+        let chain_id = if let Some(ref url) = effective_rpc_url {
+            let actual = super::run::resolve_rpc_url_for_chain_id(url, &cwd);
+            if let Some(u) = actual { super::run::fetch_chain_id(&u).await.unwrap_or(0) } else { 0 }
+        } else {
+            0
+        };
+
+        // Build sender labels
+        let sender_role_names: Vec<String> = resolved_senders.keys().cloned().collect();
+        let sender_labels = resolved_senders
+            .iter()
+            .map(|(role, sender)| (sender.sender_address(), role.clone()))
+            .collect();
+        let pipeline_config = treb_forge::pipeline::PipelineConfig {
+            script_path: component.script.clone(),
+            broadcast,
+            namespace: resolved.namespace.clone(),
+            chain_id,
+            script_sig: sig.to_string(),
+            script_args: Vec::new(),
+            verbosity: verbose,
+            is_fork,
+            ..Default::default()
+        };
+
+        let pipeline_context = treb_forge::pipeline::PipelineContext {
+            config: pipeline_config,
+            script_path: PathBuf::from(&component.script),
+            git_commit: treb_forge::pipeline::resolve_git_commit(),
+            project_root: cwd.clone(),
+            resolved_senders,
+            sender_labels,
+            sender_role_names,
+        };
+
+        compose_pipeline.add_script(name.clone(), pipeline_context, script_config);
+        components_to_run.push(name.clone());
+    }
+
+    // ── Phase 2: Simulate all with shared EVM ───────────────────────
+    // Set up progress spinner
+    let spinner: std::sync::Arc<std::sync::Mutex<Option<spinoff::Spinner>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+    if !json {
+        let spinner_ref = spinner.clone();
+        compose_pipeline = compose_pipeline.with_progress(Box::new(move |phase| {
+            let mut guard = spinner_ref.lock().unwrap();
+            if let Some(mut s) = guard.take() {
+                s.clear();
+            }
+            let msg = match phase {
+                ComposePhase::Compiling => Some("Compiling".to_string()),
+                ComposePhase::Executing(ref name) => Some(format!("Executing {name}")),
+                ComposePhase::Broadcasting(ref name) => Some(format!("Broadcasting {name}")),
+                _ => None,
+            };
+            if let Some(msg) = msg {
+                *guard = Some(spinoff::Spinner::new(
+                    spinoff::spinners::Dots2,
+                    msg,
+                    spinoff::Color::Cyan,
+                ));
+            }
+        }));
+    }
+
+    let sim_result = {
+        let _foundry_shell = super::run::FoundryShellGuard::suppress();
+        let r = compose_pipeline.simulate_all(&mut registry).await;
+        // Clear spinner
+        drop(spinner.lock().unwrap().take());
+        eprint!("\x1b[2K\r");
+        r
+    };
+
+    let mut simulations = match sim_result {
+        Ok(sims) => sims,
+        Err((partial_sims, failed_name, err)) => {
+            // Record successful simulations
+            for sim in &partial_sims {
                 completed += 1;
-                if !json {
-                    eprintln!(
-                        "{}",
-                        styled(
-                            &format!("{} Step completed successfully", emoji::CHECK_MARK),
-                            color::GREEN,
-                        ),
-                    );
-                    if !result.deployments.is_empty() {
-                        eprintln!("  Created {} deployment(s)", result.deployments.len());
-                    }
-                }
-
-                // Verbose post-execution summary per component.
-                if verbose > 0 && !json {
-                    let dep_str = format!("{} deployment(s)", result.deployments.len());
-                    let tx_str = format!("{} transaction(s)", result.transactions.len());
-                    let gas_str = format!("{} gas", output::format_gas(result.gas_used));
-                    let summary_pairs: Vec<(&str, &str)> = vec![
-                        ("Deployments", &dep_str),
-                        ("Transactions", &tx_str),
-                        ("Gas", &gas_str),
-                    ];
-                    output::eprint_kv(&summary_pairs);
-                    eprintln!();
-                }
-
                 component_results.push(ComponentResultEntry {
-                    component: name.clone(),
+                    component: sim.name.clone(),
                     status: ComponentStatus::Success,
-                    deployments: result.deployments.len(),
-                    transactions: result.transactions.len(),
-                    gas_used: result.gas_used,
+                    deployments: sim.result.deployments.len(),
+                    transactions: sim.result.transactions.len(),
+                    gas_used: sim.result.gas_used,
                     error: None,
                 });
-
-                // Update state file after each successful component.
-                state.completed.push(name.clone());
-                state.deployment_total += result.deployments.len();
-                save_compose_state(&state)?;
+                state.completed.push(sim.name.clone());
+                state.deployment_total += sim.result.deployments.len();
             }
-            Err(e) => {
-                // Show full trace in the step output, but extract a concise
-                // revert reason for the orchestration summary.
-                let full = format!("{:#}", e);
-                if !json {
-                    eprintln!("{full}");
-                }
-                // Extract just the revert reason: find last Revert line,
-                // strip tree-drawing characters and "[Revert]" prefix.
-                let error_msg = full
-                    .lines()
-                    .rev()
-                    .find(|l| l.contains("[Revert]"))
-                    .map(|l| {
-                        l.trim()
-                            .trim_start_matches(|c: char| "└─├│ ← ".contains(c))
-                            .trim()
-                            .trim_start_matches("[Revert]")
-                            .trim()
-                            .to_string()
-                    })
-                    .unwrap_or_else(|| format!("{e}"));
-                if !json {
-                    eprintln!(
-                        "{}",
-                        styled(&format!("{} Failed: {}", emoji::CROSS, error_msg), color::RED,),
-                    );
-                }
-
+            // Record failed component
+            let full = format!("{:#}", err);
+            if !json {
+                eprintln!("{full}");
+            }
+            let error_msg = full
+                .lines()
+                .rev()
+                .find(|l| l.contains("[Revert]"))
+                .map(|l| {
+                    l.trim()
+                        .trim_start_matches(|c: char| "└─├│ ← ".contains(c))
+                        .trim()
+                        .trim_start_matches("[Revert]")
+                        .trim()
+                        .to_string()
+                })
+                .unwrap_or_else(|| format!("{err}"));
+            if !json {
+                eprintln!("{}", styled(&format!("{} Failed: {}", emoji::CROSS, error_msg), color::RED));
+            }
+            component_results.push(ComponentResultEntry {
+                component: failed_name.clone(),
+                status: ComponentStatus::Failed,
+                deployments: 0,
+                transactions: 0,
+                gas_used: 0,
+                error: Some(error_msg),
+            });
+            failed_component = Some(failed_name.clone());
+            // Mark remaining as not-executed
+            let failed_idx = components_to_run.iter().position(|n| n == &failed_name).unwrap_or(0);
+            for name in components_to_run.iter().skip(failed_idx + 1) {
                 component_results.push(ComponentResultEntry {
                     component: name.clone(),
-                    status: ComponentStatus::Failed,
+                    status: ComponentStatus::NotExecuted,
                     deployments: 0,
                     transactions: 0,
                     gas_used: 0,
-                    error: Some(error_msg),
+                    error: None,
                 });
+            }
+            Vec::new() // No simulations to process further
+        }
+    };
 
-                failed_component = Some(name.clone());
+    // ── Phase 3: Display combined summary ───────────────────────────
+    if !simulations.is_empty() && !json {
+        let total_txs: usize = simulations.iter().map(|s| s.result.transactions.len()).sum();
+        let total_deps: usize = simulations.iter().map(|s| s.result.deployments.len()).sum();
+        eprintln!(
+            "\n{} Simulation complete: {} transaction(s), {} deployment(s) across {} component(s)",
+            emoji::CHECK_MARK, total_txs, total_deps, simulations.len()
+        );
+        for sim in &simulations {
+            let tx_count = sim.result.transactions.len();
+            let dep_count = sim.result.deployments.len();
+            if tx_count > 0 || dep_count > 0 {
+                eprintln!("  {} — {} tx, {} deploy", sim.name, tx_count, dep_count);
+            }
+        }
+        eprintln!();
+    }
+
+    // Record all successful simulations
+    if !simulations.is_empty() {
+        for sim in &simulations {
+            completed += 1;
+            component_results.push(ComponentResultEntry {
+                component: sim.name.clone(),
+                status: ComponentStatus::Success,
+                deployments: sim.result.deployments.len(),
+                transactions: sim.result.transactions.len(),
+                gas_used: sim.result.gas_used,
+                error: None,
+            });
+            state.completed.push(sim.name.clone());
+            state.deployment_total += sim.result.deployments.len();
+        }
+        save_compose_state(&state)?;
+
+        // ── Phase 4: Broadcast (if requested) ───────────────────────
+        if broadcast && !simulations.is_empty() {
+            if !json {
+                eprintln!("{}", styled("Broadcasting...", color::CYAN));
+            }
+            for sim in &mut simulations {
+                if sim.executed_state.is_none() {
+                    continue;
+                }
+                if !json {
+                    eprint!("  → {} ", sim.name);
+                }
+                match broadcast_component(sim).await {
+                    Ok(receipts) => {
+                        if !json {
+                            eprintln!(
+                                "{}  ({} tx)",
+                                styled(&emoji::CHECK_MARK.to_string(), color::GREEN),
+                                receipts.len()
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        let error_msg = format!("{e}");
+                        if !json {
+                            eprintln!("{}", styled(&format!("{} {}", emoji::CROSS, error_msg), color::RED));
+                        }
+                        failed_component = Some(sim.name.clone());
+                        break;
+                    }
+                }
             }
         }
     }

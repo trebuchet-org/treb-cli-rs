@@ -74,11 +74,11 @@ pub struct PipelineContext {
     pub git_commit: String,
     /// The project root directory.
     pub project_root: PathBuf,
-    /// The resolved deployer sender, used to detect Safe/Governor flows.
-    pub deployer_sender: Option<ResolvedSender>,
+    /// All resolved senders keyed by role name.
+    pub resolved_senders: HashMap<String, ResolvedSender>,
     /// Sender address → role name mapping for trace labeling.
     pub sender_labels: HashMap<Address, String>,
-    /// All sender role names (for senderId-based resolution).
+    /// All sender role names (for transaction sender resolution).
     pub sender_role_names: Vec<String>,
 }
 

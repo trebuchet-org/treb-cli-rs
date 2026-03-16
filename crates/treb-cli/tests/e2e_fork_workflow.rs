@@ -182,7 +182,7 @@ async fn e2e_fork_enter_deploy_diff_revert_exit() {
         history.iter().any(|h| h["action"].as_str() == Some("exit")),
         "history must contain 'exit' action"
     );
-    let snapshot_dir = tmp.path().join(".treb").join("snapshots").join("anvil-31337");
+    let snapshot_dir = tmp.path().join(".treb").join("priv/snapshots").join("anvil-31337");
     assert!(!snapshot_dir.exists(), "snapshot directory must be removed after exit");
     assert_deployment_count(tmp.path().to_path_buf(), 0).await;
 

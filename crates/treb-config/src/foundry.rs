@@ -154,6 +154,52 @@ pub fn resolve_rpc_endpoints(project_root: &Path) -> Result<HashMap<String, Reso
     Ok(endpoints)
 }
 
+/// Guard that restores an env var to its previous value on drop.
+///
+/// Used by [`override_rpc_endpoint`] to support nested overrides (e.g.,
+/// fork mode overrides the RPC, then compose overrides it again — dropping
+/// the compose guard restores the fork mode URL).
+pub struct RpcOverrideGuard {
+    var_name: String,
+    previous_value: Option<String>,
+}
+
+impl Drop for RpcOverrideGuard {
+    fn drop(&mut self) {
+        // SAFETY: single-threaded CLI code
+        unsafe {
+            match &self.previous_value {
+                Some(prev) => std::env::set_var(&self.var_name, prev),
+                None => std::env::remove_var(&self.var_name),
+            }
+        }
+    }
+}
+
+/// Override the RPC endpoint for a network name by setting the backing env var.
+///
+/// Resolves `network_name` through foundry.toml `[rpc_endpoints]` to find the
+/// `${ENV_VAR}` template, then sets that env var to `new_url`. Returns a guard
+/// that restores the previous value on drop, enabling nested overrides.
+///
+/// # Safety
+/// Mutates process environment — caller must ensure single-threaded access.
+pub unsafe fn override_rpc_endpoint(
+    project_root: &Path,
+    network_name: &str,
+    new_url: &str,
+) -> Option<RpcOverrideGuard> {
+    let endpoints = resolve_rpc_endpoints(project_root).ok()?;
+    let ep = endpoints.get(network_name)?;
+    let var = ep.raw_url.strip_prefix("${")?.strip_suffix('}')?;
+    if var.is_empty() {
+        return None;
+    }
+    let previous_value = std::env::var(var).ok();
+    std::env::set_var(var, new_url);
+    Some(RpcOverrideGuard { var_name: var.to_string(), previous_value })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

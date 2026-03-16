@@ -15,8 +15,9 @@ pub use duplicates::{
     resolve_duplicates,
 };
 pub use hydration::{
-    generate_deployment_id, hydrate_deployment, hydrate_governor_proposals,
-    hydrate_safe_transactions, hydrate_transactions, populate_safe_context,
+    V2TransactionMetadata, build_v2_transaction_metadata, generate_deployment_id,
+    hydrate_deployment, hydrate_governor_proposals, hydrate_safe_transactions,
+    hydrate_transactions, hydrate_transactions_from_broadcast, populate_safe_context,
 };
 pub use orchestrator::{BroadcastHook, BroadcastPhase, BroadcastProgressCallback, RunPipeline};
 pub use types::{

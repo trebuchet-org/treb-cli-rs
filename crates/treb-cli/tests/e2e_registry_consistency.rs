@@ -276,7 +276,7 @@ async fn e2e_registry_consistency_after_fork_cycle() {
     );
 
     // Snapshot directory must be cleaned up
-    let snapshot_dir = tmp.path().join(".treb").join("snapshots").join("anvil-31337");
+    let snapshot_dir = tmp.path().join(".treb").join("priv/snapshots").join("anvil-31337");
     assert!(!snapshot_dir.exists(), "snapshot directory must be removed after exit");
 
     // Verify the fork-time tag is gone (state was restored)

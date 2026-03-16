@@ -20,7 +20,7 @@ use framework::{
 /// Build a ForkEntry with fixed, deterministic values for golden file stability.
 fn sample_fork_entry(treb_dir: &std::path::Path) -> ForkEntry {
     let ts = Utc.with_ymd_and_hms(2026, 1, 15, 10, 30, 0).unwrap();
-    let snapshot_dir = treb_dir.join("snapshots").join("mainnet");
+    let snapshot_dir = treb_dir.join("priv/snapshots").join("mainnet");
     ForkEntry {
         network: "mainnet".to_string(),
         instance_name: None,
@@ -256,7 +256,7 @@ fn fork_history_not_initialized() {
 /// (no changes between current and snapshot).
 fn seed_fork_diff_no_changes(project_root: &std::path::Path) {
     let treb_dir = project_root.join(".treb");
-    let snapshot_dir = treb_dir.join("snapshots").join("mainnet");
+    let snapshot_dir = treb_dir.join("priv/snapshots").join("mainnet");
     std::fs::create_dir_all(&snapshot_dir).unwrap();
 
     // Write identical registry files to both locations
@@ -277,7 +277,7 @@ fn seed_fork_diff_no_changes(project_root: &std::path::Path) {
 /// (added, removed, and modified entries).
 fn seed_fork_diff_with_changes(project_root: &std::path::Path) {
     let treb_dir = project_root.join(".treb");
-    let snapshot_dir = treb_dir.join("snapshots").join("mainnet");
+    let snapshot_dir = treb_dir.join("priv/snapshots").join("mainnet");
     std::fs::create_dir_all(&snapshot_dir).unwrap();
 
     // Snapshot: original state
