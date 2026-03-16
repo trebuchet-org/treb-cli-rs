@@ -1009,21 +1009,79 @@ pub async fn run(
         }
     };
 
-    // ── Phase 3: Display combined summary ───────────────────────────
+    // ── Phase 3: Display combined simulation results ────────────────
     if !simulations.is_empty() && !json {
         let total_txs: usize = simulations.iter().map(|s| s.result.transactions.len()).sum();
         let total_deps: usize = simulations.iter().map(|s| s.result.deployments.len()).sum();
+
+        if total_txs > 0 {
+            // Show all transactions in order with script separator lines
+            let use_color = crate::ui::color::is_color_enabled();
+            let header = format!(
+                "\n{} transaction{} across {} component{}:",
+                total_txs,
+                if total_txs == 1 { "" } else { "s" },
+                simulations.len(),
+                if simulations.len() == 1 { "" } else { "s" },
+            );
+            if use_color {
+                eprintln!("{}", header.style(crate::ui::color::BOLD));
+            } else {
+                eprintln!("{header}");
+            }
+
+            let mut global_idx = 0usize;
+            for sim in &simulations {
+                if sim.result.transactions.is_empty() {
+                    continue;
+                }
+                // Thin separator with script name
+                if use_color {
+                    eprintln!(
+                        "\n  {} {}",
+                        "──".style(crate::ui::color::GRAY),
+                        sim.name.style(crate::ui::color::CYAN),
+                    );
+                } else {
+                    eprintln!("\n  ── {}", sim.name);
+                }
+
+                for rt in &sim.result.transactions {
+                    let sender_label = super::run::tx_sender_label(rt);
+                    if use_color {
+                        eprintln!(
+                            "  {} {}",
+                            format!("{global_idx}:").style(crate::ui::color::GRAY),
+                            format!("from={sender_label}").style(crate::ui::color::CYAN),
+                        );
+                    } else {
+                        eprintln!("  {global_idx}: from={sender_label}");
+                    }
+
+                    // Show operations as fallback (compose doesn't have per-tx traces)
+                    for op in &rt.transaction.operations {
+                        let target = crate::output::truncate_address(&op.target);
+                        let line = if op.method.is_empty() || op.method.starts_with("0x") {
+                            format!("      {} {}", op.operation_type, target)
+                        } else {
+                            format!("      {} {}.{}()", op.operation_type, target, op.method)
+                        };
+                        if use_color {
+                            eprintln!("{}", line.style(crate::ui::color::MUTED));
+                        } else {
+                            eprintln!("{line}");
+                        }
+                    }
+                    global_idx += 1;
+                }
+            }
+            eprintln!();
+        }
+
         eprintln!(
-            "\n{} Simulation complete: {} transaction(s), {} deployment(s) across {} component(s)",
+            "{} Simulation complete: {} transaction(s), {} deployment(s) across {} component(s)",
             emoji::CHECK_MARK, total_txs, total_deps, simulations.len()
         );
-        for sim in &simulations {
-            let tx_count = sim.result.transactions.len();
-            let dep_count = sim.result.deployments.len();
-            if tx_count > 0 || dep_count > 0 {
-                eprintln!("  {} — {} tx, {} deploy", sim.name, tx_count, dep_count);
-            }
-        }
         eprintln!();
     }
 

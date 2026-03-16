@@ -744,7 +744,7 @@ pub async fn run(
     let broadcast_hook = if wants_broadcast && prompts_enabled && !json {
         let previewed = broadcast_previewed.clone();
         let hook: BroadcastHook = Box::new(move |transactions: &[RecordedTransaction]| {
-            display_transactions_grouped(transactions, 0);
+            display_transactions_ordered(transactions, 0);
             let confirmed = crate::ui::prompt::confirm("Broadcast these transactions?", false);
             if confirmed {
                 previewed.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -997,28 +997,16 @@ fn collision_metadata_lines(collision: &treb_forge::events::ExtractedCollision) 
 /// Display transactions grouped by sender, with traces and optional footers.
 ///
 /// Used for both the broadcast preview and the post-execution results.
-fn display_transactions_grouped(transactions: &[RecordedTransaction], verbose: u8) {
+/// Display transactions in script execution order (not grouped by sender).
+///
+/// Each transaction is numbered and shows its sender, with optional trace
+/// and footer. Used by both `treb run` and `treb compose`.
+pub(crate) fn display_transactions_ordered(transactions: &[RecordedTransaction], verbose: u8) {
     if transactions.is_empty() {
         return;
     }
 
     let use_color = color::is_color_enabled();
-
-    // Group transactions by sender name
-    let mut by_sender: Vec<(&str, Vec<&RecordedTransaction>)> = Vec::new();
-    for rt in transactions {
-        let sender = rt
-            .sender_name
-            .as_deref()
-            .filter(|s| !s.is_empty())
-            .unwrap_or(&rt.transaction.sender);
-
-        if let Some(entry) = by_sender.iter_mut().find(|(s, _)| *s == sender) {
-            entry.1.push(rt);
-        } else {
-            by_sender.push((sender, vec![rt]));
-        }
-    }
 
     let header = format!(
         "\n{} transaction{}:",
@@ -1031,52 +1019,48 @@ fn display_transactions_grouped(transactions: &[RecordedTransaction], verbose: u
         println!("{header}");
     }
 
-    for (sender, txs) in &by_sender {
-        // Sender header
+    for (i, rt) in transactions.iter().enumerate() {
+        let sender_label = tx_sender_label(rt);
+
+        // Transaction header: index + sender
         if use_color {
             println!(
                 "\n  {} {}",
-                sender.style(color::CYAN),
-                format!("({} tx)", txs.len()).style(color::GRAY),
+                format!("{i}:").style(color::GRAY),
+                format!("from={sender_label}").style(color::CYAN),
             );
         } else {
-            println!("\n  {} ({} tx)", sender, txs.len());
+            println!("\n  {i}: from={sender_label}");
         }
 
-        // Each transaction: trace or operation summary + footer
-        for (i, rt) in txs.iter().enumerate() {
-            if i > 0 {
-                println!();
-            }
-            // Per-transaction decoded trace sub-tree
-            if verbose == 0 {
-                if let Some(ref trace) = rt.trace {
-                    for line in trace.lines() {
-                        println!("  {line}");
-                    }
-                } else {
-                    // Fallback: show operations when no trace is available
-                    for op in &rt.transaction.operations {
-                        let target = output::truncate_address(&op.target);
-                        let line = if op.method.is_empty() || op.method.starts_with("0x") {
-                            format!("    {} {}", op.operation_type, target)
-                        } else {
-                            format!("    {} {}.{}()", op.operation_type, target, op.method)
-                        };
-                        if use_color {
-                            println!("{}", line.style(color::MUTED));
-                        } else {
-                            println!("{line}");
-                        }
+        // Per-transaction decoded trace sub-tree
+        if verbose == 0 {
+            if let Some(ref trace) = rt.trace {
+                for line in trace.lines() {
+                    println!("    {line}");
+                }
+            } else {
+                // Fallback: show operations when no trace is available
+                for op in &rt.transaction.operations {
+                    let target = output::truncate_address(&op.target);
+                    let line = if op.method.is_empty() || op.method.starts_with("0x") {
+                        format!("      {} {}", op.operation_type, target)
+                    } else {
+                        format!("      {} {}.{}()", op.operation_type, target, op.method)
+                    };
+                    if use_color {
+                        println!("{}", line.style(color::MUTED));
+                    } else {
+                        println!("{line}");
                     }
                 }
             }
+        }
 
-            // Footer: hash, block, gas (only shown when populated)
-            let footer = format_tx_footer(rt);
-            if !footer.is_empty() {
-                println!("  {footer}");
-            }
+        // Footer: hash, block, gas
+        let footer = format_tx_footer(rt);
+        if !footer.is_empty() {
+            println!("    {footer}");
         }
     }
     println!();
@@ -1175,7 +1159,7 @@ fn format_tx_footer(tx: &treb_forge::pipeline::RecordedTransaction) -> String {
     }
 }
 
-fn tx_sender_label(tx: &treb_forge::pipeline::RecordedTransaction) -> &str {
+pub(crate) fn tx_sender_label(tx: &treb_forge::pipeline::RecordedTransaction) -> &str {
     tx.sender_name.as_deref().filter(|name| !name.is_empty()).unwrap_or(&tx.transaction.sender)
 }
 
@@ -1202,7 +1186,7 @@ fn display_result_human(result: &PipelineResult, verbose: u8, network: Option<&s
             // Preview already shown — just display the broadcast receipts
             display_broadcast_receipts(&result.transactions);
         } else {
-            display_transactions_grouped(&result.transactions, verbose);
+            display_transactions_ordered(&result.transactions, verbose);
         }
     }
     println!();
