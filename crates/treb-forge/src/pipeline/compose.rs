@@ -350,26 +350,26 @@ impl ComposePipeline {
             })
             .collect::<Vec<_>>();
 
-        let tx_events = extract_transaction_simulated(&parsed_events);
+        // Hydrate transactions from BroadcastableTransactions (v2) or
+        // TransactionSimulated events (v1 fallback).
+        let broadcastable_txs = execution.transactions.as_ref();
+        let transactions = if let Some(btxs) = broadcastable_txs {
+            super::hydration::hydrate_transactions_from_broadcast(btxs, &hydrated_deployments, context)
+        } else {
+            let tx_events = extract_transaction_simulated(&parsed_events);
+            hydrate_transactions(&tx_events, &hydrated_deployments, context)
+        };
+
+        let v2_metadata = if let Some(btxs) = broadcastable_txs {
+            super::hydration::build_v2_transaction_metadata(btxs, context)
+        } else {
+            HashMap::new()
+        };
+
         let safe_tx_events = extract_safe_transaction_queued(&parsed_events);
         let governor_events = extract_governor_proposal_created(&parsed_events);
-
-        let transactions = hydrate_transactions(&tx_events, &hydrated_deployments, context);
         let safe_transactions = hydrate_safe_transactions(&safe_tx_events, context);
         let governor_proposals = hydrate_governor_proposals(&governor_events, context);
-
-        let sender_id_labels: HashMap<B256, String> = context
-            .sender_role_names
-            .iter()
-            .map(|role| (alloy_primitives::keccak256(role.as_bytes()), role.clone()))
-            .collect();
-
-        let mut transaction_metadata = build_recorded_transaction_metadata(
-            &tx_events,
-            &extracted_deployments,
-            &execution.traces,
-            &sender_id_labels,
-        );
 
         // Build address labels for trace decoding
         let mut labeled_addresses = execution.labeled_addresses.clone();
@@ -396,25 +396,27 @@ impl ComposePipeline {
         }
 
         // Render traces
+        let mut empty_v1_metadata = HashMap::new();
         let (execution_traces, setup_traces) = render_traces_for_verbosity(
             execution.traces,
             &labeled_addresses,
             artifact_index,
             context.config.verbosity,
-            &mut transaction_metadata,
+            &mut empty_v1_metadata,
         )
         .await;
 
         // Build recorded transactions
+        let mut v2_metadata = v2_metadata;
         let recorded_transactions: Vec<RecordedTransaction> = transactions
             .into_iter()
             .map(|tx| {
-                let metadata = transaction_metadata.remove(&tx.id).unwrap_or_default();
+                let metadata = v2_metadata.remove(&tx.id);
                 RecordedTransaction {
                     transaction: tx,
-                    sender_name: metadata.sender_name,
-                    gas_used: metadata.gas_used,
-                    trace: metadata.trace,
+                    sender_name: metadata.as_ref().and_then(|m| m.sender_name.clone()),
+                    gas_used: metadata.as_ref().and_then(|m| m.gas_used),
+                    trace: None,
                 }
             })
             .collect();

@@ -1078,8 +1078,34 @@ pub async fn run(
             eprintln!();
         }
 
+        // Show collisions if any
+        let total_collisions: usize = simulations.iter().map(|s| s.result.collisions.len()).sum();
+        if total_collisions > 0 {
+            let use_color = crate::ui::color::is_color_enabled();
+            eprintln!();
+            for sim in &simulations {
+                for c in &sim.result.collisions {
+                    let line = format!(
+                        "  {} {} at {}",
+                        emoji::WARNING,
+                        c.contract_name,
+                        c.existing_address,
+                    );
+                    if use_color {
+                        eprintln!("{}", line.style(crate::ui::color::YELLOW));
+                    } else {
+                        eprintln!("{line}");
+                    }
+                }
+            }
+            eprintln!(
+                "  {} collision(s) — contract(s) already deployed at predicted address",
+                total_collisions,
+            );
+        }
+
         eprintln!(
-            "{} Simulation complete: {} transaction(s), {} deployment(s) across {} component(s)",
+            "\n{} Simulation complete: {} transaction(s), {} deployment(s) across {} component(s)",
             emoji::CHECK_MARK, total_txs, total_deps, simulations.len()
         );
         eprintln!();
