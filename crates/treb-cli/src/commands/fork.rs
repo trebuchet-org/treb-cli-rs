@@ -227,115 +227,173 @@ pub async fn run_enter(
     std::fs::create_dir_all(&priv_dir).context("failed to create priv directory")?;
 
     let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
-    let mut started = Vec::new();
-    let mut errors = Vec::new();
 
+    // Resolve fork URLs synchronously (needs filesystem access for foundry.toml)
+    let mut fork_configs: Vec<(String, String)> = Vec::new();
+    let mut errors: Vec<(String, String)> = Vec::new();
     for (i, network_name) in networks.iter().enumerate() {
-        // Resolve RPC URL
-        let fork_url = if i == 0 {
-            resolve_fork_url(&cwd, network_name, rpc_url_override.clone())?
-        } else {
-            resolve_fork_url(&cwd, network_name, None)?
-        };
-
-        // Fetch chain ID
-        let chain_id = match fetch_chain_id(&fork_url).await {
-            Ok(id) => id,
-            Err(e) => {
-                errors.push((network_name.clone(), format!("failed to fetch chain ID: {e}")));
-                continue;
-            }
-        };
-
-        // Deterministic port with fallback
-        let det_port = deterministic_fork_port(chain_id);
-        let port = if is_port_available(det_port) {
-            det_port
-        } else {
-            match find_available_port() {
-                Ok(p) => p,
-                Err(e) => {
-                    errors.push((network_name.clone(), format!("no available port: {e}")));
-                    continue;
-                }
-            }
-        };
-
-        let pid_file = priv_dir.join(format!("fork-{network_name}.pid"));
-        let log_file = priv_dir.join(format!("fork-{network_name}.log"));
-
-        // Spawn Anvil
-        let anvil_config = BackgroundAnvilConfig {
-            port,
-            chain_id: Some(chain_id),
-            fork_url: Some(fork_url.clone()),
-            fork_block_number,
-            pid_file: pid_file.clone(),
-            log_file: log_file.clone(),
-        };
-
-        let bg_anvil = match treb_forge::anvil::spawn_background_anvil(&anvil_config) {
-            Ok(a) => a,
-            Err(e) => {
-                errors.push((network_name.clone(), format!("failed to spawn anvil: {e}")));
-                continue;
-            }
-        };
-
-        let rpc_url = bg_anvil.rpc_url.clone();
-        let anvil_pid = bg_anvil.pid as i32;
-
-        // Poll until healthy
-        let is_forked = anvil_config.fork_url.is_some();
-        if let Err(e) = poll_anvil_health(&rpc_url, is_forked) {
-            let _ = stop_background_anvil(&pid_file);
-            errors.push((network_name.clone(), format!("anvil not ready: {e}")));
-            continue;
+        let rpc_override = if i == 0 { rpc_url_override.clone() } else { None };
+        match resolve_fork_url(&cwd, network_name, rpc_override) {
+            Ok(url) => fork_configs.push((network_name.clone(), url)),
+            Err(e) => errors.push((network_name.clone(), format!("{e}"))),
         }
+    }
 
-        // Deploy CreateX
-        if let Err(e) = deploy_createx_http(&client, &rpc_url).await {
-            eprintln!("Warning: failed to deploy CreateX on {network_name}: {e}");
+    // Fetch chain IDs in parallel
+    let mut chain_id_set = tokio::task::JoinSet::new();
+    for (name, url) in fork_configs {
+        chain_id_set.spawn(async move {
+            match fetch_chain_id(&url).await {
+                Ok(id) => Ok((name, url, id)),
+                Err(e) => Err((name, format!("failed to fetch chain ID: {e}"))),
+            }
+        });
+    }
+    let mut chain_id_results = Vec::new();
+    while let Some(result) = chain_id_set.join_next().await {
+        match result {
+            Ok(r) => chain_id_results.push(r),
+            Err(e) => errors.push(("unknown".into(), format!("task panicked: {e}"))),
         }
+    }
 
-        // Take initial EVM snapshot
-        let snapshot_id = match evm_snapshot_http(&client, &rpc_url).await {
-            Ok(id) => id,
-            Err(e) => {
+    // Allocate ports sequentially (deterministic port per chain, fallback needs exclusion)
+    struct ForkSetup {
+        network: String,
+        fork_url: String,
+        chain_id: u64,
+        port: u16,
+        pid_file: PathBuf,
+        log_file: PathBuf,
+    }
+    let mut setups: Vec<ForkSetup> = Vec::new();
+    for result in chain_id_results {
+        match result {
+            Ok((name, url, chain_id)) => {
+                let det_port = deterministic_fork_port(chain_id);
+                let port = if is_port_available(det_port) {
+                    det_port
+                } else {
+                    match find_available_port() {
+                        Ok(p) => p,
+                        Err(e) => {
+                            errors.push((name, format!("no available port: {e}")));
+                            continue;
+                        }
+                    }
+                };
+                let pid_file = priv_dir.join(format!("fork-{name}.pid"));
+                let log_file = priv_dir.join(format!("fork-{name}.log"));
+                setups.push(ForkSetup {
+                    network: name,
+                    fork_url: url,
+                    chain_id,
+                    port,
+                    pid_file,
+                    log_file,
+                });
+            }
+            Err((name, msg)) => errors.push((name, msg)),
+        }
+    }
+
+    // Spawn all Anvil nodes and run post-spawn setup in parallel
+    let mut spawn_set = tokio::task::JoinSet::new();
+    for setup in setups {
+        let client = client.clone();
+        spawn_set.spawn(async move {
+            // Spawn Anvil (sync — runs quickly)
+            let anvil_config = BackgroundAnvilConfig {
+                port: setup.port,
+                chain_id: Some(setup.chain_id),
+                fork_url: Some(setup.fork_url.clone()),
+                fork_block_number,
+                pid_file: setup.pid_file.clone(),
+                log_file: setup.log_file.clone(),
+            };
+
+            let bg_anvil = treb_forge::anvil::spawn_background_anvil(&anvil_config)
+                .map_err(|e| (setup.network.clone(), format!("failed to spawn anvil: {e}")))?;
+
+            let rpc_url = bg_anvil.rpc_url.clone();
+            let pid_file = setup.pid_file.clone();
+
+            // Poll until healthy (blocking — run in spawn_blocking)
+            let health_url = rpc_url.clone();
+            let health_pid = pid_file.clone();
+            let is_forked = anvil_config.fork_url.is_some();
+            let health_result = tokio::task::spawn_blocking(move || {
+                poll_anvil_health(&health_url, is_forked)
+            })
+            .await
+            .map_err(|e| {
+                let _ = stop_background_anvil(&health_pid);
+                (setup.network.clone(), format!("health poll task failed: {e}"))
+            })?;
+
+            if let Err(e) = health_result {
                 let _ = stop_background_anvil(&pid_file);
-                errors.push((network_name.clone(), format!("failed to take EVM snapshot: {e}")));
-                continue;
+                return Err((setup.network.clone(), format!("anvil not ready: {e}")));
             }
-        };
 
-        // Build and insert fork entry
-        let now = Utc::now();
-        let entry = ForkEntry {
-            network: network_name.clone(),
-            instance_name: None,
-            rpc_url: rpc_url.clone(),
-            port,
-            chain_id,
-            fork_url: fork_url.clone(),
-            fork_block_number,
-            snapshot_dir: snapshot_dir.to_string_lossy().into_owned(),
-            started_at: now,
-            env_var_name: format!("ETH_RPC_URL_{}", network_name.to_uppercase()),
-            original_rpc: fork_url,
-            anvil_pid,
-            pid_file: pid_file.to_string_lossy().into_owned(),
-            log_file: log_file.to_string_lossy().into_owned(),
-            entered_at: now,
-            snapshots: vec![SnapshotEntry {
-                index: 0,
-                snapshot_id,
-                command: "fork enter".into(),
-                timestamp: now,
-            }],
-        };
-        store.insert_active_fork(entry).context("failed to record fork entry")?;
+            // Deploy CreateX
+            if let Err(e) = deploy_createx_http(&client, &rpc_url).await {
+                eprintln!("Warning: failed to deploy CreateX on {}: {e}", setup.network);
+            }
 
-        started.push((network_name.clone(), chain_id, port, rpc_url, anvil_pid));
+            // Take initial EVM snapshot
+            let snapshot_id = evm_snapshot_http(&client, &rpc_url).await.map_err(|e| {
+                let _ = stop_background_anvil(&pid_file);
+                (setup.network.clone(), format!("failed to take EVM snapshot: {e}"))
+            })?;
+
+            Ok((setup, bg_anvil, rpc_url, snapshot_id))
+        });
+    }
+
+    let mut spawn_results = Vec::new();
+    while let Some(result) = spawn_set.join_next().await {
+        match result {
+            Ok(r) => spawn_results.push(r),
+            Err(e) => errors.push(("unknown".into(), format!("task panicked: {e}"))),
+        }
+    }
+
+    // Write results to store sequentially
+    let mut started = Vec::new();
+    for result in spawn_results {
+        match result {
+            Ok((setup, bg_anvil, rpc_url, snapshot_id)) => {
+                let now = Utc::now();
+                let anvil_pid = bg_anvil.pid as i32;
+                let entry = ForkEntry {
+                    network: setup.network.clone(),
+                    instance_name: None,
+                    rpc_url: rpc_url.clone(),
+                    port: setup.port,
+                    chain_id: setup.chain_id,
+                    fork_url: setup.fork_url.clone(),
+                    fork_block_number,
+                    snapshot_dir: snapshot_dir.to_string_lossy().into_owned(),
+                    started_at: now,
+                    env_var_name: format!("ETH_RPC_URL_{}", setup.network.to_uppercase()),
+                    original_rpc: setup.fork_url,
+                    anvil_pid,
+                    pid_file: setup.pid_file.to_string_lossy().into_owned(),
+                    log_file: setup.log_file.to_string_lossy().into_owned(),
+                    entered_at: now,
+                    snapshots: vec![SnapshotEntry {
+                        index: 0,
+                        snapshot_id,
+                        command: "fork enter".into(),
+                        timestamp: now,
+                    }],
+                };
+                store.insert_active_fork(entry).context("failed to record fork entry")?;
+                started.push((setup.network, setup.chain_id, setup.port, rpc_url, anvil_pid));
+            }
+            Err((name, msg)) => errors.push((name, msg)),
+        }
     }
 
     // Record history
