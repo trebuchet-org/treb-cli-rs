@@ -10,6 +10,16 @@ use alloy_primitives::{Address, B256, hex};
 use chrono::Utc;
 
 pub use treb_core::types::ids::generate_deployment_id;
+
+/// Generate a unique transaction ID for a broadcastable transaction.
+///
+/// Incorporates the script path so IDs stay unique when compose runs
+/// multiple scripts through the pipeline sequentially.
+pub fn broadcast_tx_id(script_path: &str, index: usize) -> String {
+    let id_input = format!("{}:{}", script_path, index);
+    let id_hash = alloy_primitives::keccak256(id_input.as_bytes());
+    format!("tx-{:#x}", id_hash)
+}
 use treb_core::types::{
     deployment::{ArtifactInfo, Deployment, DeploymentStrategy, ProxyInfo, VerificationInfo},
     enums::{DeploymentType, ProposalStatus, TransactionStatus, VerificationStatus},
@@ -391,10 +401,7 @@ pub fn hydrate_transactions_from_broadcast(
             });
             let input = btx.transaction.input().cloned().unwrap_or_default();
 
-            // Generate a deterministic transaction ID from the index.
-            // v2 Solidity uses bytes32(uint256(counter)) as transactionId in
-            // ContractDeployed events, so tx-0x{index:064x} correlates by position.
-            let tx_id = format!("tx-0x{:064x}", idx);
+            let tx_id = broadcast_tx_id(&context.config.script_path, idx);
 
             // Find deployments linked to this transaction by index.
             // v2 ContractDeployed events use sequential transactionId = bytes32(uint256(i)).
@@ -480,7 +487,7 @@ pub fn build_v2_transaction_metadata(
         .enumerate()
         .map(|(idx, btx)| {
             let from_addr = btx.transaction.from().unwrap_or_default();
-            let tx_id = format!("tx-0x{:064x}", idx);
+            let tx_id = broadcast_tx_id(&context.config.script_path, idx);
             let sender_name = addr_to_role.get(&from_addr).cloned();
             let gas_used = btx.transaction.gas().map(|g| g as u64);
             (tx_id, V2TransactionMetadata { sender_name, gas_used })

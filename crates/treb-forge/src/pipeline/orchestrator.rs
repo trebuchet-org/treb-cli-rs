@@ -36,7 +36,7 @@ use super::{
     PipelineContext,
     duplicates::{DuplicateStrategy, resolve_duplicates},
     hydration::{
-        build_v2_transaction_metadata, hydrate_deployment, hydrate_governor_proposals,
+        hydrate_deployment, hydrate_governor_proposals,
         hydrate_safe_transactions, hydrate_transactions, hydrate_transactions_from_broadcast,
         populate_safe_context,
     },
@@ -722,7 +722,7 @@ pub(super) fn build_v2_recorded_transaction_metadata(
     btxs.iter()
         .enumerate()
         .map(|(idx, btx)| {
-            let tx_id = format!("tx-0x{:064x}", idx);
+            let tx_id = super::hydration::broadcast_tx_id(&context.config.script_path, idx);
             let from_addr = btx.transaction.from().unwrap_or_default();
             let to_kind = btx.transaction.to();
             let input = btx.transaction.input().cloned().unwrap_or_default();

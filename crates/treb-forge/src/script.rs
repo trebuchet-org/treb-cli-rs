@@ -447,54 +447,16 @@ pub fn build_script_config(
 ///
 /// Extends [`build_script_config`] by wiring resolved senders into the wallet
 /// configuration. For the "deployer" role:
-/// - **Wallet / InMemory** senders: sets both `evm.sender` and injects the private key into
-///   `ScriptArgs.wallets` so forge can sign transactions.
-/// - **Safe / Governor** senders: sets only `evm.sender` to the contract address; actual signing is
-///   deferred to Phase 17.
+/// Build a `ScriptConfig` with all wallet keys injected.
+///
+/// Injects ALL wallet/in-memory private keys (including sub-signers for
+/// Safe/Governor senders) into `ScriptArgs.wallets.private_keys`. This
+/// enables `vm.broadcast(address)` for any configured sender address.
+///
+/// The script is always configured with `broadcast = true` because scripts
+/// use `vm.broadcast()` internally, but the actual broadcast/routing is
+/// handled by the pipeline orchestrator after execution.
 pub fn build_script_config_with_senders(
-    resolved: &ResolvedConfig,
-    script_path: &str,
-    resolved_senders: &HashMap<String, ResolvedSender>,
-) -> treb_core::Result<ScriptConfig> {
-    let mut config = build_script_config(resolved, script_path)?;
-
-    // Look up the deployer in resolved senders
-    let deployer = resolved_senders.get("deployer");
-
-    if let Some(sender) = deployer {
-        // Override the sender address with the resolved sender's address
-        config.sender(sender.sender_address());
-
-        // For Wallet/InMemory senders, inject the private key into wallet opts
-        // so forge's execution pipeline can sign transactions.
-        match sender {
-            ResolvedSender::Wallet(_) | ResolvedSender::InMemory(_) => {
-                // Get the private key hex from the original sender config
-                if let Some(pk) =
-                    resolved.senders.get("deployer").and_then(|sc| sc.private_key.as_deref())
-                {
-                    config.private_key_hex(pk);
-                }
-            }
-            // Safe/Governor: only evm.sender is set (signing deferred to Phase 17)
-            ResolvedSender::Safe { .. } | ResolvedSender::Governor { .. } => {}
-        }
-    }
-
-    Ok(config)
-}
-
-/// Build a `ScriptConfig` for v2 scripts with all wallet keys injected.
-///
-/// Unlike v1 which only injects the deployer's key, v2 injects ALL wallet/in-memory
-/// private keys (including sub-signers for Safe/Governor senders) into
-/// `ScriptArgs.wallets.private_keys`. This enables `vm.broadcast(address)` for any
-/// configured sender address.
-///
-/// The script is always configured with `broadcast = true` because v2 scripts
-/// use `vm.broadcast()` internally, but the actual broadcast/routing is handled
-/// by the v2 pipeline orchestrator after execution.
-pub fn build_script_config_v2(
     resolved: &ResolvedConfig,
     script_path: &str,
     resolved_senders: &HashMap<String, ResolvedSender>,
@@ -608,8 +570,8 @@ mod tests {
 
         // evm.sender should be the derived address
         assert_eq!(args.evm.sender, Some(ANVIL_ADDR_0));
-        // wallet opts should have the private key
-        assert_eq!(args.wallets.private_key, Some(ANVIL_KEY_0.to_string()));
+        // wallet opts should have the private key in the keys list
+        assert!(args.wallets.private_keys.contains(&ANVIL_KEY_0.to_string()));
     }
 
     #[test]
@@ -654,8 +616,8 @@ mod tests {
 
         // evm.sender should be the safe address
         assert_eq!(args.evm.sender, Some(safe_addr.parse::<Address>().unwrap()));
-        // wallet opts should NOT have a private key (signing deferred)
-        assert!(args.wallets.private_key.is_none());
+        // wallet opts should have the sub-signer's private key for vm.broadcast()
+        assert!(args.wallets.private_keys.contains(&ANVIL_KEY_0.to_string()));
     }
 
     #[test]
@@ -740,7 +702,7 @@ mod tests {
             resolved_senders.insert(k, v);
         }
 
-        let config = build_script_config_v2(&resolved_cfg, "script/Deploy.s.sol", &resolved_senders)
+        let config = build_script_config_with_senders(&resolved_cfg, "script/Deploy.s.sol", &resolved_senders)
             .unwrap();
         let args = config.into_script_args().unwrap();
 

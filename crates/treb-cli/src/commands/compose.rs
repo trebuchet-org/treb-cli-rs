@@ -7,7 +7,6 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
     env,
     hash::{DefaultHasher, Hash, Hasher},
-    io::{self, BufRead, Write},
     path::{Path, PathBuf},
 };
 
@@ -16,6 +15,7 @@ use owo_colors::{OwoColorize, Style};
 use serde::{Deserialize, Serialize};
 use treb_config::{ResolveOpts, resolve_config};
 use treb_forge::{
+    pipeline::{PipelineConfig, PipelineContext, RunPipeline, resolve_git_commit},
     script::build_script_config_with_senders,
     sender::resolve_all_senders,
     sender_config::encode_sender_configs,
@@ -292,6 +292,129 @@ fn format_execution_plan_header_lines(compose: &ComposeFile, plan_len: usize) ->
 }
 
 /// Display the execution plan in human-readable format (matches Go `RenderExecutionPlan`).
+/// Print the compose banner with plan, network, namespace, senders, and components.
+fn print_compose_banner(
+    compose: &ComposeFile,
+    plan: &[PlanEntry],
+    network: Option<&str>,
+    chain_id: u64,
+    namespace: &str,
+    is_fork: bool,
+    broadcast: bool,
+    dry_run: bool,
+    senders: &[(String, String)], // (role, address) sorted
+) {
+    let use_color = color::is_color_enabled();
+    let separator = "─".repeat(50);
+
+    if use_color {
+        eprintln!("{}", separator.style(color::GRAY));
+    } else {
+        eprintln!("{separator}");
+    }
+
+    // Plan
+    let compose_file_display = format!("{} ({})", compose.group, plan.len());
+    if use_color {
+        eprintln!("  {:12} {}", "Plan:", compose_file_display.style(color::CYAN));
+    } else {
+        eprintln!("  {:12} {}", "Plan:", compose_file_display);
+    }
+
+    // Network
+    let network_name = network.unwrap_or("(none)");
+    if use_color {
+        let chain_suffix = if chain_id > 0 {
+            format!(" {}", format!("({})", chain_id).style(color::GRAY))
+        } else {
+            String::new()
+        };
+        let fork_suffix = if is_fork {
+            format!(" {}", "[fork]".style(color::MAGENTA))
+        } else {
+            String::new()
+        };
+        eprintln!("  {:12} {}{}{}", "Network:", network_name.style(color::BLUE), chain_suffix, fork_suffix);
+    } else {
+        let fork_tag = if is_fork { " [fork]" } else { "" };
+        if chain_id > 0 {
+            eprintln!("  {:12} {} ({}){}", "Network:", network_name, chain_id, fork_tag);
+        } else {
+            eprintln!("  {:12} {}{}", "Network:", network_name, fork_tag);
+        }
+    }
+
+    // Namespace
+    if use_color {
+        eprintln!("  {:12} {}", "Namespace:", namespace.style(color::MAGENTA));
+    } else {
+        eprintln!("  {:12} {}", "Namespace:", namespace);
+    }
+
+    // Mode
+    let (mode_label, mode_style) = super::run::deployment_banner_mode(dry_run, broadcast, is_fork);
+    if use_color {
+        eprintln!("  {:12} {}", "Mode:", mode_label.style(mode_style));
+    } else {
+        eprintln!("  {:12} {}", "Mode:", mode_label);
+    }
+
+    // Senders — role name in normal color, address in gray
+    if !senders.is_empty() {
+        let max_role = senders.iter().map(|(r, _)| r.len()).max().unwrap_or(0);
+        for (i, (role, addr)) in senders.iter().enumerate() {
+            let label = if i == 0 { "Senders:" } else { "" };
+            if use_color {
+                eprintln!(
+                    "  {:12} {:<width$}  {}",
+                    label,
+                    role,
+                    addr.style(color::GRAY),
+                    width = max_role,
+                );
+            } else {
+                eprintln!("  {:12} {:<width$}  {}", label, role, addr, width = max_role);
+            }
+        }
+    }
+
+    // Components — [N] name in normal color, script/deps in gray
+    for (i, entry) in plan.iter().enumerate() {
+        let label = if i == 0 { "Components:" } else { "" };
+        if use_color {
+            let mut suffix = format!(" → {}", entry.script);
+            if !entry.deps.is_empty() {
+                suffix = format!("{} (depends on: [{}])", suffix, entry.deps.join(", "));
+            }
+            if entry.skipped {
+                suffix = format!("{} (skipped)", suffix);
+            }
+            eprintln!(
+                "  {:12} {} {} {}",
+                label,
+                format!("[{}]", entry.step).style(color::GRAY),
+                entry.component,
+                suffix.style(color::GRAY),
+            );
+        } else {
+            let mut line = format!("[{}] {} → {}", entry.step, entry.component, entry.script);
+            if !entry.deps.is_empty() {
+                line = format!("{} (depends on: [{}])", line, entry.deps.join(", "));
+            }
+            if entry.skipped {
+                line = format!("{} (skipped)", line);
+            }
+            eprintln!("  {:12} {}", label, line);
+        }
+    }
+
+    if use_color {
+        eprintln!("{}", separator.style(color::GRAY));
+    } else {
+        eprintln!("{separator}");
+    }
+}
+
 fn print_execution_plan(compose: &ComposeFile, plan: &[PlanEntry]) {
     let [orchestration_header, plan_summary_header, plan_header] =
         format_execution_plan_header_lines(compose, plan.len());
@@ -474,23 +597,14 @@ fn display_compose_human(
     total: usize,
     failed_component: &Option<String>,
 ) {
-    let separator = "═".repeat(70);
-    eprintln!("{separator}");
-
     let success = failed_component.is_none();
 
     if success {
-        eprintln!(
-            "{}",
-            styled(
-                &format!("{} Successfully orchestrated {} deployment", emoji::PARTY, group),
-                color::SUCCESS,
-            ),
-        );
-        eprintln!("\n{} Summary:", emoji::CHART);
-        eprintln!("  • Steps executed: {}/{}", completed, total);
-        eprintln!("  • Total deployments: {}", totals.deployments);
+        // Success case: no extra output needed — broadcast phase already
+        // showed per-component results with tx receipts.
     } else {
+        let separator = "═".repeat(70);
+        eprintln!("{separator}");
         eprintln!("{}", styled(&format!("{} Orchestration failed", emoji::CROSS), color::ERROR,),);
         eprintln!("\n{} Summary:", emoji::CHART);
         if let Some(failed) = failed_component {
@@ -520,6 +634,157 @@ fn display_compose_json(
         ComposeOutputJson { group: group.to_string(), success, components: results, totals };
     output::print_json(&output)?;
     Ok(())
+}
+
+// ── Per-component config setup ───────────────────────────────────────────
+
+/// Resolved configuration for a single compose component.
+struct ComponentSetup {
+    pipeline_context: PipelineContext,
+    script_config: treb_forge::script::ScriptConfig,
+}
+
+/// Common parameters shared across all components in a compose run.
+struct ComposeParams<'a> {
+    cwd: &'a std::path::Path,
+    namespace: &'a Option<String>,
+    network: &'a Option<String>,
+    rpc_url: &'a Option<String>,
+    profile: &'a Option<String>,
+    env_vars: &'a [String],
+    broadcast: bool,
+    slow: bool,
+    legacy: bool,
+    verify: bool,
+    verbose: u8,
+}
+
+/// Set up environment and build pipeline config for a single component.
+///
+/// Called once for simulation (with the compose pipeline's ephemeral URL override)
+/// and once for broadcast (with the original upstream URL).
+async fn setup_component(
+    name: &str,
+    component: &Component,
+    params: &ComposeParams<'_>,
+) -> anyhow::Result<ComponentSetup> {
+    // Re-inject global env vars (reset any previous component overrides).
+    super::run::inject_env_vars(params.env_vars)?;
+    if let Some(env_map) = &component.env {
+        for (key, value) in env_map {
+            unsafe { env::set_var(key, value) };
+        }
+    }
+
+    let resolved = resolve_config(ResolveOpts {
+        project_root: params.cwd.to_path_buf(),
+        namespace: params.namespace.clone(),
+        network: params.network.clone(),
+        profile: params.profile.clone(),
+        sender_overrides: HashMap::new(),
+    })
+    .with_context(|| format!("failed to resolve config for component '{}'", name))?;
+
+    let mut effective_rpc_url = params.rpc_url.clone().or_else(|| resolved.network.clone());
+    let effective_network = params.network.clone().or_else(|| resolved.network.clone());
+
+    // Fork detection
+    let is_fork = {
+        let net = effective_network.as_deref();
+        let mut store = treb_registry::ForkStateStore::new(&params.cwd.join(super::run::TREB_DIR));
+        if store.load().is_ok() {
+            if let Some(fork_entry) = net.and_then(|n| store.get_active_fork(n).cloned()) {
+                effective_rpc_url = Some(fork_entry.rpc_url.clone());
+                if let Some(ref net) = effective_network {
+                    if let Ok(endpoints) = treb_config::resolve_rpc_endpoints(params.cwd) {
+                        if let Some(endpoint) = endpoints.get(net.as_str()) {
+                            if let Some(var) = super::run::extract_env_var_name(&endpoint.raw_url) {
+                                unsafe { env::set_var(var, &fork_entry.rpc_url) };
+                            }
+                        }
+                    }
+                }
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    };
+
+    // Sender resolution + v2 env var injection
+    let resolved_senders = resolve_all_senders(&resolved.senders)
+        .await
+        .with_context(|| format!("failed to resolve senders for component '{}'", name))?;
+
+    unsafe { env::set_var("NAMESPACE", &resolved.namespace) };
+    if let Some(ref net) = effective_network {
+        unsafe { env::set_var("NETWORK", net) };
+    }
+    let encoded_senders = encode_sender_configs(&resolved_senders);
+    unsafe { env::set_var("SENDER_CONFIGS", &encoded_senders) };
+
+    // Build ScriptConfig (all wallet keys injected)
+    let mut script_config =
+        build_script_config_with_senders(&resolved, &component.script, &resolved_senders)
+            .with_context(|| format!("failed to build script config for '{}'", name))?;
+
+    let sig = component.sig.as_deref().unwrap_or("run()");
+    let args = component.args.clone().unwrap_or_default();
+    let effective_verify = component.verify.unwrap_or(params.verify);
+
+    script_config
+        .sig(sig)
+        .args(args)
+        .broadcast(params.broadcast)
+        .dry_run(false)
+        .slow(params.slow || resolved.slow)
+        .legacy(params.legacy)
+        .verify(effective_verify)
+        .non_interactive(true);
+
+    if let Some(ref url) = effective_rpc_url {
+        script_config.rpc_url(url);
+    }
+
+    // Resolve chain ID
+    let chain_id = if let Some(ref url) = effective_rpc_url {
+        let actual = super::run::resolve_rpc_url_for_chain_id(url, params.cwd);
+        if let Some(u) = actual { super::run::fetch_chain_id(&u).await.unwrap_or(0) } else { 0 }
+    } else {
+        0
+    };
+
+    // Build sender labels
+    let sender_role_names: Vec<String> = resolved_senders.keys().cloned().collect();
+    let sender_labels = resolved_senders
+        .iter()
+        .map(|(role, sender)| (sender.sender_address(), role.clone()))
+        .collect();
+    let pipeline_config = PipelineConfig {
+        script_path: component.script.clone(),
+        broadcast: params.broadcast,
+        namespace: resolved.namespace.clone(),
+        chain_id,
+        script_sig: sig.to_string(),
+        script_args: Vec::new(),
+        verbosity: params.verbose,
+        is_fork,
+        ..Default::default()
+    };
+
+    let pipeline_context = PipelineContext {
+        config: pipeline_config,
+        script_path: PathBuf::from(&component.script),
+        git_commit: resolve_git_commit(),
+        project_root: params.cwd.to_path_buf(),
+        resolved_senders,
+        sender_labels,
+        sender_role_names,
+    };
+
+    Ok(ComponentSetup { pipeline_context, script_config })
 }
 
 // ── Command entry point ──────────────────────────────────────────────────
@@ -607,6 +872,19 @@ pub async fn run(
 
     // ── Dump command: print per-component forge commands and exit ─────
     if dump_command {
+        let dump_params = ComposeParams {
+            cwd: &cwd,
+            namespace: &namespace,
+            network: &network,
+            rpc_url: &rpc_url,
+            profile: &profile,
+            env_vars: &env_vars,
+            broadcast,
+            slow,
+            legacy,
+            verify,
+            verbose,
+        };
         for name in &order {
             let component = &compose.components[name];
 
@@ -617,56 +895,11 @@ pub async fn run(
                 continue;
             }
 
-            // Re-inject global env vars (reset any previous component overrides).
-            super::run::inject_env_vars(&env_vars)?;
-
-            // Inject per-component env vars.
-            if let Some(env_map) = &component.env {
-                for (key, value) in env_map {
-                    unsafe { env::set_var(key, value) };
-                }
-            }
-
-            let resolved = resolve_config(ResolveOpts {
-                project_root: cwd.clone(),
-                namespace: namespace.clone(),
-                network: network.clone(),
-                profile: profile.clone(),
-                sender_overrides: HashMap::new(),
-            })
-            .with_context(|| format!("failed to resolve config for component '{}'", name))?;
-
-            let effective_rpc_url = rpc_url.clone().or_else(|| resolved.network.clone());
-
-            let resolved_senders = resolve_all_senders(&resolved.senders)
+            let setup = setup_component(name, component, &dump_params)
                 .await
-                .with_context(|| format!("failed to resolve senders for component '{}'", name))?;
+                .with_context(|| format!("failed to set up component '{}'", name))?;
 
-            let mut script_config =
-                build_script_config_with_senders(&resolved, &component.script, &resolved_senders)
-                    .with_context(|| {
-                    format!("failed to build script config for component '{}'", name)
-                })?;
-
-            let sig = component.sig.as_deref().unwrap_or("run()");
-            let args = component.args.clone().unwrap_or_default();
-            let effective_verify = component.verify.unwrap_or(verify);
-
-            script_config
-                .sig(sig)
-                .args(args)
-                .broadcast(broadcast)
-                .dry_run(false)
-                .slow(slow || resolved.slow)
-                .legacy(legacy)
-                .verify(effective_verify)
-                .non_interactive(true);
-
-            if let Some(ref url) = effective_rpc_url {
-                script_config.rpc_url(url);
-            }
-
-            let cmd_parts = script_config.to_forge_command();
+            let cmd_parts = setup.script_config.to_forge_command();
             let cmd_str = cmd_parts
                 .iter()
                 .map(|p| {
@@ -702,39 +935,7 @@ pub async fn run(
         );
     }
 
-    // ── Broadcast confirmation (once before first component) ──────────
-    if should_prompt_for_broadcast_confirmation(
-        broadcast,
-        dry_run,
-        prompts_enabled,
-        executing_count,
-    ) {
-        let count_str = format!("{}", executing_count);
-        let mut kv_pairs: Vec<(&str, &str)> =
-            vec![("Components", &count_str), ("Compose", &compose.group)];
-        let ns_ref;
-        if let Some(ref ns) = namespace {
-            ns_ref = ns.clone();
-            kv_pairs.push(("Namespace", &ns_ref));
-        }
-        let net_ref;
-        if let Some(ref net) = network {
-            net_ref = net.clone();
-            kv_pairs.push(("Network", &net_ref));
-        }
-        eprintln!("About to broadcast to the network.");
-        output::eprint_kv(&kv_pairs);
-        eprint!("Proceed? [y/N] ");
-        io::stderr().flush().ok();
-
-        let mut input = String::new();
-        io::stdin().lock().read_line(&mut input).ok();
-        let answer = input.trim().to_lowercase();
-
-        if answer != "y" && answer != "yes" {
-            bail!("broadcast cancelled by user");
-        }
-    }
+    // Broadcast confirmation is handled in Phase 4 after simulation.
 
     // ── Open registry ─────────────────────────────────────────────────
     let mut registry = Registry::open(&cwd).context("failed to open registry")?;
@@ -753,9 +954,69 @@ pub async fn run(
     let mut failed_component: Option<String> = None;
     let resume_step = order.iter().position(|name| !skip_set.contains(name)).map(|index| index + 1);
 
+    // Resolve config once for the banner (all components share the same
+    // network/namespace/senders).
+    super::run::inject_env_vars(&env_vars)?;
+    let banner_resolved = resolve_config(ResolveOpts {
+        project_root: cwd.clone(),
+        namespace: namespace.clone(),
+        network: network.clone(),
+        profile: profile.clone(),
+        sender_overrides: HashMap::new(),
+    })
+    .context("failed to resolve configuration")?;
+    let banner_senders = resolve_all_senders(&banner_resolved.senders)
+        .await
+        .context("failed to resolve senders")?;
+    let banner_network = network.as_deref().or(banner_resolved.network.as_deref());
+
+    // Resolve chain ID for the banner
+    let banner_chain_id = if let Some(net) = banner_network {
+        let actual = super::run::resolve_rpc_url_for_chain_id(net, &cwd);
+        if let Some(url) = actual { super::run::fetch_chain_id(&url).await.unwrap_or(0) } else { 0 }
+    } else {
+        0
+    };
+
+    // Detect fork mode and resolve target RPC URL for banner/confirmation
+    let (banner_is_fork, banner_rpc_url) = {
+        let net = banner_network;
+        let mut store = treb_registry::ForkStateStore::new(&cwd.join(super::run::TREB_DIR));
+        if store.load().is_ok() {
+            if let Some(fork_entry) = net.and_then(|n| store.get_active_fork(n).cloned()) {
+                (true, Some(fork_entry.rpc_url))
+            } else {
+                let url = net
+                    .and_then(|n| super::run::resolve_rpc_url_for_chain_id(n, &cwd));
+                (false, url)
+            }
+        } else {
+            let url = net
+                .and_then(|n| super::run::resolve_rpc_url_for_chain_id(n, &cwd));
+            (false, url)
+        }
+    };
+
+    // Build sorted sender list for banner
+    let mut banner_sender_list: Vec<(String, String)> = banner_senders
+        .iter()
+        .map(|(role, sender)| (role.clone(), format!("{:#x}", sender.sender_address())))
+        .collect();
+    banner_sender_list.sort_by(|a, b| a.0.cmp(&b.0));
+
     if !json {
         let plan = build_plan(&compose, &order, &skip_set);
-        print_execution_plan(&compose, &plan);
+        print_compose_banner(
+            &compose,
+            &plan,
+            banner_network,
+            banner_chain_id,
+            &banner_resolved.namespace,
+            banner_is_fork,
+            broadcast,
+            dry_run,
+            &banner_sender_list,
+        );
         if resume {
             if let Some(step) = resume_step {
                 print_resume_banner(step, total);
@@ -764,7 +1025,7 @@ pub async fn run(
     }
 
     // ── Phase 1: Build ComposePipeline with all non-skipped components ──
-    use treb_forge::pipeline::compose::{ComposePipeline, ComposePhase, broadcast_component};
+    use treb_forge::pipeline::compose::{ComposePipeline, ComposePhase};
 
     let mut compose_pipeline = ComposePipeline::new();
 
@@ -782,6 +1043,21 @@ pub async fn run(
         }
     }
 
+    // Shared params for component setup (used in simulation and broadcast phases).
+    let compose_params = ComposeParams {
+        cwd: &cwd,
+        namespace: &namespace,
+        network: &network,
+        rpc_url: &rpc_url,
+        profile: &profile,
+        env_vars: &env_vars,
+        broadcast,
+        slow,
+        legacy,
+        verify,
+        verbose,
+    };
+
     // Resolve config and build pipeline entries for non-skipped components
     let mut components_to_run: Vec<String> = Vec::new();
     for name in &order {
@@ -789,124 +1065,11 @@ pub async fn run(
             continue;
         }
         let component = &compose.components[name];
-        let sig = component.sig.as_deref().unwrap_or("run()");
-        let effective_verify = component.verify.unwrap_or(verify);
-
-        // Re-inject global env vars (reset any previous component overrides).
-        super::run::inject_env_vars(&env_vars)?;
-        if let Some(env_map) = &component.env {
-            for (key, value) in env_map {
-                unsafe { env::set_var(key, value) };
-            }
-        }
-
-        let resolved = resolve_config(ResolveOpts {
-            project_root: cwd.clone(),
-            namespace: namespace.clone(),
-            network: network.clone(),
-            profile: profile.clone(),
-            sender_overrides: HashMap::new(),
-        })
-        .with_context(|| format!("failed to resolve config for component '{}'", name))?;
-
-        let mut effective_rpc_url = rpc_url.clone().or_else(|| resolved.network.clone());
-        let effective_network = network.clone().or_else(|| resolved.network.clone());
-
-        // Fork detection
-        let is_fork = {
-            let net = effective_network.as_deref();
-            let mut store = treb_registry::ForkStateStore::new(&cwd.join(super::run::TREB_DIR));
-            if store.load().is_ok() {
-                if let Some(fork_entry) = net.and_then(|n| store.get_active_fork(n).cloned()) {
-                    effective_rpc_url = Some(fork_entry.rpc_url.clone());
-                    if let Some(ref net) = effective_network {
-                        if let Ok(endpoints) = treb_config::resolve_rpc_endpoints(&cwd) {
-                            if let Some(endpoint) = endpoints.get(net.as_str()) {
-                                if let Some(var) = super::run::extract_env_var_name(&endpoint.raw_url) {
-                                    unsafe { env::set_var(var, &fork_entry.rpc_url) };
-                                }
-                            }
-                        }
-                    }
-                    true
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        };
-
-        // Sender resolution + env var injection
-        let mut resolved_senders = resolve_all_senders(&resolved.senders)
+        let setup = setup_component(name, component, &compose_params)
             .await
-            .with_context(|| format!("failed to resolve senders for component '{}'", name))?;
+            .with_context(|| format!("failed to set up component '{}'", name))?;
 
-        unsafe { env::set_var("NAMESPACE", &resolved.namespace) };
-        if let Some(ref net) = effective_network {
-            unsafe { env::set_var("NETWORK", net) };
-        }
-        let encoded_senders = encode_sender_configs(&resolved_senders, &resolved.senders)
-            .with_context(|| format!("failed to encode sender configs for '{}'", name))?;
-        unsafe { env::set_var("SENDER_CONFIGS", &encoded_senders) };
-
-        // Build ScriptConfig
-        let mut script_config =
-            build_script_config_with_senders(&resolved, &component.script, &resolved_senders)
-                .with_context(|| format!("failed to build script config for '{}'", name))?;
-
-        let args = component.args.clone().unwrap_or_default();
-        script_config
-            .sig(sig)
-            .args(args)
-            .broadcast(broadcast)
-            .dry_run(false)
-            .slow(slow || resolved.slow)
-            .legacy(legacy)
-            .verify(effective_verify)
-            .non_interactive(true);
-
-        if let Some(ref url) = effective_rpc_url {
-            script_config.rpc_url(url);
-        }
-
-        // Resolve chain ID
-        let chain_id = if let Some(ref url) = effective_rpc_url {
-            let actual = super::run::resolve_rpc_url_for_chain_id(url, &cwd);
-            if let Some(u) = actual { super::run::fetch_chain_id(&u).await.unwrap_or(0) } else { 0 }
-        } else {
-            0
-        };
-
-        // Build sender labels
-        let sender_role_names: Vec<String> = resolved_senders.keys().cloned().collect();
-        let sender_labels = resolved_senders
-            .iter()
-            .map(|(role, sender)| (sender.sender_address(), role.clone()))
-            .collect();
-        let pipeline_config = treb_forge::pipeline::PipelineConfig {
-            script_path: component.script.clone(),
-            broadcast,
-            namespace: resolved.namespace.clone(),
-            chain_id,
-            script_sig: sig.to_string(),
-            script_args: Vec::new(),
-            verbosity: verbose,
-            is_fork,
-            ..Default::default()
-        };
-
-        let pipeline_context = treb_forge::pipeline::PipelineContext {
-            config: pipeline_config,
-            script_path: PathBuf::from(&component.script),
-            git_commit: treb_forge::pipeline::resolve_git_commit(),
-            project_root: cwd.clone(),
-            resolved_senders,
-            sender_labels,
-            sender_role_names,
-        };
-
-        compose_pipeline.add_script(name.clone(), pipeline_context, script_config);
+        compose_pipeline.add_script(name.clone(), setup.pipeline_context, setup.script_config);
         components_to_run.push(name.clone());
     }
 
@@ -946,7 +1109,11 @@ pub async fn run(
         r
     };
 
-    let mut simulations = match sim_result {
+    // Reload registry — simulate_all snapshots/restores the on-disk files,
+    // so the in-memory Registry is stale. Re-open before Phase 4 broadcast.
+    registry = Registry::open(&cwd).context("failed to reload registry")?;
+
+    let simulations = match sim_result {
         Ok(sims) => sims,
         Err((partial_sims, failed_name, err)) => {
             // Record successful simulations
@@ -1061,7 +1228,7 @@ pub async fn run(
                     // Show per-tx trace if available, otherwise operation summary
                     if let Some(ref trace) = rt.trace {
                         for line in trace.lines() {
-                            eprintln!("    {line}");
+                            eprintln!("  {line}");
                         }
                     } else {
                         for op in &rt.transaction.operations {
@@ -1159,33 +1326,144 @@ pub async fn run(
         save_compose_state(&state)?;
 
         // ── Phase 4: Broadcast (if requested) ───────────────────────
-        if broadcast && !simulations.is_empty() {
-            if !json {
-                eprintln!("{}", styled("Broadcasting...", color::CYAN));
+        //
+        // Re-execute each component against the upstream URL (not the
+        // ephemeral Anvil) through RunPipeline::execute(). This gives
+        // us forge's full broadcast state machine (signing, gas, nonces,
+        // receipt collection) and natural extensibility for future Safe/
+        // Governor proposal routing.
+        let total_txs: usize = simulations.iter().map(|s| s.result.transactions.len()).sum();
+        if broadcast && !simulations.is_empty() && total_txs > 0 {
+            // Confirmation prompt (interactive mode only)
+            if prompts_enabled && !json {
+                // Show broadcast target(s)
+                let network_name = network.as_deref()
+                    .or(banner_network)
+                    .unwrap_or("unknown");
+                let fork_tag = if banner_is_fork { " [fork]" } else { "" };
+                let url_suffix = banner_rpc_url.as_deref()
+                    .map(|u| format!(" ({u})"))
+                    .unwrap_or_default();
+                eprintln!(
+                    "\n  {} {}{}{}\n",
+                    styled("Target:", color::BOLD),
+                    network_name,
+                    fork_tag,
+                    styled(&url_suffix, color::GRAY),
+                );
+
+                let confirmed = crate::ui::prompt::confirm(
+                    "Broadcast these transactions?",
+                    false,
+                );
+                if !confirmed {
+                    eprintln!("Broadcast cancelled.");
+                    delete_compose_state();
+                    return Ok(());
+                }
             }
-            for sim in &mut simulations {
-                if sim.executed_state.is_none() {
-                    continue;
-                }
+            if !json {
+                let network_label = network.as_deref()
+                    .or(banner_network)
+                    .unwrap_or("network");
+                eprintln!(
+                    "\n{}",
+                    styled(&format!("Broadcasting to {network_label}..."), color::CYAN),
+                );
+            }
+            for name in &components_to_run {
+                let component = &compose.components[name];
+
+                // Show per-component spinner
+                let spinner: std::sync::Arc<std::sync::Mutex<Option<spinoff::Spinner>>> =
+                    std::sync::Arc::new(std::sync::Mutex::new(None));
                 if !json {
-                    eprint!("  → {} ", sim.name);
+                    let mut guard = spinner.lock().unwrap();
+                    *guard = Some(spinoff::Spinner::new(
+                        spinoff::spinners::Dots2,
+                        format!("  {name}"),
+                        spinoff::Color::Cyan,
+                    ));
                 }
-                match broadcast_component(sim).await {
-                    Ok(receipts) => {
+
+                // Rebuild config targeting the original upstream URL
+                let setup = setup_component(name, component, &compose_params).await;
+                let setup = match setup {
+                    Ok(s) => s,
+                    Err(e) => {
+                        drop(spinner.lock().unwrap().take());
+                        eprint!("\x1b[2K\r");
                         if !json {
                             eprintln!(
-                                "{}  ({} tx)",
-                                styled(&emoji::CHECK_MARK.to_string(), color::GREEN),
-                                receipts.len()
+                                "  {} {}",
+                                styled(&emoji::CROSS.to_string(), color::RED),
+                                styled(&format!("{name}: {e}"), color::RED),
                             );
+                        }
+                        failed_component = Some(name.clone());
+                        break;
+                    }
+                };
+
+                // Run through the full pipeline (compile → execute → broadcast → record)
+                let pipeline = RunPipeline::new(setup.pipeline_context)
+                    .with_script_config(setup.script_config);
+
+                let result = {
+                    let _foundry_shell = super::run::FoundryShellGuard::suppress();
+                    pipeline.execute(&mut registry).await
+                };
+
+                // Clear spinner
+                drop(spinner.lock().unwrap().take());
+                eprint!("\x1b[2K\r");
+
+                match result {
+                    Ok(res) => {
+                        let tx_count = res.transactions.len();
+                        let dep_count = res.deployments.len();
+                        if !json {
+                            let mut detail = format!("{tx_count} tx");
+                            if dep_count > 0 {
+                                detail.push_str(&format!(", {dep_count} deployed"));
+                            }
+                            eprintln!(
+                                "  {} {}  ({})",
+                                styled(&emoji::CHECK_MARK.to_string(), color::GREEN),
+                                name,
+                                styled(&detail, color::GRAY),
+                            );
+                            // Show per-tx receipt details
+                            for rt in &res.transactions {
+                                let tx = &rt.transaction;
+                                let sender_label = rt.sender_name.as_deref()
+                                    .unwrap_or(&tx.sender);
+                                let hash_display = &tx.hash;
+                                let gas_display = rt.gas_used
+                                    .map(|g| format!(" gas={g}"))
+                                    .unwrap_or_default();
+                                let block_display = if tx.block_number > 0 {
+                                    format!(" block={}", tx.block_number)
+                                } else {
+                                    String::new()
+                                };
+                                let line = format!(
+                                    "    {sender_label} {hash_display}{block_display}{gas_display}",
+                                );
+                                eprintln!("{}", styled(&line, color::GRAY));
+                            }
                         }
                     }
                     Err(e) => {
                         let error_msg = format!("{e}");
                         if !json {
-                            eprintln!("{}", styled(&format!("{} {}", emoji::CROSS, error_msg), color::RED));
+                            eprintln!(
+                                "  {} {}",
+                                styled(&emoji::CROSS.to_string(), color::RED),
+                                styled(&format!("{name}: {error_msg}"), color::RED),
+                            );
                         }
-                        failed_component = Some(sim.name.clone());
+                        failed_component = Some(name.clone());
                         break;
                     }
                 }

@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use alloy_primitives::{Address, B256};
+use alloy_primitives::Address;
 use foundry_evm::{
     traces::{
         CallTraceDecoderBuilder, decode_trace_arena, identifier::TraceIdentifiers,
@@ -21,7 +21,7 @@ use crate::{
     artifacts::ArtifactIndex,
     compiler::compile_project,
     events::{decode_events, detect_proxy_relationships, extract_collisions, extract_deployments},
-    script::{BroadcastReceipt, ExecutionResult, ScriptConfig},
+    script::{ExecutionResult, ScriptConfig},
 };
 
 use super::{
@@ -31,7 +31,7 @@ use super::{
         hydrate_transactions,
     },
     orchestrator::{
-        build_recorded_transaction_metadata, collapse_decoded_bytecode_args,
+        collapse_decoded_bytecode_args,
         extract_governor_proposal_created, extract_safe_transaction_queued,
         extract_transaction_simulated, render_traces_for_verbosity, strip_internal_events,
     },
@@ -62,26 +62,10 @@ pub struct ComponentSimulation {
     pub name: String,
     /// Hydrated pipeline result (deployments, transactions, traces, etc.).
     pub result: PipelineResult,
-    /// Forge's executed state, stored for later broadcast.
-    /// Opaque — use [`broadcast_component`] to consume this.
-    pub executed_state: Option<ExecutedStateHolder>,
     /// Raw broadcastable transactions from the script execution.
     /// Used to replay state on the shared Anvil fork between compose steps.
     pub result_transactions: Option<foundry_cheatcodes::BroadcastableTransactions>,
-    /// The fork URL this component executed against.
-    pub fork_url: Option<String>,
 }
-
-/// Opaque holder for forge's ExecutedState (private module type).
-/// We store it as a trait object since we can't name the concrete type.
-pub struct ExecutedStateHolder {
-    /// The broadcast continuation: prepare_simulation → fill_metadata → bundle → broadcast.
-    /// Called with `broadcast()` to continue the forge state machine.
-    broadcast_fn: Option<BroadcastFn>,
-}
-
-type BroadcastFn =
-    Box<dyn FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<BroadcastReceipt>, TrebError>> + Send>> + Send>;
 
 /// Compose orchestrator — executes multiple scripts with shared EVM state.
 pub struct ComposePipeline {
@@ -265,7 +249,6 @@ impl ComposePipeline {
         registry: &mut Registry,
     ) -> Result<ComponentSimulation, TrebError> {
         let script_args = script_config.into_script_args()?;
-        let wants_broadcast = script_args.broadcast && context.config.broadcast;
 
         // Run forge: preprocess → compile → link → execute
         let preprocessed = script_args
@@ -283,8 +266,6 @@ impl ComposePipeline {
             .prepare_execution()
             .await
             .map_err(|e| TrebError::Forge(format!("forge execution preparation failed: {e}")))?;
-
-        let fork_url = prepared.script_config.evm_opts.fork_url.clone();
 
         let executed = prepared
             .execute()
@@ -374,7 +355,7 @@ impl ComposePipeline {
 
         let safe_tx_events = extract_safe_transaction_queued(&parsed_events);
         let governor_events = extract_governor_proposal_created(&parsed_events);
-        let safe_transactions = hydrate_safe_transactions(&safe_tx_events, context);
+        let _safe_transactions = hydrate_safe_transactions(&safe_tx_events, context);
         let governor_proposals = hydrate_governor_proposals(&governor_events, context);
 
         // Build address labels for trace decoding
@@ -431,58 +412,13 @@ impl ComposePipeline {
             .map(|dep| RecordedDeployment { deployment: dep, safe_transaction: None })
             .collect();
 
-        // Store the executed state for later broadcast
-        let broadcast_fn: Option<BroadcastFn> = if wants_broadcast {
-            Some(Box::new(move || {
-                Box::pin(async move {
-                    let pre_sim = executed
-                        .prepare_simulation()
-                        .await
-                        .map_err(|e| TrebError::Forge(format!("forge simulation preparation failed: {e}")))?;
-                    let filled = pre_sim
-                        .fill_metadata()
-                        .await
-                        .map_err(|e| TrebError::Forge(format!("forge metadata fill failed: {e}")))?;
-                    let bundled = filled
-                        .bundle()
-                        .await
-                        .map_err(|e| TrebError::Forge(format!("forge bundling failed: {e}")))?;
-                    let bundled = bundled
-                        .wait_for_pending()
-                        .await
-                        .map_err(|e| TrebError::Forge(format!("forge pending transaction wait failed: {e}")))?;
-                    let broadcasted = bundled
-                        .broadcast()
-                        .await
-                        .map_err(|e| TrebError::Forge(format!("forge broadcast failed: {e}")))?;
-
-                    let mut receipts = Vec::new();
-                    for seq in broadcasted.sequence.sequences() {
-                        for (tx_meta, receipt) in seq.transactions.iter().zip(seq.receipts.iter()) {
-                            receipts.push(BroadcastReceipt {
-                                hash: receipt.transaction_hash,
-                                block_number: receipt.block_number.unwrap_or_default(),
-                                gas_used: receipt.gas_used,
-                                status: receipt.inner.inner.inner.receipt.status.coerce_status(),
-                                contract_name: tx_meta.contract_name.clone().filter(|s| !s.is_empty()),
-                                contract_address: receipt.contract_address,
-                            });
-                        }
-                    }
-                    Ok(receipts)
-                })
-            }))
-        } else {
-            None
-        };
-
         let result = PipelineResult {
             deployments: recorded_deployments,
             transactions: recorded_transactions,
             registry_updated: false,
             collisions,
             skipped: Vec::new(),
-            dry_run: !wants_broadcast,
+            dry_run: true,
             success: true,
             gas_used: execution.gas_used,
             event_count,
@@ -498,29 +434,9 @@ impl ComposePipeline {
         Ok(ComponentSimulation {
             name: name.to_string(),
             result,
-            executed_state: broadcast_fn.map(|f| ExecutedStateHolder { broadcast_fn: Some(f) }),
             result_transactions,
-            fork_url,
         })
     }
-}
-
-/// Broadcast a component's stored transactions.
-///
-/// Consumes the stored forge state and continues the state machine
-/// through `prepare_simulation → fill_metadata → bundle → broadcast`.
-pub async fn broadcast_component(
-    sim: &mut ComponentSimulation,
-) -> Result<Vec<BroadcastReceipt>, TrebError> {
-    let holder = sim
-        .executed_state
-        .as_mut()
-        .ok_or_else(|| TrebError::Forge("no broadcast state stored (dry-run?)".into()))?;
-    let broadcast_fn = holder
-        .broadcast_fn
-        .take()
-        .ok_or_else(|| TrebError::Forge("broadcast already consumed".into()))?;
-    broadcast_fn().await
 }
 
 /// Replay broadcastable transactions on an Anvil fork so subsequent scripts

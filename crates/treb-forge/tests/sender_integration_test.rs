@@ -82,9 +82,8 @@ async fn private_key_sender_end_to_end_pipeline() {
     );
 
     // wallet opts should have the private key injected
-    assert_eq!(
-        args.wallets.private_key,
-        Some(ANVIL_KEY_0.to_string()),
+    assert!(
+        args.wallets.private_keys.contains(&ANVIL_KEY_0.to_string()),
         "wallet opts should contain the deployer's private key"
     );
 }
@@ -144,7 +143,7 @@ async fn multi_sender_config_resolves_correctly() {
     let args = config.into_script_args().unwrap();
 
     assert_eq!(args.evm.sender, Some(ANVIL_ADDR_0));
-    assert_eq!(args.wallets.private_key, Some(ANVIL_KEY_0.to_string()));
+    assert!(args.wallets.private_keys.contains(&ANVIL_KEY_0.to_string()));
 }
 
 // ---------------------------------------------------------------------------

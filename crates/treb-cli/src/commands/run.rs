@@ -23,9 +23,9 @@ use treb_forge::{
         BroadcastHook, BroadcastPhase, BroadcastProgressCallback, PipelineConfig, PipelineContext,
         PipelineResult, RecordedTransaction, RunPipeline, resolve_git_commit,
     },
-    script::{build_script_config_v2, build_script_config_with_senders},
+    script::build_script_config_with_senders,
     sender::{ResolvedSender, resolve_all_senders},
-    sender_config::{encode_sender_configs, encode_sender_configs_v2},
+    sender_config::encode_sender_configs,
 };
 use treb_registry::{ForkStateStore, Registry};
 
@@ -167,7 +167,7 @@ fn is_active_fork_run(
         .any(|entry| active_fork_matches(entry, cwd, network, effective_rpc_url))
 }
 
-fn deployment_banner_mode(_dry_run: bool, broadcast: bool, _active_fork: bool) -> (&'static str, Style) {
+pub(crate) fn deployment_banner_mode(_dry_run: bool, broadcast: bool, _active_fork: bool) -> (&'static str, Style) {
     if broadcast {
         ("BROADCAST", color::GREEN)
     } else {
@@ -387,9 +387,9 @@ pub async fn execute_script(
     let is_safe = resolved_senders.get("deployer").is_some_and(|s| s.is_safe());
     let is_gov = resolved_senders.get("deployer").is_some_and(|s| s.is_governor());
 
-    // Build ScriptConfig (v2: all wallet keys injected)
+    // Build ScriptConfig (all wallet keys injected)
     let mut script_config =
-        build_script_config_v2(resolved, &opts.script, resolved_senders)
+        build_script_config_with_senders(resolved, &opts.script, resolved_senders)
             .context("failed to build script configuration")?;
 
     script_config
@@ -590,17 +590,11 @@ pub async fn run(
 
     // ── Inject treb context env vars for Solidity consumption ──────────
     // SAFETY: this is single-threaded CLI code; no concurrent env access.
-    unsafe { env::set_var("TREB_CLI_VERSION", "2") };
     unsafe { env::set_var("NAMESPACE", &resolved.namespace) };
     if let Some(ref net) = effective_network {
         unsafe { env::set_var("NETWORK", net) };
     }
-    // v2: simplified sender encoding (names + addresses only)
-    let encoded_senders_v2 = encode_sender_configs_v2(&resolved_senders);
-    unsafe { env::set_var("SENDER_CONFIGS_V2", &encoded_senders_v2) };
-    // v1 compat: still set SENDER_CONFIGS for scripts that haven't migrated
-    let encoded_senders = encode_sender_configs(&resolved_senders, &resolved.senders)
-        .context("failed to encode sender configs")?;
+    let encoded_senders = encode_sender_configs(&resolved_senders);
     unsafe { env::set_var("SENDER_CONFIGS", &encoded_senders) };
 
     // ── Dump command and exit ─────────────────────────────────────────
@@ -1037,7 +1031,7 @@ pub(crate) fn display_transactions_ordered(transactions: &[RecordedTransaction],
         if verbose == 0 {
             if let Some(ref trace) = rt.trace {
                 for line in trace.lines() {
-                    println!("    {line}");
+                    println!("  {line}");
                 }
             } else {
                 // Fallback: show operations when no trace is available
