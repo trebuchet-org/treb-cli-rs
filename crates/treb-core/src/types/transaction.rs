@@ -36,6 +36,8 @@ pub struct Transaction {
     pub operations: Vec<Operation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub safe_context: Option<SafeContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub broadcast_file: Option<String>,
     pub environment: String,
     pub created_at: DateTime<Utc>,
 }
@@ -102,6 +104,7 @@ mod tests {
                 },
             }],
             safe_context: None,
+            broadcast_file: None,
             environment: "production".into(),
             created_at: Utc.with_ymd_and_hms(2025, 1, 15, 10, 30, 0).unwrap(),
         }

@@ -96,6 +96,9 @@ enum Commands {
         /// Print the equivalent forge script command and exit without executing
         #[arg(long)]
         dump_command: bool,
+        /// Resume a previous run, skipping already-completed transactions
+        #[arg(long)]
+        resume: bool,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -1104,6 +1107,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             verify,
             verbose,
             dump_command,
+            resume,
             json,
             env,
             target_contract,
@@ -1122,6 +1126,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 verify,
                 verbose,
                 dump_command,
+                resume,
                 json,
                 env,
                 target_contract,

@@ -4,6 +4,7 @@
 //! decoding, deployment hydration, duplicate detection, and registry recording.
 //! All pipeline types and the [`RunPipeline`] orchestrator live here.
 
+pub mod broadcast_writer;
 pub mod compose;
 mod duplicates;
 mod hydration;
@@ -21,7 +22,9 @@ pub use hydration::{
     hydrate_transactions, hydrate_transactions_from_broadcast, populate_safe_context,
 };
 pub use orchestrator::{BroadcastHook, BroadcastPhase, BroadcastProgressCallback, RunPipeline};
-pub use routing::{RouteContext, RunResult, TransactionRun, flatten_receipts, route_all};
+pub use routing::{
+    RouteContext, RunResult, TransactionRun, flatten_receipts, route_all, route_all_with_resume,
+};
 pub use types::{
     PipelineConfig, PipelineContext, PipelineResult, ProposedResult, RecordedDeployment,
     RecordedTransaction, SkippedDeployment,

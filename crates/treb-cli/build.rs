@@ -90,6 +90,12 @@ fn build_run() -> ClapCommand {
                 .action(ArgAction::Count)
                 .help("Verbosity level (-v, -vv, -vvv)"),
         )
+        .arg(
+            Arg::new("resume")
+                .long("resume")
+                .action(ArgAction::SetTrue)
+                .help("Resume a previous run, skipping already-completed transactions"),
+        )
         .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
         .arg(Arg::new("env").long("env").num_args(1).help("Set environment variables (KEY=VALUE)"))
         .arg(Arg::new("target-contract").long("target-contract").help("Target contract to run"))

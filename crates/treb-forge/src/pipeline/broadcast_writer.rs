@@ -1,0 +1,590 @@
+//! Broadcast file writer — Foundry-compatible `ScriptSequence` construction and persistence.
+//!
+//! After routing, this module constructs `run-latest.json` in Foundry's exact
+//! `ScriptSequence` format for on-chain transactions, and a companion
+//! `run-latest.deferred.json` for pending Safe/Governor operations.
+//!
+//! File layout matches Foundry conventions:
+//! ```text
+//! broadcast/<script_filename>/<chain_id>/<sig>-latest.json
+//! cache/<script_filename>/<chain_id>/<sig>-latest.json
+//! ```
+
+use std::{
+    collections::VecDeque,
+    fs,
+    io::{BufWriter, Write},
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+// Alloy's HashMap (FxBuildHasher-based) is used by ScriptSequence fields.
+use alloy_primitives::map::HashMap as AlloyHashMap;
+
+use alloy_primitives::B256;
+use forge_script_sequence::{
+    NestedValue, ScriptSequence, TransactionWithMetadata, sig_to_file_name,
+};
+use foundry_evm::traces::CallKind;
+use serde::{Deserialize, Serialize};
+use treb_core::error::TrebError;
+
+use super::{
+    PipelineContext,
+    routing::{RunResult, TransactionRun},
+    types::RecordedTransaction,
+};
+
+// ---------------------------------------------------------------------------
+// Deferred operations (treb extension)
+// ---------------------------------------------------------------------------
+
+/// Pending operations that haven't hit the chain yet.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeferredOperations {
+    pub timestamp: u128,
+    pub chain: u64,
+    pub commit: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub safe_proposals: Vec<DeferredSafeProposal>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub governor_proposals: Vec<DeferredGovernorProposal>,
+}
+
+/// A Safe proposal awaiting multi-sig execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeferredSafeProposal {
+    pub safe_tx_hash: String,
+    pub safe_address: String,
+    pub nonce: u64,
+    pub chain_id: u64,
+    pub sender_role: String,
+    pub transaction_ids: Vec<String>,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_tx_hash: Option<String>,
+}
+
+/// A Governor proposal awaiting execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeferredGovernorProposal {
+    pub proposal_id: String,
+    pub governor_address: String,
+    pub sender_role: String,
+    pub transaction_ids: Vec<String>,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub propose_tx_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub propose_safe_tx_hash: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Resume state
+// ---------------------------------------------------------------------------
+
+/// State loaded from existing broadcast files for `--resume`.
+pub struct ResumeState {
+    pub sequence: ScriptSequence,
+    pub deferred: Option<DeferredOperations>,
+    /// Tx hashes of wallet txs that already have receipts.
+    pub completed_tx_hashes: std::collections::HashSet<B256>,
+    /// safeTxHash values already proposed.
+    pub completed_safe_hashes: std::collections::HashSet<String>,
+    /// Governor proposal IDs already submitted.
+    pub completed_gov_ids: std::collections::HashSet<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Path computation
+// ---------------------------------------------------------------------------
+
+/// Compute broadcast file paths matching Foundry's convention.
+///
+/// Returns `(broadcast_dir, broadcast_path, cache_path)`.
+pub fn compute_broadcast_paths(
+    project_root: &Path,
+    script_path: &str,
+    chain_id: u64,
+    sig: &str,
+) -> (PathBuf, PathBuf, PathBuf) {
+    let script_filename = Path::new(script_path)
+        .file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_else(|| script_path.to_string());
+
+    let sig_name = sig_to_file_name(sig);
+    let latest_name = format!("{sig_name}-latest.json");
+
+    let broadcast_dir = project_root
+        .join("broadcast")
+        .join(&script_filename)
+        .join(chain_id.to_string());
+    let broadcast_path = broadcast_dir.join(&latest_name);
+
+    let cache_dir = project_root
+        .join("cache")
+        .join(&script_filename)
+        .join(chain_id.to_string());
+    let cache_path = cache_dir.join(&latest_name);
+
+    (broadcast_dir, broadcast_path, cache_path)
+}
+
+/// Compute the deferred file path from the broadcast path.
+fn deferred_path_from(broadcast_path: &Path) -> PathBuf {
+    let stem = broadcast_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    broadcast_path.with_file_name(format!("{stem}.deferred.json"))
+}
+
+/// Build a relative path from project root to the broadcast file.
+pub fn relative_broadcast_path(
+    project_root: &Path,
+    broadcast_path: &Path,
+) -> String {
+    broadcast_path
+        .strip_prefix(project_root)
+        .unwrap_or(broadcast_path)
+        .to_string_lossy()
+        .to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Build ScriptSequence
+// ---------------------------------------------------------------------------
+
+/// Build a Foundry-compatible `ScriptSequence` from routing results.
+///
+/// Only includes transactions that were actually broadcast on-chain (wallet
+/// direct or Safe 1/1 execution). Deferred operations go to the companion file.
+pub fn build_script_sequence(
+    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    run_results: &[(TransactionRun, RunResult)],
+    recorded_txs: &[RecordedTransaction],
+    ctx: &PipelineContext,
+    broadcast_path: PathBuf,
+    cache_path: PathBuf,
+) -> ScriptSequence {
+    let mut transactions = VecDeque::new();
+    let mut receipts = Vec::new();
+    let rpc_url = ctx.config.rpc_url.as_deref().unwrap_or_default();
+
+    // Build a lookup from btx index → recorded transaction for metadata
+    let rt_by_index: std::collections::HashMap<usize, &RecordedTransaction> = {
+        let mut map = std::collections::HashMap::new();
+        // Recorded transactions are in the same order as BroadcastableTransactions indices
+        for (i, rt) in recorded_txs.iter().enumerate() {
+            map.insert(i, rt);
+        }
+        map
+    };
+
+    for (run, result) in run_results {
+        if let RunResult::Broadcast(run_receipts) = result {
+            for (receipt_idx, &tx_idx) in run.tx_indices.iter().enumerate() {
+                let Some(btx) = btxs.get(tx_idx) else { continue };
+                let receipt = run_receipts.get(receipt_idx);
+
+                // Build TransactionWithMetadata
+                let tx_maybe_signed = btx.transaction.clone();
+                let mut tx_meta = TransactionWithMetadata::from_tx_request(tx_maybe_signed);
+                tx_meta.rpc = rpc_url.to_string();
+
+                // Set hash from receipt
+                if let Some(r) = receipt {
+                    tx_meta.hash = Some(r.hash);
+                }
+
+                // Determine opcode (Create vs Call)
+                let is_create = btx.transaction.to().is_none_or(|to| {
+                    matches!(to, alloy_primitives::TxKind::Create)
+                });
+                tx_meta.opcode = if is_create {
+                    CallKind::Create
+                } else {
+                    CallKind::Call
+                };
+
+                // Set contract metadata from recorded transaction
+                if let Some(rt) = rt_by_index.get(&tx_idx) {
+                    if let Some(op) = rt.transaction.operations.first() {
+                        if op.operation_type == "DEPLOY" {
+                            tx_meta.contract_name = Some(op.target.clone());
+                            if let Some(addr_val) = op.result.get("address") {
+                                if let Some(addr_str) = addr_val.as_str() {
+                                    tx_meta.contract_address = addr_str.parse().ok();
+                                }
+                            }
+                        }
+                        if !op.method.is_empty() && op.method != "CREATE" {
+                            tx_meta.function = Some(op.method.clone());
+                        }
+                    }
+                }
+
+                // Set contract metadata from receipt
+                if let Some(r) = receipt {
+                    if tx_meta.contract_name.is_none() {
+                        tx_meta.contract_name = r.contract_name.clone();
+                    }
+                    if tx_meta.contract_address.is_none() {
+                        tx_meta.contract_address = r.contract_address;
+                    }
+                }
+
+                transactions.push_back(tx_meta);
+
+                // Add receipt if we have the raw JSON
+                if let Some(r) = receipt {
+                    if let Some(ref raw) = r.raw_receipt {
+                        if let Ok(any_receipt) = serde_json::from_value(raw.clone()) {
+                            receipts.push(any_receipt);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+
+    ScriptSequence {
+        transactions,
+        receipts,
+        libraries: Vec::new(),
+        pending: Vec::new(),
+        paths: Some((broadcast_path, cache_path)),
+        returns: AlloyHashMap::default(),
+        timestamp,
+        chain: ctx.config.chain_id,
+        commit: if ctx.git_commit.is_empty() {
+            None
+        } else {
+            Some(ctx.git_commit.clone())
+        },
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Build DeferredOperations
+// ---------------------------------------------------------------------------
+
+/// Build the deferred operations companion file from routing results.
+pub fn build_deferred_operations(
+    run_results: &[(TransactionRun, RunResult)],
+    recorded_txs: &[RecordedTransaction],
+    ctx: &PipelineContext,
+) -> DeferredOperations {
+    let mut safe_proposals = Vec::new();
+    let mut governor_proposals = Vec::new();
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+
+    for (run, result) in run_results {
+        match result {
+            RunResult::SafeProposed {
+                safe_tx_hash,
+                safe_address,
+                nonce,
+                tx_count: _,
+            } => {
+                let tx_ids: Vec<String> = run
+                    .tx_indices
+                    .iter()
+                    .filter_map(|&idx| recorded_txs.get(idx))
+                    .map(|rt| rt.transaction.id.clone())
+                    .collect();
+
+                safe_proposals.push(DeferredSafeProposal {
+                    safe_tx_hash: format!("{:#x}", safe_tx_hash),
+                    safe_address: format!("{:#x}", safe_address),
+                    nonce: *nonce,
+                    chain_id: ctx.config.chain_id,
+                    sender_role: run.sender_role.clone(),
+                    transaction_ids: tx_ids,
+                    status: "proposed".into(),
+                    execution_tx_hash: None,
+                });
+            }
+            RunResult::GovernorProposed {
+                proposal_id,
+                governor_address,
+                tx_count: _,
+            } => {
+                let tx_ids: Vec<String> = run
+                    .tx_indices
+                    .iter()
+                    .filter_map(|&idx| recorded_txs.get(idx))
+                    .map(|rt| rt.transaction.id.clone())
+                    .collect();
+
+                governor_proposals.push(DeferredGovernorProposal {
+                    proposal_id: proposal_id.clone(),
+                    governor_address: format!("{:#x}", governor_address),
+                    sender_role: run.sender_role.clone(),
+                    transaction_ids: tx_ids,
+                    status: "proposed".into(),
+                    propose_tx_hash: None,
+                    propose_safe_tx_hash: None,
+                });
+            }
+            RunResult::Broadcast(_) => {}
+        }
+    }
+
+    DeferredOperations {
+        timestamp,
+        chain: ctx.config.chain_id,
+        commit: if ctx.git_commit.is_empty() {
+            None
+        } else {
+            Some(ctx.git_commit.clone())
+        },
+        safe_proposals,
+        governor_proposals,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Write broadcast artifacts
+// ---------------------------------------------------------------------------
+
+/// Write broadcast files: `run-latest.json` + timestamped copy + deferred.
+///
+/// Uses Foundry's built-in `ScriptSequence::save()` for the main file,
+/// then writes the deferred companion file alongside it.
+pub fn write_broadcast_artifacts(
+    sequence: &mut ScriptSequence,
+    deferred: &DeferredOperations,
+) -> Result<(), TrebError> {
+    // Save the main ScriptSequence using Foundry's save method
+    // (writes run-latest.json + run-{timestamp}.json + cache/ sensitive copy)
+    sequence.save(true, true).map_err(|e| {
+        TrebError::Forge(format!("failed to write broadcast file: {e}"))
+    })?;
+
+    // Write deferred operations companion file
+    if !deferred.safe_proposals.is_empty() || !deferred.governor_proposals.is_empty() {
+        if let Some((ref broadcast_path, _)) = sequence.paths {
+            let deferred_file = deferred_path_from(broadcast_path);
+
+            // Ensure directory exists
+            if let Some(parent) = deferred_file.parent() {
+                fs::create_dir_all(parent).map_err(|e| {
+                    TrebError::Forge(format!(
+                        "failed to create deferred directory {}: {e}",
+                        parent.display()
+                    ))
+                })?;
+            }
+
+            let file = fs::File::create(&deferred_file).map_err(|e| {
+                TrebError::Forge(format!(
+                    "failed to create deferred file {}: {e}",
+                    deferred_file.display()
+                ))
+            })?;
+            let mut writer = BufWriter::new(file);
+            serde_json::to_writer_pretty(&mut writer, deferred).map_err(|e| {
+                TrebError::Forge(format!("failed to serialize deferred operations: {e}"))
+            })?;
+            writer.flush().map_err(|e| {
+                TrebError::Forge(format!("failed to flush deferred file: {e}"))
+            })?;
+
+            // Timestamped copy of deferred file
+            let ts_deferred = broadcast_path.with_file_name(format!(
+                "{}.deferred.json",
+                broadcast_path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("run")
+                    .replace("-latest", &format!("-{}", deferred.timestamp))
+            ));
+            let _ = fs::copy(&deferred_file, &ts_deferred);
+        }
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Load resume state
+// ---------------------------------------------------------------------------
+
+/// Load existing broadcast files for `--resume`.
+///
+/// Returns `None` if no broadcast file exists for this script/chain/sig combo.
+pub fn load_resume_state(
+    project_root: &Path,
+    script_path: &str,
+    chain_id: u64,
+    sig: &str,
+) -> Option<ResumeState> {
+    let (_, broadcast_path, _cache_path) =
+        compute_broadcast_paths(project_root, script_path, chain_id, sig);
+
+    if !broadcast_path.exists() {
+        return None;
+    }
+
+    // Load ScriptSequence
+    let sequence: ScriptSequence = {
+        let contents = fs::read_to_string(&broadcast_path).ok()?;
+        serde_json::from_str(&contents).ok()?
+    };
+
+    // Load deferred operations (optional)
+    let deferred_file = deferred_path_from(&broadcast_path);
+    let deferred: Option<DeferredOperations> = if deferred_file.exists() {
+        fs::read_to_string(&deferred_file)
+            .ok()
+            .and_then(|c| serde_json::from_str(&c).ok())
+    } else {
+        None
+    };
+
+    // Build completed sets from the loaded sequence
+    let completed_tx_hashes: std::collections::HashSet<B256> = sequence
+        .transactions
+        .iter()
+        .filter_map(|tx_meta| tx_meta.hash)
+        .collect();
+
+    let completed_safe_hashes: std::collections::HashSet<String> = deferred
+        .as_ref()
+        .map(|d| d.safe_proposals.iter().map(|p| p.safe_tx_hash.clone()).collect())
+        .unwrap_or_default();
+
+    let completed_gov_ids: std::collections::HashSet<String> = deferred
+        .as_ref()
+        .map(|d| d.governor_proposals.iter().map(|p| p.proposal_id.clone()).collect())
+        .unwrap_or_default();
+
+    Some(ResumeState {
+        sequence,
+        deferred,
+        completed_tx_hashes,
+        completed_safe_hashes,
+        completed_gov_ids,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compute_broadcast_paths_basic() {
+        let (dir, broadcast, cache) = compute_broadcast_paths(
+            Path::new("/project"),
+            "script/Deploy.s.sol",
+            42220,
+            "run()",
+        );
+        assert_eq!(dir, PathBuf::from("/project/broadcast/Deploy.s.sol/42220"));
+        assert_eq!(
+            broadcast,
+            PathBuf::from("/project/broadcast/Deploy.s.sol/42220/run-latest.json")
+        );
+        assert_eq!(
+            cache,
+            PathBuf::from("/project/cache/Deploy.s.sol/42220/run-latest.json")
+        );
+    }
+
+    #[test]
+    fn compute_broadcast_paths_custom_sig() {
+        let (_, broadcast, _) = compute_broadcast_paths(
+            Path::new("/project"),
+            "script/Deploy.s.sol",
+            1,
+            "deploy(uint256)",
+        );
+        assert_eq!(
+            broadcast,
+            PathBuf::from("/project/broadcast/Deploy.s.sol/1/deploy-latest.json")
+        );
+    }
+
+    #[test]
+    fn deferred_path_from_broadcast() {
+        let bp = PathBuf::from("/project/broadcast/Deploy.s.sol/42220/run-latest.json");
+        let dp = deferred_path_from(&bp);
+        assert_eq!(
+            dp,
+            PathBuf::from("/project/broadcast/Deploy.s.sol/42220/run-latest.deferred.json")
+        );
+    }
+
+    #[test]
+    fn relative_broadcast_path_strips_root() {
+        let root = Path::new("/project");
+        let bp = Path::new("/project/broadcast/Deploy.s.sol/42220/run-latest.json");
+        let rel = relative_broadcast_path(root, bp);
+        assert_eq!(rel, "broadcast/Deploy.s.sol/42220/run-latest.json");
+    }
+
+    #[test]
+    fn deferred_operations_empty_roundtrip() {
+        let deferred = DeferredOperations {
+            timestamp: 1710600000000,
+            chain: 42220,
+            commit: Some("abc1234".into()),
+            safe_proposals: Vec::new(),
+            governor_proposals: Vec::new(),
+        };
+        let json = serde_json::to_string_pretty(&deferred).unwrap();
+        let parsed: DeferredOperations = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.chain, 42220);
+        assert_eq!(parsed.commit, Some("abc1234".into()));
+    }
+
+    #[test]
+    fn deferred_operations_with_safe_roundtrip() {
+        let deferred = DeferredOperations {
+            timestamp: 1710600000000,
+            chain: 1,
+            commit: None,
+            safe_proposals: vec![DeferredSafeProposal {
+                safe_tx_hash: "0xabc".into(),
+                safe_address: "0x123".into(),
+                nonce: 5,
+                chain_id: 1,
+                sender_role: "deployer".into(),
+                transaction_ids: vec!["tx-1".into(), "tx-2".into()],
+                status: "proposed".into(),
+                execution_tx_hash: None,
+            }],
+            governor_proposals: Vec::new(),
+        };
+        let json = serde_json::to_string_pretty(&deferred).unwrap();
+        let parsed: DeferredOperations = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.safe_proposals.len(), 1);
+        assert_eq!(parsed.safe_proposals[0].nonce, 5);
+        assert_eq!(parsed.safe_proposals[0].transaction_ids.len(), 2);
+    }
+
+    #[test]
+    fn load_resume_state_returns_none_for_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let result = load_resume_state(tmp.path(), "script/Deploy.s.sol", 1, "run()");
+        assert!(result.is_none());
+    }
+}

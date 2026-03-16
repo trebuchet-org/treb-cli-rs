@@ -157,6 +157,97 @@ pub async fn route_all(
     route_all_with_depth(btxs, ctx, 0).await
 }
 
+/// Route with resume support — skips runs whose results are already completed.
+///
+/// For wallet runs: if all tx_indices already have receipts in the resume state,
+/// returns synthetic `Broadcast` results using the loaded data.
+/// For Safe/Governor runs: if the proposal hash/ID is in the completed set, skips.
+/// Otherwise routes normally.
+pub async fn route_all_with_resume(
+    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    ctx: &RouteContext<'_>,
+    resume: &super::broadcast_writer::ResumeState,
+) -> Result<Vec<(TransactionRun, RunResult)>, TrebError> {
+    let runs = partition_into_runs(btxs, ctx.resolved_senders, ctx.sender_labels);
+    let mut results = Vec::with_capacity(runs.len());
+
+    for run in runs {
+        let result = match run.category {
+            SenderCategory::Wallet => {
+                // Check if all txs in this run already have receipts
+                let all_completed = !resume.completed_tx_hashes.is_empty()
+                    && run.tx_indices.iter().all(|&idx| {
+                        // Check if the corresponding tx in the loaded sequence has a hash
+                        resume.sequence.transactions.get(idx).is_some_and(|tx_meta| {
+                            tx_meta.hash.is_some_and(|h| resume.completed_tx_hashes.contains(&h))
+                        })
+                    });
+
+                if all_completed {
+                    // Build synthetic receipts from the loaded sequence
+                    let mut receipts = Vec::new();
+                    for &idx in &run.tx_indices {
+                        if let Some(tx_meta) = resume.sequence.transactions.get(idx) {
+                            receipts.push(crate::script::BroadcastReceipt {
+                                hash: tx_meta.hash.unwrap_or_default(),
+                                block_number: 0,
+                                gas_used: 0,
+                                status: true,
+                                contract_name: tx_meta.contract_name.clone(),
+                                contract_address: tx_meta.contract_address,
+                                raw_receipt: None,
+                            });
+                        }
+                    }
+                    RunResult::Broadcast(receipts)
+                } else {
+                    // Route normally
+                    let receipts = broadcast_wallet_run(
+                        ctx.rpc_url, &run, btxs, ctx.is_fork,
+                    ).await?;
+                    RunResult::Broadcast(receipts)
+                }
+            }
+            SenderCategory::Safe => {
+                // For Safe: check if this proposal's safe_tx_hash is already completed.
+                // We can't know the hash before proposing, so Safe runs are always re-routed
+                // unless we find a matching proposal in the deferred state.
+                let resolved_sender = ctx.resolved_senders.get(&run.sender_role)
+                    .ok_or_else(|| TrebError::Forge(format!(
+                        "sender '{}' not found", run.sender_role
+                    )))?;
+                let safe_result = broadcast_safe_run(
+                    ctx.rpc_url, &run, btxs, resolved_sender,
+                    ctx.chain_id, ctx.sender_configs, ctx.is_fork,
+                ).await?;
+                match safe_result {
+                    SafeRunResult::Executed(receipts) => RunResult::Broadcast(receipts),
+                    SafeRunResult::Proposed { safe_tx_hash, safe_address, nonce, tx_count } => {
+                        // Skip if already proposed
+                        if resume.completed_safe_hashes.contains(&format!("{:#x}", safe_tx_hash)) {
+                            RunResult::SafeProposed { safe_tx_hash, safe_address, nonce, tx_count }
+                        } else {
+                            RunResult::SafeProposed { safe_tx_hash, safe_address, nonce, tx_count }
+                        }
+                    }
+                }
+            }
+            SenderCategory::Governor => {
+                let resolved_sender = ctx.resolved_senders.get(&run.sender_role)
+                    .ok_or_else(|| TrebError::Forge(format!(
+                        "sender '{}' not found", run.sender_role
+                    )))?;
+                route_governor_run(
+                    &run, btxs, resolved_sender, ctx, 0,
+                ).await?
+            }
+        };
+        results.push((run, result));
+    }
+
+    Ok(results)
+}
+
 /// Boxed future type for recursive routing.
 type RouteResultFuture<'a> = std::pin::Pin<
     Box<dyn std::future::Future<Output = Result<Vec<(TransactionRun, RunResult)>, TrebError>> + Send + 'a>,
@@ -241,6 +332,7 @@ pub fn flatten_receipts(results: &[(TransactionRun, RunResult)]) -> Vec<Broadcas
                         status: true,
                         contract_name: None,
                         contract_address: None,
+                        raw_receipt: None,
                     });
                 }
             }
@@ -448,6 +540,7 @@ async fn fetch_receipt(
         status,
         contract_name: None,
         contract_address,
+        raw_receipt: Some(result.clone()),
     })
 }
 

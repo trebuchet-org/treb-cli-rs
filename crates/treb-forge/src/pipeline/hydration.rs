@@ -223,6 +223,7 @@ pub fn hydrate_transactions(
                 deployments: linked_deployment_ids,
                 operations: hydrate_transaction_operations(sim_tx, &linked_deployments),
                 safe_context: None,
+                broadcast_file: None,
                 environment: context.config.namespace.clone(),
                 created_at: now,
             }
@@ -456,6 +457,7 @@ pub fn hydrate_transactions_from_broadcast(
                 deployments: linked_deployment_ids,
                 operations,
                 safe_context: None,
+                broadcast_file: None,
                 environment: context.config.namespace.clone(),
                 created_at: now,
             }

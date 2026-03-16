@@ -1433,6 +1433,48 @@ pub async fn run(
                             &receipts,
                         );
 
+                        // Write broadcast files per component
+                        if let Some(ref btxs) = sim.result_transactions {
+                            let comp = &compose.components[&sim.name];
+                            let comp_sig = comp.sig.as_deref().unwrap_or("run()");
+                            let (_, bp, cp) =
+                                treb_forge::pipeline::broadcast_writer::compute_broadcast_paths(
+                                    &cwd,
+                                    &comp.script,
+                                    setup.pipeline_context.config.chain_id,
+                                    comp_sig,
+                                );
+                            let mut sequence =
+                                treb_forge::pipeline::broadcast_writer::build_script_sequence(
+                                    btxs,
+                                    &run_results,
+                                    &sim.result.transactions,
+                                    &setup.pipeline_context,
+                                    bp.clone(),
+                                    cp,
+                                );
+                            let deferred =
+                                treb_forge::pipeline::broadcast_writer::build_deferred_operations(
+                                    &run_results,
+                                    &sim.result.transactions,
+                                    &setup.pipeline_context,
+                                );
+                            let _ = treb_forge::pipeline::broadcast_writer::write_broadcast_artifacts(
+                                &mut sequence,
+                                &deferred,
+                            );
+
+                            // Set broadcastFile on recorded transactions
+                            let rel_path =
+                                treb_forge::pipeline::broadcast_writer::relative_broadcast_path(
+                                    &cwd,
+                                    &bp,
+                                );
+                            for rt in &mut sim.result.transactions {
+                                rt.transaction.broadcast_file = Some(rel_path.clone());
+                            }
+                        }
+
                         // Record to registry
                         for rd in &sim.result.deployments {
                             let _ = registry.insert_deployment(rd.deployment.clone());

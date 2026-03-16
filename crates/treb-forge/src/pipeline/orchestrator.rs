@@ -65,11 +65,18 @@ pub struct RunPipeline {
     script_config: Option<ScriptConfig>,
     broadcast_hook: Option<BroadcastHook>,
     broadcast_progress: Option<BroadcastProgressCallback>,
+    resume_state: Option<super::broadcast_writer::ResumeState>,
 }
 
 impl RunPipeline {
     pub fn new(context: PipelineContext) -> Self {
-        Self { context, script_config: None, broadcast_hook: None, broadcast_progress: None }
+        Self {
+            context,
+            script_config: None,
+            broadcast_hook: None,
+            broadcast_progress: None,
+            resume_state: None,
+        }
     }
 
     pub fn with_script_config(mut self, config: ScriptConfig) -> Self {
@@ -87,6 +94,12 @@ impl RunPipeline {
     /// Set a progress callback for broadcast pipeline phases.
     pub fn with_broadcast_progress(mut self, cb: BroadcastProgressCallback) -> Self {
         self.broadcast_progress = Some(cb);
+        self
+    }
+
+    /// Set resume state loaded from a previous broadcast file.
+    pub fn with_resume_state(mut self, state: super::broadcast_writer::ResumeState) -> Self {
+        self.resume_state = Some(state);
         self
     }
 
@@ -362,7 +375,11 @@ impl RunPipeline {
                         sender_labels: &self.context.sender_labels,
                         sender_configs: &self.context.sender_configs,
                     };
-                    let run_results = super::routing::route_all(btxs, &ctx).await?;
+                    let run_results = if let Some(ref resume) = self.resume_state {
+                        super::routing::route_all_with_resume(btxs, &ctx, resume).await?
+                    } else {
+                        super::routing::route_all(btxs, &ctx).await?
+                    };
 
                     // Build Safe/Governor records from routing results
                     let (routing_proposed, routing_safe_txs) =
@@ -383,6 +400,41 @@ impl RunPipeline {
 
                     let receipts = super::routing::flatten_receipts(&run_results);
                     super::hydration::apply_receipts(&mut recorded_transactions, &receipts);
+
+                    // Write Foundry-compatible broadcast files
+                    let (_, bp, cp) = super::broadcast_writer::compute_broadcast_paths(
+                        &self.context.project_root,
+                        &self.context.config.script_path,
+                        self.context.config.chain_id,
+                        &self.context.config.script_sig,
+                    );
+                    let mut sequence = super::broadcast_writer::build_script_sequence(
+                        btxs,
+                        &run_results,
+                        &recorded_transactions,
+                        &self.context,
+                        bp.clone(),
+                        cp,
+                    );
+                    let deferred = super::broadcast_writer::build_deferred_operations(
+                        &run_results,
+                        &recorded_transactions,
+                        &self.context,
+                    );
+                    super::broadcast_writer::write_broadcast_artifacts(
+                        &mut sequence,
+                        &deferred,
+                    )?;
+
+                    // Set broadcastFile on recorded transactions
+                    let rel_path = super::broadcast_writer::relative_broadcast_path(
+                        &self.context.project_root,
+                        &bp,
+                    );
+                    for rt in &mut recorded_transactions {
+                        rt.transaction.broadcast_file = Some(rel_path.clone());
+                    }
+
                     report(BroadcastPhase::Complete);
                 }
                 true

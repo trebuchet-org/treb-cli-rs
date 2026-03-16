@@ -266,6 +266,7 @@ fn seed_governor_proposal(ctx: &TestContext) {
             result: std::collections::HashMap::new(),
         }],
         safe_context: None,
+        broadcast_file: None,
         environment: "default".to_string(),
         created_at: Utc.with_ymd_and_hms(2026, 3, 8, 9, 55, 0).unwrap(),
     };

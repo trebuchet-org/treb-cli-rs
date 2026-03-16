@@ -30,6 +30,8 @@ pub struct BroadcastReceipt {
     pub contract_name: Option<String>,
     /// Deployed contract address if this was a deployment.
     pub contract_address: Option<Address>,
+    /// Raw JSON-RPC receipt object, preserved for broadcast file construction.
+    pub raw_receipt: Option<serde_json::Value>,
 }
 
 /// Structured result from a forge script execution.
@@ -150,6 +152,7 @@ pub async fn execute_script(
         let mut receipts = Vec::new();
         for seq in broadcasted.sequence.sequences() {
             for (tx_meta, receipt) in seq.transactions.iter().zip(seq.receipts.iter()) {
+                let raw = serde_json::to_value(receipt).ok();
                 receipts.push(BroadcastReceipt {
                     hash: receipt.transaction_hash,
                     block_number: receipt.block_number.unwrap_or_default(),
@@ -157,6 +160,7 @@ pub async fn execute_script(
                     status: receipt.inner.inner.inner.receipt.status.coerce_status(),
                     contract_name: tx_meta.contract_name.clone().filter(|s| !s.is_empty()),
                     contract_address: receipt.contract_address,
+                    raw_receipt: raw,
                 });
             }
         }

@@ -577,6 +577,7 @@ mod tests {
             deployments: dep_ids,
             operations: vec![],
             safe_context: None,
+            broadcast_file: None,
             environment: "testnet".to_string(),
             created_at: ts,
         }

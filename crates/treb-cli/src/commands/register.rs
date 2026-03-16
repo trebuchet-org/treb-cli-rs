@@ -650,6 +650,7 @@ pub async fn run(
         deployments: deployment_ids,
         operations,
         safe_context: None,
+        broadcast_file: None,
         environment: effective_namespace.clone(),
         created_at: Utc::now(),
     };

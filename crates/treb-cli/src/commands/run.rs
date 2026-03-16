@@ -368,6 +368,8 @@ pub struct ExecuteScriptOpts {
     pub effective_network: Option<String>,
     /// Whether an active fork is detected.
     pub is_fork: bool,
+    /// Resume a previous run, skipping already-completed transactions.
+    pub resume: bool,
     /// Optional broadcast confirmation hook.
     pub broadcast_hook: Option<BroadcastHook>,
 }
@@ -453,6 +455,18 @@ pub async fn execute_script(
 
     let mut pipeline = RunPipeline::new(pipeline_context).with_script_config(script_config);
 
+    // Load resume state if requested
+    if opts.resume {
+        if let Some(state) = treb_forge::pipeline::broadcast_writer::load_resume_state(
+            cwd,
+            &opts.script,
+            chain_id,
+            &opts.sig,
+        ) {
+            pipeline = pipeline.with_resume_state(state);
+        }
+    }
+
     let wants_broadcast = opts.broadcast && !opts.dry_run && !is_safe && !is_gov;
 
     // Wire broadcast hook
@@ -518,6 +532,7 @@ pub async fn run(
     verify: bool,
     verbose: u8,
     dump_command: bool,
+    resume: bool,
     json: bool,
     env_vars: Vec<String>,
     target_contract: Option<String>,
@@ -770,6 +785,7 @@ pub async fn run(
             effective_rpc_url,
             effective_network,
             is_fork: active_fork.is_some(),
+            resume,
             broadcast_hook,
         },
         &resolved,
@@ -1948,6 +1964,7 @@ needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
                 deployments: Vec::new(),
                 operations: Vec::new(),
                 safe_context: None,
+                broadcast_file: None,
                 environment: "default".into(),
                 created_at: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
             },
@@ -1976,6 +1993,7 @@ needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
                 deployments: Vec::new(),
                 operations: Vec::new(),
                 safe_context: None,
+                broadcast_file: None,
                 environment: "default".into(),
                 created_at: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
             },

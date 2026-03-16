@@ -1,21 +1,15 @@
 === cmd 0: [fork enter --help] ===
-Enter fork mode for a network
+Enter fork mode for a network: snapshot registry, start Anvil, record fork state
 
-Start a local Anvil fork of the specified network, backup registry files, and prepare the
-environment for fork-mode testing.
+Snapshots the current registry, spawns Anvil as a background subprocess forking from the upstream
+RPC, deploys CreateX, takes an initial EVM snapshot, and records a fully populated fork entry in
+`fork.json`.
 
-The network's RPC endpoint in foundry.toml must use an environment variable (e.g.,
-${SEPOLIA_RPC_URL}) so that treb can override it for the fork.
-
-Usage: treb fork enter [OPTIONS] <NETWORK|--network <NETWORK>>
-
-Arguments:
-  [NETWORK]
-          Network name or chain ID
+Usage: treb fork enter [OPTIONS]
 
 Options:
       --network <NETWORK>
-          Network name or chain ID
+          Network name (resolved from config if omitted)
 
       --no-color
           Disable colored output (also respected via NO_COLOR env var)
@@ -25,15 +19,10 @@ Options:
           stdin/stdout)
 
       --rpc-url <RPC_URL>
-          Explicit RPC URL (overrides network)
-          
-          [aliases: --url]
+          Upstream RPC URL to fork (overrides foundry.toml)
 
       --fork-block-number <FORK_BLOCK_NUMBER>
           Fork at a specific block number
-
-      --json
-          Output as JSON
 
   -h, --help
           Print help (see a summary with '-h')

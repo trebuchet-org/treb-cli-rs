@@ -85,6 +85,7 @@ fn make_transaction(
         deployments: deployments.iter().map(|id| (*id).to_string()).collect(),
         operations: vec![],
         safe_context: None,
+        broadcast_file: None,
         environment: "testnet".to_string(),
         created_at: ts,
     }

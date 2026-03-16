@@ -7,13 +7,13 @@ workflow.
 Usage: treb fork [OPTIONS] <COMMAND>
 
 Commands:
-  enter    Enter fork mode for a network
-  exit     Exit fork mode for a network
-  revert   Revert the last treb run on a fork
-  restart  Restart a crashed fork
-  status   Show status of all active forks
-  history  Show command history for a fork
-  diff     Show deployments added or changed during fork mode
+  enter    Enter fork mode for a network: snapshot registry, start Anvil, record fork state
+  exit     Exit fork mode: restore registry from snapshot and remove fork state
+  revert   Revert the fork to its last snapshot
+  restart  Restart the fork from a new block
+  status   Show active fork status
+  history  Show fork history
+  diff     Diff current registry vs snapshot
   help     Print this message or the help of the given subcommand(s)
 
 Options:

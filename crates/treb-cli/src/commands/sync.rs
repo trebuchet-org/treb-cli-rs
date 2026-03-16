@@ -476,6 +476,14 @@ pub async fn run(
         }
     }
 
+    // ── Update deferred broadcast files ────────────────────────────────
+    //
+    // After syncing registry records, scan broadcast/ for deferred files and
+    // update their status fields to reflect newly-executed proposals.
+    if newly_executed_count > 0 || gov_newly_executed_count > 0 {
+        update_deferred_broadcast_files(&cwd, &registry);
+    }
+
     // ── Output ──────────────────────────────────────────────────────────
 
     if json {
@@ -605,6 +613,86 @@ fn format_sync_human_output(
     out
 }
 
+// ── Deferred broadcast file helpers ──────────────────────────────────────
+
+/// Recursively find all `.deferred.json` files under a directory.
+fn find_deferred_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut result = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return result;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            result.extend(find_deferred_files(&path));
+        } else if path.file_name().is_some_and(|n| {
+            n.to_string_lossy().ends_with(".deferred.json")
+        }) {
+            result.push(path);
+        }
+    }
+    result
+}
+
+// ── Deferred broadcast file updater ──────────────────────────────────────
+
+/// Scan `broadcast/` for `.deferred.json` files and update status fields
+/// to reflect newly-executed Safe proposals or Governor proposals.
+fn update_deferred_broadcast_files(cwd: &std::path::Path, registry: &Registry) {
+    use treb_forge::pipeline::broadcast_writer::DeferredOperations;
+
+    let broadcast_dir = cwd.join("broadcast");
+    if !broadcast_dir.exists() {
+        return;
+    }
+
+    let deferred_files = find_deferred_files(&broadcast_dir);
+
+    for path in &deferred_files {
+        let Ok(contents) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let Ok(mut deferred) = serde_json::from_str::<DeferredOperations>(&contents) else {
+            continue;
+        };
+
+        let mut changed = false;
+
+        // Update Safe proposal statuses
+        for proposal in &mut deferred.safe_proposals {
+            if proposal.status == "proposed" {
+                // Check if this safe tx hash is now executed in the registry
+                if let Some(stx) = registry.get_safe_transaction(&proposal.safe_tx_hash) {
+                    if stx.status == TransactionStatus::Executed {
+                        proposal.status = "executed".into();
+                        proposal.execution_tx_hash =
+                            Some(stx.execution_tx_hash.clone()).filter(|s| !s.is_empty());
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        // Update Governor proposal statuses
+        for proposal in &mut deferred.governor_proposals {
+            if proposal.status == "proposed" {
+                if let Some(gp) = registry.get_governor_proposal(&proposal.proposal_id) {
+                    if gp.status == treb_core::types::ProposalStatus::Executed {
+                        proposal.status = "executed".into();
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        if changed {
+            if let Ok(json) = serde_json::to_string_pretty(&deferred) {
+                let _ = std::fs::write(path, json);
+            }
+        }
+    }
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -698,6 +786,7 @@ mod tests {
                 result: StdHashMap::new(),
             }],
             safe_context: None,
+            broadcast_file: None,
             environment: "test".into(),
             created_at: Utc.with_ymd_and_hms(2026, 3, 8, 10, 0, 0).unwrap(),
         }
