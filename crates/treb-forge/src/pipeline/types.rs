@@ -7,6 +7,7 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use alloy_primitives::Address;
+use serde::{Deserialize, Serialize};
 use treb_core::types::{
     GovernorProposal, deployment::Deployment, safe_transaction::SafeTransaction,
     transaction::Transaction,
@@ -182,4 +183,108 @@ pub struct SkippedDeployment {
     pub deployment: Deployment,
     /// Human-readable reason why it was skipped.
     pub reason: String,
+}
+
+// ---------------------------------------------------------------------------
+// ScriptEntry — input to SessionPipeline
+// ---------------------------------------------------------------------------
+
+/// A single script to execute in a session pipeline.
+pub struct ScriptEntry {
+    /// Human-readable name (script filename for run, component name for compose).
+    pub name: String,
+    /// Resolved execution context.
+    pub context: PipelineContext,
+    /// Forge script configuration.
+    pub config: crate::script::ScriptConfig,
+}
+
+// ---------------------------------------------------------------------------
+// ScriptResult — per-script output from SessionPipeline
+// ---------------------------------------------------------------------------
+
+/// Result of executing a single script within a session.
+pub struct ScriptResult {
+    /// The script name (matches `ScriptEntry::name`).
+    pub name: String,
+    /// The hydrated pipeline result.
+    pub result: PipelineResult,
+    /// Raw broadcastable transactions from simulation.
+    /// Retained for compose replay between scripts.
+    pub broadcastable_transactions: Option<foundry_cheatcodes::BroadcastableTransactions>,
+}
+
+// ---------------------------------------------------------------------------
+// SessionPhase — progress reporting
+// ---------------------------------------------------------------------------
+
+/// Phases reported by the session pipeline.
+#[derive(Debug, Clone)]
+pub enum SessionPhase {
+    /// Compiling the project (once).
+    Compiling,
+    /// Spawning an ephemeral Anvil fork (multi-script only).
+    SpawningAnvil,
+    /// Simulating a specific script.
+    Simulating(String),
+    /// All simulations complete.
+    SimulationComplete,
+    /// Broadcasting a specific script.
+    Broadcasting(String),
+    /// All broadcasts complete.
+    BroadcastComplete,
+}
+
+/// Callback for session pipeline progress updates.
+pub type SessionProgressCallback = Box<dyn Fn(SessionPhase) + Send>;
+
+// ---------------------------------------------------------------------------
+// SessionState — persistent session tracking
+// ---------------------------------------------------------------------------
+
+/// Persistent state for tracking session execution progress.
+///
+/// Written to `.treb/session-state.json` after each phase completion.
+/// Used by `--resume` to skip already-completed scripts/phases.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionState {
+    /// Hash of the configuration at session start, for change detection.
+    pub config_hash: String,
+    /// Per-script progress tracking.
+    pub scripts: Vec<ScriptProgress>,
+}
+
+/// Progress of a single script in the session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptProgress {
+    /// Script name (matches `ScriptEntry::name`).
+    pub name: String,
+    /// Path to the forge script file.
+    pub script_path: String,
+    /// Target chain ID.
+    pub chain_id: u64,
+    /// Script function signature.
+    pub sig: String,
+    /// Current phase of this script.
+    pub phase: ScriptPhase,
+    /// Number of deployments produced.
+    pub deployments: usize,
+    /// Number of transactions produced.
+    pub transactions: usize,
+}
+
+/// Phase of a single script in the session.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum ScriptPhase {
+    /// Not yet started.
+    Pending,
+    /// Simulation complete, ready for broadcast.
+    Simulated,
+    /// Broadcast complete.
+    Broadcast,
+    /// Failed during the named phase.
+    Failed { phase: String },
 }

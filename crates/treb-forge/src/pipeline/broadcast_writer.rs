@@ -23,7 +23,7 @@ use alloy_primitives::map::HashMap as AlloyHashMap;
 
 use alloy_primitives::B256;
 use forge_script_sequence::{
-    NestedValue, ScriptSequence, TransactionWithMetadata, sig_to_file_name,
+    ScriptSequence, TransactionWithMetadata, sig_to_file_name,
 };
 use foundry_evm::traces::CallKind;
 use serde::{Deserialize, Serialize};
@@ -480,6 +480,51 @@ pub fn load_resume_state(
         completed_safe_hashes,
         completed_gov_ids,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Session state persistence
+// ---------------------------------------------------------------------------
+
+use super::types::SessionState;
+
+const SESSION_STATE_FILE: &str = "session-state.json";
+
+/// Load the session state file from `.treb/session-state.json`.
+///
+/// Returns `None` if the file does not exist.
+pub fn load_session_state(treb_dir: &Path) -> Option<SessionState> {
+    let path = treb_dir.join(SESSION_STATE_FILE);
+    if !path.exists() {
+        return None;
+    }
+    let contents = fs::read_to_string(&path).ok()?;
+    serde_json::from_str(&contents).ok()
+}
+
+/// Save the session state file to `.treb/session-state.json`.
+pub fn save_session_state(
+    treb_dir: &Path,
+    state: &SessionState,
+) -> Result<(), TrebError> {
+    let path = treb_dir.join(SESSION_STATE_FILE);
+    let contents = serde_json::to_string_pretty(state).map_err(|e| {
+        TrebError::Forge(format!("failed to serialize session state: {e}"))
+    })?;
+    fs::write(&path, contents).map_err(|e| {
+        TrebError::Forge(format!(
+            "failed to write session state file {}: {e}",
+            path.display()
+        ))
+    })
+}
+
+/// Delete the session state file if it exists.
+pub fn delete_session_state(treb_dir: &Path) {
+    let path = treb_dir.join(SESSION_STATE_FILE);
+    if path.exists() {
+        let _ = fs::remove_file(&path);
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -5,37 +5,18 @@
 //! After all scripts simulate, the caller can broadcast all collected
 //! transactions in order.
 
-use std::collections::HashMap;
-
-use alloy_primitives::Address;
-use foundry_evm::{
-    traces::{
-        CallTraceDecoderBuilder, decode_trace_arena, identifier::TraceIdentifiers,
-        render_trace_arena,
-    },
-};
 use treb_core::error::TrebError;
 use treb_registry::Registry;
 
 use crate::{
     artifacts::ArtifactIndex,
     compiler::compile_project,
-    events::{decode_events, detect_proxy_relationships, extract_collisions, extract_deployments},
     script::{ExecutionResult, ScriptConfig},
 };
 
 use super::{
     PipelineContext,
-    hydration::{
-        hydrate_deployment, hydrate_governor_proposals, hydrate_safe_transactions,
-        hydrate_transactions,
-    },
-    orchestrator::{
-        collapse_decoded_bytecode_args,
-        extract_governor_proposal_created, extract_safe_transaction_queued,
-        extract_transaction_simulated, render_traces_for_verbosity, strip_internal_events,
-    },
-    types::{PipelineResult, RecordedDeployment, RecordedTransaction},
+    types::PipelineResult,
 };
 
 /// Progress callback for compose pipeline phases.
@@ -72,6 +53,12 @@ pub struct ComposePipeline {
     /// Scripts to execute, in order. Each entry is (name, context, config).
     scripts: Vec<(String, PipelineContext, ScriptConfig)>,
     progress: Option<ComposeProgressCallback>,
+}
+
+impl Default for ComposePipeline {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ComposePipeline {
@@ -275,7 +262,7 @@ impl ComposePipeline {
         // Clone execution result for hydration
         let script_result = executed.execution_result.clone();
         let decoded_logs = crate::console::decode_console_logs(&script_result.logs);
-        let mut execution = ExecutionResult {
+        let execution = ExecutionResult {
             success: script_result.success,
             logs: decoded_logs,
             raw_logs: script_result.logs,
@@ -287,151 +274,38 @@ impl ComposePipeline {
             broadcast_receipts: None,
         };
 
-        // Check for failed execution
-        if !execution.success {
-            let mut err_parts = Vec::new();
-            if !execution.logs.is_empty() {
-                err_parts.push(execution.logs.join("\n"));
-            }
-            let contracts = artifact_index.inner();
-            let mut decoder =
-                CallTraceDecoderBuilder::new().with_known_contracts(contracts).build();
-            let mut identifier = TraceIdentifiers::new().with_local(contracts);
-            for (_, arena) in &execution.traces {
-                decoder.identify(&arena.arena, &mut identifier);
-            }
-            for (_, arena) in &mut execution.traces {
-                decode_trace_arena(&mut arena.arena, &decoder).await;
-                collapse_decoded_bytecode_args(&mut arena.arena, artifact_index);
-                let rendered = strip_internal_events(&render_trace_arena(arena));
-                if !rendered.trim().is_empty() {
-                    err_parts.push(rendered);
-                }
-            }
-            let detail = if err_parts.is_empty() {
-                "script reverted without output".to_string()
-            } else {
-                err_parts.join("\n")
-            };
-            return Err(TrebError::Forge(format!("script execution failed:\n{detail}")));
-        }
-
-        // Hydrate: decode events → extract deployments → hydrate transactions
-        let parsed_events = decode_events(&execution.raw_logs);
-        let event_count = parsed_events.len();
-        let extracted_deployments = extract_deployments(&parsed_events, Some(artifact_index));
-        let collisions = extract_collisions(&parsed_events);
-        let proxy_relationships = detect_proxy_relationships(&parsed_events);
-
-        let hydrated_deployments = extracted_deployments
-            .iter()
-            .map(|extracted| {
-                let proxy = proxy_relationships.get(&extracted.address);
-                hydrate_deployment(extracted, proxy, context)
-            })
-            .collect::<Vec<_>>();
-
-        // Hydrate transactions from BroadcastableTransactions (v2) or
-        // TransactionSimulated events (v1 fallback).
-        let broadcastable_txs = execution.transactions.as_ref();
-        let transactions = if let Some(btxs) = broadcastable_txs {
-            super::hydration::hydrate_transactions_from_broadcast(btxs, &hydrated_deployments, context)
-        } else {
-            let tx_events = extract_transaction_simulated(&parsed_events);
-            hydrate_transactions(&tx_events, &hydrated_deployments, context)
-        };
-
-        // Build per-transaction metadata with trace matching
-        let mut transaction_metadata = if let Some(btxs) = broadcastable_txs {
-            super::orchestrator::build_v2_recorded_transaction_metadata(
-                btxs,
-                &extracted_deployments,
-                &execution.traces,
-                context,
-            )
-        } else {
-            HashMap::new()
-        };
-
-        let safe_tx_events = extract_safe_transaction_queued(&parsed_events);
-        let governor_events = extract_governor_proposal_created(&parsed_events);
-        let _safe_transactions = hydrate_safe_transactions(&safe_tx_events, context);
-        let governor_proposals = hydrate_governor_proposals(&governor_events, context);
-
-        // Build address labels for trace decoding
-        let mut labeled_addresses = execution.labeled_addresses.clone();
-        for (addr, role) in &context.sender_labels {
-            labeled_addresses.entry(*addr).or_insert_with(|| role.clone());
-        }
-        for dep in &extracted_deployments {
-            let label = if dep.label.is_empty() {
-                dep.contract_name.clone()
-            } else {
-                format!("{}:{}", dep.contract_name, dep.label)
-            };
-            labeled_addresses.insert(dep.address, label);
-        }
-        for dep in registry.list_deployments() {
-            if let Ok(addr) = dep.address.parse::<Address>() {
-                let label = if dep.label.is_empty() {
-                    dep.contract_name.clone()
-                } else {
-                    format!("{}:{}", dep.contract_name, dep.label)
-                };
-                labeled_addresses.entry(addr).or_insert(label);
-            }
-        }
-
-        // Render traces and extract per-transaction sub-trees
-        let (execution_traces, setup_traces) = render_traces_for_verbosity(
-            execution.traces,
-            &labeled_addresses,
+        // Hydrate simulation results using shared path
+        let sim = super::simulation::hydrate_simulation(
+            execution,
             artifact_index,
-            context.config.verbosity,
-            &mut transaction_metadata,
+            context,
+            registry,
+            &super::simulation::HydrationOptions {
+                populate_safe_context: false,
+                include_addressbook_labels: false,
+            },
         )
-        .await;
+        .await?;
 
-        // Build recorded transactions
-        let recorded_transactions: Vec<RecordedTransaction> = transactions
-            .into_iter()
-            .map(|tx| {
-                let metadata = transaction_metadata.remove(&tx.id).unwrap_or_default();
-                RecordedTransaction {
-                    transaction: tx,
-                    sender_name: metadata.sender_name,
-                    gas_used: metadata.gas_used,
-                    trace: metadata.trace,
-                }
-            })
-            .collect();
-
-        // Build recorded deployments (no registry writes in simulate phase)
-        let recorded_deployments: Vec<RecordedDeployment> = hydrated_deployments
-            .into_iter()
-            .map(|dep| RecordedDeployment { deployment: dep, safe_transaction: None })
-            .collect();
+        let result_transactions = sim.broadcastable_transactions.clone();
 
         let result = PipelineResult {
-            deployments: recorded_deployments,
-            transactions: recorded_transactions,
+            deployments: sim.recorded_deployments,
+            transactions: sim.recorded_transactions,
             registry_updated: false,
-            collisions,
+            collisions: sim.collisions,
             skipped: Vec::new(),
             dry_run: true,
             success: true,
-            gas_used: execution.gas_used,
-            event_count,
-            console_logs: execution.logs,
-            governor_proposals,
-            safe_transactions: Vec::new(),
+            gas_used: sim.gas_used,
+            event_count: sim.event_count,
+            console_logs: sim.console_logs,
+            governor_proposals: sim.governor_proposals,
+            safe_transactions: sim.safe_transactions,
             proposed_results: Vec::new(),
-            execution_traces,
-            setup_traces,
+            execution_traces: sim.execution_traces,
+            setup_traces: sim.setup_traces,
         };
-
-        // Capture broadcastable transactions for replaying on the shared fork
-        let result_transactions = execution.transactions.clone();
 
         Ok(ComponentSimulation {
             name: name.to_string(),
@@ -446,7 +320,7 @@ impl ComposePipeline {
 ///
 /// Uses `anvil_impersonateAccount` + `eth_sendTransaction` for each tx.
 /// Anvil mines each tx immediately, persisting the state for the next script.
-async fn replay_transactions_on_fork(
+pub async fn replay_transactions_on_fork(
     rpc_url: &str,
     txs: &foundry_cheatcodes::BroadcastableTransactions,
 ) -> Result<(), TrebError> {

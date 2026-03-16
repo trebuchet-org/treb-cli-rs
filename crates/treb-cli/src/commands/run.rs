@@ -3,7 +3,6 @@
 use std::{
     collections::HashMap,
     env,
-    io::{self, BufRead, Write},
     path::PathBuf,
     sync::{Arc, Mutex},
     time::Duration,
@@ -17,11 +16,14 @@ use foundry_common::{
 use owo_colors::{OwoColorize, Style};
 use serde::Serialize;
 use treb_config::{ResolveOpts, resolve_config};
-use treb_core::types::{Operation, TransactionStatus};
+use treb_core::types::TransactionStatus;
+#[cfg(test)]
+use treb_core::types::Operation;
 use treb_forge::{
     pipeline::{
-        BroadcastHook, BroadcastPhase, BroadcastProgressCallback, PipelineConfig, PipelineContext,
-        PipelineResult, RecordedTransaction, RunPipeline, resolve_git_commit,
+        BroadcastHook, PipelineConfig, PipelineContext,
+        PipelineResult, RecordedTransaction, ScriptEntry, SessionPhase,
+        SessionPipeline, SessionProgressCallback, resolve_git_commit,
     },
     script::build_script_config_with_senders,
     sender::{ResolvedSender, resolve_all_senders},
@@ -54,6 +56,7 @@ pub fn parse_env_var(s: &str) -> anyhow::Result<(&str, &str)> {
     Ok((key, value))
 }
 
+#[cfg(test)]
 fn format_verbose_sender(role: &str, sender: &ResolvedSender) -> String {
     match sender {
         ResolvedSender::Governor { governor_address, timelock_address, proposer } => {
@@ -453,41 +456,38 @@ pub async fn execute_script(
         sender_role_names,
     };
 
-    let mut pipeline = RunPipeline::new(pipeline_context).with_script_config(script_config);
+    // Build SessionPipeline with a single script entry
+    let script_name = PathBuf::from(&opts.script)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| opts.script.clone());
 
-    // Load resume state if requested
+    let mut session = SessionPipeline::new();
+    session.add_script(ScriptEntry {
+        name: script_name.clone(),
+        context: pipeline_context,
+        config: script_config,
+    });
+
     if opts.resume {
-        if let Some(state) = treb_forge::pipeline::broadcast_writer::load_resume_state(
-            cwd,
-            &opts.script,
-            chain_id,
-            &opts.sig,
-        ) {
-            pipeline = pipeline.with_resume_state(state);
-        }
+        session = session.with_resume(true);
     }
 
+    // Wire progress spinner
     let wants_broadcast = opts.broadcast && !opts.dry_run && !is_safe && !is_gov;
-
-    // Wire broadcast hook
-    if let Some(hook) = opts.broadcast_hook {
-        pipeline = pipeline.with_broadcast_hook(hook);
-    }
-
-    // Wire progress spinner (shared handle so we can clear on error)
     let spinner: Arc<Mutex<Option<spinoff::Spinner>>> = Arc::new(Mutex::new(None));
     if !opts.json {
         let is_broadcast = wants_broadcast;
         let spinner_ref = spinner.clone();
-        let progress_cb: BroadcastProgressCallback = Box::new(move |phase| {
+        let progress_cb: SessionProgressCallback = Box::new(move |phase| {
             let mut guard = spinner_ref.lock().unwrap();
             if let Some(mut s) = guard.take() {
                 s.clear();
             }
             let msg = match phase {
-                BroadcastPhase::Compiling => Some("Compiling"),
-                BroadcastPhase::Simulating if is_broadcast => Some("Simulating"),
-                BroadcastPhase::Broadcasting => Some("Broadcasting"),
+                SessionPhase::Compiling => Some("Compiling".to_string()),
+                SessionPhase::Simulating(_) if is_broadcast => Some("Simulating".to_string()),
+                SessionPhase::Broadcasting(_) => Some("Broadcasting".to_string()),
                 _ => None,
             };
             if let Some(msg) = msg {
@@ -498,22 +498,63 @@ pub async fn execute_script(
                 ));
             }
         });
-        pipeline = pipeline.with_broadcast_progress(progress_cb);
+        session = session.with_progress(progress_cb);
     }
 
-    // Execute with forge shell suppressed
-    let result = {
+    // Phase 1: Simulate
+    let simulated = {
         let _foundry_shell = FoundryShellGuard::suppress();
-        let r = pipeline.execute(registry).await;
-        // Always clear spinner before returning (success or error).
-        // Drop the spinner first (stops the animation thread), then
-        // force-clear the line since spinoff doesn't always erase it.
+        let r = session.simulate_all(registry).await;
         drop(spinner.lock().unwrap().take());
         eprint!("\x1b[2K\r");
-        r.context("pipeline execution failed")?
+        match r {
+            Ok(s) => s,
+            Err((_partial, _name, e)) => return Err(anyhow::anyhow!(e)),
+        }
     };
 
-    Ok(result)
+    // Phase 2: Broadcast hook (confirm) → broadcast
+    let should_broadcast = if wants_broadcast {
+        opts.broadcast_hook
+            .is_none_or(|hook| {
+                let (_, result) = simulated.results().next().unwrap();
+                hook(&result.transactions)
+            })
+    } else {
+        false
+    };
+
+    if should_broadcast {
+        let spinner2: Arc<Mutex<Option<spinoff::Spinner>>> = Arc::new(Mutex::new(None));
+        if !opts.json {
+            let spinner_ref = spinner2.clone();
+            *spinner_ref.lock().unwrap() = Some(spinoff::Spinner::new(
+                spinoff::spinners::Dots2,
+                "Broadcasting",
+                spinoff::Color::Cyan,
+            ));
+        }
+
+        let result = {
+            let _foundry_shell = FoundryShellGuard::suppress();
+            let r = simulated.broadcast_all(registry).await;
+            drop(spinner2.lock().unwrap().take());
+            eprint!("\x1b[2K\r");
+            match r {
+                Ok(results) => results
+                    .into_iter()
+                    .next()
+                    .map(|sr| sr.result)
+                    .ok_or_else(|| anyhow::anyhow!("pipeline returned no results")),
+                Err((_partial, _name, e)) => Err(anyhow::anyhow!(e)),
+            }
+        }?;
+        Ok(result)
+    } else {
+        Ok(simulated.into_results().into_iter().next()
+            .map(|sr| sr.result)
+            .ok_or_else(|| anyhow::anyhow!("pipeline returned no results"))?)
+    }
 }
 
 /// Execute a deployment script.
@@ -845,7 +886,7 @@ async fn poll_proposed_results(
             // Start spinner + poll
             let mut spinner = spinoff::Spinner::new(
                 spinoff::spinners::Dots2,
-                format!("  Waiting for Safe execution (polling every 5s)..."),
+                "  Waiting for Safe execution (polling every 5s)...".to_string(),
                 spinoff::Color::Cyan,
             );
 
@@ -1021,19 +1062,7 @@ fn display_result_json(result: &PipelineResult) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn print_registry_update_section(result: &PipelineResult, network: Option<&str>, namespace: &str) {
-    let Some((msg, updated)) = registry_update_message(result, network, namespace) else {
-        return;
-    };
-
-    if color::is_color_enabled() {
-        let style = if updated { color::GREEN } else { color::YELLOW };
-        println!("\n{}", msg.style(style));
-    } else {
-        println!("\n{msg}");
-    }
-}
-
+#[cfg(test)]
 fn registry_update_message(
     result: &PipelineResult,
     network: Option<&str>,
@@ -1222,6 +1251,7 @@ fn format_tx_status(status: &TransactionStatus) -> String {
     if color::is_color_enabled() { format!("{}", label.style(style)) } else { label.to_string() }
 }
 
+#[cfg(test)]
 fn format_tx_operation(operation: &Operation) -> String {
     let target = if color::is_color_enabled() {
         format!("{}", output::truncate_address(&operation.target).style(color::CYAN))
@@ -1237,6 +1267,7 @@ fn format_tx_operation(operation: &Operation) -> String {
 }
 
 /// Format a summary of all operations for display after the `→` arrow.
+#[cfg(test)]
 fn format_tx_operations(operations: &[Operation]) -> String {
     operations.iter().map(format_tx_operation).collect::<Vec<_>>().join(" | ")
 }
@@ -1278,7 +1309,7 @@ fn format_skipped_deployment_line(skipped: &treb_forge::SkippedDeployment) -> St
     )
 }
 
-fn display_result_human(result: &PipelineResult, verbose: u8, network: Option<&str>, namespace: &str, skip_traces: bool) {
+fn display_result_human(result: &PipelineResult, verbose: u8, _network: Option<&str>, _namespace: &str, skip_traces: bool) {
     // ── Transactions ────────────────────────────────────────────────────
     if result.transactions.is_empty() && result.deployments.is_empty() {
         let msg = "No transactions recorded";

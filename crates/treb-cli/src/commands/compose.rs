@@ -293,6 +293,7 @@ fn format_execution_plan_header_lines(compose: &ComposeFile, plan_len: usize) ->
 
 /// Display the execution plan in human-readable format (matches Go `RenderExecutionPlan`).
 /// Print the compose banner with plan, network, namespace, senders, and components.
+#[allow(clippy::too_many_arguments)]
 fn print_compose_banner(
     compose: &ComposeFile,
     plan: &[PlanEntry],
@@ -471,10 +472,6 @@ fn print_resume_banner(start_step: usize, total: usize) {
     eprintln!("{} Resuming compose from step {} of {}", emoji::OPEN_FOLDER, start_step, total);
 }
 
-fn print_step_start(step: usize, total: usize, component: &str) {
-    eprintln!("\n[{step}/{total}] Starting {}", styled(component, color::CYAN));
-}
-
 fn should_prompt_for_broadcast_confirmation(
     broadcast: bool,
     dry_run: bool,
@@ -590,9 +587,9 @@ fn styled(text: &str, style: Style) -> String {
 
 /// Display compose summary in human-readable format (matches Go renderSummary).
 fn display_compose_human(
-    group: &str,
+    _group: &str,
     results: &[ComponentResultEntry],
-    totals: &ComposeTotals,
+    _totals: &ComposeTotals,
     completed: usize,
     total: usize,
     failed_component: &Option<String>,
@@ -1026,11 +1023,6 @@ pub async fn run(
         }
     }
 
-    // ── Phase 1: Build ComposePipeline with all non-skipped components ──
-    use treb_forge::pipeline::compose::{ComposePipeline, ComposePhase};
-
-    let mut compose_pipeline = ComposePipeline::new();
-
     // Track skipped components in results
     for name in &order {
         if skip_set.contains(name) {
@@ -1045,7 +1037,7 @@ pub async fn run(
         }
     }
 
-    // Shared params for component setup (used in simulation and broadcast phases).
+    // Shared params for component setup
     let compose_params = ComposeParams {
         cwd: &cwd,
         namespace: &namespace,
@@ -1060,7 +1052,12 @@ pub async fn run(
         verbose,
     };
 
-    // Resolve config and build pipeline entries for non-skipped components
+    // ── Build SessionPipeline with all non-skipped components ─────
+    use treb_forge::pipeline::{
+        ScriptEntry, SessionPhase, SessionPipeline, SessionProgressCallback,
+    };
+
+    let mut session = SessionPipeline::new();
     let mut components_to_run: Vec<String> = Vec::new();
     for name in &order {
         if skip_set.contains(name) {
@@ -1071,25 +1068,31 @@ pub async fn run(
             .await
             .with_context(|| format!("failed to set up component '{}'", name))?;
 
-        compose_pipeline.add_script(name.clone(), setup.pipeline_context, setup.script_config);
+        session.add_script(ScriptEntry {
+            name: name.clone(),
+            context: setup.pipeline_context,
+            config: setup.script_config,
+        });
         components_to_run.push(name.clone());
     }
 
-    // ── Phase 2: Simulate all with shared EVM ───────────────────────
-    // Set up progress spinner
+    if resume {
+        session = session.with_resume(true);
+    }
+
+    // Simulation progress spinner
     let spinner: std::sync::Arc<std::sync::Mutex<Option<spinoff::Spinner>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));
     if !json {
         let spinner_ref = spinner.clone();
-        compose_pipeline = compose_pipeline.with_progress(Box::new(move |phase| {
+        let progress_cb: SessionProgressCallback = Box::new(move |phase| {
             let mut guard = spinner_ref.lock().unwrap();
             if let Some(mut s) = guard.take() {
                 s.clear();
             }
             let msg = match phase {
-                ComposePhase::Compiling => Some("Compiling".to_string()),
-                ComposePhase::Executing(ref name) => Some(format!("Executing {name}")),
-                ComposePhase::Broadcasting(ref name) => Some(format!("Broadcasting {name}")),
+                SessionPhase::Compiling => Some("Compiling".to_string()),
+                SessionPhase::Simulating(ref name) => Some(format!("Executing {name}")),
                 _ => None,
             };
             if let Some(msg) = msg {
@@ -1099,40 +1102,41 @@ pub async fn run(
                     spinoff::Color::Cyan,
                 ));
             }
-        }));
+        });
+        session = session.with_progress(progress_cb);
     }
 
-    let sim_result = {
+    // ── Phase 2: Simulate all with shared EVM ────────────────────
+    let simulated = {
         let _foundry_shell = super::run::FoundryShellGuard::suppress();
-        let r = compose_pipeline.simulate_all(&mut registry).await;
-        // Clear spinner
+        let r = session.simulate_all(&mut registry).await;
         drop(spinner.lock().unwrap().take());
         eprint!("\x1b[2K\r");
         r
     };
 
     // Reload registry — simulate_all snapshots/restores the on-disk files,
-    // so the in-memory Registry is stale. Re-open before Phase 4 broadcast.
+    // so the in-memory Registry is stale.
     registry = Registry::open(&cwd).context("failed to reload registry")?;
 
-    let mut simulations = match sim_result {
-        Ok(sims) => sims,
-        Err((partial_sims, failed_name, err)) => {
-            // Record successful simulations
-            for sim in &partial_sims {
-                completed += 1;
-                component_results.push(ComponentResultEntry {
-                    component: sim.name.clone(),
-                    status: ComponentStatus::Success,
-                    deployments: sim.result.deployments.len(),
-                    transactions: sim.result.transactions.len(),
-                    gas_used: sim.result.gas_used,
-                    error: None,
-                });
-                state.completed.push(sim.name.clone());
-                state.deployment_total += sim.result.deployments.len();
+    let simulated = match simulated {
+        Ok(s) => s,
+        Err((partial_results, failed_name, err)) => {
+            for sr in &partial_results {
+                if components_to_run.contains(&sr.name) {
+                    completed += 1;
+                    component_results.push(ComponentResultEntry {
+                        component: sr.name.clone(),
+                        status: ComponentStatus::Success,
+                        deployments: sr.result.deployments.len(),
+                        transactions: sr.result.transactions.len(),
+                        gas_used: sr.result.gas_used,
+                        error: None,
+                    });
+                    state.completed.push(sr.name.clone());
+                    state.deployment_total += sr.result.deployments.len();
+                }
             }
-            // Record failed component
             let full = format!("{:#}", err);
             if !json {
                 eprintln!("{full}");
@@ -1162,7 +1166,6 @@ pub async fn run(
                 error: Some(error_msg),
             });
             failed_component = Some(failed_name.clone());
-            // Mark remaining as not-executed
             let failed_idx = components_to_run.iter().position(|n| n == &failed_name).unwrap_or(0);
             for name in components_to_run.iter().skip(failed_idx + 1) {
                 component_results.push(ComponentResultEntry {
@@ -1174,24 +1177,52 @@ pub async fn run(
                     error: None,
                 });
             }
-            Vec::new() // No simulations to process further
+
+            // Jump to display results
+            let totals = compute_totals(&component_results);
+            let _success = false;
+            if !json {
+                let human_totals = ComposeTotals {
+                    deployments: totals.deployments + resumed_deployments,
+                    ..totals
+                };
+                display_compose_human(
+                    &compose.group,
+                    &component_results,
+                    &human_totals,
+                    completed,
+                    total,
+                    &failed_component,
+                );
+            }
+            let failure_error = failed_component.as_ref().map(|failed| {
+                anyhow::anyhow!(
+                    "compose failed: component '{}' failed ({}/{} completed)",
+                    failed, completed, total
+                )
+            });
+            if let Some(err) = failure_error {
+                return Err(err);
+            }
+            return Ok(());
         }
     };
 
-    // ── Phase 3: Display combined simulation results ────────────────
-    if !simulations.is_empty() && !json {
-        let total_txs: usize = simulations.iter().map(|s| s.result.transactions.len()).sum();
-        let total_deps: usize = simulations.iter().map(|s| s.result.deployments.len()).sum();
+    // ── Phase 3: Display combined simulation results ────────────
+    if !json {
+        let sim_results: Vec<_> = simulated.results().collect();
+        let total_txs: usize = sim_results.iter().map(|(_, r)| r.transactions.len()).sum();
+        let total_deps: usize = sim_results.iter().map(|(_, r)| r.deployments.len()).sum();
 
         if total_txs > 0 {
-            // Show all transactions in order with script separator lines
             let use_color = crate::ui::color::is_color_enabled();
+            let sim_count = sim_results.len();
             let header = format!(
                 "\n{} transaction{} across {} component{}:",
                 total_txs,
                 if total_txs == 1 { "" } else { "s" },
-                simulations.len(),
-                if simulations.len() == 1 { "" } else { "s" },
+                sim_count,
+                if sim_count == 1 { "" } else { "s" },
             );
             if use_color {
                 eprintln!("{}", header.style(crate::ui::color::BOLD));
@@ -1200,22 +1231,21 @@ pub async fn run(
             }
 
             let mut global_idx = 0usize;
-            for sim in &simulations {
-                if sim.result.transactions.is_empty() {
+            for (name, result) in &sim_results {
+                if result.transactions.is_empty() {
                     continue;
                 }
-                // Thin separator with script name
                 if use_color {
                     eprintln!(
                         "\n  {} {}",
                         "──".style(crate::ui::color::GRAY),
-                        sim.name.style(crate::ui::color::CYAN),
+                        name.style(crate::ui::color::CYAN),
                     );
                 } else {
-                    eprintln!("\n  ── {}", sim.name);
+                    eprintln!("\n  ── {}", name);
                 }
 
-                for rt in &sim.result.transactions {
+                for rt in &result.transactions {
                     let sender_label = super::run::tx_sender_label(rt);
                     if use_color {
                         eprintln!(
@@ -1227,7 +1257,6 @@ pub async fn run(
                         eprintln!("  {global_idx}: from={sender_label}");
                     }
 
-                    // Show per-tx trace if available, otherwise operation summary
                     if let Some(ref trace) = rt.trace {
                         for line in trace.lines() {
                             eprintln!("  {line}");
@@ -1253,18 +1282,16 @@ pub async fn run(
             eprintln!();
         }
 
-        // Show collisions if any
-        let total_collisions: usize = simulations.iter().map(|s| s.result.collisions.len()).sum();
+        // Show collisions
+        let total_collisions: usize = sim_results.iter().map(|(_, r)| r.collisions.len()).sum();
         if total_collisions > 0 {
             let use_color = crate::ui::color::is_color_enabled();
             eprintln!();
-            for sim in &simulations {
-                for c in &sim.result.collisions {
+            for (_, result) in &sim_results {
+                for c in &result.collisions {
                     let line = format!(
                         "  {} {} at {}",
-                        emoji::WARNING,
-                        c.contract_name,
-                        c.existing_address,
+                        emoji::WARNING, c.contract_name, c.existing_address,
                     );
                     if use_color {
                         eprintln!("{}", line.style(crate::ui::color::YELLOW));
@@ -1283,8 +1310,8 @@ pub async fn run(
         if total_deps > 0 {
             let use_color = crate::ui::color::is_color_enabled();
             eprintln!("\n{} Deployments:", crate::ui::emoji::PACKAGE);
-            for sim in &simulations {
-                for rd in &sim.result.deployments {
+            for (_, result) in &sim_results {
+                for rd in &result.deployments {
                     let d = &rd.deployment;
                     let mut name = d.contract_name.clone();
                     if !d.label.is_empty() {
@@ -1305,256 +1332,198 @@ pub async fn run(
 
         eprintln!(
             "\n{} Simulation complete: {} transaction(s), {} deployment(s) across {} component(s)",
-            emoji::CHECK_MARK, total_txs, total_deps, simulations.len()
+            emoji::CHECK_MARK, total_txs, total_deps, sim_results.len()
         );
         eprintln!();
     }
 
-    // Record all successful simulations
-    if !simulations.is_empty() {
-        for sim in &simulations {
+    // ── Phase 4: Broadcast confirmation + broadcast ──────────────
+    let total_txs: usize = simulated.results().map(|(_, r)| r.transactions.len()).sum();
+    let should_broadcast = broadcast && total_txs > 0;
+
+    let script_results = if should_broadcast {
+        // Confirmation prompt (interactive mode only)
+        if prompts_enabled && !json {
+            let network_name = network.as_deref()
+                .or(banner_network)
+                .unwrap_or("unknown");
+            let fork_tag = if banner_is_fork { " [fork]" } else { "" };
+            let url_suffix = banner_rpc_url.as_deref()
+                .map(|u| format!(" ({u})"))
+                .unwrap_or_default();
+            eprintln!(
+                "\n  {} {}{}{}\n",
+                styled("Target:", color::BOLD),
+                network_name,
+                fork_tag,
+                styled(&url_suffix, color::GRAY),
+            );
+
+            let confirmed = crate::ui::prompt::confirm(
+                "Broadcast these transactions?",
+                false,
+            );
+            if !confirmed {
+                eprintln!("Broadcast cancelled.");
+                delete_compose_state();
+                return Ok(());
+            }
+        }
+        if !json {
+            let network_label = network.as_deref()
+                .or(banner_network)
+                .unwrap_or("network");
+            eprintln!(
+                "\n{}",
+                styled(&format!("Broadcasting to {network_label}..."), color::CYAN),
+            );
+        }
+
+        // Broadcast with spinner
+        let broadcast_spinner: std::sync::Arc<std::sync::Mutex<Option<spinoff::Spinner>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(None));
+
+        let broadcast_result = {
+            let _foundry_shell = super::run::FoundryShellGuard::suppress();
+            let r = simulated.broadcast_all(&mut registry).await;
+            drop(broadcast_spinner.lock().unwrap().take());
+            eprint!("\x1b[2K\r");
+            r
+        };
+
+        match broadcast_result {
+            Ok(results) => results,
+            Err((partial_results, failed_name, err)) => {
+                for sr in &partial_results {
+                    if components_to_run.contains(&sr.name) {
+                        completed += 1;
+                        component_results.push(ComponentResultEntry {
+                            component: sr.name.clone(),
+                            status: ComponentStatus::Success,
+                            deployments: sr.result.deployments.len(),
+                            transactions: sr.result.transactions.len(),
+                            gas_used: sr.result.gas_used,
+                            error: None,
+                        });
+                        state.completed.push(sr.name.clone());
+                        state.deployment_total += sr.result.deployments.len();
+                    }
+                }
+                let error_msg = format!("{err}");
+                if !json {
+                    eprintln!(
+                        "  {} {}",
+                        styled(emoji::CROSS, color::RED),
+                        styled(&format!("{failed_name}: {error_msg}"), color::RED),
+                    );
+                }
+                component_results.push(ComponentResultEntry {
+                    component: failed_name.clone(),
+                    status: ComponentStatus::Failed,
+                    deployments: 0,
+                    transactions: 0,
+                    gas_used: 0,
+                    error: Some(error_msg),
+                });
+                failed_component = Some(failed_name.clone());
+                let failed_idx = components_to_run.iter().position(|n| n == &failed_name).unwrap_or(0);
+                for name in components_to_run.iter().skip(failed_idx + 1) {
+                    component_results.push(ComponentResultEntry {
+                        component: name.clone(),
+                        status: ComponentStatus::NotExecuted,
+                        deployments: 0,
+                        transactions: 0,
+                        gas_used: 0,
+                        error: None,
+                    });
+                }
+                Vec::new()
+            }
+        }
+    } else {
+        simulated.into_results()
+    };
+
+    // Record successful results and display broadcast output
+    if !script_results.is_empty() {
+        for sr in &script_results {
             completed += 1;
             component_results.push(ComponentResultEntry {
-                component: sim.name.clone(),
+                component: sr.name.clone(),
                 status: ComponentStatus::Success,
-                deployments: sim.result.deployments.len(),
-                transactions: sim.result.transactions.len(),
-                gas_used: sim.result.gas_used,
+                deployments: sr.result.deployments.len(),
+                transactions: sr.result.transactions.len(),
+                gas_used: sr.result.gas_used,
                 error: None,
             });
-            state.completed.push(sim.name.clone());
-            state.deployment_total += sim.result.deployments.len();
+            state.completed.push(sr.name.clone());
+            state.deployment_total += sr.result.deployments.len();
         }
         save_compose_state(&state)?;
 
-        // ── Phase 4: Broadcast (if requested) ───────────────────────
-        //
-        // Route each component's already-captured BroadcastableTransactions
-        // to the upstream URL. No re-execution — simulation gave us everything.
-        let total_txs: usize = simulations.iter().map(|s| s.result.transactions.len()).sum();
-        if broadcast && !simulations.is_empty() && total_txs > 0 {
-            // Confirmation prompt (interactive mode only)
-            if prompts_enabled && !json {
-                let network_name = network.as_deref()
-                    .or(banner_network)
-                    .unwrap_or("unknown");
-                let fork_tag = if banner_is_fork { " [fork]" } else { "" };
-                let url_suffix = banner_rpc_url.as_deref()
-                    .map(|u| format!(" ({u})"))
-                    .unwrap_or_default();
-                eprintln!(
-                    "\n  {} {}{}{}\n",
-                    styled("Target:", color::BOLD),
-                    network_name,
-                    fork_tag,
-                    styled(&url_suffix, color::GRAY),
-                );
-
-                let confirmed = crate::ui::prompt::confirm(
-                    "Broadcast these transactions?",
-                    false,
-                );
-                if !confirmed {
-                    eprintln!("Broadcast cancelled.");
-                    delete_compose_state();
-                    return Ok(());
-                }
-            }
-            if !json {
-                let network_label = network.as_deref()
-                    .or(banner_network)
-                    .unwrap_or("network");
-                eprintln!(
-                    "\n{}",
-                    styled(&format!("Broadcasting to {network_label}..."), color::CYAN),
-                );
-            }
-
-            // Resolve the upstream URL for routing
-            let upstream_url = banner_rpc_url.as_deref().ok_or_else(|| {
-                anyhow::anyhow!("no RPC URL available for broadcast")
-            })?;
-
-            // Resolve sender context once (shared across components)
-            let setup = setup_component(
-                components_to_run.first().unwrap(),
-                &compose.components[components_to_run.first().unwrap()],
-                &compose_params,
-            ).await.context("failed to resolve broadcast context")?;
-
-            for sim in &mut simulations {
-                if sim.result.transactions.is_empty() {
+        // Display per-component broadcast results
+        if should_broadcast && !json {
+            for sr in &script_results {
+                if sr.result.transactions.is_empty() {
                     continue;
                 }
-
-                // Show per-component spinner
-                let mut comp_spinner: Option<spinoff::Spinner> = None;
-                if !json {
-                    comp_spinner = Some(spinoff::Spinner::new(
-                        spinoff::spinners::Dots2,
-                        format!("  {}", sim.name),
-                        spinoff::Color::Cyan,
-                    ));
-                }
-
-                let route_result = if let Some(ref btxs) = sim.result_transactions {
-                    let ctx = treb_forge::pipeline::RouteContext {
-                        rpc_url: upstream_url,
-                        chain_id: setup.pipeline_context.config.chain_id,
-                        is_fork: setup.pipeline_context.config.is_fork,
-                        resolved_senders: &setup.pipeline_context.resolved_senders,
-                        sender_labels: &setup.pipeline_context.sender_labels,
-                        sender_configs: &setup.pipeline_context.sender_configs,
-                    };
-                    treb_forge::pipeline::route_all(btxs, &ctx).await
+                let has_proposed = !sr.result.proposed_results.is_empty();
+                let tx_count = sr.result.transactions.len();
+                let dep_count = sr.result.deployments.len();
+                let status_icon = if has_proposed {
+                    styled(emoji::HOURGLASS, color::YELLOW)
                 } else {
-                    Ok(Vec::new())
+                    styled(emoji::CHECK_MARK, color::GREEN)
                 };
-
-                // Stop spinner and clear its line
-                if let Some(mut s) = comp_spinner.take() {
-                    s.clear();
+                let mut detail = format!("{tx_count} tx");
+                if dep_count > 0 {
+                    detail.push_str(&format!(", {dep_count} deployed"));
                 }
-                eprint!("\x1b[2K\r");
-
-                match route_result {
-                    Ok(run_results) => {
-                        // Detect proposed (non-broadcast) results
-                        let has_proposed = run_results.iter().any(|(_, r)| {
-                            matches!(r,
-                                treb_forge::pipeline::RunResult::SafeProposed { .. }
-                                | treb_forge::pipeline::RunResult::GovernorProposed { .. }
-                            )
-                        });
-
-                        let receipts = treb_forge::pipeline::flatten_receipts(&run_results);
-                        treb_forge::pipeline::apply_receipts(
-                            &mut sim.result.transactions,
-                            &receipts,
+                if has_proposed {
+                    detail.push_str(", proposed");
+                }
+                eprintln!(
+                    "  {} {}  ({})",
+                    status_icon,
+                    &sr.name,
+                    styled(&detail, color::GRAY),
+                );
+                for rt in &sr.result.transactions {
+                    let tx = &rt.transaction;
+                    let sender_label = rt.sender_name.as_deref()
+                        .unwrap_or(&tx.sender);
+                    let hash_display = &tx.hash;
+                    let gas_display = rt.gas_used
+                        .map(|g| format!(" gas={g}"))
+                        .unwrap_or_default();
+                    let block_display = if tx.block_number > 0 {
+                        format!(" block={}", tx.block_number)
+                    } else {
+                        String::new()
+                    };
+                    let line = format!(
+                        "    {sender_label} {hash_display}{block_display}{gas_display}",
+                    );
+                    eprintln!("{}", styled(&line, color::GRAY));
+                }
+                for pr in &sr.result.proposed_results {
+                    if let treb_forge::pipeline::RunResult::SafeProposed {
+                        safe_tx_hash, nonce, ..
+                    } = &pr.run_result
+                    {
+                        let hash = output::truncate_address(
+                            &format!("{:#x}", safe_tx_hash),
                         );
-
-                        // Write broadcast files per component
-                        if let Some(ref btxs) = sim.result_transactions {
-                            let comp = &compose.components[&sim.name];
-                            let comp_sig = comp.sig.as_deref().unwrap_or("run()");
-                            let (_, bp, cp) =
-                                treb_forge::pipeline::broadcast_writer::compute_broadcast_paths(
-                                    &cwd,
-                                    &comp.script,
-                                    setup.pipeline_context.config.chain_id,
-                                    comp_sig,
-                                );
-                            let mut sequence =
-                                treb_forge::pipeline::broadcast_writer::build_script_sequence(
-                                    btxs,
-                                    &run_results,
-                                    &sim.result.transactions,
-                                    &setup.pipeline_context,
-                                    bp.clone(),
-                                    cp,
-                                );
-                            let deferred =
-                                treb_forge::pipeline::broadcast_writer::build_deferred_operations(
-                                    &run_results,
-                                    &sim.result.transactions,
-                                    &setup.pipeline_context,
-                                );
-                            let _ = treb_forge::pipeline::broadcast_writer::write_broadcast_artifacts(
-                                &mut sequence,
-                                &deferred,
-                            );
-
-                            // Set broadcastFile on recorded transactions
-                            let rel_path =
-                                treb_forge::pipeline::broadcast_writer::relative_broadcast_path(
-                                    &cwd,
-                                    &bp,
-                                );
-                            for rt in &mut sim.result.transactions {
-                                rt.transaction.broadcast_file = Some(rel_path.clone());
-                            }
-                        }
-
-                        // Record to registry
-                        for rd in &sim.result.deployments {
-                            let _ = registry.insert_deployment(rd.deployment.clone());
-                        }
-                        for rt in &sim.result.transactions {
-                            let _ = registry.insert_transaction(rt.transaction.clone());
-                        }
-
-                        let tx_count = sim.result.transactions.len();
-                        let dep_count = sim.result.deployments.len();
-                        if !json {
-                            let status_icon = if has_proposed {
-                                styled(&emoji::HOURGLASS.to_string(), color::YELLOW)
-                            } else {
-                                styled(&emoji::CHECK_MARK.to_string(), color::GREEN)
-                            };
-                            let mut detail = format!("{tx_count} tx");
-                            if dep_count > 0 {
-                                detail.push_str(&format!(", {dep_count} deployed"));
-                            }
-                            if has_proposed {
-                                detail.push_str(", proposed");
-                            }
-                            eprintln!(
-                                "  {} {}  ({})",
-                                status_icon,
-                                &sim.name,
-                                styled(&detail, color::GRAY),
-                            );
-                            for rt in &sim.result.transactions {
-                                let tx = &rt.transaction;
-                                let sender_label = rt.sender_name.as_deref()
-                                    .unwrap_or(&tx.sender);
-                                let hash_display = &tx.hash;
-                                let gas_display = rt.gas_used
-                                    .map(|g| format!(" gas={g}"))
-                                    .unwrap_or_default();
-                                let block_display = if tx.block_number > 0 {
-                                    format!(" block={}", tx.block_number)
-                                } else {
-                                    String::new()
-                                };
-                                let line = format!(
-                                    "    {sender_label} {hash_display}{block_display}{gas_display}",
-                                );
-                                eprintln!("{}", styled(&line, color::GRAY));
-                            }
-                            // Show proposed summary per-run
-                            for (run, result) in &run_results {
-                                if let treb_forge::pipeline::RunResult::SafeProposed {
-                                    safe_tx_hash, nonce, ..
-                                } = result {
-                                    let hash = output::truncate_address(
-                                        &format!("{:#x}", safe_tx_hash),
-                                    );
-                                    eprintln!(
-                                        "    {}",
-                                        styled(
-                                            &format!(
-                                                "{} proposed to Safe (safeTxHash={}, nonce={})",
-                                                run.sender_role, hash, nonce,
-                                            ),
-                                            color::YELLOW,
-                                        ),
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let error_msg = format!("{e}");
-                        if !json {
-                            eprintln!(
-                                "  {} {}",
-                                styled(&emoji::CROSS.to_string(), color::RED),
-                                styled(&format!("{}: {error_msg}", sim.name), color::RED),
-                            );
-                        }
-                        failed_component = Some(sim.name.clone());
-                        break;
+                        eprintln!(
+                            "    {}",
+                            styled(
+                                &format!(
+                                    "{} proposed to Safe (safeTxHash={}, nonce={})",
+                                    pr.sender_role, hash, nonce,
+                                ),
+                                color::YELLOW,
+                            ),
+                        );
                     }
                 }
             }

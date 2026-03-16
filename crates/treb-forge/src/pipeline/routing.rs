@@ -223,12 +223,7 @@ pub async fn route_all_with_resume(
                 match safe_result {
                     SafeRunResult::Executed(receipts) => RunResult::Broadcast(receipts),
                     SafeRunResult::Proposed { safe_tx_hash, safe_address, nonce, tx_count } => {
-                        // Skip if already proposed
-                        if resume.completed_safe_hashes.contains(&format!("{:#x}", safe_tx_hash)) {
-                            RunResult::SafeProposed { safe_tx_hash, safe_address, nonce, tx_count }
-                        } else {
-                            RunResult::SafeProposed { safe_tx_hash, safe_address, nonce, tx_count }
-                        }
+                        RunResult::SafeProposed { safe_tx_hash, safe_address, nonce, tx_count }
                     }
                 }
             }

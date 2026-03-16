@@ -10,6 +10,7 @@ mod duplicates;
 mod hydration;
 mod orchestrator;
 pub mod routing;
+pub mod simulation;
 mod types;
 
 pub use duplicates::{
@@ -21,13 +22,18 @@ pub use hydration::{
     hydrate_deployment, hydrate_governor_proposals, hydrate_safe_transactions,
     hydrate_transactions, hydrate_transactions_from_broadcast, populate_safe_context,
 };
-pub use orchestrator::{BroadcastHook, BroadcastPhase, BroadcastProgressCallback, RunPipeline};
+pub use orchestrator::{
+    BroadcastHook, BroadcastPhase, BroadcastProgressCallback, RoutingOutcome, RunPipeline,
+    SessionPipeline, SimulatedSession, apply_routing_results,
+};
+pub use simulation::{HydrationOptions, SimulationOutput, hydrate_simulation};
 pub use routing::{
     RouteContext, RunResult, TransactionRun, flatten_receipts, route_all, route_all_with_resume,
 };
 pub use types::{
     PipelineConfig, PipelineContext, PipelineResult, ProposedResult, RecordedDeployment,
-    RecordedTransaction, SkippedDeployment,
+    RecordedTransaction, ScriptEntry, ScriptPhase, ScriptProgress, ScriptResult, SessionPhase,
+    SessionProgressCallback, SessionState, SkippedDeployment,
 };
 
 use std::process::Command;

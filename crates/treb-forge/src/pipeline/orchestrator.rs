@@ -25,9 +25,7 @@ use crate::{
     events::{
         ExtractedDeployment, GovernorProposalCreated, SafeTransactionQueued, TransactionSimulated,
         abi::SimulatedTransaction,
-        decode_events,
         decoder::{ParsedEvent, TrebEvent},
-        detect_proxy_relationships, extract_collisions, extract_deployments,
     },
     script::{ExecutionResult, ScriptConfig},
 };
@@ -35,11 +33,6 @@ use crate::{
 use super::{
     PipelineContext,
     duplicates::{DuplicateStrategy, resolve_duplicates},
-    hydration::{
-        hydrate_deployment, hydrate_governor_proposals,
-        hydrate_safe_transactions, hydrate_transactions, hydrate_transactions_from_broadcast,
-        populate_safe_context,
-    },
     types::{PipelineResult, RecordedDeployment, RecordedTransaction},
 };
 
@@ -182,7 +175,7 @@ impl RunPipeline {
         // may consume `executed` if we broadcast.
         let script_result = executed.execution_result.clone();
         let decoded_logs = crate::console::decode_console_logs(&script_result.logs);
-        let mut execution = ExecutionResult {
+        let execution = ExecutionResult {
             success: script_result.success,
             logs: decoded_logs,
             raw_logs: script_result.logs,
@@ -194,173 +187,42 @@ impl RunPipeline {
             broadcast_receipts: None,
         };
 
-        // 3. Check for failed execution
-        if !execution.success {
-            let mut err_parts = Vec::new();
-            if !execution.logs.is_empty() {
-                err_parts.push(execution.logs.join("\n"));
-            }
-
-            let contracts = artifact_index.inner();
-            let mut decoder = CallTraceDecoderBuilder::new()
-                .with_known_contracts(contracts)
-                .build();
-            let mut identifier = TraceIdentifiers::new().with_local(contracts);
-            for (_, arena) in &execution.traces {
-                decoder.identify(&arena.arena, &mut identifier);
-            }
-            for (_, arena) in &mut execution.traces {
-                decode_trace_arena(&mut arena.arena, &decoder).await;
-                collapse_decoded_bytecode_args(&mut arena.arena, &artifact_index);
-                let rendered = strip_internal_events(&render_trace_arena(arena));
-                if !rendered.trim().is_empty() {
-                    err_parts.push(rendered);
-                }
-            }
-
-            let detail = if err_parts.is_empty() {
-                "script reverted without output".to_string()
-            } else {
-                err_parts.join("\n")
-            };
-            return Err(TrebError::Forge(format!("script execution failed:\n{detail}")));
-        }
-
-        // 4. Decode events (ContractDeployed, collisions, proxy relationships)
-        let parsed_events = decode_events(&execution.raw_logs);
-        let event_count = parsed_events.len();
-
-        // 5. Extract deployments, collisions, and proxy relationships
-        let extracted_deployments = extract_deployments(&parsed_events, Some(&artifact_index));
-        let collisions = extract_collisions(&parsed_events);
-        let proxy_relationships = detect_proxy_relationships(&parsed_events);
-
-        // 6. Hydrate deployments
-        let hydrated_deployments = extracted_deployments
-            .iter()
-            .map(|extracted| {
-                let proxy = proxy_relationships.get(&extracted.address);
-                hydrate_deployment(extracted, proxy, &self.context)
-            })
-            .collect::<Vec<_>>();
-
-        // 7. Hydrate transactions from BroadcastableTransactions (v2 model).
-        //    Scripts use vm.broadcast() — forge collects BroadcastableTransactions
-        //    which we hydrate directly instead of relying on TransactionSimulated events.
-        let broadcastable_txs = execution.transactions.as_ref();
-        let transactions = if let Some(btxs) = broadcastable_txs {
-            hydrate_transactions_from_broadcast(btxs, &hydrated_deployments, &self.context)
-        } else {
-            // Fallback to TransactionSimulated events for backward compatibility
-            let tx_events = extract_transaction_simulated(&parsed_events);
-            hydrate_transactions(&tx_events, &hydrated_deployments, &self.context)
-        };
-
-        // Build per-transaction metadata with trace matching.
-        let mut transaction_metadata = if let Some(btxs) = broadcastable_txs {
-            build_v2_recorded_transaction_metadata(
-                btxs,
-                &extracted_deployments,
-                &execution.traces,
-                &self.context,
-            )
-        } else {
-            let tx_events = extract_transaction_simulated(&parsed_events);
-            let sender_id_labels: HashMap<B256, String> = self
-                .context
-                .sender_role_names
-                .iter()
-                .map(|role| (alloy_primitives::keccak256(role.as_bytes()), role.clone()))
-                .collect();
-            build_recorded_transaction_metadata(
-                &tx_events,
-                &extracted_deployments,
-                &execution.traces,
-                &sender_id_labels,
-            )
-        };
-
-        // Also hydrate governor proposals from events (still emitted in v2).
-        let governor_events = extract_governor_proposal_created(&parsed_events);
-        let governor_proposals = hydrate_governor_proposals(&governor_events, &self.context);
-
-        // 8. Build combined address labels for trace decoding
-        let mut labeled_addresses = execution.labeled_addresses.clone();
-        for (addr, role) in &self.context.sender_labels {
-            labeled_addresses.entry(*addr).or_insert_with(|| role.clone());
-        }
-        for dep in &extracted_deployments {
-            let label = if dep.label.is_empty() {
-                dep.contract_name.clone()
-            } else {
-                format!("{}:{}", dep.contract_name, dep.label)
-            };
-            labeled_addresses.insert(dep.address, label);
-        }
-        for dep in registry.list_deployments() {
-            if let Ok(addr) = dep.address.parse::<Address>() {
-                let label = if dep.label.is_empty() {
-                    dep.contract_name.clone()
-                } else {
-                    format!("{}:{}", dep.contract_name, dep.label)
-                };
-                labeled_addresses.entry(addr).or_insert(label);
-            }
-        }
-        let chain_id_str = self.context.config.chain_id.to_string();
-        let mut addressbook = treb_registry::AddressbookStore::new(&self.context.project_root.join(".treb"));
-        if addressbook.load().is_ok() {
-            for (name, address) in addressbook.list_entries(&chain_id_str) {
-                if let Ok(addr) = address.parse::<Address>() {
-                    labeled_addresses.entry(addr).or_insert(name);
-                }
-            }
-        }
-
-        // 9. Render traces and extract per-transaction sub-trees
-        let (execution_traces, setup_traces) = render_traces_for_verbosity(
-            execution.traces,
-            &labeled_addresses,
+        // 3. Hydrate simulation results
+        let sim = super::simulation::hydrate_simulation(
+            execution,
             &artifact_index,
-            self.context.config.verbosity,
-            &mut transaction_metadata,
+            &self.context,
+            registry,
+            &super::simulation::HydrationOptions {
+                populate_safe_context: deployer_is_safe,
+                include_addressbook_labels: true,
+            },
         )
-        .await;
+        .await?;
 
-        // 10. Safe/Governor proposal routing (currently no-op — Rust-side
-        //     proposal submission will be wired in a follow-up).
-        let safe_tx_events = extract_safe_transaction_queued(&parsed_events);
-        let safe_transactions = hydrate_safe_transactions(&safe_tx_events, &self.context);
-        let mut transactions = transactions;
-        if deployer_is_safe {
-            populate_safe_context(&mut transactions, &safe_transactions);
-        }
-
-        // 11. Build recorded transactions
-        let mut recorded_transactions: Vec<RecordedTransaction> = transactions
+        let collisions = sim.collisions;
+        let event_count = sim.event_count;
+        let governor_proposals = sim.governor_proposals;
+        let safe_transactions = sim.safe_transactions;
+        let execution_traces = sim.execution_traces;
+        let setup_traces = sim.setup_traces;
+        let hydrated_deployments: Vec<_> = sim.recorded_deployments
             .into_iter()
-            .map(|tx| {
-                let metadata = transaction_metadata.remove(&tx.id).unwrap_or_default();
-                RecordedTransaction {
-                    transaction: tx,
-                    sender_name: metadata.sender_name,
-                    gas_used: metadata.gas_used,
-                    trace: metadata.trace,
-                }
-            })
+            .map(|rd| rd.deployment)
             .collect();
+        let mut recorded_transactions = sim.recorded_transactions;
 
-        // 12. Broadcast: hook → confirm → route by sender type
+        // 4. Broadcast: hook → confirm → route by sender type
         let mut proposed_results = Vec::new();
         let mut routing_safe_transactions = Vec::new();
 
         let broadcast_confirmed = if wants_broadcast && !recorded_transactions.is_empty() {
             let confirmed = self
                 .broadcast_hook
-                .map_or(true, |hook| hook(&recorded_transactions));
+                .is_none_or(|hook| hook(&recorded_transactions));
 
             if confirmed {
-                if let Some(btxs) = &execution.transactions {
+                if let Some(btxs) = &sim.broadcastable_transactions {
                     let rpc_url = self.context.config.rpc_url.as_deref()
                         .ok_or_else(|| TrebError::Forge(
                             "RPC URL required for broadcast".into(),
@@ -381,59 +243,17 @@ impl RunPipeline {
                         super::routing::route_all(btxs, &ctx).await?
                     };
 
-                    // Build Safe/Governor records from routing results
-                    let (routing_proposed, routing_safe_txs) =
-                        build_proposed_records_from_routing(
-                            &run_results,
-                            &self.context,
-                            &recorded_transactions,
-                        );
-                    proposed_results = routing_proposed;
-                    routing_safe_transactions = routing_safe_txs;
-
-                    // Update transaction statuses for proposed runs
-                    update_transaction_statuses_from_routing(
-                        &mut recorded_transactions,
+                    let outcome = apply_routing_results(
                         &run_results,
                         btxs,
-                    );
-
-                    let receipts = super::routing::flatten_receipts(&run_results);
-                    super::hydration::apply_receipts(&mut recorded_transactions, &receipts);
-
-                    // Write Foundry-compatible broadcast files
-                    let (_, bp, cp) = super::broadcast_writer::compute_broadcast_paths(
-                        &self.context.project_root,
+                        &mut recorded_transactions,
+                        &self.context,
                         &self.context.config.script_path,
                         self.context.config.chain_id,
                         &self.context.config.script_sig,
-                    );
-                    let mut sequence = super::broadcast_writer::build_script_sequence(
-                        btxs,
-                        &run_results,
-                        &recorded_transactions,
-                        &self.context,
-                        bp.clone(),
-                        cp,
-                    );
-                    let deferred = super::broadcast_writer::build_deferred_operations(
-                        &run_results,
-                        &recorded_transactions,
-                        &self.context,
-                    );
-                    super::broadcast_writer::write_broadcast_artifacts(
-                        &mut sequence,
-                        &deferred,
                     )?;
-
-                    // Set broadcastFile on recorded transactions
-                    let rel_path = super::broadcast_writer::relative_broadcast_path(
-                        &self.context.project_root,
-                        &bp,
-                    );
-                    for rt in &mut recorded_transactions {
-                        rt.transaction.broadcast_file = Some(rel_path.clone());
-                    }
+                    proposed_results = outcome.proposed_results;
+                    routing_safe_transactions = outcome.safe_transactions;
 
                     report(BroadcastPhase::Complete);
                 }
@@ -448,7 +268,7 @@ impl RunPipeline {
         // Merge routing-produced safe transactions with event-hydrated ones
         let all_safe_transactions: Vec<_> = safe_transactions
             .into_iter()
-            .chain(routing_safe_transactions.into_iter())
+            .chain(routing_safe_transactions)
             .collect();
 
         // 13. Duplicate detection
@@ -504,9 +324,9 @@ impl RunPipeline {
             skipped,
             dry_run: !should_record,
             success: true,
-            gas_used: execution.gas_used,
+            gas_used: sim.gas_used,
             event_count,
-            console_logs: execution.logs,
+            console_logs: sim.console_logs,
             governor_proposals,
             safe_transactions: all_safe_transactions,
             proposed_results,
@@ -630,6 +450,73 @@ fn update_transaction_statuses_from_routing(
             }
         }
     }
+}
+
+/// Outcome of applying routing results to recorded transactions.
+///
+/// Returned by [`apply_routing_results()`] so the caller can persist
+/// proposed records and safe transactions to the registry.
+pub struct RoutingOutcome {
+    /// Proposed (non-broadcast) results for CLI display.
+    pub proposed_results: Vec<ProposedResult>,
+    /// Safe transactions produced by routing.
+    pub safe_transactions: Vec<treb_core::types::SafeTransaction>,
+}
+
+/// Apply routing results to recorded transactions: build proposed records,
+/// update statuses, apply receipts, and write broadcast artifacts.
+///
+/// This is the shared post-routing path used by both the orchestrator and
+/// compose's Phase 4 broadcast loop.
+pub fn apply_routing_results(
+    run_results: &[(TransactionRun, RunResult)],
+    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    recorded_transactions: &mut [RecordedTransaction],
+    context: &PipelineContext,
+    script_path: &str,
+    chain_id: u64,
+    script_sig: &str,
+) -> Result<RoutingOutcome, TrebError> {
+    // Build Safe/Governor records from routing results
+    let (proposed_results, safe_transactions) =
+        build_proposed_records_from_routing(run_results, context, recorded_transactions);
+
+    // Update transaction statuses for proposed runs
+    update_transaction_statuses_from_routing(recorded_transactions, run_results, btxs);
+
+    // Apply receipts from broadcast results
+    let receipts = super::routing::flatten_receipts(run_results);
+    super::hydration::apply_receipts(recorded_transactions, &receipts);
+
+    // Write Foundry-compatible broadcast files
+    let (_, bp, cp) = super::broadcast_writer::compute_broadcast_paths(
+        &context.project_root,
+        script_path,
+        chain_id,
+        script_sig,
+    );
+    let mut sequence = super::broadcast_writer::build_script_sequence(
+        btxs,
+        run_results,
+        recorded_transactions,
+        context,
+        bp.clone(),
+        cp,
+    );
+    let deferred = super::broadcast_writer::build_deferred_operations(
+        run_results,
+        recorded_transactions,
+        context,
+    );
+    super::broadcast_writer::write_broadcast_artifacts(&mut sequence, &deferred)?;
+
+    // Set broadcastFile on recorded transactions
+    let rel_path = super::broadcast_writer::relative_broadcast_path(&context.project_root, &bp);
+    for rt in recorded_transactions {
+        rt.transaction.broadcast_file = Some(rel_path.clone());
+    }
+
+    Ok(RoutingOutcome { proposed_results, safe_transactions })
 }
 
 /// Render traces into human-readable strings and extract per-transaction sub-trees.
@@ -1169,9 +1056,6 @@ pub(super) fn collapse_decoded_bytecode_args(
 // Broadcast receipt application
 // ---------------------------------------------------------------------------
 
-/// Apply broadcast receipts to recorded transactions.
-///
-/// Uses positional matching: `TransactionSimulated` events and
 // ---------------------------------------------------------------------------
 // Safe proposal helpers (will be wired for Rust-side Safe proposals)
 // ---------------------------------------------------------------------------
@@ -1305,6 +1189,617 @@ async fn propose_safe_transactions(
     }
 
     Ok(())
+}
+
+// ===========================================================================
+// SessionPipeline — unified orchestrator for run (1 script) and compose (N)
+// ===========================================================================
+
+use std::path::PathBuf;
+
+use super::types::{
+    ScriptEntry, ScriptPhase, ScriptProgress, ScriptResult,
+    SessionPhase, SessionProgressCallback, SessionState,
+};
+
+/// Unified pipeline that handles both single-script (`treb run`) and
+/// multi-script (`treb compose`) flows.
+///
+/// Call [`simulate_all()`] to compile + execute all scripts, then inspect
+/// the returned [`SimulatedSession`] before optionally calling
+/// [`broadcast_all()`] to route transactions and write to the registry.
+pub struct SessionPipeline {
+    scripts: Vec<ScriptEntry>,
+    progress: Option<SessionProgressCallback>,
+    resume: bool,
+}
+
+impl Default for SessionPipeline {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SessionPipeline {
+    pub fn new() -> Self {
+        Self {
+            scripts: Vec::new(),
+            progress: None,
+            resume: false,
+        }
+    }
+
+    /// Add a script to the execution queue.
+    pub fn add_script(&mut self, entry: ScriptEntry) {
+        self.scripts.push(entry);
+    }
+
+    /// Set a progress callback for pipeline phases.
+    pub fn with_progress(mut self, cb: SessionProgressCallback) -> Self {
+        self.progress = Some(cb);
+        self
+    }
+
+    /// Enable resume mode: skip already-completed scripts/phases.
+    pub fn with_resume(mut self, resume: bool) -> Self {
+        self.resume = resume;
+        self
+    }
+
+    /// Simulate all scripts: compile once, execute each, hydrate results.
+    ///
+    /// For multi-script sessions, spawns an ephemeral Anvil fork so state
+    /// flows between scripts, then restores the registry to its pre-session
+    /// state. The caller inspects results and decides whether to broadcast.
+    pub async fn simulate_all(
+        mut self,
+        registry: &mut Registry,
+    ) -> Result<SimulatedSession, (Vec<ScriptResult>, String, TrebError)> {
+        let report = |phase: &SessionPhase| {
+            if let Some(ref cb) = self.progress {
+                cb(phase.clone());
+            }
+        };
+
+        let is_multi = self.scripts.len() > 1;
+
+        // ------------------------------------------------------------------
+        // Phase 1: Compile (once, shared across all scripts)
+        // ------------------------------------------------------------------
+        report(&SessionPhase::Compiling);
+        let project_root = self
+            .scripts
+            .first()
+            .map(|e| e.context.project_root.clone())
+            .unwrap_or_default();
+        let foundry_config = load_foundry_config(&project_root)
+            .map_err(|e| (Vec::new(), String::new(), e))?;
+        let compilation = compile_project(&foundry_config)
+            .map_err(|e| (Vec::new(), String::new(), e))?;
+        let artifact_index = ArtifactIndex::from_compile_output(compilation);
+
+        // ------------------------------------------------------------------
+        // Multi-script: snapshot registry + spawn ephemeral Anvil
+        // ------------------------------------------------------------------
+        let treb_dir = project_root.join(".treb");
+        let snapshot_dir = treb_dir.join("priv/snapshots/session");
+        if is_multi {
+            let _ = treb_registry::snapshot_registry(&treb_dir, &snapshot_dir);
+        }
+
+        let ephemeral_anvil = if is_multi {
+            report(&SessionPhase::SpawningAnvil);
+            let upstream_url = self
+                .scripts
+                .first()
+                .and_then(|e| e.config.rpc_url_ref().map(|s| s.to_string()));
+
+            if let Some(ref url) = upstream_url {
+                let resolved = if url.starts_with("http://") || url.starts_with("https://") {
+                    url.clone()
+                } else {
+                    treb_config::resolve_rpc_endpoints(&project_root)
+                        .ok()
+                        .and_then(|eps| eps.get(url.as_str()).cloned())
+                        .filter(|ep| !ep.unresolved && !ep.expanded_url.trim().is_empty())
+                        .map(|ep| ep.expanded_url)
+                        .unwrap_or_else(|| url.clone())
+                };
+                let anvil = crate::anvil::AnvilConfig::new()
+                    .fork_url(&resolved)
+                    .spawn()
+                    .await
+                    .map_err(|e| (Vec::new(), String::new(), e))?;
+                Some(anvil)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let ephemeral_url = ephemeral_anvil.as_ref().map(|a| a.rpc_url().to_string());
+
+        // Override ScriptConfig RPC URLs for multi-script to point at ephemeral Anvil.
+        // PipelineContext.config.rpc_url retains the original URL for broadcast.
+        let _rpc_override_guard = if let Some(ref url) = ephemeral_url {
+            for entry in &mut self.scripts {
+                entry.config.rpc_url(url);
+            }
+            self.scripts
+                .first()
+                .and_then(|e| e.config.rpc_url_ref().map(|s| s.to_string()))
+                .as_deref()
+                .filter(|u| !u.starts_with("http://") && !u.starts_with("https://"))
+                .and_then(|network| unsafe {
+                    treb_config::override_rpc_endpoint(&project_root, network, url)
+                })
+        } else {
+            None
+        };
+
+        // ------------------------------------------------------------------
+        // Load session state for resume
+        // ------------------------------------------------------------------
+        let session_state = if self.resume {
+            super::broadcast_writer::load_session_state(&treb_dir)
+        } else {
+            super::broadcast_writer::delete_session_state(&treb_dir);
+            None
+        };
+
+        let script_phases: HashMap<String, ScriptPhase> = session_state
+            .as_ref()
+            .map(|ss| {
+                ss.scripts
+                    .iter()
+                    .map(|sp| (sp.name.clone(), sp.phase.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // ------------------------------------------------------------------
+        // Phase 2: Simulate (per-script loop)
+        // ------------------------------------------------------------------
+        let mut simulated: Vec<SimulatedScript> = Vec::new();
+        let mut skipped_results: Vec<ScriptResult> = Vec::new();
+
+        let config_hash = session_state
+            .as_ref()
+            .map(|ss| ss.config_hash.clone())
+            .unwrap_or_default();
+        let mut state_scripts: Vec<ScriptProgress> = Vec::new();
+
+        for entry in self.scripts {
+            let ScriptEntry { name, context, config } = entry;
+            let phase = script_phases.get(&name);
+
+            // Resume: skip scripts that already broadcast
+            if phase == Some(&ScriptPhase::Broadcast) {
+                skipped_results.push(ScriptResult {
+                    name: name.clone(),
+                    result: PipelineResult {
+                        deployments: Vec::new(),
+                        transactions: Vec::new(),
+                        registry_updated: false,
+                        collisions: Vec::new(),
+                        skipped: Vec::new(),
+                        dry_run: false,
+                        success: true,
+                        gas_used: 0,
+                        event_count: 0,
+                        console_logs: Vec::new(),
+                        governor_proposals: Vec::new(),
+                        safe_transactions: Vec::new(),
+                        proposed_results: Vec::new(),
+                        execution_traces: None,
+                        setup_traces: None,
+                    },
+                    broadcastable_transactions: None,
+                });
+                state_scripts.push(ScriptProgress {
+                    name,
+                    script_path: context.config.script_path.clone(),
+                    chain_id: context.config.chain_id,
+                    sig: context.config.script_sig.clone(),
+                    phase: ScriptPhase::Broadcast,
+                    deployments: 0,
+                    transactions: 0,
+                });
+                continue;
+            }
+
+            report(&SessionPhase::Simulating(name.clone()));
+
+            let deployer_is_safe = context.resolved_senders.get("deployer").is_some_and(|s| s.is_safe());
+
+            let script_args = match config.into_script_args() {
+                Ok(args) => args,
+                Err(e) => {
+                    if is_multi {
+                        let _ = treb_registry::restore_registry(&snapshot_dir, &treb_dir);
+                        let _ = std::fs::remove_dir_all(&snapshot_dir);
+                    }
+                    return Err((skipped_results, name, e));
+                }
+            };
+
+            let executed = match async {
+                let preprocessed = script_args
+                    .preprocess()
+                    .await
+                    .map_err(|e| TrebError::Forge(format!("forge preprocessing failed: {e}")))?;
+                let compiled = preprocessed
+                    .compile()
+                    .map_err(|e| TrebError::Forge(format!("forge compilation failed: {e}")))?;
+                let linked = compiled
+                    .link()
+                    .await
+                    .map_err(|e| TrebError::Forge(format!("forge linking failed: {e}")))?;
+                let prepared = linked
+                    .prepare_execution()
+                    .await
+                    .map_err(|e| TrebError::Forge(format!("forge execution preparation failed: {e}")))?;
+                prepared
+                    .execute()
+                    .await
+                    .map_err(|e| TrebError::Forge(format!("forge execution failed: {e}")))
+            }
+            .await
+            {
+                Ok(exec) => exec,
+                Err(e) => {
+                    if is_multi {
+                        let _ = treb_registry::restore_registry(&snapshot_dir, &treb_dir);
+                        let _ = std::fs::remove_dir_all(&snapshot_dir);
+                    }
+                    return Err((skipped_results, name, e));
+                }
+            };
+
+            let script_result = executed.execution_result.clone();
+            let decoded_logs = crate::console::decode_console_logs(&script_result.logs);
+            let execution = ExecutionResult {
+                success: script_result.success,
+                logs: decoded_logs,
+                raw_logs: script_result.logs,
+                gas_used: script_result.gas_used,
+                returned: script_result.returned,
+                labeled_addresses: script_result.labeled_addresses.into_iter().collect(),
+                transactions: script_result.transactions,
+                traces: script_result.traces,
+                broadcast_receipts: None,
+            };
+
+            let sim = match super::simulation::hydrate_simulation(
+                execution,
+                &artifact_index,
+                &context,
+                registry,
+                &super::simulation::HydrationOptions {
+                    populate_safe_context: deployer_is_safe && !is_multi,
+                    include_addressbook_labels: !is_multi,
+                },
+            )
+            .await
+            {
+                Ok(sim) => sim,
+                Err(e) => {
+                    if is_multi {
+                        let _ = treb_registry::restore_registry(&snapshot_dir, &treb_dir);
+                        let _ = std::fs::remove_dir_all(&snapshot_dir);
+                    }
+                    return Err((skipped_results, name, e));
+                }
+            };
+
+            let btxs = sim.broadcastable_transactions.clone();
+
+            // Multi-script: replay on ephemeral Anvil + write intermediate deployments
+            if is_multi {
+                if let Some(ref b) = btxs {
+                    if let Some(ref url) = ephemeral_url {
+                        if let Err(e) = super::compose::replay_transactions_on_fork(url, b).await {
+                            let _ = treb_registry::restore_registry(&snapshot_dir, &treb_dir);
+                            let _ = std::fs::remove_dir_all(&snapshot_dir);
+                            return Err((skipped_results, name, e));
+                        }
+                    }
+                }
+                for rd in &sim.recorded_deployments {
+                    let _ = registry.insert_deployment(rd.deployment.clone());
+                }
+                for collision in &sim.collisions {
+                    let dep = super::hydration::hydrate_collision(collision, &context);
+                    let _ = registry.insert_deployment(dep);
+                }
+            }
+
+            let pipeline_result = PipelineResult {
+                deployments: sim.recorded_deployments,
+                transactions: sim.recorded_transactions,
+                registry_updated: false,
+                collisions: sim.collisions,
+                skipped: Vec::new(),
+                dry_run: true,
+                success: true,
+                gas_used: sim.gas_used,
+                event_count: sim.event_count,
+                console_logs: sim.console_logs,
+                governor_proposals: sim.governor_proposals,
+                safe_transactions: sim.safe_transactions,
+                proposed_results: Vec::new(),
+                execution_traces: sim.execution_traces,
+                setup_traces: sim.setup_traces,
+            };
+
+            state_scripts.push(ScriptProgress {
+                name: name.clone(),
+                script_path: context.config.script_path.clone(),
+                chain_id: context.config.chain_id,
+                sig: context.config.script_sig.clone(),
+                phase: ScriptPhase::Simulated,
+                deployments: pipeline_result.deployments.len(),
+                transactions: pipeline_result.transactions.len(),
+            });
+
+            let _ = super::broadcast_writer::save_session_state(&treb_dir, &SessionState {
+                config_hash: config_hash.clone(),
+                scripts: state_scripts.clone(),
+            });
+
+            simulated.push(SimulatedScript {
+                name,
+                result: pipeline_result,
+                btxs,
+                context,
+            });
+        }
+
+        // Multi-script: restore registry to pre-session state
+        if is_multi {
+            let _ = treb_registry::restore_registry(&snapshot_dir, &treb_dir);
+            let _ = std::fs::remove_dir_all(&snapshot_dir);
+        }
+
+        report(&SessionPhase::SimulationComplete);
+
+        Ok(SimulatedSession {
+            scripts: simulated,
+            skipped_results,
+            resume: self.resume,
+            progress: self.progress,
+            treb_dir,
+            config_hash,
+            state_scripts,
+        })
+    }
+}
+
+/// Intermediate state between simulation and broadcast.
+///
+/// Returned by [`SessionPipeline::simulate_all()`]. Inspect results with
+/// [`results()`], then either [`broadcast_all()`] or [`into_results()`].
+pub struct SimulatedSession {
+    scripts: Vec<SimulatedScript>,
+    skipped_results: Vec<ScriptResult>,
+    resume: bool,
+    progress: Option<SessionProgressCallback>,
+    treb_dir: PathBuf,
+    config_hash: String,
+    state_scripts: Vec<ScriptProgress>,
+}
+
+struct SimulatedScript {
+    name: String,
+    result: PipelineResult,
+    btxs: Option<foundry_cheatcodes::BroadcastableTransactions>,
+    context: PipelineContext,
+}
+
+impl SimulatedSession {
+    /// Read-only access to simulation results for display/confirmation.
+    pub fn results(&self) -> impl Iterator<Item = (&str, &PipelineResult)> {
+        self.scripts.iter().map(|s| (s.name.as_str(), &s.result))
+    }
+
+    /// Convert to final results without broadcasting (dry-run / user cancelled).
+    pub fn into_results(self) -> Vec<ScriptResult> {
+        let mut out = self.skipped_results;
+        for s in self.scripts {
+            out.push(ScriptResult {
+                name: s.name,
+                result: s.result,
+                broadcastable_transactions: s.btxs,
+            });
+        }
+        out
+    }
+
+    /// Broadcast all scripts: route transactions, write registry, produce
+    /// broadcast files.
+    ///
+    /// On failure returns partial results, the failed script name, and the error.
+    pub async fn broadcast_all(
+        mut self,
+        registry: &mut Registry,
+    ) -> Result<Vec<ScriptResult>, (Vec<ScriptResult>, String, TrebError)> {
+        let report = |phase: &SessionPhase| {
+            if let Some(ref cb) = self.progress {
+                cb(phase.clone());
+            }
+        };
+
+        let mut results: Vec<ScriptResult> = self.skipped_results;
+
+        for sim_script in self.scripts {
+            let SimulatedScript { name, mut result, btxs, context } = sim_script;
+
+            let wants_broadcast = context.config.broadcast && !result.transactions.is_empty();
+
+            if wants_broadcast {
+                if let Some(ref btxs) = btxs {
+                    let rpc_url = match context.config.rpc_url.as_deref() {
+                        Some(url) => url,
+                        None => {
+                            let e = TrebError::Forge("RPC URL required for broadcast".into());
+                            results.push(ScriptResult {
+                                name: name.clone(),
+                                result,
+                                broadcastable_transactions: Some(btxs.clone()),
+                            });
+                            if let Some(sp) = self.state_scripts.iter_mut().find(|sp| sp.name == name) {
+                                sp.phase = ScriptPhase::Failed { phase: "broadcast".into() };
+                            }
+                            let _ = super::broadcast_writer::save_session_state(&self.treb_dir, &SessionState {
+                                config_hash: self.config_hash.clone(),
+                                scripts: self.state_scripts.clone(),
+                            });
+                            return Err((results, name, e));
+                        }
+                    };
+
+                    report(&SessionPhase::Broadcasting(name.clone()));
+                    let route_ctx = super::routing::RouteContext {
+                        rpc_url,
+                        chain_id: context.config.chain_id,
+                        is_fork: context.config.is_fork,
+                        resolved_senders: &context.resolved_senders,
+                        sender_labels: &context.sender_labels,
+                        sender_configs: &context.sender_configs,
+                    };
+
+                    let run_results = if self.resume {
+                        let resume_state = super::broadcast_writer::load_resume_state(
+                            &context.project_root,
+                            &context.config.script_path,
+                            context.config.chain_id,
+                            &context.config.script_sig,
+                        );
+                        if let Some(ref rs) = resume_state {
+                            super::routing::route_all_with_resume(btxs, &route_ctx, rs).await
+                        } else {
+                            super::routing::route_all(btxs, &route_ctx).await
+                        }
+                    } else {
+                        super::routing::route_all(btxs, &route_ctx).await
+                    };
+
+                    match run_results {
+                        Ok(run_results) => {
+                            let outcome = apply_routing_results(
+                                &run_results,
+                                btxs,
+                                &mut result.transactions,
+                                &context,
+                                &context.config.script_path,
+                                context.config.chain_id,
+                                &context.config.script_sig,
+                            );
+
+                            if let Ok(outcome) = outcome {
+                                result.proposed_results = outcome.proposed_results;
+                                let routing_safe_txs = outcome.safe_transactions;
+                                let all_safe_txs: Vec<_> = result
+                                    .safe_transactions
+                                    .drain(..)
+                                    .chain(routing_safe_txs)
+                                    .collect();
+                                result.safe_transactions = all_safe_txs;
+                            }
+
+                            // Duplicate detection
+                            let hydrated_deployments: Vec<_> = result
+                                .deployments
+                                .drain(..)
+                                .map(|rd| rd.deployment)
+                                .collect();
+
+                            let resolved = match resolve_duplicates(
+                                hydrated_deployments,
+                                registry,
+                                DuplicateStrategy::Skip,
+                            ) {
+                                Ok(r) => r,
+                                Err(e) => {
+                                    return Err((results, name, e));
+                                }
+                            };
+                            result.skipped = resolved.skipped;
+
+                            // Registry writes
+                            let mut recorded_deployments = Vec::new();
+                            for dep in resolved.to_insert {
+                                let _ = registry.insert_deployment(dep.clone());
+                                recorded_deployments.push(RecordedDeployment {
+                                    deployment: dep,
+                                    safe_transaction: None,
+                                });
+                            }
+                            for dep in resolved.to_update {
+                                let _ = registry.update_deployment(dep.clone());
+                                recorded_deployments.push(RecordedDeployment {
+                                    deployment: dep,
+                                    safe_transaction: None,
+                                });
+                            }
+                            for rt in &result.transactions {
+                                let _ = registry.insert_transaction(rt.transaction.clone());
+                            }
+                            for safe_tx in &result.safe_transactions {
+                                let _ = registry.insert_safe_transaction(safe_tx.clone());
+                            }
+                            let deployer_is_governor = context.resolved_senders.get("deployer").is_some_and(|s| s.is_governor());
+                            if deployer_is_governor {
+                                for proposal in &result.governor_proposals {
+                                    let _ = registry.insert_governor_proposal(proposal.clone());
+                                }
+                            }
+
+                            result.deployments = recorded_deployments;
+                            result.registry_updated = true;
+                            result.dry_run = false;
+                        }
+                        Err(e) => {
+                            results.push(ScriptResult {
+                                name: name.clone(),
+                                result,
+                                broadcastable_transactions: Some(btxs.clone()),
+                            });
+                            if let Some(sp) = self.state_scripts.iter_mut().find(|sp| sp.name == name) {
+                                sp.phase = ScriptPhase::Failed { phase: "broadcast".into() };
+                            }
+                            let _ = super::broadcast_writer::save_session_state(&self.treb_dir, &SessionState {
+                                config_hash: self.config_hash.clone(),
+                                scripts: self.state_scripts.clone(),
+                            });
+                            return Err((results, name, e));
+                        }
+                    }
+                }
+            }
+
+            // Mark script as broadcast in state
+            if let Some(sp) = self.state_scripts.iter_mut().find(|sp| sp.name == name) {
+                sp.phase = ScriptPhase::Broadcast;
+            }
+            let _ = super::broadcast_writer::save_session_state(&self.treb_dir, &SessionState {
+                config_hash: self.config_hash.clone(),
+                scripts: self.state_scripts.clone(),
+            });
+
+            results.push(ScriptResult {
+                name,
+                result,
+                broadcastable_transactions: btxs,
+            });
+        }
+
+        report(&SessionPhase::BroadcastComplete);
+        super::broadcast_writer::delete_session_state(&self.treb_dir);
+
+        Ok(results)
+    }
 }
 
 // ---------------------------------------------------------------------------
