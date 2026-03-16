@@ -1464,68 +1464,7 @@ pub async fn run(
         // Display per-component broadcast results
         if should_broadcast && !json {
             for sr in &script_results {
-                if sr.result.transactions.is_empty() {
-                    continue;
-                }
-                let has_proposed = !sr.result.proposed_results.is_empty();
-                let tx_count = sr.result.transactions.len();
-                let dep_count = sr.result.deployments.len();
-                let status_icon = if has_proposed {
-                    styled(emoji::HOURGLASS, color::YELLOW)
-                } else {
-                    styled(emoji::CHECK_MARK, color::GREEN)
-                };
-                let mut detail = format!("{tx_count} tx");
-                if dep_count > 0 {
-                    detail.push_str(&format!(", {dep_count} deployed"));
-                }
-                if has_proposed {
-                    detail.push_str(", proposed");
-                }
-                eprintln!(
-                    "  {} {}  ({})",
-                    status_icon,
-                    &sr.name,
-                    styled(&detail, color::GRAY),
-                );
-                for rt in &sr.result.transactions {
-                    let tx = &rt.transaction;
-                    let sender_label = rt.sender_name.as_deref()
-                        .unwrap_or(&tx.sender);
-                    let hash_display = &tx.hash;
-                    let gas_display = rt.gas_used
-                        .map(|g| format!(" gas={g}"))
-                        .unwrap_or_default();
-                    let block_display = if tx.block_number > 0 {
-                        format!(" block={}", tx.block_number)
-                    } else {
-                        String::new()
-                    };
-                    let line = format!(
-                        "    {sender_label} {hash_display}{block_display}{gas_display}",
-                    );
-                    eprintln!("{}", styled(&line, color::GRAY));
-                }
-                for pr in &sr.result.proposed_results {
-                    if let treb_forge::pipeline::RunResult::SafeProposed {
-                        safe_tx_hash, nonce, ..
-                    } = &pr.run_result
-                    {
-                        let hash = output::truncate_address(
-                            &format!("{:#x}", safe_tx_hash),
-                        );
-                        eprintln!(
-                            "    {}",
-                            styled(
-                                &format!(
-                                    "{} proposed to Safe (safeTxHash={}, nonce={})",
-                                    pr.sender_role, hash, nonce,
-                                ),
-                                color::YELLOW,
-                            ),
-                        );
-                    }
-                }
+                super::run::display_script_broadcast_summary(&sr.name, &sr.result);
             }
         }
     }

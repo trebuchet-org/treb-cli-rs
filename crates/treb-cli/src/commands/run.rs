@@ -843,8 +843,13 @@ pub async fn run(
 
     // ── Display results ──────────────────────────────────────────────────
     let skip_traces = broadcast_previewed.load(std::sync::atomic::Ordering::Relaxed);
+    let script_name = std::path::Path::new(script)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| script.to_string());
     display_result(
         &result, json, verbose, resolved.network.as_deref(), &resolved.namespace, skip_traces,
+        &script_name,
     )?;
 
     Ok(())
@@ -1000,11 +1005,12 @@ fn display_result(
     network: Option<&str>,
     namespace: &str,
     skip_traces: bool,
+    script_name: &str,
 ) -> anyhow::Result<()> {
     if json {
         display_result_json(result)?;
     } else {
-        display_result_human(result, verbose, network, namespace, skip_traces);
+        display_result_human(result, verbose, network, namespace, skip_traces, script_name);
     }
     Ok(())
 }
@@ -1201,55 +1207,118 @@ pub(crate) fn display_transactions_ordered(transactions: &[RecordedTransaction],
     println!();
 }
 
-/// Display compact broadcast receipts (hash, block, gas) after confirmation.
-fn display_broadcast_receipts(transactions: &[RecordedTransaction]) {
+/// Display broadcast summary for a single script result.
+///
+/// Renders the compose-style format used by both `treb run` and `treb compose`:
+/// ```text
+///   ✓ Deploy  (1 tx, 1 deployed)
+///     deployer 0xbde3... gas=577982
+/// ```
+pub(super) fn display_script_broadcast_summary(
+    name: &str,
+    result: &PipelineResult,
+) {
+    if result.transactions.is_empty() {
+        return;
+    }
+
     let use_color = color::is_color_enabled();
-    for rt in transactions {
+    let has_proposed = !result.proposed_results.is_empty();
+    let tx_count = result.transactions.len();
+    let dep_count = result.deployments.len();
+
+    // Status icon
+    let status_icon = if has_proposed {
+        if use_color {
+            format!("{}", emoji::HOURGLASS.style(color::YELLOW))
+        } else {
+            emoji::HOURGLASS.to_string()
+        }
+    } else if use_color {
+        format!("{}", emoji::CHECK_MARK.style(color::GREEN))
+    } else {
+        emoji::CHECK_MARK.to_string()
+    };
+
+    // Summary line
+    let mut detail = format!("{tx_count} tx");
+    if dep_count > 0 {
+        detail.push_str(&format!(", {dep_count} deployed"));
+    }
+    if has_proposed {
+        detail.push_str(", proposed");
+    }
+    if use_color {
+        eprintln!(
+            "  {} {}  ({})",
+            status_icon,
+            name,
+            detail.style(color::GRAY),
+        );
+    } else {
+        eprintln!("  {} {}  ({})", status_icon, name, detail);
+    }
+
+    // Per-transaction detail lines
+    for rt in &result.transactions {
         let tx = &rt.transaction;
         let sender_label = tx_sender_label(rt);
-        let status = format_tx_status(&tx.status);
-
-        let mut parts = Vec::new();
-        if !tx.hash.is_empty() {
-            parts.push(format!("Tx: {}", tx.hash));
-        }
-        if tx.block_number > 0 {
-            parts.push(format!("Block: {}", tx.block_number));
-        }
-        if let Some(gas) = rt.gas_used.filter(|g| *g > 0) {
-            parts.push(format!("Gas: {}", output::format_gas(gas)));
-        }
-
-        let detail = if parts.is_empty() { String::new() } else { parts.join(" | ") };
-        if use_color {
-            println!(
-                "  {} {} {}",
-                status,
-                sender_label.style(color::CYAN),
-                detail.style(color::GRAY),
-            );
+        let hash_display = &tx.hash;
+        let gas_display = rt.gas_used
+            .map(|g| format!(" gas={g}"))
+            .unwrap_or_default();
+        let block_display = if tx.block_number > 0 {
+            format!(" block={}", tx.block_number)
         } else {
-            println!("  {} {} {}", status, sender_label, detail);
+            String::new()
+        };
+        let line = format!(
+            "    {sender_label} {hash_display}{block_display}{gas_display}",
+        );
+        if use_color {
+            eprintln!("{}", line.style(color::GRAY));
+        } else {
+            eprintln!("{line}");
+        }
+    }
+
+    // Proposed summary lines
+    for pr in &result.proposed_results {
+        match &pr.run_result {
+            treb_forge::pipeline::RunResult::SafeProposed {
+                safe_tx_hash, nonce, ..
+            } => {
+                let hash = output::truncate_address(&format!("{:#x}", safe_tx_hash));
+                let line = format!(
+                    "{} proposed to Safe (safeTxHash={}, nonce={})",
+                    pr.sender_role, hash, nonce,
+                );
+                if use_color {
+                    eprintln!("    {}", line.style(color::YELLOW));
+                } else {
+                    eprintln!("    {line}");
+                }
+            }
+            treb_forge::pipeline::RunResult::GovernorProposed {
+                proposal_id, governor_address, ..
+            } => {
+                let gov = output::truncate_address(&format!("{:#x}", governor_address));
+                let line = format!(
+                    "{} proposed to Governor {} (proposal={})",
+                    pr.sender_role, gov, proposal_id,
+                );
+                if use_color {
+                    eprintln!("    {}", line.style(color::YELLOW));
+                } else {
+                    eprintln!("    {line}");
+                }
+            }
+            _ => {}
         }
     }
 }
 
-// ---------------------------------------------------------------------------
-// Transaction rendering helpers (Go: render/transaction.go)
-// ---------------------------------------------------------------------------
 
-/// Format a transaction status as a fixed-width (9-char) lowercase string
-/// with Go-matching color: simulated=faint, queued=yellow, executed=green,
-/// failed=red.
-fn format_tx_status(status: &TransactionStatus) -> String {
-    let (label, style) = match status {
-        TransactionStatus::Simulated => ("simulated", color::MUTED),
-        TransactionStatus::Queued => ("queued   ", color::YELLOW),
-        TransactionStatus::Executed => ("executed ", color::GREEN),
-        TransactionStatus::Failed => ("failed   ", color::RED),
-    };
-    if color::is_color_enabled() { format!("{}", label.style(style)) } else { label.to_string() }
-}
 
 #[cfg(test)]
 fn format_tx_operation(operation: &Operation) -> String {
@@ -1309,7 +1378,7 @@ fn format_skipped_deployment_line(skipped: &treb_forge::SkippedDeployment) -> St
     )
 }
 
-fn display_result_human(result: &PipelineResult, verbose: u8, _network: Option<&str>, _namespace: &str, skip_traces: bool) {
+fn display_result_human(result: &PipelineResult, verbose: u8, _network: Option<&str>, _namespace: &str, skip_traces: bool, script_name: &str) {
     // ── Transactions ────────────────────────────────────────────────────
     if result.transactions.is_empty() && result.deployments.is_empty() {
         let msg = "No transactions recorded";
@@ -1320,8 +1389,8 @@ fn display_result_human(result: &PipelineResult, verbose: u8, _network: Option<&
         }
     } else if !result.transactions.is_empty() {
         if skip_traces {
-            // Preview already shown — just display the broadcast receipts
-            display_broadcast_receipts(&result.transactions);
+            // Preview already shown — display compact broadcast summary
+            display_script_broadcast_summary(script_name, result);
         } else {
             display_transactions_ordered(&result.transactions, verbose);
         }
