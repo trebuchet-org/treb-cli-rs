@@ -513,8 +513,9 @@ pub async fn execute_script(
         }
     };
 
-    // Phase 2: Broadcast hook (confirm) → broadcast
-    let should_broadcast = if wants_broadcast {
+    // Phase 2: Preview simulation results → confirm → broadcast
+    let has_transactions = simulated.results().any(|(_, r)| !r.transactions.is_empty());
+    let should_broadcast = if wants_broadcast && has_transactions {
         opts.broadcast_hook
             .is_none_or(|hook| {
                 let (_, result) = simulated.results().next().unwrap();
