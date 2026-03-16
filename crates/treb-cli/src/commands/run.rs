@@ -753,7 +753,7 @@ pub async fn run(
         None
     };
 
-    let result = execute_script(
+    let mut result = execute_script(
         ExecuteScriptOpts {
             script: script.to_string(),
             sig: sig.to_string(),
@@ -779,11 +779,105 @@ pub async fn run(
     )
     .await?;
 
+    // ── Poll for Safe execution (interactive only) ────────────────────────
+    if !result.proposed_results.is_empty() && prompts_enabled && !json {
+        poll_proposed_results(&mut result, chain_id, &mut registry).await?;
+    }
+
     // ── Display results ──────────────────────────────────────────────────
     let skip_traces = broadcast_previewed.load(std::sync::atomic::Ordering::Relaxed);
     display_result(
         &result, json, verbose, resolved.network.as_deref(), &resolved.namespace, skip_traces,
     )?;
+
+    Ok(())
+}
+
+// ── Safe execution polling ───────────────────────────────────────────────
+
+/// Interactively poll for Safe transaction execution.
+///
+/// For each `SafeProposed` result, prompts the user to wait. If confirmed,
+/// polls the Safe Transaction Service every 5 seconds until executed.
+/// Updates the registry records on execution.
+async fn poll_proposed_results(
+    result: &mut PipelineResult,
+    chain_id: u64,
+    registry: &mut treb_registry::Registry,
+) -> anyhow::Result<()> {
+    use treb_core::types::TransactionStatus;
+
+    for pr in &result.proposed_results {
+        if let treb_forge::pipeline::RunResult::SafeProposed {
+            safe_tx_hash, safe_address, nonce, tx_count,
+        } = &pr.run_result
+        {
+            let hash_display = output::truncate_address(&format!("{:#x}", safe_tx_hash));
+            let safe_display = output::truncate_address(&format!("{:#x}", safe_address));
+
+            println!(
+                "\n  {} {}  Proposed to Safe {} (safeTxHash={}, nonce={}, {} tx)",
+                emoji::HOURGLASS, pr.sender_role, safe_display, hash_display, nonce, tx_count,
+            );
+
+            let wait = crate::ui::prompt::confirm("Wait for execution?", false);
+            if !wait {
+                println!("  Saved as queued — check status later with `treb safe status`");
+                continue;
+            }
+
+            // Start spinner + poll
+            let mut spinner = spinoff::Spinner::new(
+                spinoff::spinners::Dots2,
+                format!("  Waiting for Safe execution (polling every 5s)..."),
+                spinoff::Color::Cyan,
+            );
+
+            let poll_result = treb_forge::pipeline::routing::poll_safe_execution(
+                chain_id,
+                safe_tx_hash,
+                || false, // never skip — user explicitly asked to wait
+            )
+            .await;
+
+            spinner.clear();
+            eprint!("\x1b[2K\r");
+
+            match poll_result {
+                Ok(Some(tx_hash)) => {
+                    if color::is_color_enabled() {
+                        println!(
+                            "  {} {}  Executed! tx={}",
+                            emoji::CHECK_MARK,
+                            pr.sender_role,
+                            tx_hash.style(color::GREEN),
+                        );
+                    } else {
+                        println!(
+                            "  {} {}  Executed! tx={}",
+                            emoji::CHECK_MARK, pr.sender_role, tx_hash,
+                        );
+                    }
+
+                    // Update safe transaction status in registry
+                    for safe_tx in &mut result.safe_transactions {
+                        if safe_tx.safe_tx_hash == format!("{:#x}", safe_tx_hash) {
+                            safe_tx.status = TransactionStatus::Executed;
+                            safe_tx.execution_tx_hash = tx_hash.clone();
+                            safe_tx.executed_at = Some(chrono::Utc::now());
+                            let _ = registry.update_safe_transaction(safe_tx.clone());
+                        }
+                    }
+                }
+                Ok(None) => {
+                    println!("  Skipped — saved as queued");
+                }
+                Err(e) => {
+                    eprintln!("  Polling failed: {e}");
+                }
+            }
+        }
+    }
 
     Ok(())
 }
