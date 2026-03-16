@@ -12,6 +12,7 @@ use treb_core::types::{
     transaction::Transaction,
 };
 
+use super::routing::RunResult;
 use crate::{events::ExtractedCollision, sender::ResolvedSender};
 
 // ---------------------------------------------------------------------------
@@ -115,10 +116,31 @@ pub struct PipelineResult {
     pub console_logs: Vec<String>,
     /// Governor proposals created during script execution.
     pub governor_proposals: Vec<GovernorProposal>,
+    /// Safe transactions produced by routing (proposed to Safe Service).
+    pub safe_transactions: Vec<SafeTransaction>,
+    /// Raw routing results for CLI display (proposed vs broadcast per-run).
+    pub proposed_results: Vec<ProposedResult>,
     /// Pre-rendered execution traces (shown at `-v` and `-vv`).
     pub execution_traces: Option<String>,
     /// Pre-rendered setup traces (shown at `-vvv`).
     pub setup_traces: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// ProposedResult
+// ---------------------------------------------------------------------------
+
+/// A routing result that was proposed (not broadcast on-chain).
+///
+/// These are surfaced to the CLI for display and optional polling.
+#[derive(Debug, Clone)]
+pub struct ProposedResult {
+    /// The sender role that triggered this proposal.
+    pub sender_role: String,
+    /// The routing outcome.
+    pub run_result: RunResult,
+    /// Number of original user transactions covered by this proposal.
+    pub tx_count: usize,
 }
 
 // ---------------------------------------------------------------------------

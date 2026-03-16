@@ -23,8 +23,8 @@ pub use hydration::{
 pub use orchestrator::{BroadcastHook, BroadcastPhase, BroadcastProgressCallback, RunPipeline};
 pub use routing::{RouteContext, RunResult, TransactionRun, flatten_receipts, route_all};
 pub use types::{
-    PipelineConfig, PipelineContext, PipelineResult, RecordedDeployment, RecordedTransaction,
-    SkippedDeployment,
+    PipelineConfig, PipelineContext, PipelineResult, ProposedResult, RecordedDeployment,
+    RecordedTransaction, SkippedDeployment,
 };
 
 use std::process::Command;

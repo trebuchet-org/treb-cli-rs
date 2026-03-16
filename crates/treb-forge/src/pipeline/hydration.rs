@@ -543,6 +543,7 @@ mod tests {
             resolved_senders: Default::default(),
             sender_labels: Default::default(),
             sender_role_names: Default::default(),
+            sender_configs: std::collections::HashMap::new(),
         }
     }
 

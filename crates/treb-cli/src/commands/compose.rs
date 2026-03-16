@@ -760,7 +760,7 @@ async fn setup_component(
     let sender_role_names: Vec<String> = resolved_senders.keys().cloned().collect();
     let sender_labels = resolved_senders
         .iter()
-        .map(|(role, sender)| (sender.sender_address(), role.clone()))
+        .map(|(role, sender)| (sender.broadcast_address(), role.clone()))
         .collect();
     let pipeline_config = PipelineConfig {
         script_path: component.script.clone(),
@@ -1419,6 +1419,14 @@ pub async fn run(
 
                 match route_result {
                     Ok(run_results) => {
+                        // Detect proposed (non-broadcast) results
+                        let has_proposed = run_results.iter().any(|(_, r)| {
+                            matches!(r,
+                                treb_forge::pipeline::RunResult::SafeProposed { .. }
+                                | treb_forge::pipeline::RunResult::GovernorProposed { .. }
+                            )
+                        });
+
                         let receipts = treb_forge::pipeline::flatten_receipts(&run_results);
                         treb_forge::pipeline::apply_receipts(
                             &mut sim.result.transactions,
@@ -1436,13 +1444,21 @@ pub async fn run(
                         let tx_count = sim.result.transactions.len();
                         let dep_count = sim.result.deployments.len();
                         if !json {
+                            let status_icon = if has_proposed {
+                                styled(&emoji::HOURGLASS.to_string(), color::YELLOW)
+                            } else {
+                                styled(&emoji::CHECK_MARK.to_string(), color::GREEN)
+                            };
                             let mut detail = format!("{tx_count} tx");
                             if dep_count > 0 {
                                 detail.push_str(&format!(", {dep_count} deployed"));
                             }
+                            if has_proposed {
+                                detail.push_str(", proposed");
+                            }
                             eprintln!(
                                 "  {} {}  ({})",
-                                styled(&emoji::CHECK_MARK.to_string(), color::GREEN),
+                                status_icon,
                                 &sim.name,
                                 styled(&detail, color::GRAY),
                             );
@@ -1463,6 +1479,26 @@ pub async fn run(
                                     "    {sender_label} {hash_display}{block_display}{gas_display}",
                                 );
                                 eprintln!("{}", styled(&line, color::GRAY));
+                            }
+                            // Show proposed summary per-run
+                            for (run, result) in &run_results {
+                                if let treb_forge::pipeline::RunResult::SafeProposed {
+                                    safe_tx_hash, nonce, ..
+                                } = result {
+                                    let hash = output::truncate_address(
+                                        &format!("{:#x}", safe_tx_hash),
+                                    );
+                                    eprintln!(
+                                        "    {}",
+                                        styled(
+                                            &format!(
+                                                "{} proposed to Safe (safeTxHash={}, nonce={})",
+                                                run.sender_role, hash, nonce,
+                                            ),
+                                            color::YELLOW,
+                                        ),
+                                    );
+                                }
                             }
                         }
                     }

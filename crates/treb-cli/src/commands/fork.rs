@@ -1014,7 +1014,7 @@ mod tests {
         let sub = parse_fork(&["enter", "--network", "mainnet"]).unwrap();
         match sub {
             ForkSubcommand::Enter { network, rpc_url, fork_block_number } => {
-                assert_eq!(network, "mainnet");
+                assert_eq!(network.as_deref(), Some("mainnet"));
                 assert!(rpc_url.is_none());
                 assert!(fork_block_number.is_none());
             }
@@ -1036,7 +1036,7 @@ mod tests {
         .unwrap();
         match sub {
             ForkSubcommand::Enter { network, rpc_url, fork_block_number } => {
-                assert_eq!(network, "mainnet");
+                assert_eq!(network.as_deref(), Some("mainnet"));
                 assert_eq!(rpc_url.as_deref(), Some("https://eth.example.com"));
                 assert_eq!(fork_block_number, Some(19_000_000));
             }
@@ -1048,7 +1048,7 @@ mod tests {
     fn parse_exit() {
         let sub = parse_fork(&["exit", "--network", "sepolia"]).unwrap();
         match sub {
-            ForkSubcommand::Exit { network } => assert_eq!(network, "sepolia"),
+            ForkSubcommand::Exit { network } => assert_eq!(network.as_deref(), Some("sepolia")),
             _ => panic!("expected Exit"),
         }
     }
@@ -1079,7 +1079,7 @@ mod tests {
         let sub = parse_fork(&["diff", "--network", "mainnet", "--json"]).unwrap();
         match sub {
             ForkSubcommand::Diff { network, json } => {
-                assert_eq!(network, "mainnet");
+                assert_eq!(network.as_deref(), Some("mainnet"));
                 assert!(json);
             }
             _ => panic!("expected Diff"),

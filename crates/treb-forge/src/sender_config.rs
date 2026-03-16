@@ -106,9 +106,12 @@ impl SenderTypes {
 pub fn encode_sender_configs(
     resolved_senders: &HashMap<String, ResolvedSender>,
 ) -> String {
+    // Use broadcast_address() — for Governor+timelock, this returns the
+    // timelock address (the on-chain executor), so the Solidity side calls
+    // vm.broadcast(timelockAddress) instead of vm.broadcast(governorAddress).
     let mut pairs: Vec<(String, Address)> = resolved_senders
         .iter()
-        .map(|(name, sender)| (name.clone(), sender.sender_address()))
+        .map(|(name, sender)| (name.clone(), sender.broadcast_address()))
         .collect();
     // Sort by name for deterministic output
     pairs.sort_by(|a, b| a.0.cmp(&b.0));

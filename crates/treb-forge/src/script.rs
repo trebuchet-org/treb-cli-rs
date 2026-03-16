@@ -479,9 +479,10 @@ pub fn build_script_config_with_senders(
         config.private_keys_hex(all_keys);
     }
 
-    // Set the sender to the deployer's address if available
+    // Set the sender to the deployer's broadcast address if available.
+    // For Governor+timelock, this is the timelock (the on-chain executor).
     if let Some(deployer) = resolved_senders.get("deployer") {
-        config.sender(deployer.sender_address());
+        config.sender(deployer.broadcast_address());
     }
 
     Ok(config)
@@ -572,7 +573,7 @@ mod tests {
         // evm.sender should be the derived address
         assert_eq!(args.evm.sender, Some(ANVIL_ADDR_0));
         // wallet opts should have the private key in the keys list
-        assert!(args.wallets.private_keys.contains(&ANVIL_KEY_0.to_string()));
+        assert!(args.wallets.private_keys.as_ref().is_some_and(|keys| keys.contains(&ANVIL_KEY_0.to_string())));
     }
 
     #[test]
@@ -618,7 +619,7 @@ mod tests {
         // evm.sender should be the safe address
         assert_eq!(args.evm.sender, Some(safe_addr.parse::<Address>().unwrap()));
         // wallet opts should have the sub-signer's private key for vm.broadcast()
-        assert!(args.wallets.private_keys.contains(&ANVIL_KEY_0.to_string()));
+        assert!(args.wallets.private_keys.as_ref().is_some_and(|keys| keys.contains(&ANVIL_KEY_0.to_string())));
     }
 
     #[test]

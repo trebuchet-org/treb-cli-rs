@@ -424,6 +424,8 @@ impl ComposePipeline {
             event_count,
             console_logs: execution.logs,
             governor_proposals,
+            safe_transactions: Vec::new(),
+            proposed_results: Vec::new(),
             execution_traces,
             setup_traces,
         };

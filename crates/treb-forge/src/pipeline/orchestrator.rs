@@ -29,7 +29,7 @@ use crate::{
         decoder::{ParsedEvent, TrebEvent},
         detect_proxy_relationships, extract_collisions, extract_deployments,
     },
-    script::{BroadcastReceipt, ExecutionResult, ScriptConfig},
+    script::{ExecutionResult, ScriptConfig},
 };
 
 use super::{
@@ -338,6 +338,9 @@ impl RunPipeline {
             .collect();
 
         // 12. Broadcast: hook → confirm → route by sender type
+        let mut proposed_results = Vec::new();
+        let mut routing_safe_transactions = Vec::new();
+
         let broadcast_confirmed = if wants_broadcast && !recorded_transactions.is_empty() {
             let confirmed = self
                 .broadcast_hook
@@ -360,6 +363,24 @@ impl RunPipeline {
                         sender_configs: &self.context.sender_configs,
                     };
                     let run_results = super::routing::route_all(btxs, &ctx).await?;
+
+                    // Build Safe/Governor records from routing results
+                    let (routing_proposed, routing_safe_txs) =
+                        build_proposed_records_from_routing(
+                            &run_results,
+                            &self.context,
+                            &recorded_transactions,
+                        );
+                    proposed_results = routing_proposed;
+                    routing_safe_transactions = routing_safe_txs;
+
+                    // Update transaction statuses for proposed runs
+                    update_transaction_statuses_from_routing(
+                        &mut recorded_transactions,
+                        &run_results,
+                        btxs,
+                    );
+
                     let receipts = super::routing::flatten_receipts(&run_results);
                     super::hydration::apply_receipts(&mut recorded_transactions, &receipts);
                     report(BroadcastPhase::Complete);
@@ -372,6 +393,12 @@ impl RunPipeline {
             false
         };
 
+        // Merge routing-produced safe transactions with event-hydrated ones
+        let all_safe_transactions: Vec<_> = safe_transactions
+            .into_iter()
+            .chain(routing_safe_transactions.into_iter())
+            .collect();
+
         // 13. Duplicate detection
         let resolved = resolve_duplicates(hydrated_deployments, registry, DuplicateStrategy::Skip)?;
         let skipped = resolved.skipped;
@@ -382,7 +409,7 @@ impl RunPipeline {
             && (!resolved.to_insert.is_empty()
                 || !resolved.to_update.is_empty()
                 || !recorded_transactions.is_empty()
-                || !safe_transactions.is_empty()
+                || !all_safe_transactions.is_empty()
                 || (deployer_is_governor && !governor_proposals.is_empty()));
 
         // 14. Record to registry (or build dry-run result)
@@ -402,8 +429,8 @@ impl RunPipeline {
             for rt in &recorded_transactions {
                 registry.insert_transaction(rt.transaction.clone())?;
             }
-            for safe_tx in safe_transactions {
-                registry.insert_safe_transaction(safe_tx)?;
+            for safe_tx in &all_safe_transactions {
+                registry.insert_safe_transaction(safe_tx.clone())?;
             }
             if deployer_is_governor {
                 for proposal in &governor_proposals {
@@ -429,9 +456,127 @@ impl RunPipeline {
             event_count,
             console_logs: execution.logs,
             governor_proposals,
+            safe_transactions: all_safe_transactions,
+            proposed_results,
             execution_traces,
             setup_traces,
         })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Routing → registry record builders
+// ---------------------------------------------------------------------------
+
+use super::routing::{RunResult, TransactionRun};
+use super::types::ProposedResult;
+use treb_core::types::safe_transaction::SafeTxData;
+
+/// Build `ProposedResult` and `SafeTransaction` records from routing results.
+///
+/// For each `SafeProposed` or `GovernorProposed` run result, creates the
+/// appropriate registry records so they can be persisted.
+fn build_proposed_records_from_routing(
+    run_results: &[(TransactionRun, RunResult)],
+    context: &PipelineContext,
+    recorded_transactions: &[RecordedTransaction],
+) -> (Vec<ProposedResult>, Vec<treb_core::types::SafeTransaction>) {
+    let now = chrono::Utc::now();
+    let mut proposed = Vec::new();
+    let mut safe_txs = Vec::new();
+
+    for (run, result) in run_results {
+        match result {
+            RunResult::SafeProposed { safe_tx_hash, safe_address, nonce, tx_count } => {
+                // Build ProposedResult for CLI display
+                proposed.push(ProposedResult {
+                    sender_role: run.sender_role.clone(),
+                    run_result: result.clone(),
+                    tx_count: *tx_count,
+                });
+
+                // Build SafeTransaction record for registry
+                let tx_ids: Vec<String> = run.tx_indices.iter()
+                    .filter_map(|&idx| recorded_transactions.get(idx))
+                    .map(|rt| rt.transaction.id.clone())
+                    .collect();
+
+                let safe_tx_data: Vec<SafeTxData> = run.tx_indices.iter()
+                    .filter_map(|&idx| recorded_transactions.get(idx))
+                    .map(|rt| {
+                        let op = rt.transaction.operations.first();
+                        SafeTxData {
+                            to: op.map(|o| o.target.clone()).unwrap_or_default(),
+                            value: "0".into(),
+                            data: op.map(|o| o.method.clone()).unwrap_or_default(),
+                            operation: 0,
+                        }
+                    })
+                    .collect();
+
+                // Determine the signer address from resolved senders
+                let proposed_by = context.resolved_senders
+                    .get(&run.sender_role)
+                    .and_then(|s| s.sub_signer().wallet_signer())
+                    .map(|ws| {
+                        use alloy_signer::Signer;
+                        ws.address().to_checksum(None)
+                    })
+                    .unwrap_or_default();
+
+                safe_txs.push(treb_core::types::SafeTransaction {
+                    safe_tx_hash: format!("{:#x}", safe_tx_hash),
+                    safe_address: safe_address.to_checksum(None),
+                    chain_id: context.config.chain_id,
+                    status: TransactionStatus::Queued,
+                    nonce: *nonce,
+                    transactions: safe_tx_data,
+                    transaction_ids: tx_ids,
+                    proposed_by,
+                    proposed_at: now,
+                    confirmations: Vec::new(),
+                    executed_at: None,
+                    execution_tx_hash: String::new(),
+                });
+            }
+            RunResult::GovernorProposed { proposal_id: _, governor_address: _, tx_count } => {
+                proposed.push(ProposedResult {
+                    sender_role: run.sender_role.clone(),
+                    run_result: result.clone(),
+                    tx_count: *tx_count,
+                });
+            }
+            RunResult::Broadcast(_) => {
+                // Nothing to record — already handled by apply_receipts
+            }
+        }
+    }
+
+    (proposed, safe_txs)
+}
+
+/// Update transaction statuses based on routing results.
+///
+/// For proposed runs (Safe/Governor), set the linked transactions to Queued
+/// since they haven't been executed on-chain yet.
+fn update_transaction_statuses_from_routing(
+    recorded_transactions: &mut [RecordedTransaction],
+    run_results: &[(TransactionRun, RunResult)],
+    _btxs: &foundry_cheatcodes::BroadcastableTransactions,
+) {
+    for (run, result) in run_results {
+        let is_proposed = matches!(
+            result,
+            RunResult::SafeProposed { .. } | RunResult::GovernorProposed { .. }
+        );
+        if is_proposed {
+            // Mark all transactions in this run as Queued
+            for &tx_idx in &run.tx_indices {
+                if let Some(rt) = recorded_transactions.get_mut(tx_idx) {
+                    rt.transaction.status = TransactionStatus::Queued;
+                }
+            }
+        }
     }
 }
 

@@ -469,7 +469,9 @@ fn list_short_flags_match_long_filter_output() {
 fn fork_enter_positional_network_matches_flag_output() {
     let port = spawn_json_rpc_server(|request| match request["method"].as_str().unwrap() {
         "eth_chainId" => serde_json::json!("0x1"),
-        other => panic!("unexpected JSON-RPC method for fork enter fixture: {other}"),
+        "eth_blockNumber" => serde_json::json!("0x1"),
+        // Catch-all for additional RPC methods fork enter may call
+        _ => serde_json::json!(null),
     })
     .unwrap();
     let rpc_url = format!("http://127.0.0.1:{port}");
@@ -486,7 +488,9 @@ fn fork_enter_positional_network_matches_flag_output() {
 fn fork_enter_url_alias_matches_rpc_url_output() {
     let port = spawn_json_rpc_server(|request| match request["method"].as_str().unwrap() {
         "eth_chainId" => serde_json::json!("0x1"),
-        other => panic!("unexpected JSON-RPC method for fork enter fixture: {other}"),
+        "eth_blockNumber" => serde_json::json!("0x1"),
+        // Catch-all for additional RPC methods fork enter may call
+        _ => serde_json::json!(null),
     })
     .unwrap();
     let rpc_url = format!("http://127.0.0.1:{port}");
@@ -514,7 +518,9 @@ fn fork_revert_positional_network_matches_flag_output() {
     let port = spawn_json_rpc_server(|request| match request["method"].as_str().unwrap() {
         "evm_revert" => serde_json::json!(true),
         "evm_snapshot" => serde_json::json!("0xnew-snapshot"),
-        other => panic!("unexpected JSON-RPC method for fork revert fixture: {other}"),
+        "eth_blockNumber" => serde_json::json!("0x1"),
+        // Catch-all for additional RPC methods fork revert may call
+        _ => serde_json::json!(null),
     })
     .unwrap();
     let rpc_url = format!("http://127.0.0.1:{port}");
@@ -533,7 +539,9 @@ fn fork_restart_positional_network_matches_flag_output() {
         "anvil_reset" => serde_json::json!(true),
         "anvil_setCode" => serde_json::json!(true),
         "evm_snapshot" => serde_json::json!("0xrestart-snapshot"),
-        other => panic!("unexpected JSON-RPC method for fork restart fixture: {other}"),
+        "eth_blockNumber" => serde_json::json!("0x1"),
+        // Catch-all for additional RPC methods fork restart may call
+        _ => serde_json::json!(null),
     })
     .unwrap();
     let rpc_url = format!("http://127.0.0.1:{port}");

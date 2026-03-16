@@ -4,6 +4,7 @@
 //! flow with synthetic data, verifying that the pipeline produces correct
 //! core domain records without requiring real forge compilation.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use alloy_primitives::{Address, B256, Bytes, address, b256, keccak256};
@@ -43,6 +44,7 @@ fn test_context() -> PipelineContext {
         resolved_senders: Default::default(),
         sender_labels: Default::default(),
         sender_role_names: Default::default(),
+        sender_configs: HashMap::new(),
     }
 }
 
@@ -119,6 +121,8 @@ fn build_pipeline_result(
         governor_proposals: Vec::new(),
         execution_traces: None,
         setup_traces: None,
+        safe_transactions: Vec::new(),
+        proposed_results: Vec::new(),
     }
 }
 

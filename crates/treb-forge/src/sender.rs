@@ -69,6 +69,19 @@ impl ResolvedSender {
         }
     }
 
+    /// Returns the address that `vm.broadcast()` should use for this sender.
+    ///
+    /// For most senders this equals `sender_address()`. The difference is for
+    /// Governor senders with a timelock: the **timelock** is the on-chain
+    /// executor (it's the `msg.sender` when the proposal executes), so the
+    /// script must `vm.broadcast(timelockAddress)`.
+    pub fn broadcast_address(&self) -> Address {
+        match self {
+            Self::Governor { timelock_address: Some(tl), .. } => *tl,
+            _ => self.sender_address(),
+        }
+    }
+
     /// Returns `true` if this is a Safe multisig sender.
     pub fn is_safe(&self) -> bool {
         matches!(self, Self::Safe { .. })
@@ -900,5 +913,49 @@ mod tests {
     fn timelock_address_returns_none_for_wallet() {
         let wallet = ResolvedSender::Wallet(in_memory_signer(0).unwrap());
         assert!(wallet.timelock_address().is_none());
+    }
+
+    // ---- broadcast_address tests ----
+
+    #[test]
+    fn broadcast_address_returns_timelock_when_present() {
+        let tl = address!("0000000000000000000000000000000000000088");
+        let gov = ResolvedSender::Governor {
+            governor_address: address!("0000000000000000000000000000000000000099"),
+            timelock_address: Some(tl),
+            proposer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
+        };
+        assert_eq!(gov.broadcast_address(), tl);
+    }
+
+    #[test]
+    fn broadcast_address_returns_governor_when_no_timelock() {
+        let gov_addr = address!("0000000000000000000000000000000000000099");
+        let gov = ResolvedSender::Governor {
+            governor_address: gov_addr,
+            timelock_address: None,
+            proposer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
+        };
+        assert_eq!(gov.broadcast_address(), gov_addr);
+    }
+
+    #[test]
+    fn broadcast_address_equals_sender_address_for_wallet() {
+        let ws = in_memory_signer(0).unwrap();
+        let addr = ws.address();
+        let wallet = ResolvedSender::Wallet(ws);
+        assert_eq!(wallet.broadcast_address(), addr);
+        assert_eq!(wallet.broadcast_address(), wallet.sender_address());
+    }
+
+    #[test]
+    fn broadcast_address_equals_sender_address_for_safe() {
+        let safe_addr = address!("0000000000000000000000000000000000000042");
+        let safe = ResolvedSender::Safe {
+            safe_address: safe_addr,
+            signer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
+        };
+        assert_eq!(safe.broadcast_address(), safe_addr);
+        assert_eq!(safe.broadcast_address(), safe.sender_address());
     }
 }

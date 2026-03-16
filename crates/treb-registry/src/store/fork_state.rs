@@ -103,10 +103,10 @@ pub fn restore_registry(snapshot_dir: &Path, registry_dir: &Path) -> Result<(), 
             if legacy_snapshot_file.exists() {
                 fs::write(&registry_file, fs::read(&legacy_snapshot_file)?)?;
             } else if registry_file.exists() {
-                fs::write(&registry_file, "{}")?;
+                fs::remove_file(&registry_file)?;
             }
         } else if registry_file.exists() {
-            fs::write(&registry_file, "{}")?;
+            fs::remove_file(&registry_file)?;
         }
     }
     Ok(())

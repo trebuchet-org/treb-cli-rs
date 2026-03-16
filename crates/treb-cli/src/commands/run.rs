@@ -434,7 +434,7 @@ pub async fn execute_script(
     let sender_role_names: Vec<String> = resolved_senders.keys().cloned().collect();
     let sender_labels = resolved_senders
         .iter()
-        .map(|(role, sender)| (sender.sender_address(), role.clone()))
+        .map(|(role, sender)| (sender.broadcast_address(), role.clone()))
         .collect();
 
     // Take ownership of all resolved senders for the pipeline context.
@@ -1295,6 +1295,73 @@ fn display_result_human(result: &PipelineResult, verbose: u8, network: Option<&s
         println!();
     }
 
+    // ── Proposed Transactions (from routing) ─────────────────────────────
+    if !result.proposed_results.is_empty() {
+        output::print_section_header(emoji::HOURGLASS, "Pending Proposals", 50);
+        for pr in &result.proposed_results {
+            match &pr.run_result {
+                treb_forge::pipeline::RunResult::SafeProposed {
+                    safe_tx_hash, safe_address, nonce, tx_count,
+                } => {
+                    let hash = output::truncate_address(&format!("{:#x}", safe_tx_hash));
+                    let safe = output::truncate_address(&format!("{:#x}", safe_address));
+                    let tx_suffix = if *tx_count == 1 { "" } else { "s" };
+                    if color::is_color_enabled() {
+                        println!(
+                            "  {} {}  safeTxHash={} nonce={} ({} tx{})",
+                            emoji::HOURGLASS,
+                            pr.sender_role.style(color::CYAN),
+                            hash.style(color::YELLOW),
+                            nonce,
+                            tx_count,
+                            tx_suffix,
+                        );
+                        println!(
+                            "   {}",
+                            format!("Proposed to Safe {safe}").style(color::GRAY),
+                        );
+                    } else {
+                        println!(
+                            "  {} {}  safeTxHash={} nonce={} ({} tx{})",
+                            emoji::HOURGLASS,
+                            pr.sender_role, hash, nonce, tx_count, tx_suffix,
+                        );
+                        println!("   Proposed to Safe {safe}");
+                    }
+                }
+                treb_forge::pipeline::RunResult::GovernorProposed {
+                    proposal_id, governor_address, tx_count,
+                } => {
+                    let gov = output::truncate_address(&format!("{:#x}", governor_address));
+                    let tx_suffix = if *tx_count == 1 { "" } else { "s" };
+                    if color::is_color_enabled() {
+                        println!(
+                            "  {} {}  proposal={} ({} tx{})",
+                            emoji::CLASSICAL_BUILDING,
+                            pr.sender_role.style(color::CYAN),
+                            proposal_id.style(color::YELLOW),
+                            tx_count,
+                            tx_suffix,
+                        );
+                        println!(
+                            "   {}",
+                            format!("Governor {gov}").style(color::GRAY),
+                        );
+                    } else {
+                        println!(
+                            "  {} {}  proposal={} ({} tx{})",
+                            emoji::CLASSICAL_BUILDING,
+                            pr.sender_role, proposal_id, tx_count, tx_suffix,
+                        );
+                        println!("   Governor {gov}");
+                    }
+                }
+                _ => {}
+            }
+        }
+        println!();
+    }
+
     // ── Skipped Deployments ─────────────────────────────────────────────
     if !result.skipped.is_empty() {
         println!("Skipped:");
@@ -1444,6 +1511,8 @@ mod tests {
             governor_proposals: Vec::new(),
             execution_traces: None,
             setup_traces: None,
+            safe_transactions: Vec::new(),
+            proposed_results: Vec::new(),
         }
     }
 
@@ -1571,11 +1640,11 @@ needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
 
     #[test]
     fn deployment_banner_mode_uses_go_parity_labels() {
-        // dry_run param is ignored — mode is driven by broadcast flag
+        // Mode is driven by broadcast flag only — fork/live distinction removed
         assert_eq!(deployment_banner_mode(false, false, false).0, "DRY_RUN");
         assert_eq!(deployment_banner_mode(false, false, true).0, "DRY_RUN");
-        assert_eq!(deployment_banner_mode(false, true, true).0, "FORK");
-        assert_eq!(deployment_banner_mode(false, true, false).0, "LIVE");
+        assert_eq!(deployment_banner_mode(false, true, true).0, "BROADCAST");
+        assert_eq!(deployment_banner_mode(false, true, false).0, "BROADCAST");
     }
 
     #[test]
@@ -1641,8 +1710,9 @@ needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
         let lines = format_verbose_senders(&senders);
 
         assert_eq!(lines.len(), 2);
-        assert_eq!(lines[0], "anvil: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8");
-        assert_eq!(lines[1], "deployer: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
+        // Padded format: role is left-aligned to max role length, then two spaces
+        assert_eq!(lines[0], "anvil     0x70997970C51812dc3A010C7d01b50e0d17dc79C8");
+        assert_eq!(lines[1], "deployer  0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
     }
 
     #[test]
@@ -1733,6 +1803,8 @@ needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
 
     #[test]
     fn format_tx_operations_includes_all_operations() {
+        // Disable color so we get predictable output
+        owo_colors::set_override(false);
         let operations = vec![
             Operation {
                 operation_type: "DEPLOY".into(),
@@ -1748,9 +1820,10 @@ needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
             },
         ];
 
+        // Format: "type truncated_target.method()" joined by " | "
         assert_eq!(
             format_tx_operations(&operations),
-            "0x0000000000000000000000000000000000001001::CREATE(DEPLOY) | 0x0000000000000000000000000000000000001002::CREATE(DEPLOY)"
+            "DEPLOY 0x0000...1001.CREATE() | DEPLOY 0x0000...1002.CREATE()"
         );
     }
 

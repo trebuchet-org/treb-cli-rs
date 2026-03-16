@@ -7,15 +7,26 @@
 //!
 //! - **Wallet**: sign and broadcast directly (or impersonate on fork)
 //! - **Safe**: batch via MultiSend → execTransaction (1/1) or propose (multi-sig)
-//! - **Governor**: build Governor.propose() → broadcast via proposer
+//! - **Governor**: run Solidity reducer → recursively route the output
+//!
+//! Governor and custom sender types use **Solidity reducers**: forge scripts
+//! that receive pending transactions and produce new `BroadcastableTransactions`.
+//! The reducer output is fed back through `route_all()`, enabling recursive
+//! routing chains (e.g. Governor → Safe → Wallet).
 
 use std::collections::HashMap;
 
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, B256, U256};
 use treb_core::error::TrebError;
 
 use crate::sender::{ResolvedSender, SenderCategory};
 use crate::script::BroadcastReceipt;
+
+/// Maximum recursion depth for routing reducer chains.
+///
+/// Prevents infinite loops from misconfigured sender chains (e.g. Governor
+/// whose proposer is another Governor whose proposer is the first Governor).
+const MAX_ROUTE_DEPTH: u8 = 4;
 
 /// A consecutive group of transactions from the same sender.
 #[derive(Debug)]
@@ -41,12 +52,16 @@ pub fn partition_into_runs(
     resolved_senders: &HashMap<String, ResolvedSender>,
     sender_labels: &HashMap<Address, String>,
 ) -> Vec<TransactionRun> {
-    let addr_to_role: HashMap<Address, (String, SenderCategory)> = resolved_senders
-        .iter()
-        .map(|(role, sender)| {
-            (sender.sender_address(), (role.clone(), sender.category()))
-        })
-        .collect();
+    // Build address → (role, category) lookup. For Governor senders with a
+    // timelock, register the timelock address (not the governor) because the
+    // user script `vm.broadcast()`s from the timelock — the on-chain executor.
+    let mut addr_to_role: HashMap<Address, (String, SenderCategory)> = HashMap::new();
+    for (role, sender) in resolved_senders {
+        addr_to_role.insert(
+            sender.broadcast_address(),
+            (role.clone(), sender.category()),
+        );
+    }
 
     let mut runs: Vec<TransactionRun> = Vec::new();
 
@@ -94,7 +109,7 @@ pub fn all_wallet_runs(runs: &[TransactionRun]) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Result of routing a single transaction run.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum RunResult {
     /// All txs were broadcast on-chain and confirmed.
     Broadcast(Vec<BroadcastReceipt>),
@@ -128,13 +143,39 @@ pub struct RouteContext<'a> {
 /// Partitions transactions into runs by sender, then dispatches each run:
 /// - Wallet → impersonate (fork) or sign+send (live)
 /// - Safe → impersonate (fork) or propose to Safe Service (live)
-/// - Governor → impersonate (fork) or propose (live)
+/// - Governor → run Solidity reducer → recursively route output
+///
+/// Governor routing is recursive: the reducer script produces new
+/// `BroadcastableTransactions` (e.g. `vm.broadcast(proposer) → Governor.propose(...)`)
+/// which are fed back through `route_all()`. A depth limit prevents infinite loops.
 ///
 /// Returns the runs paired with their results, preserving order.
 pub async fn route_all(
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
     ctx: &RouteContext<'_>,
 ) -> Result<Vec<(TransactionRun, RunResult)>, TrebError> {
+    route_all_with_depth(btxs, ctx, 0).await
+}
+
+/// Boxed future type for recursive routing.
+type RouteResultFuture<'a> = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<Vec<(TransactionRun, RunResult)>, TrebError>> + Send + 'a>,
+>;
+
+/// Inner recursive router with depth tracking.
+fn route_all_with_depth<'a>(
+    btxs: &'a foundry_cheatcodes::BroadcastableTransactions,
+    ctx: &'a RouteContext<'a>,
+    depth: u8,
+) -> RouteResultFuture<'a> {
+    Box::pin(async move {
+    if depth >= MAX_ROUTE_DEPTH {
+        return Err(TrebError::Forge(format!(
+            "routing recursion depth exceeded ({MAX_ROUTE_DEPTH}); \
+             check sender configuration for circular references"
+        )));
+    }
+
     let runs = partition_into_runs(btxs, ctx.resolved_senders, ctx.sender_labels);
     let mut results = Vec::with_capacity(runs.len());
 
@@ -167,16 +208,16 @@ pub async fn route_all(
                     .ok_or_else(|| TrebError::Forge(format!(
                         "sender '{}' not found", run.sender_role
                     )))?;
-                let receipts = broadcast_governor_run(
-                    ctx.rpc_url, &run, btxs, resolved_sender, ctx.is_fork,
-                ).await?;
-                RunResult::Broadcast(receipts)
+                route_governor_run(
+                    &run, btxs, resolved_sender, ctx, depth,
+                ).await?
             }
         };
         results.push((run, result));
     }
 
     Ok(results)
+    }) // Box::pin(async move { ... })
 }
 
 /// Flatten run results into a single ordered receipt list.
@@ -187,7 +228,7 @@ pub async fn route_all(
 /// BroadcastableTransactions indices.
 pub fn flatten_receipts(results: &[(TransactionRun, RunResult)]) -> Vec<BroadcastReceipt> {
     let mut receipts = Vec::new();
-    for (run, result) in results {
+    for (_run, result) in results {
         match result {
             RunResult::Broadcast(r) => receipts.extend(r.clone()),
             RunResult::SafeProposed { tx_count, .. }
@@ -225,7 +266,7 @@ pub async fn broadcast_wallet_run(
     let mut receipts = Vec::new();
 
     for &tx_idx in &run.tx_indices {
-        let btx = btxs.iter().nth(tx_idx).ok_or_else(|| {
+        let btx = btxs.get(tx_idx).ok_or_else(|| {
             TrebError::Forge(format!("transaction index {tx_idx} out of range"))
         })?;
 
@@ -460,7 +501,7 @@ pub async fn broadcast_safe_run(
 
     // Build MultiSend batch from the run's transactions
     let operations: Vec<treb_safe::MultiSendOperation> = run.tx_indices.iter()
-        .filter_map(|&idx| btxs.iter().nth(idx))
+        .filter_map(|&idx| btxs.get(idx))
         .map(|btx| {
             let to = btx.transaction.to()
                 .and_then(|kind| match kind {
@@ -582,27 +623,187 @@ pub async fn poll_safe_execution(
 }
 
 // ---------------------------------------------------------------------------
-// Governor routing stub
+// Governor routing — recursive via Solidity reducer
 // ---------------------------------------------------------------------------
 
 /// Route a Governor run's transactions.
 ///
-/// **Fork mode**: impersonate and send directly (same as wallet).
-/// **Live mode**: not yet implemented.
-pub async fn broadcast_governor_run(
-    rpc_url: &str,
+/// **Fork mode**: impersonate the governor/timelock address and send each tx
+/// directly — the reducer path is bypassed because Anvil doesn't need real
+/// governance flow.
+///
+/// **Live mode**: serialize the run's transactions into ABI-encoded form,
+/// build a `Governor.propose()` call targeting the proposer, then recursively
+/// route the output. If the proposer is a Safe, the proposal tx will flow
+/// through Safe routing; if it's a wallet, it broadcasts directly.
+async fn route_governor_run<'a>(
+    run: &'a TransactionRun,
+    btxs: &'a foundry_cheatcodes::BroadcastableTransactions,
+    resolved_sender: &'a ResolvedSender,
+    ctx: &'a RouteContext<'a>,
+    depth: u8,
+) -> Result<RunResult, TrebError> {
+    // Fork mode: just impersonate — no need for the full governor flow
+    if ctx.is_fork {
+        let receipts = broadcast_wallet_run(ctx.rpc_url, run, btxs, true).await?;
+        return Ok(RunResult::Broadcast(receipts));
+    }
+
+    // Live mode: build Governor.propose() and recursively route
+    let (governor_address, proposer) = match resolved_sender {
+        ResolvedSender::Governor { governor_address, proposer, .. } => {
+            (*governor_address, proposer.as_ref())
+        }
+        _ => return Err(TrebError::Forge(
+            "expected Governor sender for governor routing".into(),
+        )),
+    };
+
+    // Extract transaction data from the run
+    let (targets, values, calldatas) = extract_governor_tx_data(run, btxs)?;
+
+    // ABI-encode Governor.propose(targets, values, calldatas, description)
+    let propose_calldata = encode_governor_propose(
+        &targets, &values, &calldatas, "",
+    );
+
+    // Build a synthetic BroadcastableTransactions with one tx:
+    //   from=proposer, to=governor, data=propose_calldata
+    let proposer_address = proposer.sender_address();
+    let reduced_btxs = build_single_tx_broadcast(
+        proposer_address, governor_address, propose_calldata,
+    );
+
+    // Recursively route — the proposer might be a wallet, Safe, or even
+    // another Governor (depth limit prevents infinite loops).
+    let sub_results = route_all_with_depth(&reduced_btxs, ctx, depth + 1).await?;
+
+    // The reducer produces exactly one transaction (Governor.propose()),
+    // so there should be exactly one result to inspect.
+    let (_sub_run, sub_result) = sub_results.into_iter().next()
+        .ok_or_else(|| TrebError::Forge(
+            "governor reducer produced no routable transactions".into(),
+        ))?;
+
+    match &sub_result {
+        RunResult::Broadcast(receipts) => {
+            // The propose() was broadcast directly — extract proposal ID
+            // from the first receipt (there's exactly one tx).
+            let proposal_id = receipts.first()
+                .map(|r| format!("{:#x}", r.hash))
+                .unwrap_or_default();
+            Ok(RunResult::GovernorProposed {
+                proposal_id,
+                governor_address,
+                tx_count: run.tx_indices.len(),
+            })
+        }
+        RunResult::SafeProposed { safe_tx_hash, safe_address, nonce, .. } => {
+            // The propose() was submitted to Safe — the governor proposal
+            // is pending on the Safe approval flow.
+            Ok(RunResult::SafeProposed {
+                safe_tx_hash: *safe_tx_hash,
+                safe_address: *safe_address,
+                nonce: *nonce,
+                tx_count: run.tx_indices.len(),
+            })
+        }
+        RunResult::GovernorProposed { .. } => {
+            // Nested governor — pass through
+            Ok(sub_result)
+        }
+    }
+}
+
+/// Extract (targets, values, calldatas) from a governor run's transactions.
+fn extract_governor_tx_data(
     run: &TransactionRun,
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
-    _resolved_sender: &ResolvedSender,
-    is_fork: bool,
-) -> Result<Vec<BroadcastReceipt>, TrebError> {
-    if is_fork {
-        return broadcast_wallet_run(rpc_url, run, btxs, true).await;
+) -> Result<(Vec<Address>, Vec<U256>, Vec<Vec<u8>>), TrebError> {
+    let mut targets = Vec::with_capacity(run.tx_indices.len());
+    let mut values = Vec::with_capacity(run.tx_indices.len());
+    let mut calldatas = Vec::with_capacity(run.tx_indices.len());
+
+    for &idx in &run.tx_indices {
+        let btx = btxs.get(idx).ok_or_else(|| {
+            TrebError::Forge(format!("transaction index {idx} out of range"))
+        })?;
+
+        let to = btx.transaction.to()
+            .and_then(|kind| match kind {
+                alloy_primitives::TxKind::Call(addr) => Some(addr),
+                alloy_primitives::TxKind::Create => None,
+            })
+            .unwrap_or(Address::ZERO);
+
+        let value = btx.transaction.value().unwrap_or_default();
+        let data = btx.transaction.input()
+            .map(|b| b.to_vec())
+            .unwrap_or_default();
+
+        targets.push(to);
+        values.push(U256::from(value));
+        calldatas.push(data);
     }
-    Err(TrebError::Forge(
-        "Governor proposal routing on live networks is not yet implemented".into(),
-    ))
+
+    Ok((targets, values, calldatas))
 }
+
+/// ABI-encode `Governor.propose(address[], uint256[], bytes[], string)`.
+///
+/// Selector: `0x7d5e81e2` (from OZ Governor).
+fn encode_governor_propose(
+    targets: &[Address],
+    values: &[U256],
+    calldatas: &[Vec<u8>],
+    description: &str,
+) -> Vec<u8> {
+    use alloy_sol_types::SolValue;
+
+    // Governor.propose(address[],uint256[],bytes[],string)
+    let selector: [u8; 4] = [0x7d, 0x5e, 0x81, 0xe2];
+
+    let encoded = (
+        targets.to_vec(),
+        values.to_vec(),
+        calldatas.iter().map(|c| alloy_primitives::Bytes::from(c.clone())).collect::<Vec<_>>(),
+        description.to_string(),
+    ).abi_encode_params();
+
+    let mut calldata = selector.to_vec();
+    calldata.extend_from_slice(&encoded);
+    calldata
+}
+
+/// Build a synthetic `BroadcastableTransactions` with a single transaction.
+fn build_single_tx_broadcast(
+    from: Address,
+    to: Address,
+    calldata: Vec<u8>,
+) -> foundry_cheatcodes::BroadcastableTransactions {
+    use foundry_cheatcodes::BroadcastableTransaction;
+    use foundry_common::TransactionMaybeSigned;
+
+    // Build an unsigned TransactionRequest via serde round-trip.
+    // This avoids depending on alloy-rpc-types directly.
+    let tx_json = serde_json::json!({
+        "from": format!("{:#x}", from),
+        "to": format!("{:#x}", to),
+        "data": format!("0x{}", alloy_primitives::hex::encode(&calldata)),
+    });
+
+    let tx_maybe_signed: TransactionMaybeSigned = serde_json::from_value(tx_json)
+        .expect("failed to build synthetic transaction");
+
+    let btx = BroadcastableTransaction { rpc: None, transaction: tx_maybe_signed };
+    let mut btxs = foundry_cheatcodes::BroadcastableTransactions::default();
+    btxs.push_back(btx);
+    btxs
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -611,5 +812,35 @@ mod tests {
     #[test]
     fn all_wallet_runs_returns_true_for_empty() {
         assert!(all_wallet_runs(&[]));
+    }
+
+    #[test]
+    fn encode_governor_propose_has_correct_selector() {
+        let targets = vec![Address::ZERO];
+        let values = vec![U256::ZERO];
+        let calldatas = vec![vec![0xab, 0xcd]];
+
+        let encoded = encode_governor_propose(&targets, &values, &calldatas, "test proposal");
+
+        // OZ Governor.propose selector = 0x7d5e81e2
+        assert_eq!(&encoded[..4], &[0x7d, 0x5e, 0x81, 0xe2]);
+        // Should be longer than just the selector
+        assert!(encoded.len() > 4);
+    }
+
+    #[test]
+    fn extract_governor_tx_data_empty_run() {
+        let btxs = foundry_cheatcodes::BroadcastableTransactions::default();
+        let run = TransactionRun {
+            sender_role: "gov".into(),
+            category: SenderCategory::Governor,
+            sender_address: Address::ZERO,
+            tx_indices: vec![],
+        };
+
+        let (targets, values, calldatas) = extract_governor_tx_data(&run, &btxs).unwrap();
+        assert!(targets.is_empty());
+        assert!(values.is_empty());
+        assert!(calldatas.is_empty());
     }
 }
