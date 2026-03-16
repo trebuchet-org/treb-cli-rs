@@ -1058,18 +1058,24 @@ pub async fn run(
                         eprintln!("  {global_idx}: from={sender_label}");
                     }
 
-                    // Show operations as fallback (compose doesn't have per-tx traces)
-                    for op in &rt.transaction.operations {
-                        let target = crate::output::truncate_address(&op.target);
-                        let line = if op.method.is_empty() || op.method.starts_with("0x") {
-                            format!("      {} {}", op.operation_type, target)
-                        } else {
-                            format!("      {} {}.{}()", op.operation_type, target, op.method)
-                        };
-                        if use_color {
-                            eprintln!("{}", line.style(crate::ui::color::MUTED));
-                        } else {
-                            eprintln!("{line}");
+                    // Show per-tx trace if available, otherwise operation summary
+                    if let Some(ref trace) = rt.trace {
+                        for line in trace.lines() {
+                            eprintln!("    {line}");
+                        }
+                    } else {
+                        for op in &rt.transaction.operations {
+                            let target = crate::output::truncate_address(&op.target);
+                            let line = if op.method.is_empty() || op.method.starts_with("0x") {
+                                format!("      {} {}", op.operation_type, target)
+                            } else {
+                                format!("      {} {}.{}()", op.operation_type, target, op.method)
+                            };
+                            if use_color {
+                                eprintln!("{}", line.style(crate::ui::color::MUTED));
+                            } else {
+                                eprintln!("{line}");
+                            }
                         }
                     }
                     global_idx += 1;
@@ -1102,6 +1108,30 @@ pub async fn run(
                 "  {} collision(s) — contract(s) already deployed at predicted address",
                 total_collisions,
             );
+        }
+
+        // Deployment summary
+        if total_deps > 0 {
+            let use_color = crate::ui::color::is_color_enabled();
+            eprintln!("\n{} Deployments:", crate::ui::emoji::PACKAGE);
+            for sim in &simulations {
+                for rd in &sim.result.deployments {
+                    let d = &rd.deployment;
+                    let mut name = d.contract_name.clone();
+                    if !d.label.is_empty() {
+                        name = format!("{name}:{}", d.label);
+                    }
+                    if use_color {
+                        eprintln!(
+                            "  {} at {}",
+                            name.style(crate::ui::color::CYAN),
+                            d.address.style(crate::ui::color::GREEN),
+                        );
+                    } else {
+                        eprintln!("  {} at {}", name, d.address);
+                    }
+                }
+            }
         }
 
         eprintln!(

@@ -246,11 +246,15 @@ impl RunPipeline {
             hydrate_transactions(&tx_events, &hydrated_deployments, &self.context)
         };
 
-        // Build v2 transaction metadata from broadcastable transactions.
-        let mut v2_metadata = if let Some(btxs) = broadcastable_txs {
-            build_v2_transaction_metadata(btxs, &self.context)
+        // Build per-transaction metadata with trace matching.
+        let mut transaction_metadata = if let Some(btxs) = broadcastable_txs {
+            build_v2_recorded_transaction_metadata(
+                btxs,
+                &extracted_deployments,
+                &execution.traces,
+                &self.context,
+            )
         } else {
-            // Fallback to v1 metadata from TransactionSimulated events
             let tx_events = extract_transaction_simulated(&parsed_events);
             let sender_id_labels: HashMap<B256, String> = self
                 .context
@@ -258,19 +262,12 @@ impl RunPipeline {
                 .iter()
                 .map(|role| (alloy_primitives::keccak256(role.as_bytes()), role.clone()))
                 .collect();
-            let v1_meta = build_recorded_transaction_metadata(
+            build_recorded_transaction_metadata(
                 &tx_events,
                 &extracted_deployments,
                 &execution.traces,
                 &sender_id_labels,
-            );
-            // Convert v1 metadata to v2 format
-            v1_meta.into_iter().map(|(k, v)| {
-                (k, super::hydration::V2TransactionMetadata {
-                    sender_name: v.sender_name,
-                    gas_used: v.gas_used,
-                })
-            }).collect()
+            )
         };
 
         // Also hydrate governor proposals from events (still emitted in v2).
@@ -310,14 +307,13 @@ impl RunPipeline {
             }
         }
 
-        // 9. Render traces (v2 doesn't use per-tx trace matching from TransactionSimulated)
-        let mut empty_v1_metadata = HashMap::new();
+        // 9. Render traces and extract per-transaction sub-trees
         let (execution_traces, setup_traces) = render_traces_for_verbosity(
             execution.traces,
             &labeled_addresses,
             &artifact_index,
             self.context.config.verbosity,
-            &mut empty_v1_metadata,
+            &mut transaction_metadata,
         )
         .await;
 
@@ -334,12 +330,12 @@ impl RunPipeline {
         let mut recorded_transactions: Vec<RecordedTransaction> = transactions
             .into_iter()
             .map(|tx| {
-                let metadata = v2_metadata.remove(&tx.id);
+                let metadata = transaction_metadata.remove(&tx.id).unwrap_or_default();
                 RecordedTransaction {
                     transaction: tx,
-                    sender_name: metadata.as_ref().and_then(|m| m.sender_name.clone()),
-                    gas_used: metadata.as_ref().and_then(|m| m.gas_used),
-                    trace: None,
+                    sender_name: metadata.sender_name,
+                    gas_used: metadata.gas_used,
+                    trace: metadata.trace,
                 }
             })
             .collect();
@@ -685,6 +681,91 @@ fn collect_recorded_transaction_metadata(
                     gas_used: matched.and_then(|(gas, _)| gas),
                     trace_node_idx: matched.map(|(_, idx)| idx),
                     trace: None,
+                },
+            )
+        })
+        .collect()
+}
+
+/// Build per-transaction metadata from BroadcastableTransactions (v2).
+///
+/// Same logic as `build_recorded_transaction_metadata` but driven by
+/// `BroadcastableTransactions` instead of `TransactionSimulated` events.
+pub(super) fn build_v2_recorded_transaction_metadata(
+    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    extracted_deployments: &[ExtractedDeployment],
+    traces: &Traces,
+    context: &PipelineContext,
+) -> HashMap<String, RecordedTransactionMetadata> {
+    let transaction_deployments = build_transaction_deployment_index(extracted_deployments);
+    let mut pending_traces: Vec<PendingExecutionTrace> = traces
+        .iter()
+        .filter(|(kind, _)| matches!(kind, TraceKind::Execution))
+        .flat_map(|(_, arena)| arena.nodes().iter())
+        .map(|node| PendingExecutionTrace {
+            to: node.trace.address,
+            kind: node.trace.kind,
+            data: node.trace.data.to_vec(),
+            value: node.trace.value,
+            gas_used: Some(node.trace.gas_used).filter(|gas| *gas > 0),
+            matched: false,
+            node_idx: node.idx,
+        })
+        .collect();
+
+    let addr_to_role: HashMap<Address, String> = context
+        .sender_labels
+        .iter()
+        .map(|(addr, role)| (*addr, role.clone()))
+        .collect();
+
+    btxs.iter()
+        .enumerate()
+        .map(|(idx, btx)| {
+            let tx_id = format!("tx-0x{:064x}", idx);
+            let from_addr = btx.transaction.from().unwrap_or_default();
+            let to_kind = btx.transaction.to();
+            let input = btx.transaction.input().cloned().unwrap_or_default();
+            let value = btx.transaction.value().unwrap_or_default();
+
+            let deployment_targets = transaction_deployments.get(&tx_id).map(Vec::as_slice);
+
+            let matched = pending_traces
+                .iter_mut()
+                .find(|candidate| {
+                    if candidate.matched || candidate.value != value {
+                        return false;
+                    }
+                    match to_kind {
+                        Some(alloy_primitives::TxKind::Call(to_addr)) => {
+                            !candidate.kind.is_any_create()
+                                && candidate.to == to_addr
+                                && candidate.data == input.as_ref()
+                        }
+                        Some(alloy_primitives::TxKind::Create) | None => {
+                            if !candidate.kind.is_any_create() {
+                                return false;
+                            }
+                            deployment_targets
+                                .is_some_and(|targets| targets.contains(&candidate.to))
+                                || (!input.is_empty() && candidate.data == input.as_ref())
+                        }
+                    }
+                })
+                .map(|candidate| {
+                    candidate.matched = true;
+                    (candidate.gas_used, candidate.node_idx)
+                });
+
+            let sender_name = addr_to_role.get(&from_addr).cloned();
+
+            (
+                tx_id,
+                RecordedTransactionMetadata {
+                    sender_name,
+                    gas_used: matched.and_then(|(gas, _)| gas),
+                    trace_node_idx: matched.map(|(_, idx)| idx),
+                    trace: None, // filled by extract_per_transaction_traces later
                 },
             )
         })

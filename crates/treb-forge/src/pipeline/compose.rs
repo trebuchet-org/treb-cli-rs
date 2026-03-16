@@ -360,8 +360,14 @@ impl ComposePipeline {
             hydrate_transactions(&tx_events, &hydrated_deployments, context)
         };
 
-        let v2_metadata = if let Some(btxs) = broadcastable_txs {
-            super::hydration::build_v2_transaction_metadata(btxs, context)
+        // Build per-transaction metadata with trace matching
+        let mut transaction_metadata = if let Some(btxs) = broadcastable_txs {
+            super::orchestrator::build_v2_recorded_transaction_metadata(
+                btxs,
+                &extracted_deployments,
+                &execution.traces,
+                context,
+            )
         } else {
             HashMap::new()
         };
@@ -395,28 +401,26 @@ impl ComposePipeline {
             }
         }
 
-        // Render traces
-        let mut empty_v1_metadata = HashMap::new();
+        // Render traces and extract per-transaction sub-trees
         let (execution_traces, setup_traces) = render_traces_for_verbosity(
             execution.traces,
             &labeled_addresses,
             artifact_index,
             context.config.verbosity,
-            &mut empty_v1_metadata,
+            &mut transaction_metadata,
         )
         .await;
 
         // Build recorded transactions
-        let mut v2_metadata = v2_metadata;
         let recorded_transactions: Vec<RecordedTransaction> = transactions
             .into_iter()
             .map(|tx| {
-                let metadata = v2_metadata.remove(&tx.id);
+                let metadata = transaction_metadata.remove(&tx.id).unwrap_or_default();
                 RecordedTransaction {
                     transaction: tx,
-                    sender_name: metadata.as_ref().and_then(|m| m.sender_name.clone()),
-                    gas_used: metadata.as_ref().and_then(|m| m.gas_used),
-                    trace: None,
+                    sender_name: metadata.sender_name,
+                    gas_used: metadata.gas_used,
+                    trace: metadata.trace,
                 }
             })
             .collect();
