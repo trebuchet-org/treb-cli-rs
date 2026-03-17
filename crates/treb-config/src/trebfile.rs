@@ -32,6 +32,20 @@ pub fn load_treb_config_v2(path: &Path) -> Result<TrebFileConfigV2> {
     Ok(config)
 }
 
+/// Load a v2 treb.toml **without** expanding `${VAR}` references.
+///
+/// Used by `config show` to display raw env-var references instead of resolved
+/// values (especially private keys).
+pub fn load_treb_config_v2_raw(path: &Path) -> Result<TrebFileConfigV2> {
+    if !path.exists() {
+        return Err(TrebError::Config(format!("treb.toml not found: {}", path.display())));
+    }
+
+    let contents = std::fs::read_to_string(path)?;
+    toml::from_str(&contents)
+        .map_err(|e| TrebError::Config(format!("invalid TOML in {}: {e}", path.display())))
+}
+
 /// Render a [`TrebFileConfigV2`] as a TOML string.
 ///
 /// Uses `toml::to_string_pretty` for stable, readable output that can be

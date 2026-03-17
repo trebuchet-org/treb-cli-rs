@@ -6,4 +6,4 @@ Network:   (not set)
 📦 Config source: treb.toml
 📁 config file: .treb/config.local.json
 
-  deployer  private_key  (literal key)
+  deployer  private_key  key=(literal)  address=${TEST_ADDR}
