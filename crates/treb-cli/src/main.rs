@@ -78,9 +78,6 @@ enum Commands {
         /// --json)
         #[arg(long)]
         broadcast: bool,
-        /// Simulate execution without making changes
-        #[arg(long)]
-        dry_run: bool,
         /// Send transactions one at a time
         #[arg(long)]
         slow: bool,
@@ -93,9 +90,6 @@ enum Commands {
         /// Verbosity level (-v, -vv, -vvv)
         #[arg(long, short, action = clap::ArgAction::Count)]
         verbose: u8,
-        /// Print the equivalent forge script command and exit without executing
-        #[arg(long)]
-        dump_command: bool,
         /// Resume a previous run, skipping already-completed transactions
         #[arg(long)]
         resume: bool,
@@ -403,9 +397,6 @@ enum Commands {
         /// --json)
         #[arg(long)]
         broadcast: bool,
-        /// Simulate execution without making changes
-        #[arg(long)]
-        dry_run: bool,
         /// Skip already-completed components
         #[arg(long)]
         resume: bool,
@@ -421,9 +412,6 @@ enum Commands {
         /// Verbosity level (-v, -vv, -vvv)
         #[arg(long, short, action = clap::ArgAction::Count)]
         verbose: u8,
-        /// Print per-component forge commands and exit without executing
-        #[arg(long)]
-        dump_command: bool,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -1026,12 +1014,10 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             rpc_url,
             namespace,
             broadcast,
-            dry_run,
             slow,
             legacy,
             verify,
             verbose,
-            dump_command,
             resume,
             json,
             env,
@@ -1045,12 +1031,12 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 rpc_url,
                 namespace,
                 broadcast,
-                dry_run,
+                false, // dry_run (removed)
                 slow,
                 legacy,
                 verify,
                 verbose,
-                dump_command,
+                false, // dump_command (removed)
                 resume,
                 json,
                 env,
@@ -1187,13 +1173,11 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             namespace,
             profile,
             broadcast,
-            dry_run,
             resume,
             verify,
             slow,
             legacy,
             verbose,
-            dump_command,
             json,
             env,
         } => {
@@ -1204,13 +1188,13 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 namespace,
                 profile,
                 broadcast,
-                dry_run,
+                false, // dry_run (removed)
                 resume,
                 verify,
                 slow,
                 legacy,
                 verbose,
-                dump_command,
+                false, // dump_command (removed)
                 json,
                 env,
                 non_interactive,

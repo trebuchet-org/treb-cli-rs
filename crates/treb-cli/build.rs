@@ -57,12 +57,6 @@ fn build_run() -> ClapCommand {
                 .help("Broadcast transactions to the network"),
         )
         .arg(
-            Arg::new("dry-run")
-                .long("dry-run")
-                .action(ArgAction::SetTrue)
-                .help("Simulate execution without recording to registry"),
-        )
-        .arg(
             Arg::new("slow")
                 .long("slow")
                 .action(ArgAction::SetTrue)
@@ -369,12 +363,6 @@ fn build_compose() -> ClapCommand {
                 .long("broadcast")
                 .action(ArgAction::SetTrue)
                 .help("Broadcast transactions to the network"),
-        )
-        .arg(
-            Arg::new("dry-run")
-                .long("dry-run")
-                .action(ArgAction::SetTrue)
-                .help("Print execution plan without running"),
         )
         .arg(
             Arg::new("resume")
