@@ -314,7 +314,7 @@ async fn register_basic() {
     run_register_golden_test(
         &ctx,
         "register_basic",
-        &["register", "--tx-hash", &tx_hash, "--network", "anvil-31337"],
+        &["registry", "add", "--tx-hash", &tx_hash, "--network", "anvil-31337"],
         &[".treb/deployments.json"],
         vec![
             Box::new(path_normalizer),
@@ -344,7 +344,7 @@ async fn register_network_from_config() {
     run_register_golden_test(
         &ctx,
         "register_network_from_config",
-        &["register", "--tx-hash", &tx_hash],
+        &["registry", "add", "--tx-hash", &tx_hash],
         &[".treb/deployments.json"],
         vec![
             Box::new(path_normalizer),
@@ -377,7 +377,7 @@ async fn register_namespace_from_config() {
     run_register_golden_test(
         &ctx,
         "register_namespace_from_config",
-        &["register", "--tx-hash", &tx_hash, "--network", "anvil-31337"],
+        &["registry", "add", "--tx-hash", &tx_hash, "--network", "anvil-31337"],
         &[".treb/deployments.json"],
         vec![
             Box::new(path_normalizer),
@@ -409,7 +409,7 @@ fn register_network_from_dotenv_config() {
     run_register_golden_test(
         &ctx,
         "register_network_from_dotenv_config",
-        &["register", "--tx-hash", DOTENV_REGISTER_TX_HASH],
+        &["registry", "add", "--tx-hash", DOTENV_REGISTER_TX_HASH],
         &[".treb/deployments.json"],
         vec![
             Box::new(path_normalizer),
@@ -443,7 +443,7 @@ async fn register_json() {
     run_register_golden_test(
         &ctx,
         "register_json",
-        &["register", "--tx-hash", &tx_hash, "--network", "anvil-31337", "--json"],
+        &["registry", "add", "--tx-hash", &tx_hash, "--network", "anvil-31337", "--json"],
         &[],
         vec![
             Box::new(path_normalizer),
@@ -467,7 +467,7 @@ fn register_error_bad_prefix() {
 
     let test = IntegrationTest::new("register_error_bad_prefix")
         .setup(&["init"])
-        .test(&["register", "--tx-hash", "abc123", "--rpc-url", "http://localhost:8545"])
+        .test(&["registry", "add", "--tx-hash", "abc123", "--rpc-url", "http://localhost:8545"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -487,7 +487,7 @@ fn register_error_no_init() {
             std::fs::remove_dir_all(ctx.treb_dir()).ok();
             std::fs::remove_file(ctx.path().join("foundry.toml")).ok();
         })
-        .test(&["register", "--tx-hash", "0xabc"])
+        .test(&["registry", "add", "--tx-hash", "0xabc"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -502,7 +502,7 @@ fn register_error_no_active_network() {
 
     let test = IntegrationTest::new("register_error_no_active_network")
         .setup(&["init"])
-        .test(&["register", "--tx-hash", "0xabc"])
+        .test(&["registry", "add", "--tx-hash", "0xabc"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -524,7 +524,8 @@ async fn register_error_tx_not_found() {
     let test = IntegrationTest::new("register_error_tx_not_found")
         .setup(&["init"])
         .test(&[
-            "register",
+            "registry",
+            "add",
             "--tx-hash",
             "0x0000000000000000000000000000000000000000000000000000000000000001",
             "--network",

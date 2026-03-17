@@ -97,7 +97,8 @@ async fn e2e_register_from_tx_hash() {
     let register_output = run_human(
         tmp.path().to_path_buf(),
         vec![
-            "register".into(),
+            "registry".into(),
+            "add".into(),
             "--tx-hash".into(),
             tx_hash.clone(),
             "--rpc-url".into(),
@@ -147,7 +148,8 @@ async fn e2e_register_tag_show_roundtrip() {
     let register_output = run_human(
         tmp.path().to_path_buf(),
         vec![
-            "register".into(),
+            "registry".into(),
+            "add".into(),
             "--tx-hash".into(),
             tx_hash.clone(),
             "--rpc-url".into(),

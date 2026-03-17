@@ -15,7 +15,6 @@ Main Commands:
 Management Commands:
   registry      Manage the deployment registry
   addressbook   Manage named addresses scoped by chain ID
-  register      Register an existing contract deployment in the registry
   dev           Development utilities
   networks      List available networks from foundry.toml
   config        Manage treb local config

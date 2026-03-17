@@ -1,5 +1,5 @@
-=== cmd 0: [register --help] ===
-Register an existing contract deployment in the registry
+=== cmd 0: [registry add --help] ===
+Register an existing contract deployment
 
 Register a contract that was deployed outside of treb so it can be used
 with registry lookups.
@@ -9,7 +9,7 @@ You can provide either:
 - A transaction hash (and treb will trace the transaction to find all contract creations)
 - Explicit parameters (address, contract path, transaction hash)
 
-Usage: treb register [OPTIONS] --tx-hash <TX_HASH>
+Usage: treb registry add [OPTIONS] --tx-hash <TX_HASH>
 
 Options:
       --no-color

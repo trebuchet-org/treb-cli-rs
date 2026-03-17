@@ -74,7 +74,7 @@ fn help_sync() {
 #[test]
 fn help_register() {
     let ctx = TestContext::new("minimal-project");
-    let test = IntegrationTest::new("help_register").test(&["register", "--help"]);
+    let test = IntegrationTest::new("help_register").test(&["registry", "add", "--help"]);
 
     run_integration_test(&test, &ctx);
 }

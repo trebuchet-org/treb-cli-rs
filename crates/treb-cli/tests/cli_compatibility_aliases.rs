@@ -376,9 +376,9 @@ fn compatibility_suite_still_exposes_completion_output_shape() {
 #[test]
 fn register_help_exposes_phase_10_flag_surface() {
     let output =
-        treb().args(["register", "--help"]).output().expect("register help command should run");
+        treb().args(["registry", "add", "--help"]).output().expect("register help command should run");
 
-    assert!(output.status.success(), "treb register --help should succeed");
+    assert!(output.status.success(), "treb registry add --help should succeed");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     for flag in ["--network", "--rpc-url", "--namespace", "--deployment-type", "--skip-verify"] {

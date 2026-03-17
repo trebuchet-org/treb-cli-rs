@@ -112,7 +112,8 @@ async fn register_deployment(
     tokio::task::spawn_blocking(move || {
         treb()
             .args([
-                "register",
+                "registry",
+                "add",
                 "--tx-hash",
                 &tx_hash,
                 "--rpc-url",

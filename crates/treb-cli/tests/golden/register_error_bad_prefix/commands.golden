@@ -1,2 +1,2 @@
-=== cmd 0: [register --tx-hash abc123 --rpc-url http://localhost:8545] ===
+=== cmd 0: [registry add --tx-hash abc123 --rpc-url http://localhost:8545] ===
 Error: --tx-hash must be a hex string starting with 0x

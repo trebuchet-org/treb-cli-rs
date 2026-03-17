@@ -28,7 +28,6 @@ fn build_cli() -> ClapCommand {
         .subcommand(build_verify())
         .subcommand(build_registry())
         .subcommand(build_addressbook())
-        .subcommand(build_register())
         .subcommand(build_version())
         .subcommand(build_networks())
         .subcommand(build_compose())
@@ -257,6 +256,7 @@ fn build_registry() -> ClapCommand {
         .subcommand(build_registry_sync())
         .subcommand(build_registry_prune())
         .subcommand(build_registry_tag())
+        .subcommand(build_registry_add())
         .subcommand(build_registry_drop())
 }
 
@@ -368,8 +368,8 @@ fn build_addressbook() -> ClapCommand {
         )
 }
 
-fn build_register() -> ClapCommand {
-    ClapCommand::new("register")
+fn build_registry_add() -> ClapCommand {
+    ClapCommand::new("add")
         .about("Register deployments from a historical transaction")
         .arg(
             Arg::new("tx-hash")

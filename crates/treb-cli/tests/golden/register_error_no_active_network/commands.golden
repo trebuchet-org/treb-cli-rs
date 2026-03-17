@@ -1,2 +1,2 @@
-=== cmd 0: [register --tx-hash 0xabc] ===
+=== cmd 0: [registry add --tx-hash 0xabc] ===
 Error: no active network set in config, --network flag is required

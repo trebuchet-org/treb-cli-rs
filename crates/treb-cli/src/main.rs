@@ -269,51 +269,6 @@ enum Commands {
         #[command(subcommand)]
         subcommand: commands::addressbook::AddressbookSubcommand,
     },
-    /// Register an existing contract deployment in the registry
-    ///
-    /// Register a contract that was deployed outside of treb so it can be used
-    /// with registry lookups.
-    ///
-    /// This command allows you to add existing deployments to the treb registry.
-    /// You can provide either:
-    /// - A transaction hash (and treb will trace the transaction to find all contract creations)
-    /// - Explicit parameters (address, contract path, transaction hash)
-    #[command(verbatim_doc_comment)]
-    Register {
-        /// Transaction hash to trace for contract creations
-        #[arg(long)]
-        tx_hash: String,
-        /// Network name or chain ID
-        #[arg(long)]
-        network: Option<String>,
-        /// Explicit RPC URL (overrides network)
-        #[arg(long)]
-        rpc_url: Option<String>,
-        /// Filter to a specific deployed address
-        #[arg(long)]
-        address: Option<String>,
-        /// Contract artifact name to match
-        #[arg(long)]
-        contract: Option<String>,
-        /// Contract name to narrow artifact matching
-        #[arg(long)]
-        contract_name: Option<String>,
-        /// Label for registered deployments
-        #[arg(long)]
-        label: Option<String>,
-        /// Deployment namespace
-        #[arg(long)]
-        namespace: Option<String>,
-        /// Deployment type (proxy, singleton, library, unknown)
-        #[arg(long, value_parser = parse_deployment_type)]
-        deployment_type: Option<treb_core::types::DeploymentType>,
-        /// Skip post-registration verification
-        #[arg(long)]
-        skip_verify: bool,
-        /// Output as JSON
-        #[arg(long)]
-        json: bool,
-    },
     /// Print the version number of treb
     Version {
         /// Output as JSON
@@ -492,6 +447,51 @@ enum RegistrySubcommand {
         #[arg(long)]
         json: bool,
     },
+    /// Register an existing contract deployment
+    ///
+    /// Register a contract that was deployed outside of treb so it can be used
+    /// with registry lookups.
+    ///
+    /// This command allows you to add existing deployments to the treb registry.
+    /// You can provide either:
+    /// - A transaction hash (and treb will trace the transaction to find all contract creations)
+    /// - Explicit parameters (address, contract path, transaction hash)
+    #[command(verbatim_doc_comment)]
+    Add {
+        /// Transaction hash to trace for contract creations
+        #[arg(long)]
+        tx_hash: String,
+        /// Network name or chain ID
+        #[arg(long)]
+        network: Option<String>,
+        /// Explicit RPC URL (overrides network)
+        #[arg(long)]
+        rpc_url: Option<String>,
+        /// Filter to a specific deployed address
+        #[arg(long)]
+        address: Option<String>,
+        /// Contract artifact name to match
+        #[arg(long)]
+        contract: Option<String>,
+        /// Contract name to narrow artifact matching
+        #[arg(long)]
+        contract_name: Option<String>,
+        /// Label for registered deployments
+        #[arg(long)]
+        label: Option<String>,
+        /// Deployment namespace
+        #[arg(long)]
+        namespace: Option<String>,
+        /// Deployment type (proxy, singleton, library, unknown)
+        #[arg(long, value_parser = parse_deployment_type)]
+        deployment_type: Option<treb_core::types::DeploymentType>,
+        /// Skip post-registration verification
+        #[arg(long)]
+        skip_verify: bool,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Drop registry entries by query, network, or namespace
     ///
     /// Delete deployments, transactions, and safe transactions from the registry.
@@ -510,7 +510,6 @@ impl Commands {
             | Commands::List { json, .. }
             | Commands::Show { json, .. }
             | Commands::Verify { json, .. }
-            | Commands::Register { json, .. }
             | Commands::Version { json, .. }
             | Commands::Networks { json, .. }
             | Commands::Compose { json, .. } => *json,
@@ -534,7 +533,8 @@ impl Commands {
 fn registry_subcommand_json_flag(subcommand: &RegistrySubcommand) -> bool {
     match subcommand {
         RegistrySubcommand::Sync { json, .. }
-        | RegistrySubcommand::Tag { json, .. } => *json,
+        | RegistrySubcommand::Tag { json, .. }
+        | RegistrySubcommand::Add { json, .. } => *json,
         RegistrySubcommand::Prune(args) => args.json,
         RegistrySubcommand::Drop(args) => args.json,
     }
@@ -659,7 +659,6 @@ fn build_grouped_help(cmd: &clap::Command) -> String {
         &[
             "registry",
             "addressbook",
-            "register",
             "dev",
             "networks",
             "config",
@@ -1156,28 +1155,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 )
                 .await?
             }
-            RegistrySubcommand::Drop(args) => {
-                commands::reset::run(args, non_interactive).await?
-            }
-        },
-        Commands::Addressbook { namespace, network, subcommand } => {
-            commands::addressbook::run(namespace, network, subcommand).await?
-        }
-        Commands::Register {
-            tx_hash,
-            network,
-            rpc_url,
-            address,
-            contract,
-            contract_name,
-            label,
-            namespace,
-            deployment_type,
-            skip_verify,
-            json,
-        } => {
-            commands::register::run(
-                &tx_hash,
+            RegistrySubcommand::Add {
+                tx_hash,
                 network,
                 rpc_url,
                 address,
@@ -1188,8 +1167,28 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 deployment_type,
                 skip_verify,
                 json,
-            )
-            .await?
+            } => {
+                commands::register::run(
+                    &tx_hash,
+                    network,
+                    rpc_url,
+                    address,
+                    contract,
+                    contract_name,
+                    label,
+                    namespace,
+                    deployment_type,
+                    skip_verify,
+                    json,
+                )
+                .await?
+            }
+            RegistrySubcommand::Drop(args) => {
+                commands::reset::run(args, non_interactive).await?
+            }
+        },
+        Commands::Addressbook { namespace, network, subcommand } => {
+            commands::addressbook::run(namespace, network, subcommand).await?
         }
         Commands::Version { json } => commands::version::run(json).await?,
         Commands::Networks { json } => commands::networks::run(json).await?,
