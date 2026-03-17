@@ -1,9 +1,6 @@
 === cmd 0: [config show] ===
-📋 Current config:
 Namespace: default
 Network:   (not set)
-
-📦 Config source: treb.toml
-📁 config file: .treb/config.local.json
+Source:    treb.toml
 
   deployer  private_key  key=(literal)  address=${TEST_ADDR}

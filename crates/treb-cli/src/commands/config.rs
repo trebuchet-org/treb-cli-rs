@@ -9,7 +9,9 @@ use treb_config::{
     resolve_config, save_local_config,
 };
 
-use crate::{output, ui::emoji};
+use owo_colors::OwoColorize;
+
+use crate::{output, ui::color, ui::emoji};
 
 const FOUNDRY_TOML: &str = "foundry.toml";
 const TREB_DIR: &str = ".treb";
@@ -55,23 +57,12 @@ pub async fn show(json: bool) -> anyhow::Result<()> {
     } else {
         let network_display = resolved.network.as_deref().unwrap_or("(not set)");
 
-        println!("{} Current config:", emoji::CLIPBOARD);
-        println!("Namespace: {}", resolved.namespace);
-        println!("Network:   {}", network_display);
-
-        println!();
+        println!("Namespace: {}", resolved.namespace.style(color::CYAN));
+        println!("Network:   {}", network_display.style(color::CYAN));
         println!(
-            "{} Config source: {}",
-            emoji::PACKAGE,
-            human_config_source(&resolved.config_source)
+            "Source:    {}",
+            human_config_source(&resolved.config_source).style(color::GRAY)
         );
-
-        let config_path = resolved.project_root.join(".treb/config.local.json");
-        let relative_path = config_path
-            .strip_prefix(&cwd)
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|_| config_path.display().to_string());
-        println!("{} config file: {}", emoji::FOLDER, relative_path);
 
         // Load raw (unexpanded) senders so env var references like
         // ${DEPLOYER_PRIVATE_KEY} are shown instead of resolved values.
@@ -271,18 +262,54 @@ fn format_sender_rows(senders: &HashMap<String, SenderConfig>) -> String {
     let role_width = entries.iter().map(|(role, ..)| role.len()).max().unwrap_or(0);
     let type_width = entries.iter().map(|(_, type_str, _)| type_str.len()).max().unwrap_or(0);
 
+    let use_color = color::is_color_enabled();
+
     entries
         .into_iter()
         .map(|(role, type_str, details)| {
-            let detail_str = details
-                .iter()
-                .map(|(k, v)| format!("{k}={v}"))
-                .collect::<Vec<_>>()
-                .join("  ");
-            if detail_str.is_empty() {
-                format!("  {role:<role_width$}  {type_str}")
+            let detail_str = if use_color {
+                details
+                    .iter()
+                    .map(|(k, v)| {
+                        format!(
+                            "{}={}",
+                            k.style(color::GRAY),
+                            v.style(color::CYAN)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("  ")
             } else {
-                format!("  {role:<role_width$}  {type_str:<type_width$}  {detail_str}")
+                details
+                    .iter()
+                    .map(|(k, v)| format!("{k}={v}"))
+                    .collect::<Vec<_>>()
+                    .join("  ")
+            };
+
+            // Pad raw strings first, then apply color to preserve alignment.
+            let padded_role = format!("{role:<role_width$}");
+            let role_display = if use_color {
+                format!("{}", padded_role.style(color::BOLD))
+            } else {
+                padded_role
+            };
+
+            if detail_str.is_empty() {
+                let type_display = if use_color {
+                    format!("{}", type_str.style(color::GRAY))
+                } else {
+                    type_str
+                };
+                format!("  {role_display}  {type_display}")
+            } else {
+                let padded_type = format!("{type_str:<type_width$}");
+                let type_display = if use_color {
+                    format!("{}", padded_type.style(color::GRAY))
+                } else {
+                    padded_type
+                };
+                format!("  {role_display}  {type_display}  {detail_str}")
             }
         })
         .collect::<Vec<_>>()
@@ -296,6 +323,8 @@ mod tests {
 
     #[test]
     fn format_sender_rows_sorts_roles_and_shows_type_specific_details() {
+        // Disable color so assertions compare plain text.
+        crate::ui::color::color_enabled(true);
         let mut senders = HashMap::new();
         senders.insert(
             "ops".to_string(),
