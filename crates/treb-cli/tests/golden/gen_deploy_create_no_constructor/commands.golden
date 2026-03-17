@@ -1,8 +1,0 @@
-=== cmd 0: [gen deploy SimpleContract --strategy create --output script/DeploySimpleContract.s.sol] ===
-
-✅ Generated deployment script: script/DeploySimpleContract.s.sol
-
-To deploy, run:
-  treb run script/DeploySimpleContract.s.sol --network <network>
-🔨 Compiling project...
-📝 Generating deploy script...

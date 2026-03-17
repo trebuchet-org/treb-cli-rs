@@ -24,7 +24,7 @@ clap = { workspace = true }
 tokio = { workspace = true }
 reqwest = { workspace = true }
 alloy-chains = { workspace = true }
-handlebars = { workspace = true }
+
 toml = { workspace = true }
 nucleo-matcher = { workspace = true }
 dialoguer = { workspace = true }

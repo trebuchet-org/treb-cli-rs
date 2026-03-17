@@ -144,18 +144,26 @@ pub async fn spawn_anvil_or_skip() -> Option<treb_forge::AnvilInstance> {
 
 /// Set up an isolated project directory for an e2e test.
 ///
-/// Copies the gen-deploy-project fixture (includes forge-std and
-/// SimpleContract.sol), writes a treb deploy script that emits treb events,
+/// Copies the project fixture (includes forge-std and foundry.toml),
+/// writes SimpleContract.sol and a treb deploy script that emits treb events,
 /// adds treb.toml with the Anvil deployer key, and runs `treb init`.
 pub async fn setup_project() -> tempfile::TempDir {
     let tmp = tempfile::tempdir().unwrap();
 
-    // Copy gen-deploy-project as the base: provides forge-std, SimpleContract.sol, foundry.toml.
+    // Copy project fixture as the base: provides forge-std, foundry.toml, src/.
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
-        .join("gen-deploy-project");
+        .join("project");
     copy_dir_recursive(&fixture, tmp.path());
+
+    // Write SimpleContract.sol used by the deploy script.
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(
+        tmp.path().join("src").join("SimpleContract.sol"),
+        "// SPDX-License-Identifier: UNLICENSED\npragma solidity ^0.8.13;\n\ncontract SimpleContract {\n    uint256 public value;\n}\n",
+    )
+    .unwrap();
 
     // Write the treb deploy script.
     fs::create_dir_all(tmp.path().join("script")).unwrap();

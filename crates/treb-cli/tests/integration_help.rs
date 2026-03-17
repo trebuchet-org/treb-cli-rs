@@ -16,15 +16,6 @@ fn help_root() {
     run_integration_test(&test, &ctx);
 }
 
-/// `gen --help` should continue to show the nested `deploy` structure.
-#[test]
-fn help_gen() {
-    let ctx = TestContext::new("minimal-project");
-    let test = IntegrationTest::new("help_gen").test(&["gen", "--help"]);
-
-    run_integration_test(&test, &ctx);
-}
-
 /// `completion --help` should stay singular in help output.
 #[test]
 fn help_completion() {

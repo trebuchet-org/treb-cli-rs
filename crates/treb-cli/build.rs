@@ -32,8 +32,6 @@ fn build_cli() -> ClapCommand {
         .subcommand(build_sync())
         .subcommand(build_version())
         .subcommand(build_networks())
-        .subcommand(build_gen())
-        .subcommand(build_gen_deploy_compat())
         .subcommand(build_compose())
         .subcommand(build_prune())
         .subcommand(build_reset())
@@ -357,40 +355,6 @@ fn build_networks() -> ClapCommand {
     ClapCommand::new("networks")
         .about("List available networks")
         .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
-}
-
-fn with_gen_deploy_args(cmd: ClapCommand) -> ClapCommand {
-    cmd.about("Generate deployment scripts from templates")
-        .arg(Arg::new("artifact").help("Contract name or artifact identifier"))
-        .arg(
-            Arg::new("strategy")
-                .long("strategy")
-                .help("Deployment strategy: create, create2, create3"),
-        )
-        .arg(
-            Arg::new("proxy")
-                .long("proxy")
-                .help("Proxy pattern: erc1967, uups, transparent, beacon"),
-        )
-        .arg(Arg::new("proxy-contract").long("proxy-contract").help("Custom proxy contract name"))
-        .arg(Arg::new("output").long("output").help("Output file path"))
-        .arg(
-            Arg::new("json")
-                .long("json")
-                .action(ArgAction::SetTrue)
-                .help("Output as JSON instead of writing a file"),
-        )
-}
-
-fn build_gen() -> ClapCommand {
-    ClapCommand::new("gen")
-        .about("Generate deployment scripts")
-        .visible_alias("generate")
-        .subcommand(with_gen_deploy_args(ClapCommand::new("deploy")))
-}
-
-fn build_gen_deploy_compat() -> ClapCommand {
-    with_gen_deploy_args(ClapCommand::new("gen-deploy").hide(true))
 }
 
 fn build_compose() -> ClapCommand {

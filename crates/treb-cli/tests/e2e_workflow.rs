@@ -4,8 +4,8 @@
 //! verifying that init, run, list, show, tag, prune, and reset commands
 //! compose correctly end-to-end.
 //!
-//! Each test spawns a local Anvil instance, copies the gen-deploy-project
-//! fixture (which includes forge-std and SimpleContract.sol), deploys a
+//! Each test spawns a local Anvil instance, copies the project fixture
+//! (which includes forge-std), writes SimpleContract.sol, deploys a
 //! contract using a treb-compatible script that emits `ContractDeployed`
 //! events, and then exercises the relevant treb command.
 

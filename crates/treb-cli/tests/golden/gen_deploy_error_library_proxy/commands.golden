@@ -1,3 +1,0 @@
-=== cmd 0: [gen deploy MathLib --proxy erc1967] ===
-🔨 Compiling project...
-Error: libraries cannot be deployed behind proxies

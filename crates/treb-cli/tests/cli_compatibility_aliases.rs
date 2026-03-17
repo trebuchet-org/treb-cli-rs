@@ -22,30 +22,6 @@ fn treb() -> assert_cmd::Command {
     cargo_bin_cmd!("treb-cli")
 }
 
-fn copy_dir_recursive(src: &Path, dst: &Path) {
-    for entry in fs::read_dir(src).unwrap() {
-        let entry = entry.unwrap();
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-        if src_path.is_dir() {
-            fs::create_dir_all(&dst_path).unwrap();
-            copy_dir_recursive(&src_path, &dst_path);
-        } else {
-            fs::copy(&src_path, &dst_path).unwrap();
-        }
-    }
-}
-
-fn setup_gen_deploy_project() -> tempfile::TempDir {
-    let tmp = tempfile::tempdir().unwrap();
-    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("gen-deploy-project");
-    copy_dir_recursive(&fixture, tmp.path());
-    tmp
-}
-
 const MINIMAL_FOUNDRY_TOML: &str = "[profile.default]\n";
 
 fn setup_config_project() -> tempfile::TempDir {
@@ -346,28 +322,6 @@ where
     });
 
     Ok(port)
-}
-
-#[test]
-fn gen_deploy_json_output_is_valid_for_primary_and_compat_forms() {
-    let tmp = setup_gen_deploy_project();
-
-    let run = |args: &[&str]| -> Vec<u8> {
-        let output =
-            treb().args(args).current_dir(tmp.path()).output().expect("command should run");
-
-        assert!(output.status.success(), "command should succeed for args: {args:?}");
-        let _: serde_json::Value =
-            serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-        output.stdout
-    };
-
-    let nested = run(&["gen", "deploy", "Counter", "--json"]);
-    let alias = run(&["generate", "deploy", "Counter", "--json"]);
-    let compat = run(&["gen-deploy", "Counter", "--json"]);
-
-    assert_eq!(nested, alias, "generate alias should match gen deploy output");
-    assert_eq!(nested, compat, "gen-deploy compatibility command should match gen deploy output");
 }
 
 #[test]

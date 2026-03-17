@@ -1,2 +1,0 @@
-=== cmd 0: [gen deploy Counter --proxy invalid] ===
-Error: invalid proxy pattern 'invalid'. Valid patterns: erc1967, uups, transparent, beacon

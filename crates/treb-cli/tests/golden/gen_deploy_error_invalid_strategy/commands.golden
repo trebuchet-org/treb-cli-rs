@@ -1,2 +1,0 @@
-=== cmd 0: [gen deploy Counter --strategy invalid] ===
-Error: invalid strategy 'invalid'. Valid strategies: create, create2, create3
