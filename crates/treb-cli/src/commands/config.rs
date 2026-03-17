@@ -179,15 +179,36 @@ fn human_config_source(config_source: &str) -> &str {
     config_source
 }
 
+/// Extract the most relevant display detail for a sender based on its type.
+fn sender_detail(sender: &SenderConfig) -> String {
+    match sender.type_.as_ref() {
+        Some(treb_config::SenderType::PrivateKey) => {
+            match sender.private_key.as_deref() {
+                Some(key) if key.starts_with("${") => key.to_string(),
+                Some(_) => "(literal key)".to_string(),
+                None => String::new(),
+            }
+        }
+        Some(treb_config::SenderType::Safe) => {
+            sender.safe.clone().unwrap_or_default()
+        }
+        Some(treb_config::SenderType::Ledger | treb_config::SenderType::Trezor) => {
+            sender.derivation_path.clone().unwrap_or_default()
+        }
+        Some(treb_config::SenderType::OZGovernor) => {
+            sender.governor.clone().unwrap_or_default()
+        }
+        None => String::new(),
+    }
+}
+
 fn format_sender_rows(senders: &HashMap<String, SenderConfig>) -> String {
-    let mut rows: Vec<(&str, String, &str)> = senders
+    let mut rows: Vec<(&str, String, String)> = senders
         .iter()
         .map(|(role, sender)| {
-            (
-                role.as_str(),
-                sender.type_.as_ref().map(ToString::to_string).unwrap_or_default(),
-                sender.address.as_deref().unwrap_or(""),
-            )
+            let type_str = sender.type_.as_ref().map(ToString::to_string).unwrap_or_default();
+            let detail = sender_detail(sender);
+            (role.as_str(), type_str, detail)
         })
         .collect();
     rows.sort_by_key(|(role, ..)| *role);
@@ -196,11 +217,11 @@ fn format_sender_rows(senders: &HashMap<String, SenderConfig>) -> String {
     let type_width = rows.iter().map(|(_, type_str, _)| type_str.len()).max().unwrap_or(0);
 
     rows.into_iter()
-        .map(|(role, type_str, address)| {
-            if address.is_empty() {
+        .map(|(role, type_str, detail)| {
+            if detail.is_empty() {
                 format!("  {role:<role_width$}  {type_str}")
             } else {
-                format!("  {role:<role_width$}  {type_str:<type_width$}  {address}")
+                format!("  {role:<role_width$}  {type_str:<type_width$}  {detail}")
             }
         })
         .collect::<Vec<_>>()
@@ -212,38 +233,63 @@ mod tests {
     use super::*;
     use treb_config::SenderType;
 
-    fn sender_config(type_: SenderType, address: Option<&str>) -> SenderConfig {
-        SenderConfig {
-            type_: Some(type_),
-            address: address.map(str::to_string),
-            ..SenderConfig::default()
-        }
-    }
-
     #[test]
-    fn format_sender_rows_sorts_roles_and_aligns_columns() {
+    fn format_sender_rows_sorts_roles_and_shows_type_specific_detail() {
         let mut senders = HashMap::new();
         senders.insert(
             "ops".to_string(),
-            sender_config(SenderType::Ledger, Some("0x2222222222222222222222222222222222222222")),
+            SenderConfig {
+                type_: Some(SenderType::Ledger),
+                derivation_path: Some("m/44'/60'/0'/0/0".to_string()),
+                ..SenderConfig::default()
+            },
         );
         senders.insert(
             "deployer".to_string(),
-            sender_config(
-                SenderType::PrivateKey,
-                Some("0x1111111111111111111111111111111111111111"),
-            ),
+            SenderConfig {
+                type_: Some(SenderType::PrivateKey),
+                private_key: Some("${DEPLOYER_PRIVATE_KEY}".to_string()),
+                ..SenderConfig::default()
+            },
         );
-        senders.insert("admin".to_string(), sender_config(SenderType::Safe, None));
+        senders.insert(
+            "admin".to_string(),
+            SenderConfig {
+                type_: Some(SenderType::Safe),
+                safe: Some("0xSafe1111111111111111111111111111111111".to_string()),
+                signer: Some("deployer".to_string()),
+                ..SenderConfig::default()
+            },
+        );
+        senders.insert(
+            "gov".to_string(),
+            SenderConfig {
+                type_: Some(SenderType::OZGovernor),
+                governor: Some("0xGov22222222222222222222222222222222222".to_string()),
+                proposer: Some("admin".to_string()),
+                ..SenderConfig::default()
+            },
+        );
 
         assert_eq!(
             format_sender_rows(&senders),
             concat!(
-                "  admin     safe\n",
-                "  deployer  private_key  0x1111111111111111111111111111111111111111\n",
-                "  ops       ledger       0x2222222222222222222222222222222222222222"
+                "  admin     safe         0xSafe1111111111111111111111111111111111\n",
+                "  deployer  private_key  ${DEPLOYER_PRIVATE_KEY}\n",
+                "  gov       oz_governor  0xGov22222222222222222222222222222222222\n",
+                "  ops       ledger       m/44'/60'/0'/0/0"
             )
         );
+    }
+
+    #[test]
+    fn sender_detail_private_key_literal_shows_placeholder() {
+        let sender = SenderConfig {
+            type_: Some(SenderType::PrivateKey),
+            private_key: Some("0xdeadbeef".to_string()),
+            ..SenderConfig::default()
+        };
+        assert_eq!(sender_detail(&sender), "(literal key)");
     }
 
     #[test]

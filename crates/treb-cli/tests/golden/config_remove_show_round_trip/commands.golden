@@ -6,4 +6,4 @@ Network:   (not set)
 📦 Config source: treb.toml
 📁 config file: .treb/config.local.json
 
-  anvil  private_key
+  anvil  private_key  (literal key)
