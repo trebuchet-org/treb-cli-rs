@@ -151,6 +151,7 @@ async fn e2e_prune_onchain_clean_registry() {
     let prune_output = run_human(
         tmp.path().to_path_buf(),
         vec![
+            "registry".into(),
             "prune".into(),
             "--check-onchain".into(),
             "--rpc-url".into(),
@@ -170,6 +171,7 @@ async fn e2e_prune_onchain_clean_registry() {
     let result = run_json(
         tmp.path().to_path_buf(),
         vec![
+            "registry".into(),
             "prune".into(),
             "--check-onchain".into(),
             "--rpc-url".into(),
@@ -218,6 +220,7 @@ async fn e2e_prune_detects_selfdestructed() {
     let prune_output = run_human(
         tmp.path().to_path_buf(),
         vec![
+            "registry".into(),
             "prune".into(),
             "--check-onchain".into(),
             "--rpc-url".into(),
@@ -245,6 +248,7 @@ async fn e2e_prune_detects_selfdestructed() {
     let result = run_json(
         tmp.path().to_path_buf(),
         vec![
+            "registry".into(),
             "prune".into(),
             "--check-onchain".into(),
             "--rpc-url".into(),
@@ -295,14 +299,14 @@ async fn e2e_reset_scoped_by_namespace() {
     // Step 2: Reset with a non-matching namespace → no files change.
     let reset_output = run_human(
         tmp.path().to_path_buf(),
-        vec!["reset".into(), "--namespace".into(), "nonexistent".into(), "--yes".into()],
+        vec!["registry".into(), "drop".into(), "--namespace".into(), "nonexistent".into(), "--yes".into()],
     )
     .await;
     assert!(
         reset_output.contains(
-            "Nothing to reset. No registry entries found for the current namespace and network."
+            "Nothing to drop. No registry entries found matching the given filters."
         ),
-        "non-matching namespace reset must show the full empty-state message, got: {reset_output}"
+        "non-matching namespace drop must show the full empty-state message, got: {reset_output}"
     );
     assert_eq!(
         read_deployments(tmp.path()),
@@ -318,7 +322,7 @@ async fn e2e_reset_scoped_by_namespace() {
     // Step 3: Reset the default namespace only.
     let result = run_json(
         tmp.path().to_path_buf(),
-        vec!["reset".into(), "--namespace".into(), "default".into(), "--yes".into()],
+        vec!["registry".into(), "drop".into(), "--namespace".into(), "default".into(), "--yes".into()],
     )
     .await;
     assert_eq!(
@@ -377,10 +381,10 @@ async fn e2e_deploy_reset_redeploy() {
 
     // Step 2a: Reset human output check.
     let reset_output =
-        run_human(tmp.path().to_path_buf(), vec!["reset".into(), "--yes".into()]).await;
+        run_human(tmp.path().to_path_buf(), vec!["registry".into(), "drop".into(), "--namespace".into(), "default".into(), "--yes".into()]).await;
     assert!(
-        reset_output.contains("Successfully reset 2 items from the registry."),
-        "reset must show 'Successfully reset 2 items from the registry.', got: {reset_output}"
+        reset_output.contains("Successfully dropped 2 items from the registry."),
+        "drop must show 'Successfully dropped 2 items from the registry.', got: {reset_output}"
     );
     assert_deployment_count(tmp.path().to_path_buf(), 0).await;
 

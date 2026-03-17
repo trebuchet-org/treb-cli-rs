@@ -1,4 +1,4 @@
-//! Golden-file integration tests for `treb prune`.
+//! Golden-file integration tests for `treb registry prune`.
 //!
 //! Tests exercise dry-run candidate display, destructive removal with backup,
 //! chain ID filtering, --include-pending, JSON output, clean-registry, and
@@ -146,7 +146,7 @@ fn prune_dry_run() {
     let test = IntegrationTest::new("prune_dry_run")
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_prune_registry(ctx.path()))
-        .test(&["prune", "--dry-run"])
+        .test(&["registry", "prune", "--dry-run"])
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(EpochNormalizer));
 
@@ -162,7 +162,7 @@ fn prune_destructive() {
     let test = IntegrationTest::new("prune_destructive")
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_prune_registry(ctx.path()))
-        .test(&["prune", "--yes"])
+        .test(&["registry", "prune", "--yes"])
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(EpochNormalizer));
 
@@ -177,7 +177,7 @@ fn prune_non_interactive_without_yes() {
     ctx.run(["init"]).success();
     seed_prune_registry(ctx.path());
 
-    let assertion = ctx.run_with_env(["prune"], [("TREB_NON_INTERACTIVE", "true")]);
+    let assertion = ctx.run_with_env(["registry", "prune"], [("TREB_NON_INTERACTIVE", "true")]);
     let stdout = String::from_utf8_lossy(&assertion.get_output().stdout).to_string();
     assertion.success();
 
@@ -206,7 +206,7 @@ fn prune_non_interactive_env_one_without_yes() {
     ctx.run(["init"]).success();
     seed_prune_registry(ctx.path());
 
-    let assertion = ctx.run_with_env(["prune"], [("TREB_NON_INTERACTIVE", "1")]);
+    let assertion = ctx.run_with_env(["registry", "prune"], [("TREB_NON_INTERACTIVE", "1")]);
     let stdout = String::from_utf8_lossy(&assertion.get_output().stdout).to_string();
     assertion.success();
 
@@ -235,7 +235,7 @@ fn prune_global_non_interactive_without_yes() {
     ctx.run(["init"]).success();
     seed_prune_registry(ctx.path());
 
-    let assertion = ctx.run(["--non-interactive", "prune"]);
+    let assertion = ctx.run(["--non-interactive", "registry", "prune"]);
     let stdout = String::from_utf8_lossy(&assertion.get_output().stdout).to_string();
     assertion.success();
 
@@ -264,7 +264,7 @@ fn prune_nothing() {
 
     let test = IntegrationTest::new("prune_nothing")
         .setup(&["init"])
-        .test(&["prune", "--dry-run"])
+        .test(&["registry", "prune", "--dry-run"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
@@ -279,7 +279,7 @@ fn prune_chain_filter() {
     let test = IntegrationTest::new("prune_chain_filter")
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_prune_registry(ctx.path()))
-        .test(&["prune", "--dry-run", "--network", "1"])
+        .test(&["registry", "prune", "--dry-run", "--network", "1"])
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(EpochNormalizer));
 
@@ -295,7 +295,7 @@ fn prune_include_pending() {
     let test = IntegrationTest::new("prune_include_pending")
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_prune_registry(ctx.path()))
-        .test(&["prune", "--dry-run", "--include-pending"])
+        .test(&["registry", "prune", "--dry-run", "--include-pending"])
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(EpochNormalizer));
 
@@ -311,7 +311,7 @@ fn prune_json_dry_run() {
     let test = IntegrationTest::new("prune_json_dry_run")
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_prune_registry(ctx.path()))
-        .test(&["prune", "--dry-run", "--json"])
+        .test(&["registry", "prune", "--dry-run", "--json"])
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(EpochNormalizer));
 
@@ -325,7 +325,7 @@ fn prune_uninitialized() {
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("prune_uninitialized")
-        .test(&["prune", "--dry-run"])
+        .test(&["registry", "prune", "--dry-run"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -394,7 +394,7 @@ async fn prune_check_onchain_dry_run() {
     // Run prune with --check-onchain
     let chain_str = chain_id.to_string();
     let args =
-        &["prune", "--check-onchain", "--rpc-url", &rpc_url, "--dry-run", "--network", &chain_str];
+        &["registry", "prune", "--check-onchain", "--rpc-url", &rpc_url, "--dry-run", "--network", &chain_str];
     let assertion = ctx.run(args);
     let stdout = String::from_utf8_lossy(&assertion.get_output().stdout).to_string();
     let stderr = String::from_utf8_lossy(&assertion.get_output().stderr).to_string();

@@ -26,7 +26,7 @@ fn sync_no_safe_txs() {
 
     let test = IntegrationTest::new("sync_no_safe_txs")
         .setup(&["init"])
-        .test(&["sync"])
+        .test(&["registry", "sync"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
@@ -40,7 +40,7 @@ fn sync_no_safe_txs_network_filter() {
 
     let test = IntegrationTest::new("sync_no_safe_txs_network_filter")
         .setup(&["init"])
-        .test(&["sync", "--network", "1"])
+        .test(&["registry", "sync", "--network", "1"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
@@ -54,7 +54,7 @@ fn sync_json_empty() {
 
     let test = IntegrationTest::new("sync_json_empty")
         .setup(&["init"])
-        .test(&["sync", "--json"])
+        .test(&["registry", "sync", "--json"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
@@ -70,7 +70,7 @@ fn sync_uninitialized() {
         .pre_setup_hook(|ctx| {
             std::fs::remove_dir_all(ctx.path().join(".treb")).unwrap();
         })
-        .test(&["sync"])
+        .test(&["registry", "sync"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -299,7 +299,7 @@ async fn sync_governor_human() {
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("sync_governor_human")
-        .test(&["sync"])
+        .test(&["registry", "sync"])
         .output_artifact(".treb/governor-txs.json")
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -315,7 +315,7 @@ async fn sync_governor_dotenv_rpc() {
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("sync_governor_dotenv_rpc")
-        .test(&["sync"])
+        .test(&["registry", "sync"])
         .output_artifact(".treb/governor-txs.json")
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -332,7 +332,7 @@ fn sync_governor_missing_rpc_human() {
     seed_governor_proposal(&ctx);
 
     let test = IntegrationTest::new("sync_governor_missing_rpc_human")
-        .test(&["sync"])
+        .test(&["registry", "sync"])
         .output_artifact(".treb/governor-txs.json")
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -350,7 +350,7 @@ async fn sync_governor_json() {
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("sync_governor_json")
-        .test(&["sync", "--json"])
+        .test(&["registry", "sync", "--json"])
         .output_artifact(".treb/governor-txs.json")
         .output_artifact(".treb/transactions.json")
         .extra_normalizer(Box::new(path_normalizer));
@@ -367,7 +367,7 @@ async fn sync_governor_clean() {
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("sync_governor_clean")
-        .test(&["sync", "--clean"])
+        .test(&["registry", "sync", "--clean"])
         .output_artifact(".treb/governor-txs.json")
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -383,7 +383,7 @@ fn sync_no_foundry_project() {
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("sync_no_foundry_project")
-        .test(&["sync"])
+        .test(&["registry", "sync"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 

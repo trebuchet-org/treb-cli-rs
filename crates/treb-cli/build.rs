@@ -1,6 +1,6 @@
 use std::{path::Path, process::Command};
 
-use clap::{Arg, ArgAction, ArgGroup, Command as ClapCommand};
+use clap::{Arg, ArgAction, Command as ClapCommand};
 use clap_complete::{Shell, generate_to};
 
 fn build_cli() -> ClapCommand {
@@ -26,15 +26,12 @@ fn build_cli() -> ClapCommand {
         .subcommand(build_init())
         .subcommand(build_config())
         .subcommand(build_verify())
-        .subcommand(build_tag())
+        .subcommand(build_registry())
         .subcommand(build_addressbook())
         .subcommand(build_register())
-        .subcommand(build_sync())
         .subcommand(build_version())
         .subcommand(build_networks())
         .subcommand(build_compose())
-        .subcommand(build_prune())
-        .subcommand(build_reset())
         .subcommand(build_fork())
         .subcommand(build_dev())
         .subcommand(build_completion_cmd())
@@ -252,7 +249,67 @@ fn build_verify() -> ClapCommand {
         .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
 }
 
-fn build_tag() -> ClapCommand {
+fn build_registry() -> ClapCommand {
+    ClapCommand::new("registry")
+        .about("Manage the deployment registry")
+        .subcommand_required(true)
+        .arg_required_else_help(true)
+        .subcommand(build_registry_sync())
+        .subcommand(build_registry_prune())
+        .subcommand(build_registry_tag())
+        .subcommand(build_registry_drop())
+}
+
+fn build_registry_sync() -> ClapCommand {
+    ClapCommand::new("sync")
+        .about("Sync safe transaction state from the Safe Transaction Service")
+        .arg(Arg::new("network").long("network").help("Filter sync to a specific network"))
+        .arg(
+            Arg::new("clean")
+                .long("clean")
+                .action(ArgAction::SetTrue)
+                .help("Remove invalid entries while syncing"),
+        )
+        .arg(
+            Arg::new("debug")
+                .long("debug")
+                .action(ArgAction::SetTrue)
+                .help("Print raw API responses to stderr"),
+        )
+        .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
+}
+
+fn build_registry_prune() -> ClapCommand {
+    ClapCommand::new("prune")
+        .about("Remove stale or broken registry entries")
+        .arg(
+            Arg::new("dry-run")
+                .long("dry-run")
+                .action(ArgAction::SetTrue)
+                .help("Report prune candidates without deleting anything"),
+        )
+        .arg(
+            Arg::new("include-pending")
+                .long("include-pending")
+                .action(ArgAction::SetTrue)
+                .help("Include pending transactions in the prune scan"),
+        )
+        .arg(
+            Arg::new("network")
+                .long("network")
+                .help("Filter candidates to a specific network (by chain ID)"),
+        )
+        .arg(
+            Arg::new("yes")
+                .long("yes")
+                .short('y')
+                .action(ArgAction::SetTrue)
+                .help("Skip confirmation prompt"),
+        )
+        .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
+}
+
+fn build_registry_tag() -> ClapCommand {
     ClapCommand::new("tag")
         .about("Manage tags on a deployment")
         .arg(Arg::new("deployment").help("Deployment identifier; omit to select interactively"))
@@ -260,6 +317,27 @@ fn build_tag() -> ClapCommand {
         .arg(Arg::new("remove").long("remove").help("Remove a tag from the deployment"))
         .arg(Arg::new("network").long("network").short('n').help("Network name or chain ID"))
         .arg(Arg::new("namespace").long("namespace").short('s').help("Deployment namespace"))
+        .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
+}
+
+fn build_registry_drop() -> ClapCommand {
+    ClapCommand::new("drop")
+        .about("Drop registry entries by query, network, or namespace")
+        .arg(Arg::new("query").help("Deployment query (contract name, label, or ID)"))
+        .arg(
+            Arg::new("network")
+                .long("network")
+                .short('n')
+                .help("Network name or chain ID"),
+        )
+        .arg(Arg::new("namespace").long("namespace").short('s').help("Deployment namespace"))
+        .arg(
+            Arg::new("yes")
+                .long("yes")
+                .short('y')
+                .action(ArgAction::SetTrue)
+                .help("Skip confirmation prompt"),
+        )
         .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
 }
 
@@ -319,24 +397,6 @@ fn build_register() -> ClapCommand {
         .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
 }
 
-fn build_sync() -> ClapCommand {
-    ClapCommand::new("sync")
-        .about("Sync safe transaction state from the Safe Transaction Service")
-        .arg(Arg::new("network").long("network").help("Filter sync to a specific network"))
-        .arg(
-            Arg::new("clean")
-                .long("clean")
-                .action(ArgAction::SetTrue)
-                .help("Remove invalid entries while syncing"),
-        )
-        .arg(
-            Arg::new("debug")
-                .long("debug")
-                .action(ArgAction::SetTrue)
-                .help("Print raw API responses to stderr"),
-        )
-        .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
-}
 
 fn build_version() -> ClapCommand {
     ClapCommand::new("version")
@@ -399,54 +459,6 @@ fn build_compose() -> ClapCommand {
         .arg(Arg::new("env").long("env").num_args(1).help("Set environment variables (KEY=VALUE)"))
 }
 
-fn build_prune() -> ClapCommand {
-    ClapCommand::new("prune")
-        .about("Remove stale or broken registry entries")
-        .arg(
-            Arg::new("dry-run")
-                .long("dry-run")
-                .action(ArgAction::SetTrue)
-                .help("Report prune candidates without deleting anything"),
-        )
-        .arg(
-            Arg::new("include-pending")
-                .long("include-pending")
-                .action(ArgAction::SetTrue)
-                .help("Include pending transactions in the prune scan"),
-        )
-        .arg(
-            Arg::new("network")
-                .long("network")
-                .help("Filter candidates to a specific network (by chain ID)"),
-        )
-        .arg(
-            Arg::new("yes")
-                .long("yes")
-                .short('y')
-                .action(ArgAction::SetTrue)
-                .help("Skip confirmation prompt"),
-        )
-        .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
-}
-
-fn build_reset() -> ClapCommand {
-    ClapCommand::new("reset")
-        .about("Reset registry state (with optional scope filters)")
-        .arg(
-            Arg::new("network")
-                .long("network")
-                .help("Filter reset to a specific network (by chain ID)"),
-        )
-        .arg(Arg::new("namespace").long("namespace").help("Filter reset to a specific namespace"))
-        .arg(
-            Arg::new("yes")
-                .long("yes")
-                .short('y')
-                .action(ArgAction::SetTrue)
-                .help("Skip confirmation prompt"),
-        )
-        .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
-}
 
 fn build_fork() -> ClapCommand {
     ClapCommand::new("fork")

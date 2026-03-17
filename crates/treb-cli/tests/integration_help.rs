@@ -65,7 +65,7 @@ fn help_show() {
 #[test]
 fn help_sync() {
     let ctx = TestContext::new("minimal-project");
-    let test = IntegrationTest::new("help_sync").test(&["sync", "--help"]);
+    let test = IntegrationTest::new("help_sync").test(&["registry", "sync", "--help"]);
 
     run_integration_test(&test, &ctx);
 }

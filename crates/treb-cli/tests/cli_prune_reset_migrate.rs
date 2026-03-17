@@ -106,7 +106,7 @@ fn prune_dry_run_outputs_candidates_and_does_not_modify_files() {
     let orig_deployments = fs::read_to_string(tmp.path().join(".treb/deployments.json")).unwrap();
 
     treb()
-        .args(["prune", "--dry-run"])
+        .args(["registry", "prune", "--dry-run"])
         .current_dir(tmp.path())
         .assert()
         .success()
@@ -138,7 +138,7 @@ fn prune_yes_removes_broken_entry_and_creates_backup() {
     // Insert a deployment with a broken transaction reference.
     registry.insert_deployment(make_deployment("dep-broken", "tx-missing", 1, "default")).unwrap();
 
-    let output = treb().args(["prune", "--yes"]).current_dir(tmp.path()).output().unwrap();
+    let output = treb().args(["registry", "prune", "--yes"]).current_dir(tmp.path()).output().unwrap();
 
     assert!(output.status.success(), "prune --yes should succeed");
     let stdout = String::from_utf8(output.stdout).unwrap();
@@ -183,7 +183,7 @@ fn prune_non_interactive_proceeds_without_yes_and_creates_backup() {
     registry.insert_deployment(make_deployment("dep-broken", "tx-missing", 1, "default")).unwrap();
 
     let output = treb()
-        .args(["prune"])
+        .args(["registry", "prune"])
         .env("TREB_NON_INTERACTIVE", "true")
         .current_dir(tmp.path())
         .output()
@@ -218,43 +218,47 @@ fn prune_dry_run_on_clean_registry_outputs_nothing_to_prune() {
     registry.insert_deployment(make_deployment("dep-1", "tx-1", 1, "default")).unwrap();
 
     treb()
-        .args(["prune", "--dry-run"])
+        .args(["registry", "prune", "--dry-run"])
         .current_dir(tmp.path())
         .assert()
         .success()
         .stdout(predicate::str::contains("Nothing to prune."));
 }
 
-// ── treb reset ────────────────────────────────────────────────────────────────
+// ── treb registry drop ───────────────────────────────────────────────────────
 
 #[test]
-fn reset_yes_empties_all_stores_and_creates_backup() {
+fn drop_yes_removes_matching_stores_and_creates_backup() {
     let tmp = tempfile::tempdir().unwrap();
     let mut registry = init_project(&tmp);
 
     registry.insert_deployment(make_deployment("dep-1", "", 1, "default")).unwrap();
-    registry.insert_deployment(make_deployment("dep-2", "", 42220, "staging")).unwrap();
+    registry.insert_deployment(make_deployment("dep-2", "", 42220, "default")).unwrap();
 
-    let output = treb().args(["reset", "--yes"]).current_dir(tmp.path()).output().unwrap();
+    let output = treb()
+        .args(["registry", "drop", "--namespace", "default", "--yes"])
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
 
-    assert!(output.status.success(), "reset --yes should succeed");
+    assert!(output.status.success(), "drop --yes should succeed");
     let stdout = String::from_utf8(output.stdout).unwrap();
 
     assert!(
-        stdout.contains("Found 2 items to reset for namespace 'default' across all networks:"),
-        "stdout should describe the mixed-chain reset scope without inventing a default network: {stdout}"
+        stdout.contains("Dropping 2 registry entries in namespace 'default':"),
+        "stdout should describe the drop scope: {stdout}"
     );
     assert!(
         stdout.contains("  Deployments:        2"),
-        "stdout should include aligned reset counts: {stdout}"
+        "stdout should include aligned drop counts: {stdout}"
     );
     assert!(
-        stdout.contains("Running in non-interactive mode. Proceeding with reset..."),
+        stdout.contains("Running in non-interactive mode. Proceeding with drop..."),
         "stdout should include the non-interactive proceed line: {stdout}"
     );
     assert!(
-        stdout.contains("Successfully reset 2 items from the registry."),
-        "stdout should contain the plain reset success line: {stdout}"
+        stdout.contains("Successfully dropped 2 items from the registry."),
+        "stdout should contain the plain drop success line: {stdout}"
     );
     assert!(!stdout.contains("31337"), "stdout should not claim chain 31337: {stdout}");
     assert!(
@@ -265,19 +269,19 @@ fn reset_yes_empties_all_stores_and_creates_backup() {
     // Backup directory should exist.
     let backups_dir = tmp.path().join(".treb/backups");
     assert!(backups_dir.exists(), ".treb/backups/ should exist");
-    let reset_backups: Vec<_> = fs::read_dir(&backups_dir)
+    let drop_backups: Vec<_> = fs::read_dir(&backups_dir)
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| e.file_name().to_string_lossy().starts_with("reset-"))
+        .filter(|e| e.file_name().to_string_lossy().starts_with("drop-"))
         .collect();
-    assert_eq!(reset_backups.len(), 1, "exactly one reset backup should be created");
+    assert_eq!(drop_backups.len(), 1, "exactly one drop backup should be created");
 
     // Registry should be empty.
     let registry_after = treb_registry::Registry::open(tmp.path()).unwrap();
     assert_eq!(
         registry_after.deployment_count(),
         0,
-        "all deployments should be removed after full reset"
+        "all deployments should be removed after drop"
     );
 }
 
@@ -290,7 +294,7 @@ fn reset_network_removes_only_matching_chain() {
     registry.insert_deployment(make_deployment("dep-chain1", "", 1, "default")).unwrap();
     registry.insert_deployment(make_deployment("dep-chain42220", "", 42220, "default")).unwrap();
 
-    treb().args(["reset", "--network", "1", "--yes"]).current_dir(tmp.path()).assert().success();
+    treb().args(["registry", "drop", "--network", "1", "--yes"]).current_dir(tmp.path()).assert().success();
 
     let registry_after = treb_registry::Registry::open(tmp.path()).unwrap();
     assert!(
@@ -313,7 +317,7 @@ fn reset_namespace_removes_only_matching_namespace() {
     registry.insert_deployment(make_deployment("dep-staging", "", 1, "staging")).unwrap();
 
     treb()
-        .args(["reset", "--namespace", "default", "--yes"])
+        .args(["registry", "drop", "--namespace", "default", "--yes"])
         .current_dir(tmp.path())
         .assert()
         .success();

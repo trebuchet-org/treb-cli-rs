@@ -1,4 +1,4 @@
-=== cmd 0: [prune --check-onchain --rpc-url http://127.0.0.1:<PORT> --dry-run --network 31337] ===
+=== cmd 0: [registry prune --check-onchain --rpc-url http://127.0.0.1:<PORT> --dry-run --network 31337] ===
 🔍 Checking registry entries...
 
 🗑️  Found 1 items to prune:

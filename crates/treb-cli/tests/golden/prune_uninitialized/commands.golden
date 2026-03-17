@@ -1,4 +1,4 @@
-=== cmd 0: [prune --dry-run] ===
+=== cmd 0: [registry prune --dry-run] ===
 Error: no foundry.toml found in <PROJECT_ROOT>
 
 Run `forge init`, then `treb init`.

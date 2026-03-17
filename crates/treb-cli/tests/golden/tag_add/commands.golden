@@ -1,4 +1,4 @@
-=== cmd 0: [tag --add v3-release mainnet/42220/FPMM:v<VERSION>] ===
+=== cmd 0: [registry tag --add v3-release mainnet/42220/FPMM:v<VERSION>] ===
 ✅ Added tag v3-release to mainnet/42220/FPMM:v<VERSION>
 
 Current tags: v3-release

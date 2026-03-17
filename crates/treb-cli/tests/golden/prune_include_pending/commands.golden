@@ -1,4 +1,4 @@
-=== cmd 0: [prune --dry-run --include-pending] ===
+=== cmd 0: [registry prune --dry-run --include-pending] ===
 🔍 Checking registry entries...
 
 🗑️  Found 4 items to prune:

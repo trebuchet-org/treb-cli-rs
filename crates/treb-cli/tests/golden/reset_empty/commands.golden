@@ -1,2 +1,2 @@
-=== cmd 0: [reset --yes] ===
-Nothing to reset. No registry entries found for the current namespace and network.
+=== cmd 0: [registry drop --namespace default --yes] ===
+Nothing to drop. No registry entries found matching the given filters.

@@ -1,4 +1,4 @@
-=== cmd 0: [reset --yes] ===
+=== cmd 0: [registry drop --namespace default --yes] ===
 Error: no foundry.toml found in <PROJECT_ROOT>
 
 Run `forge init`, then `treb init`.

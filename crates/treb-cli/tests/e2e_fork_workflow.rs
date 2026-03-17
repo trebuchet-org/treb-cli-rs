@@ -223,7 +223,7 @@ async fn e2e_fork_enter_deploy_exit_restores_state() {
     let id = dep_id.clone();
     tokio::task::spawn_blocking(move || {
         treb()
-            .args(["tag", &id, "--add", "fork-only-tag"])
+            .args(["registry", "tag", &id, "--add", "fork-only-tag"])
             .current_dir(&tmp_path)
             .assert()
             .success();

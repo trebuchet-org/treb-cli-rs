@@ -1,4 +1,4 @@
-//! Golden-file integration tests for `treb tag`.
+//! Golden-file integration tests for `treb registry tag`.
 
 mod framework;
 mod helpers;
@@ -99,7 +99,7 @@ fn tag_show_empty() {
     let test = IntegrationTest::new("tag_show_empty")
         .setup(&["init"])
         .post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))
-        .test(&["tag", "mainnet/42220/FPMM:v3.0.0"])
+        .test(&["registry", "tag", "mainnet/42220/FPMM:v3.0.0"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
@@ -114,7 +114,7 @@ fn tag_show_json_empty() {
     let test = IntegrationTest::new("tag_show_json_empty")
         .setup(&["init"])
         .post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))
-        .test(&["tag", "--json", "mainnet/42220/FPMM:v3.0.0"])
+        .test(&["registry", "tag", "--json", "mainnet/42220/FPMM:v3.0.0"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
@@ -129,7 +129,7 @@ fn tag_add() {
     let test = IntegrationTest::new("tag_add")
         .setup(&["init"])
         .post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))
-        .test(&["tag", "--add", "v3-release", "mainnet/42220/FPMM:v3.0.0"])
+        .test(&["registry", "tag", "--add", "v3-release", "mainnet/42220/FPMM:v3.0.0"])
         .post_test_hook(|ctx| {
             // Extract tags for the modified deployment into a small deterministic artifact.
             // deployments.json uses HashMap so key order is non-deterministic;
@@ -166,7 +166,7 @@ fn tag_add_preserves_go_compatible_bare_deployments_file() {
         "seeded fixture should start as the Go-compatible bare-map format"
     );
 
-    ctx.run(["tag", "--add", "core", "mainnet/42220/CDPLiquidityStrategy:v3.0.0"]).success();
+    ctx.run(["registry", "tag", "--add", "core", "mainnet/42220/CDPLiquidityStrategy:v3.0.0"]).success();
 
     let after = fs::read_to_string(&deployments_path).expect("read updated deployments file");
     let json: serde_json::Value =
@@ -196,7 +196,7 @@ fn tag_add_json() {
     let test = IntegrationTest::new("tag_add_json")
         .setup(&["init"])
         .post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))
-        .test(&["tag", "--json", "--add", "v3-release", "mainnet/42220/FPMM:v3.0.0"])
+        .test(&["registry", "tag", "--json", "--add", "v3-release", "mainnet/42220/FPMM:v3.0.0"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
@@ -211,8 +211,8 @@ fn tag_add_then_show() {
     let test = IntegrationTest::new("tag_add_then_show")
         .setup(&["init"])
         .post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))
-        .test(&["tag", "--add", "v3-release", "mainnet/42220/FPMM:v3.0.0"])
-        .test(&["tag", "mainnet/42220/FPMM:v3.0.0"])
+        .test(&["registry", "tag", "--add", "v3-release", "mainnet/42220/FPMM:v3.0.0"])
+        .test(&["registry", "tag", "mainnet/42220/FPMM:v3.0.0"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
@@ -227,7 +227,7 @@ fn tag_remove() {
     let test = IntegrationTest::new("tag_remove")
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_registry_with_tag(ctx.path()))
-        .test(&["tag", "--remove", "v3-release", "mainnet/42220/FPMM:v3.0.0"])
+        .test(&["registry", "tag", "--remove", "v3-release", "mainnet/42220/FPMM:v3.0.0"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
@@ -242,7 +242,7 @@ fn tag_remove_json() {
     let test = IntegrationTest::new("tag_remove_json")
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_registry_with_tag(ctx.path()))
-        .test(&["tag", "--json", "--remove", "v3-release", "mainnet/42220/FPMM:v3.0.0"])
+        .test(&["registry", "tag", "--json", "--remove", "v3-release", "mainnet/42220/FPMM:v3.0.0"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
@@ -257,7 +257,7 @@ fn tag_add_duplicate_error() {
     let test = IntegrationTest::new("tag_add_duplicate_error")
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_registry_with_tag(ctx.path()))
-        .test(&["tag", "--add", "v3-release", "mainnet/42220/FPMM:v3.0.0"])
+        .test(&["registry", "tag", "--add", "v3-release", "mainnet/42220/FPMM:v3.0.0"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -273,7 +273,7 @@ fn tag_remove_nonexistent_error() {
     let test = IntegrationTest::new("tag_remove_nonexistent_error")
         .setup(&["init"])
         .post_setup_hook(|ctx| helpers::seed_registry(ctx.path()))
-        .test(&["tag", "--remove", "v3-release", "mainnet/42220/FPMM:v3.0.0"])
+        .test(&["registry", "tag", "--remove", "v3-release", "mainnet/42220/FPMM:v3.0.0"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -290,7 +290,7 @@ fn tag_uninitialized() {
         .pre_setup_hook(|ctx| {
             std::fs::remove_dir_all(ctx.treb_dir()).ok();
         })
-        .test(&["tag", "mainnet/42220/FPMM:v3.0.0"])
+        .test(&["registry", "tag", "mainnet/42220/FPMM:v3.0.0"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -322,7 +322,7 @@ fn tag_show_namespace_scope_resolves_the_filtered_deployment() {
         ],
     );
 
-    ctx.run_with_env(["tag", "--namespace", "mainnet", "Counter"], [("NO_COLOR", "1")])
+    ctx.run_with_env(["registry", "tag", "--namespace", "mainnet", "Counter"], [("NO_COLOR", "1")])
         .success()
         .stdout(predicate::str::contains("mainnet/42220/Counter:v1"))
         .stdout(predicate::str::contains("stable"))
@@ -354,7 +354,7 @@ fn tag_add_namespace_and_network_scope_only_updates_the_matching_deployment() {
         ],
     );
 
-    ctx.run(["tag", "--add", "v2", "-s", "mainnet", "-n", "42220", "Counter"])
+    ctx.run(["registry", "tag", "--add", "v2", "-s", "mainnet", "-n", "42220", "Counter"])
         .success()
         .stdout(predicate::str::contains("mainnet/42220/Counter:v1"));
 
@@ -391,7 +391,7 @@ fn tag_remove_namespace_scope_only_updates_the_matching_deployment() {
         ],
     );
 
-    ctx.run(["tag", "--remove", "v2", "--namespace", "mainnet", "Counter"])
+    ctx.run(["registry", "tag", "--remove", "v2", "--namespace", "mainnet", "Counter"])
         .success()
         .stdout(predicate::str::contains("mainnet/42220/Counter:v1"));
 
@@ -418,7 +418,7 @@ fn tag_network_scope_errors_when_the_match_is_outside_the_filter() {
         )],
     );
 
-    ctx.run(["tag", "--network", "1", "Counter"])
+    ctx.run(["registry", "tag", "--network", "1", "Counter"])
         .failure()
         .stderr(predicate::str::contains("no deployment found matching 'Counter' on network '1'"));
 }

@@ -130,7 +130,7 @@ async fn e2e_run_tag_list_with_filter() {
     let tmp_path = tmp.path().to_path_buf();
     let dep_id = deployment_id.clone();
     tokio::task::spawn_blocking(move || {
-        treb().args(["tag", &dep_id, "--add", "v1.0.0"]).current_dir(&tmp_path).assert().success();
+        treb().args(["registry", "tag", &dep_id, "--add", "v1.0.0"]).current_dir(&tmp_path).assert().success();
     })
     .await
     .unwrap();
@@ -172,7 +172,7 @@ async fn e2e_run_prune_dry_run_clean() {
 
     let tmp_path = tmp.path().to_path_buf();
     let output = tokio::task::spawn_blocking(move || {
-        treb().args(["prune", "--dry-run"]).current_dir(&tmp_path).output().unwrap()
+        treb().args(["registry", "prune", "--dry-run"]).current_dir(&tmp_path).output().unwrap()
     })
     .await
     .unwrap();
@@ -203,7 +203,7 @@ async fn e2e_run_reset_list() {
     // Reset the registry without prompting.
     let tmp_path = tmp.path().to_path_buf();
     tokio::task::spawn_blocking(move || {
-        treb().args(["reset", "--yes"]).current_dir(&tmp_path).assert().success();
+        treb().args(["registry", "drop", "--namespace", "default", "--yes"]).current_dir(&tmp_path).assert().success();
     })
     .await
     .unwrap();

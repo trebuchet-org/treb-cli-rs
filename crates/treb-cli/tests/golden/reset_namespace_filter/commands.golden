@@ -1,10 +1,11 @@
-=== cmd 0: [reset --yes --namespace staging] ===
-Found 4 items to reset for namespace 'staging' on network '1' (chain 1):
+=== cmd 0: [registry drop --yes --namespace staging] ===
+Dropping 4 registry entries in namespace 'staging' on network '1' (chain 1):
 
   Deployments:        1
-  Transactions:       1
-  Safe Transactions:  1
-  Governor Proposals: 1
+    TestContract:v1 (0x0000...0001) on chain 1
+  Transactions:       1  (orphaned)
+  Safe Transactions:  1  (orphaned)
+  Governor Proposals: 1  (orphaned)
 
-Running in non-interactive mode. Proceeding with reset...
-Successfully reset 4 items from the registry.
+Running in non-interactive mode. Proceeding with drop...
+Successfully dropped 4 items from the registry.

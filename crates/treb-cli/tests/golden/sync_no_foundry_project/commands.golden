@@ -1,3 +1,3 @@
-=== cmd 0: [sync] ===
+=== cmd 0: [registry sync] ===
 Error: no foundry.toml found in the current directory.
 Run this command from a Foundry project root.

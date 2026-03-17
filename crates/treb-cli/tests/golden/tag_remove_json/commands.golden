@@ -1,4 +1,4 @@
-=== cmd 0: [tag --json --remove v3-release mainnet/42220/FPMM:v<VERSION>] ===
+=== cmd 0: [registry tag --json --remove v3-release mainnet/42220/FPMM:v<VERSION>] ===
 {
   "action": "remove",
   "deploymentId": "mainnet/42220/FPMM:v<VERSION>",

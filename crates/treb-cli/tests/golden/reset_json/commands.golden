@@ -1,6 +1,6 @@
-=== cmd 0: [reset --yes --json] ===
+=== cmd 0: [registry drop --namespace default --yes --json] ===
 {
-  "backupPath": "<PROJECT_ROOT>/.treb/backups/reset-<UNIX_TIME>",
+  "backupPath": "<PROJECT_ROOT>/.treb/backups/drop-<UNIX_TIME>",
   "removedDeployments": 3,
   "removedGovernorProposals": 2,
   "removedSafeTransactions": 2,

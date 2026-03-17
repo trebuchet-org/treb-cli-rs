@@ -187,7 +187,7 @@ fn sync_without_init_fails() {
     fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
 
     treb()
-        .args(["sync"])
+        .args(["registry", "sync"])
         .current_dir(tmp.path())
         .assert()
         .failure()
@@ -196,7 +196,7 @@ fn sync_without_init_fails() {
 
 #[test]
 fn sync_help_shows_expected_flags() {
-    let output = treb().args(["sync", "--help"]).output().expect("failed to run treb sync --help");
+    let output = treb().args(["registry", "sync", "--help"]).output().expect("failed to run treb registry sync --help");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("--network"), "help should show --network");
@@ -210,11 +210,11 @@ fn sync_with_empty_registry_succeeds() {
     init_project(&tmp);
 
     // Sync with no safe transactions in registry should succeed gracefully
-    treb().args(["sync", "--json"]).current_dir(tmp.path()).assert().success();
+    treb().args(["registry", "sync", "--json"]).current_dir(tmp.path()).assert().success();
 
     // Verify JSON output
     let output = treb()
-        .args(["sync", "--json"])
+        .args(["registry", "sync", "--json"])
         .current_dir(tmp.path())
         .output()
         .expect("failed to run sync");
@@ -233,7 +233,7 @@ fn sync_plaintext_output_with_empty_registry() {
     init_project(&tmp);
 
     treb()
-        .args(["sync"])
+        .args(["registry", "sync"])
         .current_dir(tmp.path())
         .assert()
         .success()

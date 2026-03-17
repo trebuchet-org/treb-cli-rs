@@ -1,4 +1,4 @@
-//! Focused CLI tests for `treb tag` query scoping.
+//! Focused CLI tests for `treb registry tag` query scoping.
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use chrono::Utc;
@@ -106,7 +106,7 @@ fn tag_show_resolves_with_namespace_scope() {
     );
 
     treb()
-        .args(["tag", "--namespace", "mainnet", "Counter"])
+        .args(["registry", "tag", "--namespace", "mainnet", "Counter"])
         .current_dir(tmp.path())
         .assert()
         .success()
@@ -141,7 +141,7 @@ fn tag_add_scopes_by_namespace_and_network() {
     );
 
     treb()
-        .args(["tag", "--add", "v2", "-s", "mainnet", "-n", "42220", "Counter"])
+        .args(["registry", "tag", "--add", "v2", "-s", "mainnet", "-n", "42220", "Counter"])
         .current_dir(tmp.path())
         .assert()
         .success()
@@ -181,7 +181,7 @@ fn tag_remove_scopes_by_namespace() {
     );
 
     treb()
-        .args(["tag", "--remove", "v2", "--namespace", "mainnet", "Counter"])
+        .args(["registry", "tag", "--remove", "v2", "--namespace", "mainnet", "Counter"])
         .current_dir(tmp.path())
         .assert()
         .success()

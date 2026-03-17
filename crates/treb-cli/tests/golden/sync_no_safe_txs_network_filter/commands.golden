@@ -1,4 +1,4 @@
-=== cmd 0: [sync --network 1] ===
+=== cmd 0: [registry sync --network 1] ===
 Syncing registry...
 No pending Safe transactions found
 

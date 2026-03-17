@@ -1,2 +1,2 @@
-=== cmd 0: [prune --dry-run] ===
+=== cmd 0: [registry prune --dry-run] ===
 ✅ All registry entries are valid. Nothing to prune.

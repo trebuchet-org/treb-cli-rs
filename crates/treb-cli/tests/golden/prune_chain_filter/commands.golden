@@ -1,4 +1,4 @@
-=== cmd 0: [prune --dry-run --network 1] ===
+=== cmd 0: [registry prune --dry-run --network 1] ===
 🔍 Checking registry entries...
 
 🗑️  Found 2 items to prune:

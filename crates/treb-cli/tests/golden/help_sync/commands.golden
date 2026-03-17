@@ -1,13 +1,10 @@
-=== cmd 0: [sync --help] ===
-Sync registry with on-chain state
+=== cmd 0: [registry sync --help] ===
+Sync safe/governor transaction state from on-chain services
 
 Update deployment registry with latest on-chain information. Checks
 pending Safe transactions and updates their execution status.
 
-This command will:
-- Check all pending Safe transactions for execution status
-
-Usage: treb sync [OPTIONS]
+Usage: treb registry sync [OPTIONS]
 
 Options:
       --network <NETWORK>

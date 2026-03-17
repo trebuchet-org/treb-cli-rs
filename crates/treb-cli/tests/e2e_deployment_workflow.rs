@@ -64,7 +64,7 @@ async fn e2e_full_deployment_lifecycle() {
     let dep_id_clone = dep_id.clone();
     tokio::task::spawn_blocking(move || {
         treb()
-            .args(["tag", &dep_id_clone, "--add", "v1.0.0"])
+            .args(["registry", "tag", &dep_id_clone, "--add", "v1.0.0"])
             .current_dir(&tmp_path)
             .assert()
             .success();
@@ -100,7 +100,7 @@ async fn e2e_full_deployment_lifecycle() {
     let dep_id_clone = dep_id.clone();
     tokio::task::spawn_blocking(move || {
         treb()
-            .args(["tag", &dep_id_clone, "--remove", "v1.0.0"])
+            .args(["registry", "tag", &dep_id_clone, "--remove", "v1.0.0"])
             .current_dir(&tmp_path)
             .assert()
             .success();

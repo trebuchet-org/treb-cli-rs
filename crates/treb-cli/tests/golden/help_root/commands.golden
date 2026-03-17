@@ -7,23 +7,18 @@ Main Commands:
   init          Initialize treb in a Foundry project
   list          List deployments from registry
   show          Show detailed deployment information from registry
-  gen           Generate deployment scripts (alias: generate)
   run           Run a Foundry script with treb infrastructure
   verify        Verify contracts on block explorers
   compose       Execute orchestrated deployments from a YAML configuration
   fork          Manage network fork mode
 
 Management Commands:
-  sync          Sync registry with on-chain state
-  tag           Manage deployment tags
+  registry      Manage the deployment registry
   addressbook   Manage named addresses scoped by chain ID
   register      Register an existing contract deployment in the registry
   dev           Development utilities
   networks      List available networks from foundry.toml
-  prune         Prune registry entries that no longer exist on-chain
-  reset         Reset registry entries for the current namespace and network
   config        Manage treb local config
-  migrate       Migrate config to new treb.toml accounts/namespace format
 
 Additional Commands:
   version       Print the version number of treb

@@ -1,4 +1,4 @@
-=== cmd 0: [prune --dry-run --json] ===
+=== cmd 0: [registry prune --dry-run --json] ===
 [
   {
     "chainId": 1,

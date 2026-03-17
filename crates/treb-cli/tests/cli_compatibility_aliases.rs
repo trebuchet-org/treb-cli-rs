@@ -388,7 +388,7 @@ fn register_help_exposes_phase_10_flag_surface() {
 
 #[test]
 fn sync_help_exposes_phase_10_flag_surface() {
-    let output = treb().args(["sync", "--help"]).output().expect("sync help command should run");
+    let output = treb().args(["registry", "sync", "--help"]).output().expect("sync help command should run");
 
     assert!(output.status.success(), "treb sync --help should succeed");
 

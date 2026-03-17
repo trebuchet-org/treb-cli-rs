@@ -1,7 +1,7 @@
-//! Golden-file integration tests for `treb reset`.
+//! Golden-file integration tests for `treb registry drop`.
 //!
-//! Tests exercise full reset with backup, network-scoped reset, namespace-scoped
-//! reset, empty registry, JSON output, and uninitialized project error paths.
+//! Tests exercise full drop with backup, network-scoped drop, namespace-scoped
+//! drop, empty registry, JSON output, and uninitialized project error paths.
 
 mod framework;
 mod helpers;
@@ -139,41 +139,53 @@ fn make_governor_proposal(
     }
 }
 
-/// Seed the registry with entries across two chains and two namespaces.
+/// Seed the registry with linked entries across two chains, all in "default" namespace.
 ///
 /// Creates:
-/// - dep-1: chain 1, namespace "default"
-/// - dep-2: chain 1, namespace "staging"
-/// - dep-3: chain 42220, namespace "default"
-/// - tx-1: chain 1
-/// - tx-2: chain 42220
-/// - safe-tx-1: chain 1
-/// - safe-tx-2: chain 42220
-/// - gov-1: chain 1
-/// - gov-2: chain 42220
-fn seed_reset_registry(project_root: &std::path::Path) {
+/// - dep-1: chain 1, namespace "default", linked to tx-1
+/// - dep-2: chain 1, namespace "default", linked to tx-1
+/// - dep-3: chain 42220, namespace "default", linked to tx-2
+/// - tx-1: chain 1, linked to [dep-1, dep-2]
+/// - tx-2: chain 42220, linked to [dep-3]
+/// - safe-tx-1: chain 1, linked to [tx-1]
+/// - safe-tx-2: chain 42220, linked to [tx-2]
+/// - gov-1: chain 1, linked to [tx-1]
+/// - gov-2: chain 42220, linked to [tx-2]
+fn seed_drop_registry(project_root: &std::path::Path) {
     let mut registry = Registry::open(project_root).expect("registry should open");
 
-    // Deployments
-    registry.insert_deployment(make_deployment("dep-1", 1, "default", "")).unwrap();
-    registry.insert_deployment(make_deployment("dep-2", 1, "staging", "")).unwrap();
-    registry.insert_deployment(make_deployment("dep-3", 42220, "default", "")).unwrap();
+    // Deployments — all in "default" namespace
+    registry.insert_deployment(make_deployment("dep-1", 1, "default", "tx-1")).unwrap();
+    registry.insert_deployment(make_deployment("dep-2", 1, "default", "tx-1")).unwrap();
+    registry.insert_deployment(make_deployment("dep-3", 42220, "default", "tx-2")).unwrap();
 
-    // Transactions
-    registry.insert_transaction(make_transaction("tx-1", 1, &[])).unwrap();
-    registry.insert_transaction(make_transaction("tx-2", 42220, &[])).unwrap();
+    // Transactions — linked to deployments
+    registry
+        .insert_transaction(make_transaction("tx-1", 1, &["dep-1", "dep-2"]))
+        .unwrap();
+    registry
+        .insert_transaction(make_transaction("tx-2", 42220, &["dep-3"]))
+        .unwrap();
 
-    // Safe transactions
-    registry.insert_safe_transaction(make_safe_transaction("safe-tx-1", 1, &[])).unwrap();
-    registry.insert_safe_transaction(make_safe_transaction("safe-tx-2", 42220, &[])).unwrap();
+    // Safe transactions — linked to transactions
+    registry
+        .insert_safe_transaction(make_safe_transaction("safe-tx-1", 1, &["tx-1"]))
+        .unwrap();
+    registry
+        .insert_safe_transaction(make_safe_transaction("safe-tx-2", 42220, &["tx-2"]))
+        .unwrap();
 
-    // Governor proposals
-    registry.insert_governor_proposal(make_governor_proposal("gov-1", 1, &[])).unwrap();
-    registry.insert_governor_proposal(make_governor_proposal("gov-2", 42220, &[])).unwrap();
+    // Governor proposals — linked to transactions
+    registry
+        .insert_governor_proposal(make_governor_proposal("gov-1", 1, &["tx-1"]))
+        .unwrap();
+    registry
+        .insert_governor_proposal(make_governor_proposal("gov-2", 42220, &["tx-2"]))
+        .unwrap();
 }
 
-/// Seed namespace-scoped reset fixtures with linked entries in two namespaces.
-fn seed_namespace_reset_registry(project_root: &std::path::Path) {
+/// Seed namespace-scoped drop fixtures with linked entries in two namespaces.
+fn seed_namespace_drop_registry(project_root: &std::path::Path) {
     let mut registry = Registry::open(project_root).expect("registry should open");
 
     registry.insert_deployment(make_deployment("dep-default", 1, "default", "tx-default")).unwrap();
@@ -199,63 +211,63 @@ fn seed_namespace_reset_registry(project_root: &std::path::Path) {
 
 // ── Tests ────────────────────────────────────────────────────────────────
 
-/// Full reset removes all entries and prints per-type removal counts with backup path.
+/// Full drop removes all entries and prints per-type removal counts with backup path.
 #[test]
-fn reset_full() {
+fn drop_full() {
     let ctx = TestContext::new("minimal-project");
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("reset_full")
         .setup(&["init"])
-        .post_setup_hook(|ctx| seed_reset_registry(ctx.path()))
-        .test(&["reset", "--yes"])
+        .post_setup_hook(|ctx| seed_drop_registry(ctx.path()))
+        .test(&["registry", "drop", "--namespace", "default", "--yes"])
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(EpochNormalizer));
 
     run_integration_test(&test, &ctx);
 }
 
-/// Network filter restricts reset to entries on the specified chain only.
+/// Network filter restricts drop to entries on the specified chain only.
 #[test]
-fn reset_network_filter() {
+fn drop_network_filter() {
     let ctx = TestContext::new("minimal-project");
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("reset_network_filter")
         .setup(&["init"])
-        .post_setup_hook(|ctx| seed_reset_registry(ctx.path()))
-        .test(&["reset", "--yes", "--network", "1"])
+        .post_setup_hook(|ctx| seed_drop_registry(ctx.path()))
+        .test(&["registry", "drop", "--yes", "--network", "1"])
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(EpochNormalizer));
 
     run_integration_test(&test, &ctx);
 }
 
-/// Namespace filter restricts reset to deployments in the specified namespace only.
+/// Namespace filter restricts drop to deployments in the specified namespace only.
 #[test]
-fn reset_namespace_filter() {
+fn drop_namespace_filter() {
     let ctx = TestContext::new("minimal-project");
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("reset_namespace_filter")
         .setup(&["init"])
-        .post_setup_hook(|ctx| seed_namespace_reset_registry(ctx.path()))
-        .test(&["reset", "--yes", "--namespace", "staging"])
+        .post_setup_hook(|ctx| seed_namespace_drop_registry(ctx.path()))
+        .test(&["registry", "drop", "--yes", "--namespace", "staging"])
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(EpochNormalizer));
 
     run_integration_test(&test, &ctx);
 }
 
-/// Empty registry outputs "Nothing to reset."
+/// Empty registry outputs "Nothing to drop."
 #[test]
-fn reset_empty() {
+fn drop_empty() {
     let ctx = TestContext::new("minimal-project");
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("reset_empty")
         .setup(&["init"])
-        .test(&["reset", "--yes"])
+        .test(&["registry", "drop", "--namespace", "default", "--yes"])
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
@@ -263,14 +275,14 @@ fn reset_empty() {
 
 /// JSON output produces valid JSON with removal counts and backup path.
 #[test]
-fn reset_json() {
+fn drop_json() {
     let ctx = TestContext::new("minimal-project");
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("reset_json")
         .setup(&["init"])
-        .post_setup_hook(|ctx| seed_reset_registry(ctx.path()))
-        .test(&["reset", "--yes", "--json"])
+        .post_setup_hook(|ctx| seed_drop_registry(ctx.path()))
+        .test(&["registry", "drop", "--namespace", "default", "--yes", "--json"])
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(EpochNormalizer));
 
@@ -279,12 +291,12 @@ fn reset_json() {
 
 /// Uninitialized project (no foundry.toml) produces an error.
 #[test]
-fn reset_uninitialized() {
+fn drop_uninitialized() {
     let ctx = TestContext::new("compose-project");
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("reset_uninitialized")
-        .test(&["reset", "--yes"])
+        .test(&["registry", "drop", "--namespace", "default", "--yes"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 

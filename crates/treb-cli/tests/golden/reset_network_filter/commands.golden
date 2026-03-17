@@ -1,10 +1,12 @@
-=== cmd 0: [reset --yes --network 1] ===
-Found 5 items to reset for namespace 'default' on network '1' (chain 1):
+=== cmd 0: [registry drop --yes --network 1] ===
+Dropping 5 registry entries on network '1' (chain 1):
 
   Deployments:        2
+    TestContract:v1 (0x0000...0001) on chain 1
+    TestContract:v1 (0x0000...0001) on chain 1
   Transactions:       1
   Safe Transactions:  1
   Governor Proposals: 1
 
-Running in non-interactive mode. Proceeding with reset...
-Successfully reset 5 items from the registry.
+Running in non-interactive mode. Proceeding with drop...
+Successfully dropped 5 items from the registry.

@@ -3,7 +3,7 @@ use std::{
     ffi::{OsStr, OsString},
 };
 
-use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use treb_cli::{commands, output, ui};
 use treb_core::types::DeploymentType;
 
@@ -248,32 +248,14 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Manage deployment tags
+    /// Manage the deployment registry
     ///
-    /// Add or remove version tags on deployments. Without flags, shows current tags.
-    ///
-    /// Examples:
-    ///   treb tag Counter:v1                  # Show current tags
-    #[command(verbatim_doc_comment)]
-    Tag {
-        /// Deployment identifier (full ID, name, address, name:label, or namespace/name); omit to
-        /// select interactively
-        deployment: Option<String>,
-        /// Add a tag to the deployment
-        #[arg(long, conflicts_with = "remove")]
-        add: Option<String>,
-        /// Remove a tag from the deployment
-        #[arg(long, conflicts_with = "add")]
-        remove: Option<String>,
-        /// Network name or chain ID
-        #[arg(long, short = 'n')]
-        network: Option<String>,
-        /// Deployment namespace
-        #[arg(long, short = 's')]
-        namespace: Option<String>,
-        /// Output as JSON
-        #[arg(long)]
-        json: bool,
+    /// Registry management commands for syncing, pruning, tagging, and dropping
+    /// registry entries.
+    #[command(subcommand_required = true, arg_required_else_help = true)]
+    Registry {
+        #[command(subcommand)]
+        subcommand: RegistrySubcommand,
     },
     /// Manage named addresses scoped by chain ID
     #[command(alias = "ab")]
@@ -328,28 +310,6 @@ enum Commands {
         /// Skip post-registration verification
         #[arg(long)]
         skip_verify: bool,
-        /// Output as JSON
-        #[arg(long)]
-        json: bool,
-    },
-    /// Sync registry with on-chain state
-    ///
-    /// Update deployment registry with latest on-chain information. Checks
-    /// pending Safe transactions and updates their execution status.
-    ///
-    /// This command will:
-    /// - Check all pending Safe transactions for execution status
-    #[command(verbatim_doc_comment)]
-    Sync {
-        /// Network name or chain ID
-        #[arg(long)]
-        network: Option<String>,
-        /// Remove invalid entries while syncing
-        #[arg(long)]
-        clean: bool,
-        /// Print raw API responses to stderr
-        #[arg(long)]
-        debug: bool,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -419,22 +379,6 @@ enum Commands {
         #[arg(long, num_args = 1)]
         env: Vec<String>,
     },
-    /// Prune registry entries that no longer exist on-chain
-    ///
-    /// Prune registry entries that no longer exist on-chain.
-    ///
-    /// This command checks all deployments, transactions, and safe transactions
-    /// against the blockchain and removes entries that no longer exist. This is
-    /// useful for cleaning up after test deployments on local or virtual networks.
-    Prune(commands::prune::PruneArgs),
-    /// Reset registry entries for the current namespace and network
-    ///
-    /// Reset registry entries for the current namespace and network.
-    ///
-    /// This command deletes all deployments, transactions, and safe transactions
-    /// matching the current namespace and network from the registry. This is useful
-    /// for cleaning up and starting fresh on a given namespace/network combination.
-    Reset(commands::reset::ResetArgs),
     /// Manage network fork mode
     ///
     /// Fork mode lets you test deployment scripts against local forks of live
@@ -494,6 +438,70 @@ enum ConfigSubcommand {
     },
 }
 
+#[derive(Subcommand)]
+enum RegistrySubcommand {
+    /// Sync safe/governor transaction state from on-chain services
+    ///
+    /// Update deployment registry with latest on-chain information. Checks
+    /// pending Safe transactions and updates their execution status.
+    #[command(verbatim_doc_comment)]
+    Sync {
+        /// Network name or chain ID
+        #[arg(long)]
+        network: Option<String>,
+        /// Remove invalid entries while syncing
+        #[arg(long)]
+        clean: bool,
+        /// Print raw API responses to stderr
+        #[arg(long)]
+        debug: bool,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove broken cross-references and stale entries
+    ///
+    /// Check all deployments, transactions, and safe transactions
+    /// against the blockchain and remove entries that no longer exist. This is
+    /// useful for cleaning up after test deployments on local or virtual networks.
+    Prune(commands::prune::PruneArgs),
+    /// Manage version tags on deployments
+    ///
+    /// Add or remove version tags on deployments. Without flags, shows current tags.
+    ///
+    /// Examples:
+    ///   treb registry tag Counter:v1                  # Show current tags
+    #[command(verbatim_doc_comment)]
+    Tag {
+        /// Deployment identifier (full ID, name, address, name:label, or namespace/name); omit to
+        /// select interactively
+        deployment: Option<String>,
+        /// Add a tag to the deployment
+        #[arg(long, conflicts_with = "remove")]
+        add: Option<String>,
+        /// Remove a tag from the deployment
+        #[arg(long, conflicts_with = "add")]
+        remove: Option<String>,
+        /// Network name or chain ID
+        #[arg(long, short = 'n')]
+        network: Option<String>,
+        /// Deployment namespace
+        #[arg(long, short = 's')]
+        namespace: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Drop registry entries by query, network, or namespace
+    ///
+    /// Delete deployments, transactions, and safe transactions from the registry.
+    /// At least one of query, --network, or --namespace must be provided.
+    /// Linked transactions and proposals are only removed when all their linked
+    /// deployments are being dropped (orphan cascade).
+    #[command(verbatim_doc_comment)]
+    Drop(commands::reset::DropArgs),
+}
+
 impl Commands {
     /// Returns `true` when the parsed subcommand includes `--json`.
     fn json_flag(&self) -> bool {
@@ -502,9 +510,7 @@ impl Commands {
             | Commands::List { json, .. }
             | Commands::Show { json, .. }
             | Commands::Verify { json, .. }
-            | Commands::Tag { json, .. }
             | Commands::Register { json, .. }
-            | Commands::Sync { json, .. }
             | Commands::Version { json, .. }
             | Commands::Networks { json, .. }
             | Commands::Compose { json, .. } => *json,
@@ -515,14 +521,22 @@ impl Commands {
             Commands::Config { subcommand } => {
                 matches!(subcommand, ConfigSubcommand::Show { json: true })
             }
-            Commands::Prune(args) => args.json,
-            Commands::Reset(args) => args.json,
+            Commands::Registry { subcommand } => registry_subcommand_json_flag(subcommand),
             Commands::Fork { subcommand } => fork_subcommand_json_flag(subcommand),
             Commands::Dev { subcommand } => dev_subcommand_json_flag(subcommand),
             Commands::Init { .. }
             | Commands::Completion { .. }
             | Commands::CompletionCompat { .. } => false,
         }
+    }
+}
+
+fn registry_subcommand_json_flag(subcommand: &RegistrySubcommand) -> bool {
+    match subcommand {
+        RegistrySubcommand::Sync { json, .. }
+        | RegistrySubcommand::Tag { json, .. } => *json,
+        RegistrySubcommand::Prune(args) => args.json,
+        RegistrySubcommand::Drop(args) => args.json,
     }
 }
 
@@ -623,7 +637,7 @@ fn build_grouped_help(cmd: &clap::Command) -> String {
         s.push('\n');
         for name in names {
             if let Some(sub) = cmd.find_subcommand(name) {
-                let mut about = sub.get_about().map(|a| a.to_string()).unwrap_or_default();
+                let about = sub.get_about().map(|a| a.to_string()).unwrap_or_default();
                 s.push_str(&format!("  {name:<14}{about}\n"));
             } else if *name == "help" && !cmd.is_disable_help_subcommand_set() {
                 s.push_str(&format!("  {name:<14}{BUILTIN_HELP_SUBCOMMAND_ABOUT}\n"));
@@ -643,14 +657,11 @@ fn build_grouped_help(cmd: &clap::Command) -> String {
         cmd,
         "Management Commands:",
         &[
-            "sync",
-            "tag",
+            "registry",
             "addressbook",
             "register",
             "dev",
             "networks",
-            "prune",
-            "reset",
             "config",
         ],
     );
@@ -1126,10 +1137,29 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             )
             .await?
         }
-        Commands::Tag { deployment, add, remove, network, namespace, json } => {
-            commands::tag::run(deployment, add, remove, network, namespace, json, non_interactive)
+        Commands::Registry { subcommand } => match subcommand {
+            RegistrySubcommand::Sync { network, clean, debug, json } => {
+                commands::sync::run(network, clean, debug, json).await?
+            }
+            RegistrySubcommand::Prune(args) => {
+                commands::prune::run(args, non_interactive).await?
+            }
+            RegistrySubcommand::Tag { deployment, add, remove, network, namespace, json } => {
+                commands::tag::run(
+                    deployment,
+                    add,
+                    remove,
+                    network,
+                    namespace,
+                    json,
+                    non_interactive,
+                )
                 .await?
-        }
+            }
+            RegistrySubcommand::Drop(args) => {
+                commands::reset::run(args, non_interactive).await?
+            }
+        },
         Commands::Addressbook { namespace, network, subcommand } => {
             commands::addressbook::run(namespace, network, subcommand).await?
         }
@@ -1160,9 +1190,6 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 json,
             )
             .await?
-        }
-        Commands::Sync { network, clean, debug, json } => {
-            commands::sync::run(network, clean, debug, json).await?
         }
         Commands::Version { json } => commands::version::run(json).await?,
         Commands::Networks { json } => commands::networks::run(json).await?,
@@ -1201,8 +1228,6 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             )
             .await?
         }
-        Commands::Prune(args) => commands::prune::run(args, non_interactive).await?,
-        Commands::Reset(args) => commands::reset::run(args, non_interactive).await?,
         Commands::Fork { subcommand } => commands::fork::run(subcommand).await?,
         Commands::Dev { subcommand } => commands::dev::run(subcommand).await?,
         Commands::Completion { shell } | Commands::CompletionCompat { shell } => {
@@ -1371,16 +1396,20 @@ mod tests {
 
     #[test]
     fn tag_short_flags_parse_without_wiring_behavior() {
-        let cli = parse_cli_from(["treb", "tag", "Counter", "-n", "mainnet", "-s", "production"])
-            .unwrap();
+        let cli = parse_cli_from([
+            "treb", "registry", "tag", "Counter", "-n", "mainnet", "-s", "production",
+        ])
+        .unwrap();
 
         match cli.command {
-            Commands::Tag { deployment, network, namespace, .. } => {
+            Commands::Registry {
+                subcommand: RegistrySubcommand::Tag { deployment, network, namespace, .. },
+            } => {
                 assert_eq!(deployment.as_deref(), Some("Counter"));
                 assert_eq!(network.as_deref(), Some("mainnet"));
                 assert_eq!(namespace.as_deref(), Some("production"));
             }
-            _ => panic!("expected tag command"),
+            _ => panic!("expected registry tag command"),
         }
     }
 
@@ -1598,6 +1627,38 @@ mod tests {
             ),
             "unexpected help output: {help}"
         );
+    }
+
+    #[test]
+    fn registry_long_help_includes_contextual_footer() {
+        let mut cmd = build_grouped_command();
+        let mut buffer = Vec::new();
+        cmd.find_subcommand_mut("registry").unwrap().write_long_help(&mut buffer).unwrap();
+        let help = String::from_utf8(buffer).unwrap();
+
+        assert!(
+            help.contains(
+                "Use \"treb registry [command] --help\" for more information about a command."
+            ),
+            "unexpected help output: {help}"
+        );
+    }
+
+    #[test]
+    fn registry_subcommand_parses() {
+        let cli =
+            parse_cli_from(["treb", "registry", "drop", "--namespace", "default", "--yes"])
+                .unwrap();
+
+        match cli.command {
+            Commands::Registry {
+                subcommand: RegistrySubcommand::Drop(args),
+            } => {
+                assert_eq!(args.namespace.as_deref(), Some("default"));
+                assert!(args.yes);
+            }
+            _ => panic!("expected registry drop command"),
+        }
     }
 
     #[test]

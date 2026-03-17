@@ -1,10 +1,13 @@
-=== cmd 0: [reset --yes] ===
-Found 9 items to reset for namespace 'default' across all networks:
+=== cmd 0: [registry drop --namespace default --yes] ===
+Dropping 9 registry entries in namespace 'default':
 
   Deployments:        3
-  Transactions:       2
-  Safe Transactions:  2
-  Governor Proposals: 2
+    TestContract:v1 (0x0000...0001) on chain 1
+    TestContract:v1 (0x0000...0001) on chain 1
+    TestContract:v1 (0x0000...0001) on chain 42220
+  Transactions:       2  (orphaned)
+  Safe Transactions:  2  (orphaned)
+  Governor Proposals: 2  (orphaned)
 
-Running in non-interactive mode. Proceeding with reset...
-Successfully reset 9 items from the registry.
+Running in non-interactive mode. Proceeding with drop...
+Successfully dropped 9 items from the registry.

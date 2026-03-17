@@ -1,4 +1,4 @@
-=== cmd 0: [sync --json] ===
+=== cmd 0: [registry sync --json] ===
 {
   "errors": [],
   "governorNewlyExecuted": 1,
