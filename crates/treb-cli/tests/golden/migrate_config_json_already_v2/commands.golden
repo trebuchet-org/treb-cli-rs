@@ -1,5 +1,0 @@
-=== cmd 0: [migrate config --json] ===
-{
-  "message": "treb.toml is already v2 format",
-  "status": "already_v2"
-}

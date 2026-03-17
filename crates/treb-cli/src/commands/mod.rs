@@ -6,7 +6,7 @@ pub mod fork;
 
 pub mod init;
 pub mod list;
-pub mod migrate;
+
 pub mod networks;
 pub mod prune;
 pub mod register;

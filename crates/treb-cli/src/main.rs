@@ -447,23 +447,6 @@ enum Commands {
     /// matching the current namespace and network from the registry. This is useful
     /// for cleaning up and starting fresh on a given namespace/network combination.
     Reset(commands::reset::ResetArgs),
-    /// Migrate config to new treb.toml accounts/namespace format
-    ///
-    /// Migrate treb sender configuration from foundry.toml [profile.*.treb.*]
-    /// sections into the new treb.toml format with [accounts.*] and [namespace.*]
-    /// sections.
-    ///
-    /// This command will:
-    /// 1. Read all [profile.*.treb.*] sections from foundry.toml
-    /// 2. Deduplicate identical sender configs into shared accounts
-    /// 3. Map profile names to namespaces with role->account mappings
-    /// 4. Show a preview of the generated treb.toml
-    /// 5. Ask for confirmation before writing
-    #[command(verbatim_doc_comment)]
-    Migrate {
-        #[command(subcommand)]
-        subcommand: commands::migrate::MigrateSubcommand,
-    },
     /// Manage network fork mode
     ///
     /// Fork mode lets you test deployment scripts against local forks of live
@@ -548,7 +531,6 @@ impl Commands {
             Commands::Reset(args) => args.json,
             Commands::Fork { subcommand } => fork_subcommand_json_flag(subcommand),
             Commands::Dev { subcommand } => dev_subcommand_json_flag(subcommand),
-            Commands::Migrate { subcommand } => migrate_subcommand_json_flag(subcommand),
             Commands::Init { .. }
             | Commands::Completion { .. }
             | Commands::CompletionCompat { .. } => false,
@@ -565,12 +547,6 @@ fn fork_subcommand_json_flag(subcommand: &commands::fork::ForkSubcommand) -> boo
         | commands::fork::ForkSubcommand::Revert
         | commands::fork::ForkSubcommand::Restart { .. }
         | commands::fork::ForkSubcommand::Logs { .. } => false,
-    }
-}
-
-fn migrate_subcommand_json_flag(subcommand: &commands::migrate::MigrateSubcommand) -> bool {
-    match subcommand {
-        commands::migrate::MigrateSubcommand::Config { json, .. } => *json,
     }
 }
 
@@ -688,7 +664,6 @@ fn build_grouped_help(cmd: &clap::Command) -> String {
             "prune",
             "reset",
             "config",
-            "migrate",
         ],
     );
     s.push('\n');
@@ -1244,9 +1219,6 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         }
         Commands::Prune(args) => commands::prune::run(args, non_interactive).await?,
         Commands::Reset(args) => commands::reset::run(args, non_interactive).await?,
-        Commands::Migrate { subcommand } => {
-            commands::migrate::run(subcommand, non_interactive).await?
-        }
         Commands::Fork { subcommand } => commands::fork::run(subcommand).await?,
         Commands::Dev { subcommand } => commands::dev::run(subcommand).await?,
         Commands::Completion { shell } | Commands::CompletionCompat { shell } => {
@@ -1270,8 +1242,6 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::migrate::MigrateSubcommand;
-
     #[test]
     fn completion_command_aliases_parse() {
         let cli = Cli::try_parse_from(["treb", "completion", "bash"]).unwrap();
@@ -1377,17 +1347,6 @@ mod tests {
         match cli.command {
             Commands::List { .. } => {}
             _ => panic!("expected list command"),
-        }
-    }
-
-    #[test]
-    fn non_interactive_is_accepted_before_migrate_subcommand() {
-        let cli = parse_cli_from(["treb", "--non-interactive", "migrate", "config"]).unwrap();
-        assert!(cli.non_interactive);
-
-        match cli.command {
-            Commands::Migrate { subcommand: MigrateSubcommand::Config { .. } } => {}
-            _ => panic!("expected migrate config command"),
         }
     }
 

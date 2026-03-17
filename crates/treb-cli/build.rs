@@ -35,7 +35,6 @@ fn build_cli() -> ClapCommand {
         .subcommand(build_compose())
         .subcommand(build_prune())
         .subcommand(build_reset())
-        .subcommand(build_migrate())
         .subcommand(build_fork())
         .subcommand(build_dev())
         .subcommand(build_completion_cmd())
@@ -459,45 +458,6 @@ fn build_reset() -> ClapCommand {
                 .help("Skip confirmation prompt"),
         )
         .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
-}
-
-fn build_migrate() -> ClapCommand {
-    ClapCommand::new("migrate")
-        .about("Migrate config or registry to a newer format")
-        .subcommand(
-            ClapCommand::new("config")
-                .about("Detect and convert treb.toml v1 → v2")
-                .arg(
-                    Arg::new("dry-run")
-                        .long("dry-run")
-                        .action(ArgAction::SetTrue)
-                        .help("Print v2 TOML to stdout without modifying any files"),
-                )
-                .arg(
-                    Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"),
-                )
-                .arg(
-                    Arg::new("yes")
-                        .long("yes")
-                        .short('y')
-                        .action(ArgAction::SetTrue)
-                        .help("Skip confirmation prompt"),
-                )
-                .arg(
-                    Arg::new("cleanup-foundry")
-                        .long("cleanup-foundry")
-                        .action(ArgAction::SetTrue)
-                        .help("Remove [profile.*.treb.*] sections from foundry.toml"),
-                ),
-        )
-        .subcommand(
-            ClapCommand::new("registry").about("Apply versioned registry schema migrations").arg(
-                Arg::new("dry-run")
-                    .long("dry-run")
-                    .action(ArgAction::SetTrue)
-                    .help("List pending migrations without applying them"),
-            ),
-        )
 }
 
 fn build_fork() -> ClapCommand {

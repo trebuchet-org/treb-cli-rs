@@ -1,4 +1,4 @@
-//! Integration tests for `treb prune`, `treb reset`, and `treb migrate`.
+//! Integration tests for `treb prune` and `treb reset`.
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
@@ -15,14 +15,6 @@ fn treb() -> assert_cmd::Command {
 }
 
 const MINIMAL_FOUNDRY_TOML: &str = "[profile.default]\n";
-
-const V1_TREB_TOML: &str = r#"[ns.default.senders.deployer]
-type = "private_key"
-address = "0xDeployerAddr"
-private_key = "0xDeployerKey"
-"#;
-
-const V2_TREB_TOML: &str = "[accounts.deployer]\ntype = \"private_key\"\n";
 
 // ── Fixture builders ──────────────────────────────────────────────────────────
 
@@ -337,133 +329,3 @@ fn reset_namespace_removes_only_matching_namespace() {
     );
 }
 
-// ── treb migrate config ───────────────────────────────────────────────────────
-
-#[test]
-fn migrate_config_dry_run_v1_prints_v2_content_without_modifying_file() {
-    let tmp = tempfile::tempdir().unwrap();
-    fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
-    fs::write(tmp.path().join("treb.toml"), V1_TREB_TOML).unwrap();
-
-    let original = fs::read_to_string(tmp.path().join("treb.toml")).unwrap();
-
-    let output =
-        treb().args(["migrate", "config", "--dry-run"]).current_dir(tmp.path()).output().unwrap();
-
-    assert!(output.status.success(), "migrate config --dry-run should succeed");
-    let stdout = String::from_utf8(output.stdout).unwrap();
-
-    // stdout should contain v2 TOML structure (accounts section).
-    assert!(
-        stdout.contains("accounts"),
-        "dry-run stdout should contain v2 TOML accounts section: {stdout}"
-    );
-
-    // treb.toml must be unchanged.
-    let after = fs::read_to_string(tmp.path().join("treb.toml")).unwrap();
-    assert_eq!(original, after, "dry-run must not modify treb.toml");
-
-    // No backup file should be created.
-    let backups: Vec<_> = fs::read_dir(tmp.path())
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_name().to_string_lossy().starts_with("treb.toml.bak-"))
-        .collect();
-    assert!(backups.is_empty(), "dry-run must not create a backup file");
-}
-
-#[test]
-fn migrate_config_v1_rewrites_file_and_creates_backup() {
-    let tmp = tempfile::tempdir().unwrap();
-    fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
-    fs::write(tmp.path().join("treb.toml"), V1_TREB_TOML).unwrap();
-
-    let original = fs::read_to_string(tmp.path().join("treb.toml")).unwrap();
-
-    treb().args(["migrate", "config"]).current_dir(tmp.path()).assert().success().stdout(
-        predicate::str::contains("✓ treb.toml written successfully")
-            .and(predicate::str::contains("Next steps:")),
-    );
-
-    // treb.toml should now be v2 format.
-    let after = fs::read_to_string(tmp.path().join("treb.toml")).unwrap();
-    assert_ne!(original, after, "treb.toml should have been rewritten to v2");
-
-    let format = treb_config::detect_treb_config_format(tmp.path());
-    assert_eq!(
-        format,
-        treb_config::TrebConfigFormat::V2,
-        "treb.toml should be detected as v2 after migration"
-    );
-
-    // A backup file should exist containing the original v1 content.
-    let backups: Vec<_> = fs::read_dir(tmp.path())
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_name().to_string_lossy().starts_with("treb.toml.bak-"))
-        .collect();
-    assert_eq!(backups.len(), 1, "exactly one backup file should be created");
-    let backup_content = fs::read_to_string(backups[0].path()).unwrap();
-    assert_eq!(backup_content, original, "backup should contain original v1 content");
-}
-
-#[test]
-fn migrate_config_already_v2_outputs_message_and_no_file_changes() {
-    let tmp = tempfile::tempdir().unwrap();
-    fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
-    fs::write(tmp.path().join("treb.toml"), V2_TREB_TOML).unwrap();
-
-    let original = fs::read_to_string(tmp.path().join("treb.toml")).unwrap();
-
-    treb()
-        .args(["migrate", "config"])
-        .current_dir(tmp.path())
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("already v2"));
-
-    // File must be unchanged.
-    let after = fs::read_to_string(tmp.path().join("treb.toml")).unwrap();
-    assert_eq!(original, after, "already-v2 file must not be modified");
-
-    // No backup should be created.
-    let backups: Vec<_> = fs::read_dir(tmp.path())
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_name().to_string_lossy().starts_with("treb.toml.bak-"))
-        .collect();
-    assert!(backups.is_empty(), "no backup should be created for already-v2 config");
-}
-
-// ── treb migrate ──────────────────────────────────────────────────────────────
-
-#[test]
-fn migrate_help_does_not_list_registry_subcommand() {
-    let output =
-        treb().args(["migrate", "--help"]).output().expect("failed to run treb migrate --help");
-
-    assert!(output.status.success(), "migrate --help should succeed");
-
-    let stdout = String::from_utf8(output.stdout).expect("help output should be utf-8");
-    assert!(stdout.contains("config"), "migrate help should list the config subcommand: {stdout}");
-    assert!(
-        !stdout.contains("registry"),
-        "migrate help should not mention the removed registry subcommand: {stdout}"
-    );
-}
-
-#[test]
-fn migrate_registry_subcommand_is_rejected() {
-    let tmp = tempfile::tempdir().unwrap();
-    fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
-
-    treb()
-        .args(["migrate", "registry"])
-        .current_dir(tmp.path())
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains(
-            "Error: unknown command \"registry\" for \"treb migrate\"",
-        ))
-        .stderr(predicate::str::contains("Run 'treb migrate --help' for usage."));
-}
