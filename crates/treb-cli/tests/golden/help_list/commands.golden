@@ -36,7 +36,8 @@ Options:
           Filter by deployment label
 
       --fork
-          Show only fork deployments (namespace starts with fork/)
+          Show only fork deployments (in fork mode: deployments added since fork enter; otherwise:
+          fork/ namespace)
 
       --no-fork
           Hide fork deployments

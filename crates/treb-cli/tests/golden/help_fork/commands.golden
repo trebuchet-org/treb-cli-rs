@@ -13,7 +13,6 @@ Commands:
   restart  Restart the fork from a new block
   status   Show active fork status
   history  Show fork history
-  diff     Diff current registry vs snapshot
   logs     Tail Anvil log files for active forks
   help     Print this message or the help of the given subcommand(s)
 
