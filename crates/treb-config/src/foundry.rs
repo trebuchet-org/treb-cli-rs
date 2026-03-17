@@ -196,7 +196,8 @@ pub unsafe fn override_rpc_endpoint(
         return None;
     }
     let previous_value = std::env::var(var).ok();
-    std::env::set_var(var, new_url);
+    // SAFETY: caller guarantees single-threaded access (documented on this fn).
+    unsafe { std::env::set_var(var, new_url) };
     Some(RpcOverrideGuard { var_name: var.to_string(), previous_value })
 }
 
