@@ -38,12 +38,14 @@ sol! {
 // ---------------------------------------------------------------------------
 
 /// Compute the `bytes8` hash for a type string (first 8 bytes of keccak256).
+#[allow(dead_code)]
 fn calculate_bytes8(type_string: &str) -> FixedBytes<8> {
     let hash = keccak256(type_string);
     FixedBytes::from_slice(&hash[..8])
 }
 
 /// Perform bitwise OR on two `bytes8` values.
+#[allow(dead_code)]
 fn bitwise_or(a: FixedBytes<8>, b: FixedBytes<8>) -> FixedBytes<8> {
     let mut result = [0u8; 8];
     for i in 0..8 {
@@ -53,8 +55,10 @@ fn bitwise_or(a: FixedBytes<8>, b: FixedBytes<8>) -> FixedBytes<8> {
 }
 
 /// Sender type constants matching `SenderTypes` in `types.sol`.
+#[allow(dead_code)]
 struct SenderTypes;
 
+#[allow(dead_code)]
 impl SenderTypes {
     fn private_key() -> FixedBytes<8> {
         calculate_bytes8("private-key")
@@ -124,6 +128,7 @@ pub fn encode_sender_configs(
 }
 
 /// Build a single `SenderInitConfig` from a resolved sender and its config.
+#[allow(dead_code)]
 fn build_sender_init_config(
     name: &str,
     resolved: &ResolvedSender,
@@ -153,6 +158,7 @@ fn build_sender_init_config(
 ///
 /// Maps to `SenderTypes.InMemory` in Solidity (same as Go's behavior).
 /// Config bytes contain the private key ABI-encoded as `uint256`.
+#[allow(dead_code)]
 fn build_private_key_config(
     name: &str,
     resolved: &ResolvedSender,
@@ -189,6 +195,7 @@ fn build_private_key_config(
 /// Build config for a `ledger` sender.
 ///
 /// Config bytes contain the derivation path ABI-encoded as `string`.
+#[allow(dead_code)]
 fn build_ledger_config(
     name: &str,
     resolved: &ResolvedSender,
@@ -211,6 +218,7 @@ fn build_ledger_config(
 /// Build config for a `trezor` sender.
 ///
 /// Config bytes contain the derivation path ABI-encoded as `string`.
+#[allow(dead_code)]
 fn build_trezor_config(
     name: &str,
     resolved: &ResolvedSender,
@@ -233,6 +241,7 @@ fn build_trezor_config(
 /// Build config for a `safe` sender.
 ///
 /// Config bytes contain the signer (proposer) name ABI-encoded as `string`.
+#[allow(dead_code)]
 fn build_safe_config(
     name: &str,
     resolved: &ResolvedSender,
@@ -266,6 +275,7 @@ fn build_safe_config(
 ///
 /// Config bytes contain `(address governor, address timelock, string proposerName)`
 /// ABI-encoded as a tuple.
+#[allow(dead_code)]
 fn build_governance_config(
     name: &str,
     resolved: &ResolvedSender,

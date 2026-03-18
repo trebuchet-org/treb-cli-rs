@@ -16,7 +16,6 @@ use foundry_common::{
 use owo_colors::{OwoColorize, Style};
 use serde::Serialize;
 use treb_config::{ResolveOpts, resolve_config};
-use treb_core::types::TransactionStatus;
 #[cfg(test)]
 use treb_core::types::Operation;
 use treb_forge::{
@@ -1958,7 +1957,7 @@ mod tests {
     use alloy_primitives::{Address, B256};
     use chrono::{TimeZone, Utc};
     use treb_core::types::{
-        GovernorProposal, ProposalStatus,
+        GovernorProposal, ProposalStatus, TransactionStatus,
         deployment::{ArtifactInfo, Deployment, DeploymentStrategy, VerificationInfo},
         enums::{DeploymentMethod, DeploymentType, VerificationStatus},
     };

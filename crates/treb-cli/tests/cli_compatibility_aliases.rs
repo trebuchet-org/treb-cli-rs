@@ -165,6 +165,7 @@ fn seed_fork_diff(project_root: &Path) {
     store.insert_active_fork(entry).unwrap();
 }
 
+#[allow(dead_code)]
 fn seed_fork_runtime_for_revert(project_root: &Path, rpc_url: &str, port: u16) {
     let treb_dir = project_root.join(".treb");
     let mut entry = sample_fork_entry(&treb_dir, "mainnet");
@@ -187,6 +188,7 @@ fn seed_fork_runtime_for_revert(project_root: &Path, rpc_url: &str, port: u16) {
     store.insert_active_fork(entry).unwrap();
 }
 
+#[allow(dead_code)]
 fn seed_fork_runtime_for_restart(project_root: &Path, rpc_url: &str, port: u16) {
     let treb_dir = project_root.join(".treb");
     let mut entry = sample_fork_entry(&treb_dir, "mainnet");
@@ -226,6 +228,7 @@ fn seed_addressbook_entry(project_root: &Path) {
     );
 }
 
+#[allow(dead_code)]
 fn read_http_request(stream: &mut std::net::TcpStream) -> std::io::Result<String> {
     stream.set_read_timeout(Some(std::time::Duration::from_millis(250)))?;
 
@@ -275,6 +278,7 @@ fn read_http_request(stream: &mut std::net::TcpStream) -> std::io::Result<String
     Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
+#[allow(dead_code)]
 fn spawn_json_rpc_server<F>(mut handler: F) -> std::io::Result<u16>
 where
     F: FnMut(&serde_json::Value) -> serde_json::Value + Send + 'static,
