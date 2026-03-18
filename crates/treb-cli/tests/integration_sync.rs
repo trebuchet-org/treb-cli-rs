@@ -284,6 +284,8 @@ fn seed_governor_proposal(ctx: &TestContext) {
         description: String::new(),
         executed_at: None,
         execution_tx_hash: String::new(),
+        fork_executed_at: None,
+        actions: Vec::new(),
     };
     registry.insert_governor_proposal(proposal).unwrap();
 }

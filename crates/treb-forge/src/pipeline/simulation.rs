@@ -218,9 +218,13 @@ pub async fn hydrate_simulation(
         .into_iter()
         .map(|tx| {
             let metadata = transaction_metadata.remove(&tx.id).unwrap_or_default();
+            let sender_category = metadata.sender_name.as_ref()
+                .and_then(|name| context.resolved_senders.get(name))
+                .map(|s| s.category());
             RecordedTransaction {
                 transaction: tx,
                 sender_name: metadata.sender_name,
+                sender_category,
                 gas_used: metadata.gas_used,
                 trace: metadata.trace,
             }

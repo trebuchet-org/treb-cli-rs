@@ -17,9 +17,8 @@ safe = "0xSafeContract"
 signer = "deployer"
 
 [accounts.governor]
-type = "oz_governor"
-address = "0xGovAddr"
-governor = "0xGovernorContract"
+type = "governance"
+address = "0xTimelockContract"
 timelock = "0xTimelockContract"
 proposer = "deployer"
 

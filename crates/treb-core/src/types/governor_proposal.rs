@@ -32,6 +32,22 @@ pub struct GovernorProposal {
     pub executed_at: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub execution_tx_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork_executed_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<GovernorAction>,
+}
+
+// ---------------------------------------------------------------------------
+// GovernorAction
+// ---------------------------------------------------------------------------
+
+/// A single action in a governance proposal.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GovernorAction {
+    pub target: String,
+    pub value: String,
+    pub calldata: String,
 }
 
 #[cfg(test)]
@@ -53,6 +69,8 @@ mod tests {
             description: String::new(),
             executed_at: None,
             execution_tx_hash: String::new(),
+            fork_executed_at: None,
+            actions: Vec::new(),
         }
     }
 

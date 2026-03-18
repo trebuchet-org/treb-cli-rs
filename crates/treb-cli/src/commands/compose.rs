@@ -769,6 +769,7 @@ async fn setup_component(
         verbosity: params.verbose,
         is_fork,
         rpc_url: effective_rpc_url.clone(),
+        quiet: false,
         ..Default::default()
     };
 
@@ -995,6 +996,22 @@ pub async fn run(
             (false, url)
         }
     };
+
+    // Auto-fund senders on fork
+    if banner_is_fork {
+        if let Some(ref rpc) = banner_rpc_url {
+            let fund_results =
+                treb_forge::fund_senders_on_fork(rpc, &banner_senders, 10_000).await;
+            let funded_count = fund_results.iter().filter(|(_, _, ok)| *ok).count();
+            if funded_count > 0 && !json {
+                eprintln!(
+                    "Funded {} sender address{} on fork",
+                    funded_count,
+                    if funded_count == 1 { "" } else { "es" },
+                );
+            }
+        }
+    }
 
     // Build sorted sender list for banner
     let mut banner_sender_list: Vec<(String, String)> = banner_senders

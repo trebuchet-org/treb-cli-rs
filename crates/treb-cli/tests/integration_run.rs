@@ -412,7 +412,7 @@ fn run_no_init() {
 
 /// Governor sender config for tests.
 ///
-/// Defines an "anvil" private-key account and a "governance" oz_governor account
+/// Defines an "anvil" private-key account and a "governance" sender
 /// whose proposer is "anvil".  The namespace maps "deployer" → "governance" so
 /// that the CLI detects `is_governor_sender = true`.
 const GOVERNOR_TREB_TOML: &str = r#"[accounts.anvil]
@@ -420,8 +420,8 @@ type = "private_key"
 private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
 [accounts.governance]
-type = "oz_governor"
-governor = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+type = "governance"
+address = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 timelock = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 proposer = "anvil"
 

@@ -408,6 +408,7 @@ fn build_contract_display(
     d: &Deployment,
     category: &DisplayCategory,
     fork_deployment_ids: &HashSet<String>,
+    queued_transaction_ids: &HashSet<String>,
 ) -> String {
     let name = if d.label.is_empty() {
         d.contract_name.clone()
@@ -423,6 +424,15 @@ fn build_contract_display(
             write!(display, " {}", "[fork]".style(color::FORK_INDICATOR)).unwrap();
         } else {
             display.push_str(" [fork]");
+        }
+    }
+
+    // Show [queued] badge if the deployment's transaction is still queued
+    if !d.transaction_id.is_empty() && queued_transaction_ids.contains(&d.transaction_id) {
+        if color::is_color_enabled() {
+            write!(display, " {}", "[queued]".style(color::YELLOW)).unwrap();
+        } else {
+            display.push_str(" [queued]");
         }
     }
 
@@ -447,8 +457,9 @@ fn build_deployment_row(
     d: &Deployment,
     category: &DisplayCategory,
     fork_deployment_ids: &HashSet<String>,
+    queued_transaction_ids: &HashSet<String>,
 ) -> Vec<String> {
-    let name = build_contract_display(d, category, fork_deployment_ids);
+    let name = build_contract_display(d, category, fork_deployment_ids, queued_transaction_ids);
 
     let address = if color::is_color_enabled() {
         format!("{}", d.address.style(color::ADDRESS))
@@ -499,11 +510,12 @@ fn build_type_group_table(
     namespace: &str,
     chain_id: u64,
     fork_deployment_ids: &HashSet<String>,
+    queued_transaction_ids: &HashSet<String>,
     impl_lookup: &ImplNameLookup,
 ) -> output::TableData {
     let mut table = Vec::new();
     for d in &tg.deployments {
-        table.push(build_deployment_row(d, &tg.category, fork_deployment_ids));
+        table.push(build_deployment_row(d, &tg.category, fork_deployment_ids, queued_transaction_ids));
         if let Some(ref pi) = d.proxy_info {
             table.push(build_impl_row(namespace, chain_id, &pi.implementation, impl_lookup));
         }
@@ -659,6 +671,14 @@ pub async fn run(
     let registry = Registry::open(&cwd).context("failed to open registry")?;
     let all_deployments = registry.list_deployments();
 
+    // Build set of transaction IDs that are still queued (for [queued] badge)
+    let queued_transaction_ids: HashSet<String> = registry
+        .list_transactions()
+        .into_iter()
+        .filter(|t| t.status == treb_core::types::TransactionStatus::Queued)
+        .map(|t| t.id.clone())
+        .collect();
+
     let filters = DeploymentFilters {
         network,
         namespace,
@@ -765,6 +785,7 @@ pub async fn run(
                         namespace,
                         chain_id,
                         &result.fork_deployment_ids,
+                        &queued_transaction_ids,
                         &impl_lookup,
                     ));
                 }
@@ -1456,7 +1477,7 @@ mod tests {
         let fork_ids = HashSet::new();
         let impl_lookup = ImplNameLookup::new();
         let tg = TypeGroup { category: DisplayCategory::Proxy, deployments: vec![&d] };
-        let table = build_type_group_table(&tg, "mainnet", 42220, &fork_ids, &impl_lookup);
+        let table = build_type_group_table(&tg, "mainnet", 42220, &fork_ids, &HashSet::new(), &impl_lookup);
 
         assert_eq!(table.len(), 2, "proxy deployment should produce 2 table rows");
         assert!(
@@ -1513,7 +1534,7 @@ mod tests {
         let fork_ids = HashSet::new();
         let impl_lookup = build_impl_name_lookup(&full_refs);
         let tg = TypeGroup { category: DisplayCategory::Proxy, deployments: vec![&deployments[0]] };
-        let table = build_type_group_table(&tg, "mainnet", 42220, &fork_ids, &impl_lookup);
+        let table = build_type_group_table(&tg, "mainnet", 42220, &fork_ids, &HashSet::new(), &impl_lookup);
 
         assert_eq!(table.len(), 2);
         assert!(
@@ -1542,7 +1563,7 @@ mod tests {
         let fork_ids = HashSet::new();
         let impl_lookup = ImplNameLookup::new();
         let tg = TypeGroup { category: DisplayCategory::Singleton, deployments: vec![&d] };
-        let table = build_type_group_table(&tg, "mainnet", 42220, &fork_ids, &impl_lookup);
+        let table = build_type_group_table(&tg, "mainnet", 42220, &fork_ids, &HashSet::new(), &impl_lookup);
 
         assert_eq!(table.len(), 1, "non-proxy deployment should produce 1 table row");
     }
@@ -1565,7 +1586,7 @@ mod tests {
         let mut fork_ids = HashSet::new();
         fork_ids.insert(d.id.clone());
 
-        let display = build_contract_display(&d, &DisplayCategory::Proxy, &fork_ids);
+        let display = build_contract_display(&d, &DisplayCategory::Proxy, &fork_ids, &HashSet::new());
         assert!(display.contains("[fork]"), "fork deployment display should contain [fork] badge");
     }
 
@@ -1593,7 +1614,7 @@ mod tests {
 
         let mut fork_ids = HashSet::new();
         fork_ids.insert(d.id.clone());
-        let row = build_deployment_row(&d, &DisplayCategory::Proxy, &fork_ids);
+        let row = build_deployment_row(&d, &DisplayCategory::Proxy, &fork_ids, &HashSet::new());
 
         assert!(
             row[0].contains('\x1b'),

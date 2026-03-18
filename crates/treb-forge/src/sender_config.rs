@@ -139,8 +139,8 @@ fn build_sender_init_config(
         SenderType::Ledger => build_ledger_config(name, resolved, sender_config),
         SenderType::Trezor => build_trezor_config(name, resolved, sender_config),
         SenderType::Safe => build_safe_config(name, resolved, sender_config, all_configs),
-        SenderType::OZGovernor => {
-            build_oz_governor_config(name, resolved, sender_config, all_configs)
+        SenderType::Governance => {
+            build_governance_config(name, resolved, sender_config, all_configs)
         }
     }
 }
@@ -262,28 +262,27 @@ fn build_safe_config(
     })
 }
 
-/// Build config for an `oz_governor` sender.
+/// Build config for a `governance` sender.
 ///
 /// Config bytes contain `(address governor, address timelock, string proposerName)`
 /// ABI-encoded as a tuple.
-fn build_oz_governor_config(
+fn build_governance_config(
     name: &str,
-    _resolved: &ResolvedSender,
+    resolved: &ResolvedSender,
     sender_config: &SenderConfig,
     all_configs: &HashMap<String, SenderConfig>,
 ) -> treb_core::Result<SenderInitConfig> {
     let governor_addr: Address = sender_config
-        .governor
+        .address
         .as_deref()
-        .or(sender_config.address.as_deref())
         .ok_or_else(|| {
             TrebError::Config(format!(
-                "sender '{name}': oz_governor sender missing 'governor' or 'address' field"
+                "sender '{name}': governance sender missing 'address' field"
             ))
         })?
         .parse()
         .map_err(|e| {
-            TrebError::Config(format!("sender '{name}': invalid governor address: {e}"))
+            TrebError::Config(format!("sender '{name}': invalid governance address: {e}"))
         })?;
 
     let timelock_addr: Address = sender_config
@@ -299,19 +298,19 @@ fn build_oz_governor_config(
 
     let proposer_name = sender_config.proposer.as_deref().ok_or_else(|| {
         TrebError::Config(format!(
-            "sender '{name}': oz_governor sender missing 'proposer' field"
+            "sender '{name}': governance sender missing 'proposer' field"
         ))
     })?;
 
     // Validate proposer exists
     if !all_configs.contains_key(proposer_name) {
         return Err(TrebError::Config(format!(
-            "sender '{name}': oz_governor proposer '{proposer_name}' not found in sender configurations"
+            "sender '{name}': governance proposer '{proposer_name}' not found in sender configurations"
         )));
     }
 
-    // Account is timelock if provided, otherwise governor (matches Go behavior)
-    let account = if timelock_addr != Address::ZERO { timelock_addr } else { governor_addr };
+    // Account is the broadcast address (timelock if present, else governor)
+    let account = resolved.broadcast_address();
 
     // ABI-encode (address governor, address timelock, string proposerName)
     let config_bytes = (governor_addr, timelock_addr, proposer_name.to_string()).abi_encode();

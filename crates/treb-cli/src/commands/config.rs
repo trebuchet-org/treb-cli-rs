@@ -230,13 +230,12 @@ fn sender_details(sender: &SenderConfig) -> Vec<(&'static str, String)> {
                 details.push(("path", path.to_string()));
             }
         }
-        Some(treb_config::SenderType::OZGovernor) => {
-            // Show timelock address if present, otherwise governor address,
-            // with a label indicating which it is.
+        Some(treb_config::SenderType::Governance) => {
+            if let Some(addr) = sender.address.as_deref() {
+                details.push(("address", addr.to_string()));
+            }
             if let Some(timelock) = sender.timelock.as_deref() {
                 details.push(("timelock", timelock.to_string()));
-            } else if let Some(gov) = sender.governor.as_deref() {
-                details.push(("governor", gov.to_string()));
             }
             if let Some(proposer) = sender.proposer.as_deref() {
                 details.push(("proposer", proposer.to_string()));
@@ -355,8 +354,8 @@ mod tests {
         senders.insert(
             "gov".to_string(),
             SenderConfig {
-                type_: Some(SenderType::OZGovernor),
-                governor: Some("0xGov2222".to_string()),
+                type_: Some(SenderType::Governance),
+                address: Some("0xTime333".to_string()),
                 timelock: Some("0xTime333".to_string()),
                 proposer: Some("admin".to_string()),
                 ..SenderConfig::default()
@@ -368,7 +367,7 @@ mod tests {
             concat!(
                 "  admin     safe         safe=0xSafe1111  signer=deployer\n",
                 "  deployer  private_key  key=${DEPLOYER_PRIVATE_KEY}\n",
-                "  gov       oz_governor  timelock=0xTime333  proposer=admin\n",
+                "  gov       governance   address=0xTime333  timelock=0xTime333  proposer=admin\n",
                 "  ops       ledger       address=${OPS_ADDR}  path=m/44'/60'/0'/0/0"
             )
         );

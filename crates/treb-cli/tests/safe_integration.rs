@@ -96,10 +96,10 @@ fn config_show_json_includes_governor_sender() {
     assert!(senders.contains_key("deployer"), "senders should contain 'deployer' role");
 
     let deployer = &senders["deployer"];
-    assert_eq!(deployer["type"], "oz_governor", "deployer should be of type 'oz_governor'");
+    assert_eq!(deployer["type"], "governance", "deployer should be of type 'governance'");
     assert_eq!(
-        deployer["governor"], "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "should have correct governor address"
+        deployer["address"], "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "should have correct governance address"
     );
     assert_eq!(
         deployer["timelock"], "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -107,7 +107,7 @@ fn config_show_json_includes_governor_sender() {
     );
     assert_eq!(
         deployer["proposer"], "deployer",
-        "governor sender should reference 'deployer' as proposer"
+        "governance sender should reference 'deployer' as proposer"
     );
 }
 
@@ -124,7 +124,7 @@ fn config_show_plaintext_includes_governor_type() {
         .current_dir(tmp.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("oz_governor"));
+        .stdout(predicate::str::contains("governance"));
 }
 
 // ── Dry-run proposal output: Safe sender ─────────────────────────────────
@@ -311,8 +311,8 @@ fn governor_config_fixture_is_valid_toml() {
     assert!(accounts.contains_key("governance"));
 
     let governance = &accounts["governance"];
-    assert_eq!(governance["type"].as_str(), Some("oz_governor"));
-    assert!(governance["governor"].is_str());
+    assert_eq!(governance["type"].as_str(), Some("governance"));
+    assert!(governance["address"].is_str());
     assert!(governance["timelock"].is_str());
     assert_eq!(governance["proposer"].as_str(), Some("deployer"));
 }

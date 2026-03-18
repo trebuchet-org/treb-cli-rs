@@ -135,13 +135,13 @@ pub(crate) fn expand_sender_config_env_vars(config: &mut crate::SenderConfig) {
     if let Some(ref mut v) = config.derivation_path {
         *v = expand_env_vars(v);
     }
-    if let Some(ref mut v) = config.governor {
-        *v = expand_env_vars(v);
-    }
     if let Some(ref mut v) = config.timelock {
         *v = expand_env_vars(v);
     }
     if let Some(ref mut v) = config.proposer {
+        *v = expand_env_vars(v);
+    }
+    if let Some(ref mut v) = config.proposer_script {
         *v = expand_env_vars(v);
     }
 }
@@ -214,9 +214,8 @@ safe = "0xSafeContract"
 signer = "deployer"
 
 [accounts.governor]
-type = "oz_governor"
+type = "governance"
 address = "0xGovAddr"
-governor = "0xGovernorContract"
 timelock = "0xTimelockContract"
 proposer = "deployer"
 
@@ -246,7 +245,7 @@ setup = "script/ForkSetup.s.sol"
         assert_eq!(config.accounts["deployer"].type_, Some(SenderType::PrivateKey));
         assert_eq!(config.accounts["ledger_signer"].type_, Some(SenderType::Ledger));
         assert_eq!(config.accounts["multisig"].type_, Some(SenderType::Safe));
-        assert_eq!(config.accounts["governor"].type_, Some(SenderType::OZGovernor));
+        assert_eq!(config.accounts["governor"].type_, Some(SenderType::Governance));
 
         // Verify namespace count.
         assert_eq!(config.namespace.len(), 2);

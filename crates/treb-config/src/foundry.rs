@@ -323,8 +323,8 @@ safe = "${TREB_TEST_SAFE_P3_US_002}"
 signer = "${TREB_TEST_SIGNER_P3_US_002}"
 
 [profile.default.treb.senders.governor]
-type = "oz_governor"
-governor = "${TREB_TEST_GOVERNOR_P3_US_002}"
+type = "governance"
+address = "${TREB_TEST_GOVERNOR_P3_US_002}"
 timelock = "${TREB_TEST_TIMELOCK_P3_US_002}"
 proposer = "${TREB_TEST_PROPOSER_P3_US_002}"
 
@@ -354,7 +354,7 @@ derivation_path = "${TREB_TEST_DERIVATION_PATH_P3_US_002}"
         assert_eq!(deployer.signer.as_deref(), Some("signer-account"));
 
         let governor = senders.get("governor").unwrap();
-        assert_eq!(governor.governor.as_deref(), Some("0xGovernorAddr"));
+        assert_eq!(governor.address.as_deref(), Some("0xGovernorAddr"));
         assert_eq!(governor.timelock.as_deref(), Some("0xTimelockAddr"));
         assert_eq!(governor.proposer.as_deref(), Some("proposer-account"));
 

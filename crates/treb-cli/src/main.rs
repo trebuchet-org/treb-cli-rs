@@ -334,6 +334,18 @@ enum Commands {
         #[arg(long, num_args = 1)]
         env: Vec<String>,
     },
+    /// List queued Safe/Governor operations
+    ///
+    /// Show pending Safe transactions and governance proposals that have been
+    /// queued but not yet executed or simulated.
+    Queued {
+        /// Network name or chain ID
+        #[arg(long)]
+        network: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Manage network fork mode
     ///
     /// Fork mode lets you test deployment scripts against local forks of live
@@ -509,6 +521,7 @@ impl Commands {
             Commands::Run { json, .. }
             | Commands::List { json, .. }
             | Commands::Show { json, .. }
+            | Commands::Queued { json, .. }
             | Commands::Verify { json, .. }
             | Commands::Version { json, .. }
             | Commands::Networks { json, .. }
@@ -543,7 +556,8 @@ fn registry_subcommand_json_flag(subcommand: &RegistrySubcommand) -> bool {
 fn fork_subcommand_json_flag(subcommand: &commands::fork::ForkSubcommand) -> bool {
     match subcommand {
         commands::fork::ForkSubcommand::Status { json, .. }
-        | commands::fork::ForkSubcommand::History { json, .. } => *json,
+        | commands::fork::ForkSubcommand::History { json, .. }
+        | commands::fork::ForkSubcommand::Exec { json, .. } => *json,
         commands::fork::ForkSubcommand::Enter { .. }
         | commands::fork::ForkSubcommand::Exit
         | commands::fork::ForkSubcommand::Revert
@@ -1226,6 +1240,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 non_interactive,
             )
             .await?
+        }
+        Commands::Queued { network, json } => {
+            commands::queued::queued_command(network, json).await?
         }
         Commands::Fork { subcommand } => commands::fork::run(subcommand).await?,
         Commands::Dev { subcommand } => commands::dev::run(subcommand).await?,

@@ -121,6 +121,23 @@ pub enum ForkSubcommand {
         #[arg(long)]
         network: Option<String>,
     },
+    /// Execute queued Safe/Governor items on the active fork
+    ///
+    /// Executes pending Safe transactions and governance proposals that were
+    /// queued during a `treb run --broadcast` on the fork.
+    Exec {
+        /// Safe tx hash or proposal ID to execute (omit for --all)
+        query: Option<String>,
+        /// Execute all queued items
+        #[arg(long)]
+        all: bool,
+        /// Network name or chain ID
+        #[arg(long)]
+        network: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 // ── Dispatch ──────────────────────────────────────────────────────────────────
@@ -138,6 +155,9 @@ pub async fn run(subcommand: ForkSubcommand) -> anyhow::Result<()> {
         ForkSubcommand::Status { json } => run_status(json).await,
         ForkSubcommand::History { network, json } => run_history(network, json).await,
         ForkSubcommand::Logs { follow, network } => run_logs(follow, network).await,
+        ForkSubcommand::Exec { query, all, network, json } => {
+            run_exec(query, all, network, json).await
+        }
     }
 }
 
@@ -1388,6 +1408,202 @@ async fn is_port_reachable(port: u16) -> bool {
     }
     let addr = format!("127.0.0.1:{port}");
     TcpStream::connect(&addr).await.is_ok()
+}
+
+// ── run_exec ──────────────────────────────────────────────────────────────────
+
+async fn run_exec(
+    query: Option<String>,
+    all: bool,
+    network: Option<String>,
+    json: bool,
+) -> anyhow::Result<()> {
+    let cwd = env::current_dir().context("failed to determine current directory")?;
+    let treb_dir = cwd.join(TREB_DIR);
+
+    ensure_treb_dir(&treb_dir)?;
+
+    // Verify fork mode is active
+    let mut fork_store = ForkStateStore::new(&treb_dir);
+    fork_store.load()?;
+    let state = fork_store.data();
+    if state.forks.is_empty() {
+        bail!("No active fork — run `treb fork enter` first");
+    }
+
+    if !all && query.is_none() {
+        bail!("specify a safe tx hash or proposal ID, or use --all");
+    }
+
+    let mut registry = treb_registry::Registry::open(&treb_dir)?;
+
+    // Collect queued Safe transactions
+    let all_safe_txs = registry.list_safe_transactions();
+    let mut queued_safe: Vec<_> = all_safe_txs
+        .into_iter()
+        .filter(|stx| stx.status == treb_core::types::TransactionStatus::Queued)
+        .filter(|stx| stx.fork_executed_at.is_none())
+        .filter(|stx| {
+            network.as_ref().is_none_or(|n| {
+                n.parse::<u64>().is_ok_and(|id| id == stx.chain_id)
+                    || *n == stx.chain_id.to_string()
+            })
+        })
+        .cloned()
+        .collect();
+
+    // Collect pending governor proposals
+    let all_proposals = registry.list_governor_proposals();
+    let mut queued_proposals: Vec<_> = all_proposals
+        .into_iter()
+        .filter(|p| {
+            !matches!(
+                p.status,
+                treb_core::types::ProposalStatus::Executed
+                    | treb_core::types::ProposalStatus::Canceled
+                    | treb_core::types::ProposalStatus::Defeated
+            )
+        })
+        .filter(|p| p.fork_executed_at.is_none())
+        .filter(|p| {
+            network.as_ref().is_none_or(|n| {
+                n.parse::<u64>().is_ok_and(|id| id == p.chain_id)
+                    || *n == p.chain_id.to_string()
+            })
+        })
+        .cloned()
+        .collect();
+
+    // Filter by query if provided
+    if let Some(ref q) = query {
+        queued_safe.retain(|stx| stx.safe_tx_hash.contains(q));
+        queued_proposals.retain(|p| p.proposal_id.contains(q));
+    }
+
+    if queued_safe.is_empty() && queued_proposals.is_empty() {
+        if json {
+            println!("{{\"executed\":0}}");
+        } else {
+            println!("No queued items to execute.");
+        }
+        return Ok(());
+    }
+
+    let now = chrono::Utc::now();
+    let mut executed_count = 0usize;
+
+    // Execute queued Safe transactions
+    for stx in &queued_safe {
+        let fork_entry = state.forks.values().find(|f| f.chain_id == stx.chain_id);
+        let Some(fork) = fork_entry else {
+            if !json {
+                eprintln!(
+                    "  skipping safe tx {} — no active fork for chain {}",
+                    &stx.safe_tx_hash[..10.min(stx.safe_tx_hash.len())],
+                    stx.chain_id,
+                );
+            }
+            continue;
+        };
+        let rpc_url = format!("http://127.0.0.1:{}", fork.port);
+
+        let result = treb_forge::pipeline::fork_routing::exec_safe_from_registry(
+            &rpc_url,
+            &stx.safe_address,
+            stx.chain_id,
+            &stx.transactions,
+        )
+        .await;
+
+        match result {
+            Ok(_receipts) => {
+                // Update fork_executed_at in registry
+                let mut updated = stx.clone();
+                updated.fork_executed_at = Some(now);
+                registry.update_safe_transaction(updated)?;
+                executed_count += 1;
+                if !json {
+                    eprintln!(
+                        "  executed safe tx {}",
+                        &stx.safe_tx_hash[..10.min(stx.safe_tx_hash.len())],
+                    );
+                }
+            }
+            Err(e) => {
+                if !json {
+                    eprintln!(
+                        "  failed safe tx {}: {e}",
+                        &stx.safe_tx_hash[..10.min(stx.safe_tx_hash.len())],
+                    );
+                }
+            }
+        }
+    }
+
+    // Execute queued governor proposals
+    for p in &queued_proposals {
+        let fork_entry = state.forks.values().find(|f| f.chain_id == p.chain_id);
+        let Some(fork) = fork_entry else {
+            if !json {
+                eprintln!(
+                    "  skipping proposal {} — no active fork for chain {}",
+                    &p.proposal_id[..10.min(p.proposal_id.len())],
+                    p.chain_id,
+                );
+            }
+            continue;
+        };
+        let rpc_url = format!("http://127.0.0.1:{}", fork.port);
+
+        if p.actions.is_empty() {
+            if !json {
+                eprintln!(
+                    "  skipping proposal {} — no stored actions",
+                    &p.proposal_id[..10.min(p.proposal_id.len())],
+                );
+            }
+            continue;
+        }
+
+        let result = treb_forge::pipeline::fork_routing::exec_governance_from_registry(
+            &rpc_url,
+            &p.governor_address,
+            &p.timelock_address,
+            &p.actions,
+        )
+        .await;
+
+        match result {
+            Ok(_receipts) => {
+                let mut updated = p.clone();
+                updated.fork_executed_at = Some(now);
+                registry.update_governor_proposal(updated)?;
+                executed_count += 1;
+                if !json {
+                    eprintln!(
+                        "  simulated proposal {}",
+                        &p.proposal_id[..10.min(p.proposal_id.len())],
+                    );
+                }
+            }
+            Err(e) => {
+                if !json {
+                    eprintln!(
+                        "  failed proposal {}: {e}",
+                        &p.proposal_id[..10.min(p.proposal_id.len())],
+                    );
+                }
+            }
+        }
+    }
+
+    if json {
+        println!("{{\"executed\":{executed_count}}}");
+    } else {
+        println!("\nExecuted {executed_count} queued item{}.", if executed_count == 1 { "" } else { "s" });
+    }
+
+    Ok(())
 }
 
 /// Load a JSON file as an object map.  Returns `None` if the file is missing or not an object.

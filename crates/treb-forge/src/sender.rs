@@ -46,12 +46,13 @@ pub enum ResolvedSender {
     /// Actual Safe transaction signing is deferred to a later phase.
     Safe { safe_address: Address, signer: Box<ResolvedSender> },
 
-    /// An OZ Governor — holds governor/timelock addresses and the resolved proposer.
-    /// Actual governance proposal signing is deferred to a later phase.
+    /// A governance sender — holds governor/timelock addresses and the resolved proposer.
+    /// Actual governance proposal creation is deferred to routing.
     Governor {
         governor_address: Address,
         timelock_address: Option<Address>,
         proposer: Box<ResolvedSender>,
+        proposer_script: Option<String>,
     },
 }
 
@@ -87,7 +88,7 @@ impl ResolvedSender {
         matches!(self, Self::Safe { .. })
     }
 
-    /// Returns `true` if this is an OZ Governor sender.
+    /// Returns `true` if this is a governance sender.
     pub fn is_governor(&self) -> bool {
         matches!(self, Self::Governor { .. })
     }
@@ -177,8 +178,8 @@ pub fn resolve_sender<'a>(
             treb_config::SenderType::Ledger => resolve_ledger(name, config).await,
             treb_config::SenderType::Trezor => resolve_trezor(name, config).await,
             treb_config::SenderType::Safe => resolve_safe(name, config, all_senders, visited).await,
-            treb_config::SenderType::OZGovernor => {
-                resolve_governor(name, config, all_senders, visited).await
+            treb_config::SenderType::Governance => {
+                resolve_governance(name, config, all_senders, visited).await
             }
         }
     })
@@ -335,24 +336,23 @@ async fn resolve_safe(
     Ok(ResolvedSender::Safe { safe_address, signer: Box::new(signer) })
 }
 
-async fn resolve_governor(
+async fn resolve_governance(
     name: &str,
     config: &SenderConfig,
     all_senders: &HashMap<String, SenderConfig>,
     visited: &mut HashSet<String>,
 ) -> treb_core::Result<ResolvedSender> {
     let governor_address: Address = config
-        .governor
+        .address
         .as_deref()
-        .or(config.address.as_deref())
         .ok_or_else(|| {
             TrebError::Config(format!(
-                "sender '{name}' of type OZGovernor is missing required 'governor' or 'address' field"
+                "sender '{name}' of type Governance is missing required 'address' field"
             ))
         })?
         .parse()
         .map_err(|e| {
-            TrebError::Config(format!("sender '{name}': invalid governor address: {e}"))
+            TrebError::Config(format!("sender '{name}': invalid governance address: {e}"))
         })?;
 
     let timelock_address: Option<Address> = config
@@ -367,7 +367,7 @@ async fn resolve_governor(
 
     let proposer_name = config.proposer.as_deref().ok_or_else(|| {
         TrebError::Config(format!(
-            "sender '{name}' of type OZGovernor is missing required 'proposer' field"
+            "sender '{name}' of type Governance is missing required 'proposer' field"
         ))
     })?;
 
@@ -383,6 +383,7 @@ async fn resolve_governor(
         governor_address,
         timelock_address,
         proposer: Box::new(proposer),
+        proposer_script: config.proposer_script.clone(),
     })
 }
 
@@ -636,14 +637,14 @@ mod tests {
 
     // ---- Governor sender resolution tests ----
 
-    fn governor_config(
-        governor_addr: &str,
+    fn governance_config(
+        address: &str,
         timelock_addr: Option<&str>,
         proposer_name: &str,
     ) -> SenderConfig {
         SenderConfig {
-            type_: Some(SenderType::OZGovernor),
-            governor: Some(governor_addr.to_string()),
+            type_: Some(SenderType::Governance),
+            address: Some(address.to_string()),
             timelock: timelock_addr.map(|a| a.to_string()),
             proposer: Some(proposer_name.to_string()),
             ..Default::default()
@@ -655,7 +656,7 @@ mod tests {
         let gov_addr = "0x0000000000000000000000000000000000000099";
         let tl_addr = "0x0000000000000000000000000000000000000088";
         let mut senders = HashMap::new();
-        senders.insert("my-gov".to_string(), governor_config(gov_addr, Some(tl_addr), "deployer"));
+        senders.insert("my-gov".to_string(), governance_config(gov_addr, Some(tl_addr), "deployer"));
         senders.insert("deployer".to_string(), pk_config(ANVIL_KEY_0, None));
 
         let mut visited = HashSet::new();
@@ -665,7 +666,7 @@ mod tests {
                 .unwrap();
 
         match result {
-            ResolvedSender::Governor { governor_address, timelock_address, proposer } => {
+            ResolvedSender::Governor { governor_address, timelock_address, proposer, .. } => {
                 assert_eq!(governor_address, gov_addr.parse::<Address>().unwrap());
                 assert_eq!(timelock_address, Some(tl_addr.parse::<Address>().unwrap()));
                 match *proposer {
@@ -683,7 +684,7 @@ mod tests {
     async fn governor_without_timelock() {
         let gov_addr = "0x0000000000000000000000000000000000000099";
         let mut senders = HashMap::new();
-        senders.insert("my-gov".to_string(), governor_config(gov_addr, None, "deployer"));
+        senders.insert("my-gov".to_string(), governance_config(gov_addr, None, "deployer"));
         senders.insert("deployer".to_string(), pk_config(ANVIL_KEY_0, None));
 
         let mut visited = HashSet::new();
@@ -694,7 +695,7 @@ mod tests {
 
         match result {
             ResolvedSender::Governor { timelock_address, .. } => {
-                assert_eq!(timelock_address, None);
+                assert!(timelock_address.is_none());
             }
             other => panic!("expected Governor variant, got {other:?}"),
         }
@@ -760,7 +761,7 @@ mod tests {
         let mut senders = HashMap::new();
         senders.insert("deployer".to_string(), pk_config(ANVIL_KEY_0, None));
         senders.insert("my-safe".to_string(), safe_config(safe_addr, "deployer"));
-        senders.insert("my-gov".to_string(), governor_config(gov_addr, None, "deployer"));
+        senders.insert("my-gov".to_string(), governance_config(gov_addr, None, "deployer"));
 
         let resolved = resolve_all_senders(&senders).await.unwrap();
         assert_eq!(resolved.len(), 3);
@@ -789,6 +790,7 @@ mod tests {
             governor_address: address!("0000000000000000000000000000000000000099"),
             timelock_address: None,
             proposer: Box::new(proposer),
+            proposer_script: None,
         };
         assert!(gov.is_governor());
         assert!(!gov.is_safe());
@@ -822,6 +824,7 @@ mod tests {
             governor_address: address!("0000000000000000000000000000000000000099"),
             timelock_address: None,
             proposer: Box::new(ResolvedSender::Wallet(ws)),
+            proposer_script: None,
         };
         let sub = gov.sub_signer();
         assert!(matches!(sub, ResolvedSender::Wallet(_)));
@@ -878,6 +881,7 @@ mod tests {
             governor_address: addr,
             timelock_address: None,
             proposer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
+            proposer_script: None,
         };
         assert_eq!(gov.governor_address(), Some(addr));
     }
@@ -895,6 +899,7 @@ mod tests {
             governor_address: address!("0000000000000000000000000000000000000099"),
             timelock_address: Some(tl),
             proposer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
+            proposer_script: None,
         };
         assert_eq!(gov.timelock_address(), Some(tl));
     }
@@ -905,6 +910,7 @@ mod tests {
             governor_address: address!("0000000000000000000000000000000000000099"),
             timelock_address: None,
             proposer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
+            proposer_script: None,
         };
         assert!(gov.timelock_address().is_none());
     }
@@ -924,6 +930,7 @@ mod tests {
             governor_address: address!("0000000000000000000000000000000000000099"),
             timelock_address: Some(tl),
             proposer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
+            proposer_script: None,
         };
         assert_eq!(gov.broadcast_address(), tl);
     }
@@ -935,6 +942,7 @@ mod tests {
             governor_address: gov_addr,
             timelock_address: None,
             proposer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
+            proposer_script: None,
         };
         assert_eq!(gov.broadcast_address(), gov_addr);
     }

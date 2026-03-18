@@ -24,8 +24,8 @@ pub enum SenderType {
     Trezor,
     #[serde(rename = "safe")]
     Safe,
-    #[serde(rename = "oz_governor")]
-    OZGovernor,
+    #[serde(rename = "governance")]
+    Governance,
 }
 
 impl fmt::Display for SenderType {
@@ -35,7 +35,7 @@ impl fmt::Display for SenderType {
             Self::Ledger => write!(f, "ledger"),
             Self::Trezor => write!(f, "trezor"),
             Self::Safe => write!(f, "safe"),
-            Self::OZGovernor => write!(f, "oz_governor"),
+            Self::Governance => write!(f, "governance"),
         }
     }
 }
@@ -49,7 +49,7 @@ impl FromStr for SenderType {
             "ledger" => Ok(Self::Ledger),
             "trezor" => Ok(Self::Trezor),
             "safe" => Ok(Self::Safe),
-            "oz_governor" => Ok(Self::OZGovernor),
+            "governance" => Ok(Self::Governance),
             other => Err(format!("unknown SenderType: {other}")),
         }
     }
@@ -79,11 +79,11 @@ pub struct SenderConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub derivation_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub governor: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timelock: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposer_script: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -255,7 +255,7 @@ mod tests {
             (SenderType::Ledger, "\"ledger\""),
             (SenderType::Trezor, "\"trezor\""),
             (SenderType::Safe, "\"safe\""),
-            (SenderType::OZGovernor, "\"oz_governor\""),
+            (SenderType::Governance, "\"governance\""),
         ] {
             let json = serde_json::to_string(&variant).unwrap();
             assert_eq!(json, expected);
@@ -276,7 +276,7 @@ mod tests {
             SenderType::Ledger,
             SenderType::Trezor,
             SenderType::Safe,
-            SenderType::OZGovernor,
+            SenderType::Governance,
         ] {
             let w = Wrapper { t: variant.clone() };
             let s = toml::to_string(&w).unwrap();
@@ -294,7 +294,7 @@ mod tests {
             (SenderType::Ledger, "ledger"),
             (SenderType::Trezor, "trezor"),
             (SenderType::Safe, "safe"),
-            (SenderType::OZGovernor, "oz_governor"),
+            (SenderType::Governance, "governance"),
         ] {
             assert_eq!(variant.to_string(), s);
             assert_eq!(s.parse::<SenderType>().unwrap(), variant);

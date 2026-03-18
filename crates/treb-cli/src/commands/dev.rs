@@ -1182,42 +1182,26 @@ async fn run_fund_senders(network: Option<String>, amount: u64) -> anyhow::Resul
         return Ok(());
     }
 
-    // Fund each sender via anvil_setBalance
-    // amount ETH in wei as hex
-    let balance_wei_hex = format!("{:#x}", amount as u128 * 1_000_000_000_000_000_000u128);
-    let client = reqwest::Client::new();
-
+    let results = treb_forge::fund_senders_on_fork(&rpc_url, &resolved_senders, amount).await;
     let use_color = color::is_color_enabled();
 
-    // Collect unique addresses (multiple roles may share an address)
-    let mut seen = std::collections::HashSet::new();
-    let mut funded = Vec::new();
-
-    for (role, sender) in &resolved_senders {
-        let addr = sender.sender_address();
-        if !seen.insert(addr) {
+    // Display results
+    let mut funded_count = 0usize;
+    for (role, addr, ok) in &results {
+        if !ok {
+            if use_color {
+                eprintln!(
+                    "  {} {} {}",
+                    emoji::CROSS,
+                    styled(role, color::RED),
+                    styled(&format!("{:#x}", addr), color::GRAY),
+                );
+            } else {
+                eprintln!("  {} {} {:#x}", emoji::CROSS, role, addr);
+            }
             continue;
         }
-
-        let body = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "anvil_setBalance",
-            "params": [format!("{:#x}", addr), &balance_wei_hex],
-            "id": 1
-        });
-
-        client
-            .post(&rpc_url)
-            .json(&body)
-            .send()
-            .await
-            .with_context(|| format!("anvil_setBalance failed for {role} ({addr})"))?;
-
-        funded.push((role.clone(), addr));
-    }
-
-    // Display results
-    for (role, addr) in &funded {
+        funded_count += 1;
         if use_color {
             println!(
                 "  {} {} {}",
@@ -1232,8 +1216,8 @@ async fn run_fund_senders(network: Option<String>, amount: u64) -> anyhow::Resul
 
     let summary = format!(
         "\nFunded {} address{} with {} ETH on {}",
-        funded.len(),
-        if funded.len() == 1 { "" } else { "es" },
+        funded_count,
+        if funded_count == 1 { "" } else { "es" },
         amount,
         rpc_url,
     );

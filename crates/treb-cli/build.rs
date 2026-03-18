@@ -31,6 +31,7 @@ fn build_cli() -> ClapCommand {
         .subcommand(build_version())
         .subcommand(build_networks())
         .subcommand(build_compose())
+        .subcommand(build_queued())
         .subcommand(build_fork())
         .subcommand(build_dev())
         .subcommand(build_completion_cmd())
@@ -460,6 +461,22 @@ fn build_compose() -> ClapCommand {
 }
 
 
+fn build_queued() -> ClapCommand {
+    ClapCommand::new("queued")
+        .about("List queued Safe/Governor operations")
+        .arg(
+            Arg::new("network")
+                .long("network")
+                .help("Network name or chain ID"),
+        )
+        .arg(
+            Arg::new("json")
+                .long("json")
+                .action(ArgAction::SetTrue)
+                .help("Output as JSON"),
+        )
+}
+
 fn build_fork() -> ClapCommand {
     ClapCommand::new("fork")
         .about("Fork networks for local testing")
@@ -536,6 +553,28 @@ fn build_fork() -> ClapCommand {
                     Arg::new("network")
                         .long("network")
                         .help("Filter to a specific network"),
+                ),
+        )
+        .subcommand(
+            ClapCommand::new("exec")
+                .about("Execute queued Safe/Governor items on the active fork")
+                .arg(Arg::new("query").help("Safe tx hash or proposal ID to execute"))
+                .arg(
+                    Arg::new("all")
+                        .long("all")
+                        .action(ArgAction::SetTrue)
+                        .help("Execute all queued items"),
+                )
+                .arg(
+                    Arg::new("network")
+                        .long("network")
+                        .help("Network name or chain ID"),
+                )
+                .arg(
+                    Arg::new("json")
+                        .long("json")
+                        .action(ArgAction::SetTrue)
+                        .help("Output as JSON"),
                 ),
         )
 }

@@ -11,6 +11,7 @@ pub mod compiler;
 pub mod console;
 pub mod createx;
 pub mod events;
+pub mod fund;
 pub mod governor;
 pub mod pipeline;
 pub mod script;
@@ -44,6 +45,7 @@ pub use sender::{
     ResolvedSender, SenderCategory, default_test_signers, extract_signing_key, in_memory_signer,
     resolve_all_senders, resolve_sender,
 };
+pub use fund::fund_senders_on_fork;
 pub use governor::{is_terminal, query_proposal_state};
 pub use sender_config::encode_sender_configs;
 pub use version::{ForgeVersion, detect_forge_version};

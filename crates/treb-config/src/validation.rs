@@ -45,7 +45,7 @@ pub fn validate_sender(
     let Some(ref sender_type) = sender.type_ else {
         return Err(TrebError::Config(format!(
             "{location}: sender '{name}' has no 'type' field. \
-             Add `type = \"private_key\"` (or ledger, trezor, safe, oz_governor) to fix."
+             Add `type = \"private_key\"` (or ledger, trezor, safe, governance) to fix."
         )));
     };
 
@@ -127,24 +127,24 @@ pub fn validate_sender(
                 }
             }
         }
-        SenderType::OZGovernor => {
-            if sender.governor.is_none() {
+        SenderType::Governance => {
+            if sender.address.is_none() {
                 return Err(TrebError::Config(format!(
-                    "{location}: oz_governor sender '{name}' is missing the 'governor' field. \
-                     Add `governor = \"0xGovernorAddress\"` to fix."
+                    "{location}: governance sender '{name}' is missing the 'address' field. \
+                     Add `address = \"0xTimelockOrGovernorAddress\"` to fix."
                 )));
             }
             match &sender.proposer {
                 None => {
                     return Err(TrebError::Config(format!(
-                        "{location}: oz_governor sender '{name}' is missing the 'proposer' field. \
+                        "{location}: governance sender '{name}' is missing the 'proposer' field. \
                          Add `proposer = \"<sender_name>\"` referencing an existing sender to fix."
                     )));
                 }
                 Some(proposer_name) => {
                     if !all_senders.contains_key(proposer_name) {
                         return Err(TrebError::Config(format!(
-                            "{location}: oz_governor sender '{name}' references proposer \
+                            "{location}: governance sender '{name}' references proposer \
                              '{proposer_name}' which does not exist. Define a sender named \
                              '{proposer_name}' or update the proposer field to reference an \
                              existing sender."
@@ -221,7 +221,7 @@ mod tests {
     }
 
     #[test]
-    fn valid_oz_governor_sender_passes() {
+    fn valid_governance_sender_passes() {
         let mut senders = HashMap::new();
         senders.insert(
             "deployer".to_string(),
@@ -234,8 +234,8 @@ mod tests {
         senders.insert(
             "gov".to_string(),
             SenderConfig {
-                type_: Some(SenderType::OZGovernor),
-                governor: Some("0xGovAddr".to_string()),
+                type_: Some(SenderType::Governance),
+                address: Some("0xTimelockAddr".to_string()),
                 proposer: Some("deployer".to_string()),
                 ..Default::default()
             },
@@ -345,12 +345,12 @@ mod tests {
     }
 
     #[test]
-    fn oz_governor_without_governor_field_errors() {
+    fn governance_without_address_field_errors() {
         let mut senders = HashMap::new();
         senders.insert(
             "gov".to_string(),
             SenderConfig {
-                type_: Some(SenderType::OZGovernor),
+                type_: Some(SenderType::Governance),
                 proposer: Some("deployer".to_string()),
                 ..Default::default()
             },
@@ -359,18 +359,18 @@ mod tests {
         let err = validate_config(&config).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("gov"), "should mention sender name: {msg}");
-        assert!(msg.contains("governor"), "should mention missing field: {msg}");
+        assert!(msg.contains("address"), "should mention missing field: {msg}");
         assert!(msg.contains("fix"), "should contain fix instructions: {msg}");
     }
 
     #[test]
-    fn oz_governor_without_proposer_errors() {
+    fn governance_without_proposer_errors() {
         let mut senders = HashMap::new();
         senders.insert(
             "gov".to_string(),
             SenderConfig {
-                type_: Some(SenderType::OZGovernor),
-                governor: Some("0xGovAddr".to_string()),
+                type_: Some(SenderType::Governance),
+                address: Some("0xTimelockAddr".to_string()),
                 ..Default::default()
             },
         );
@@ -383,13 +383,13 @@ mod tests {
     }
 
     #[test]
-    fn oz_governor_with_missing_proposer_reference_errors() {
+    fn governance_with_missing_proposer_reference_errors() {
         let mut senders = HashMap::new();
         senders.insert(
             "gov".to_string(),
             SenderConfig {
-                type_: Some(SenderType::OZGovernor),
-                governor: Some("0xGovAddr".to_string()),
+                type_: Some(SenderType::Governance),
+                address: Some("0xTimelockAddr".to_string()),
                 proposer: Some("ghost".to_string()),
                 ..Default::default()
             },

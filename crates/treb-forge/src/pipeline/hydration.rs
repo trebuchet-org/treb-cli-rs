@@ -304,6 +304,7 @@ pub fn hydrate_safe_transactions(
                 proposed_at: now,
                 confirmations: Vec::new(),
                 executed_at: None,
+                fork_executed_at: None,
                 execution_tx_hash: String::new(),
             }
         })
@@ -372,7 +373,9 @@ pub fn hydrate_governor_proposals(
                 proposed_at: now,
                 description: String::new(),
                 executed_at: None,
+                fork_executed_at: None,
                 execution_tx_hash: String::new(),
+                actions: Vec::new(),
             }
         })
         .collect()
@@ -1010,6 +1013,7 @@ mod tests {
             proposed_at: chrono::Utc::now(),
             confirmations: Vec::new(),
             executed_at: None,
+            fork_executed_at: None,
             execution_tx_hash: String::new(),
         }];
 
@@ -1064,6 +1068,7 @@ mod tests {
             proposed_at: chrono::Utc::now(),
             confirmations: Vec::new(),
             executed_at: None,
+            fork_executed_at: None,
             execution_tx_hash: String::new(),
         }];
 
@@ -1155,6 +1160,7 @@ mod tests {
             governor_address: address!("0000000000000000000000000000000000000099"),
             timelock_address: Some(timelock_addr),
             proposer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
+            proposer_script: None,
         });
 
         let events = vec![GovernorProposalCreated {

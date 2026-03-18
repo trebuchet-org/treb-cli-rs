@@ -36,6 +36,8 @@ pub struct SafeTransaction {
     pub executed_at: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub execution_tx_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork_executed_at: Option<DateTime<Utc>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -96,6 +98,7 @@ mod tests {
             }],
             executed_at: None,
             execution_tx_hash: String::new(),
+            fork_executed_at: None,
         }
     }
 

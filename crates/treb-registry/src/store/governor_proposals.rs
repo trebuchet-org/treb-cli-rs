@@ -120,6 +120,8 @@ mod tests {
             description: String::new(),
             executed_at: None,
             execution_tx_hash: String::new(),
+            fork_executed_at: None,
+            actions: Vec::new(),
         }
     }
 
