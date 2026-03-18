@@ -303,6 +303,7 @@ impl ComposePipeline {
             governor_proposals: sim.governor_proposals,
             safe_transactions: sim.safe_transactions,
             proposed_results: Vec::new(),
+            queued_executions: Vec::new(),
             execution_traces: sim.execution_traces,
             setup_traces: sim.setup_traces,
         };

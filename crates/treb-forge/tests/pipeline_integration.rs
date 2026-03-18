@@ -123,6 +123,7 @@ fn build_pipeline_result(
         setup_traces: None,
         safe_transactions: Vec::new(),
         proposed_results: Vec::new(),
+        queued_executions: Vec::new(),
     }
 }
 
@@ -463,7 +464,7 @@ fn dry_run_leaves_registry_unchanged() {
         .collect();
     let recorded_txs: Vec<RecordedTransaction> = transactions
         .into_iter()
-        .map(|t| RecordedTransaction { transaction: t, sender_name: None, gas_used: None, trace: None })
+        .map(|t| RecordedTransaction { transaction: t, sender_name: None, sender_category: None, gas_used: None, trace: None })
         .collect();
 
     let result = build_pipeline_result(recorded_deps, recorded_txs, vec![], vec![], true);

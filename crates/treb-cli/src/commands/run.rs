@@ -59,7 +59,7 @@ pub fn parse_env_var(s: &str) -> anyhow::Result<(&str, &str)> {
 #[cfg(test)]
 fn format_verbose_sender(role: &str, sender: &ResolvedSender) -> String {
     match sender {
-        ResolvedSender::Governor { governor_address, timelock_address, proposer } => {
+        ResolvedSender::Governor { governor_address, timelock_address, proposer, .. } => {
             let timelock = timelock_address
                 .map(|address| address.to_string())
                 .unwrap_or_else(|| "none".to_string());
@@ -87,7 +87,7 @@ fn format_verbose_senders(resolved_senders: &HashMap<String, ResolvedSender>) ->
 
 fn format_verbose_sender_padded(role: &str, sender: &ResolvedSender, pad: usize) -> String {
     match sender {
-        ResolvedSender::Governor { governor_address, timelock_address, proposer } => {
+        ResolvedSender::Governor { governor_address, timelock_address, proposer, .. } => {
             let timelock = timelock_address
                 .map(|address| address.to_string())
                 .unwrap_or_else(|| "none".to_string());
@@ -435,6 +435,7 @@ pub async fn execute_script(
         verbosity: opts.verbose,
         is_fork: opts.is_fork,
         rpc_url: opts.effective_rpc_url.clone(),
+        quiet: opts.json,
         ..Default::default()
     };
 
@@ -708,6 +709,22 @@ pub async fn run(
         return Ok(());
     }
 
+    // ── Auto-fund senders on fork ──────────────────────────────────────
+    if active_fork.is_some() {
+        if let Some(ref rpc) = effective_rpc_url {
+            let fund_results =
+                treb_forge::fund_senders_on_fork(rpc, &resolved_senders, 10_000).await;
+            let funded_count = fund_results.iter().filter(|(_, _, ok)| *ok).count();
+            if funded_count > 0 && !json {
+                eprintln!(
+                    "Funded {} sender address{} on fork",
+                    funded_count,
+                    if funded_count == 1 { "" } else { "es" },
+                );
+            }
+        }
+    }
+
     let is_safe = resolved_senders.get("deployer").is_some_and(|s| s.is_safe());
     let is_gov = resolved_senders.get("deployer").is_some_and(|s| s.is_governor());
 
@@ -875,8 +892,14 @@ pub async fn run(
     )
     .await?;
 
-    // ── Poll for Safe execution (interactive only) ────────────────────────
-    if !result.proposed_results.is_empty() && prompts_enabled && !json {
+    // ── Inline queued execution handling ────────────────────────────────
+    if !result.queued_executions.is_empty() && !json {
+        handle_queued_executions(
+            &mut result, chain_id, prompts_enabled,
+            active_fork.is_some(), &cwd, &mut registry,
+        ).await?;
+    } else if !result.proposed_results.is_empty() && prompts_enabled && !json {
+        // Fallback: old-style polling for live mode (no queued items)
         poll_proposed_results(&mut result, chain_id, &mut registry).await?;
     }
 
@@ -894,7 +917,219 @@ pub async fn run(
     Ok(())
 }
 
-// ── Safe execution polling ───────────────────────────────────────────────
+// ── Inline queued execution ──────────────────────────────────────────────
+
+/// Handle queued executions inline after broadcast.
+///
+/// For each `QueuedExecution` item, prints a status line and optionally
+/// prompts the user to simulate execution on fork.
+async fn handle_queued_executions(
+    result: &mut PipelineResult,
+    chain_id: u64,
+    prompts_enabled: bool,
+    is_fork: bool,
+    cwd: &std::path::Path,
+    registry: &mut treb_registry::Registry,
+) -> anyhow::Result<()> {
+    use treb_forge::pipeline::QueuedExecution;
+
+    let queued = std::mem::take(&mut result.queued_executions);
+
+    for item in &queued {
+        match item {
+            QueuedExecution::SafeProposal { safe_address, safe_tx_hash, nonce, inner_txs } => {
+                let safe_display = output::truncate_address(&format!("{:#x}", safe_address));
+                let hash_display = output::truncate_address(&format!("{:#x}", safe_tx_hash));
+
+                if color::is_color_enabled() {
+                    eprintln!(
+                        "  {} queued  Safe {} (safeTxHash={}, nonce={}, {} tx)",
+                        emoji::HOURGLASS,
+                        safe_display,
+                        hash_display.style(color::YELLOW),
+                        nonce,
+                        inner_txs.len(),
+                    );
+                } else {
+                    eprintln!(
+                        "  {} queued  Safe {} (safeTxHash={}, nonce={}, {} tx)",
+                        emoji::HOURGLASS, safe_display, hash_display, nonce, inner_txs.len(),
+                    );
+                }
+
+                if is_fork && prompts_enabled {
+                    let simulate = crate::ui::prompt::confirm(
+                        "  Simulate Safe execution on fork?", true,
+                    );
+                    if simulate {
+                        let fork_rpc = resolve_fork_rpc(cwd, chain_id)?;
+                        match treb_forge::pipeline::fork_routing::exec_safe_from_registry(
+                            &fork_rpc,
+                            &format!("{:#x}", safe_address),
+                            chain_id,
+                            &inner_txs.iter().map(|tx| {
+                                treb_core::types::safe_transaction::SafeTxData {
+                                    to: format!("{:#x}", tx.to),
+                                    value: format!("{}", tx.value),
+                                    data: format!("0x{}", tx.data.iter().map(|b| format!("{b:02x}")).collect::<String>()),
+                                    operation: 0,
+                                }
+                            }).collect::<Vec<_>>(),
+                        ).await {
+                            Ok(receipts) => {
+                                let all_ok = receipts.iter().all(|r| r.status);
+                                if all_ok {
+                                    if color::is_color_enabled() {
+                                        eprintln!(
+                                            "  {} {}  executed Safe {} ({} tx, {} batch)",
+                                            emoji::CHECK_MARK.style(color::GREEN),
+                                            "simulated".style(color::GREEN),
+                                            safe_display,
+                                            inner_txs.len(),
+                                            receipts.len(),
+                                        );
+                                    } else {
+                                        eprintln!(
+                                            "  {} simulated  executed Safe {} ({} tx, {} batch)",
+                                            emoji::CHECK_MARK, safe_display, inner_txs.len(), receipts.len(),
+                                        );
+                                    }
+                                    // Update fork_executed_at in registry
+                                    for safe_tx in &mut result.safe_transactions {
+                                        if safe_tx.safe_tx_hash == format!("{:#x}", safe_tx_hash) {
+                                            safe_tx.fork_executed_at = Some(chrono::Utc::now());
+                                            let _ = registry.update_safe_transaction(safe_tx.clone());
+                                        }
+                                    }
+                                } else {
+                                    eprintln!("  Safe simulation reverted on fork");
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("  Safe simulation failed: {e}");
+                            }
+                        }
+                    } else {
+                        eprintln!("  Saved as queued — execute later via `treb fork exec`");
+                    }
+                } else if is_fork {
+                    // Non-interactive fork: save as queued
+                    eprintln!("  Saved as queued — execute later via `treb fork exec`");
+                }
+                // Live mode: already proposed to Safe TX Service
+            }
+
+            QueuedExecution::GovernanceProposal {
+                governor_address, timelock_address, actions, proposal_description: _,
+            } => {
+                let gov_display = output::truncate_address(&format!("{:#x}", governor_address));
+                let tl_display = timelock_address
+                    .map(|tl| format!(" via Timelock {}", output::truncate_address(&format!("{:#x}", tl))))
+                    .unwrap_or_default();
+
+                if color::is_color_enabled() {
+                    eprintln!(
+                        "  {} queued  Governor {}{} ({} action{})",
+                        emoji::HOURGLASS,
+                        gov_display.style(color::YELLOW),
+                        tl_display,
+                        actions.len(),
+                        if actions.len() == 1 { "" } else { "s" },
+                    );
+                } else {
+                    eprintln!(
+                        "  {} queued  Governor {}{} ({} action{})",
+                        emoji::HOURGLASS, gov_display, tl_display,
+                        actions.len(),
+                        if actions.len() == 1 { "" } else { "s" },
+                    );
+                }
+
+                if is_fork && prompts_enabled {
+                    let simulate = crate::ui::prompt::confirm(
+                        "  Simulate governance execution on fork?", true,
+                    );
+                    if simulate {
+                        let fork_rpc = resolve_fork_rpc(cwd, chain_id)?;
+                        let governance_addr = timelock_address.unwrap_or(*governor_address);
+                        let targets: Vec<_> = actions.iter()
+                            .map(|a| a.target)
+                            .collect();
+                        let values: Vec<_> = actions.iter()
+                            .map(|a| a.value)
+                            .collect();
+                        let calldatas: Vec<Vec<u8>> = actions.iter()
+                            .map(|a| a.calldata.clone())
+                            .collect();
+
+                        match treb_forge::pipeline::fork_routing::simulate_governance_on_fork(
+                            &treb_forge::pipeline::fork_routing::AnvilRpc::new(&fork_rpc),
+                            &targets,
+                            &values,
+                            &calldatas,
+                            governance_addr,
+                        ).await {
+                            Ok(receipts) => {
+                                let all_ok = receipts.iter().all(|r| r.status);
+                                if all_ok {
+                                    if color::is_color_enabled() {
+                                        eprintln!(
+                                            "  {} {}  executed Governor{} ({} action{})",
+                                            emoji::CHECK_MARK.style(color::GREEN),
+                                            "simulated".style(color::GREEN),
+                                            tl_display,
+                                            actions.len(),
+                                            if actions.len() == 1 { "" } else { "s" },
+                                        );
+                                    } else {
+                                        eprintln!(
+                                            "  {} simulated  executed Governor{} ({} action{})",
+                                            emoji::CHECK_MARK, tl_display,
+                                            actions.len(),
+                                            if actions.len() == 1 { "" } else { "s" },
+                                        );
+                                    }
+                                    // Update fork_executed_at on governor proposals
+                                    for proposal in &mut result.governor_proposals {
+                                        if proposal.governor_address == format!("{:#x}", governor_address) {
+                                            proposal.fork_executed_at = Some(chrono::Utc::now());
+                                            let _ = registry.update_governor_proposal(proposal.clone());
+                                        }
+                                    }
+                                } else {
+                                    eprintln!("  Governance simulation reverted on fork");
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("  Governance simulation failed: {e}");
+                            }
+                        }
+                    } else {
+                        eprintln!("  Saved as queued — execute later via `treb fork exec`");
+                    }
+                } else if is_fork {
+                    eprintln!("  Saved as queued — execute later via `treb fork exec`");
+                }
+                // Live mode: governance takes time, just record
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Resolve the fork RPC URL from the fork state store.
+fn resolve_fork_rpc(cwd: &std::path::Path, chain_id: u64) -> anyhow::Result<String> {
+    let treb_dir = cwd.join(TREB_DIR);
+    let mut store = treb_registry::ForkStateStore::new(&treb_dir);
+    store.load().map_err(|e| anyhow::anyhow!("failed to load fork state: {e}"))?;
+    let fork = store.data().forks.values()
+        .find(|f| f.chain_id == chain_id)
+        .ok_or_else(|| anyhow::anyhow!("no active fork for chain {chain_id}"))?;
+    Ok(format!("http://127.0.0.1:{}", fork.port))
+}
+
+// ── Safe execution polling (legacy, for live mode) ───────────────────────
 
 /// Interactively poll for Safe transaction execution.
 ///
@@ -1188,11 +1423,53 @@ pub(crate) fn display_transactions_ordered(transactions: &[RecordedTransaction],
 
     let use_color = color::is_color_enabled();
 
-    let header = format!(
-        "\n{} transaction{}:",
-        transactions.len(),
-        if transactions.len() == 1 { "" } else { "s" },
-    );
+    // Count by category for header.
+    // Governor/Safe txs are grouped into proposals — count unique sender roles,
+    // not individual txs, so "2 governor txs from the same sender" = 1 proposal.
+    let mut wallet_count = 0usize;
+    let mut governor_tx_count = 0usize;
+    let mut safe_tx_count = 0usize;
+    let mut governor_senders = std::collections::HashSet::new();
+    let mut safe_senders = std::collections::HashSet::new();
+    for rt in transactions {
+        match rt.sender_category {
+            Some(treb_forge::SenderCategory::Governor) => {
+                governor_tx_count += 1;
+                governor_senders.insert(rt.sender_name.as_deref().unwrap_or(""));
+            }
+            Some(treb_forge::SenderCategory::Safe) => {
+                safe_tx_count += 1;
+                safe_senders.insert(rt.sender_name.as_deref().unwrap_or(""));
+            }
+            _ => wallet_count += 1,
+        }
+    }
+    let mut header_parts: Vec<String> = Vec::new();
+    if wallet_count > 0 {
+        let s = if wallet_count == 1 { "" } else { "s" };
+        header_parts.push(format!("{wallet_count} transaction{s}"));
+    }
+    if !governor_senders.is_empty() {
+        let n = governor_senders.len();
+        let s = if n == 1 { "" } else { "s" };
+        let inner = if governor_tx_count == 1 {
+            "1 transaction".into()
+        } else {
+            format!("{governor_tx_count} transactions")
+        };
+        header_parts.push(format!("{n} governance proposal{s} ({inner})"));
+    }
+    if !safe_senders.is_empty() {
+        let n = safe_senders.len();
+        let s = if n == 1 { "" } else { "s" };
+        let inner = if safe_tx_count == 1 {
+            "1 transaction".into()
+        } else {
+            format!("{safe_tx_count} transactions")
+        };
+        header_parts.push(format!("{n} safe execution{s} ({inner})"));
+    }
+    let header = format!("\n{}:", header_parts.join(", "));
     if use_color {
         println!("{}", header.style(color::BOLD));
     } else {
@@ -1202,15 +1479,23 @@ pub(crate) fn display_transactions_ordered(transactions: &[RecordedTransaction],
     for (i, rt) in transactions.iter().enumerate() {
         let sender_label = tx_sender_label(rt);
 
-        // Transaction header: index + sender
+        // Category tag for non-wallet senders
+        let category_tag = match rt.sender_category {
+            Some(treb_forge::SenderCategory::Governor) => " [governor]",
+            Some(treb_forge::SenderCategory::Safe) => " [safe]",
+            _ => "",
+        };
+
+        // Transaction header: index + sender + category
         if use_color {
             println!(
-                "\n  {} {}",
+                "\n  {} {}{}",
                 format!("{i}:").style(color::GRAY),
                 format!("from={sender_label}").style(color::CYAN),
+                category_tag.style(color::YELLOW),
             );
         } else {
-            println!("\n  {i}: from={sender_label}");
+            println!("\n  {i}: from={sender_label}{category_tag}");
         }
 
         // Per-transaction decoded trace sub-tree
@@ -1263,8 +1548,23 @@ pub(super) fn display_script_broadcast_summary(
 
     let use_color = color::is_color_enabled();
     let has_proposed = !result.proposed_results.is_empty();
-    let tx_count = result.transactions.len();
     let dep_count = result.deployments.len();
+
+    // Count transactions by category, grouping governor/safe into proposals
+    let mut wallet_count = 0usize;
+    let mut governor_senders = std::collections::HashSet::new();
+    let mut safe_senders = std::collections::HashSet::new();
+    for rt in &result.transactions {
+        match rt.sender_category {
+            Some(treb_forge::SenderCategory::Governor) => {
+                governor_senders.insert(rt.sender_name.as_deref().unwrap_or(""));
+            }
+            Some(treb_forge::SenderCategory::Safe) => {
+                safe_senders.insert(rt.sender_name.as_deref().unwrap_or(""));
+            }
+            _ => wallet_count += 1,
+        }
+    }
 
     // Status icon
     let status_icon = if has_proposed {
@@ -1279,14 +1579,28 @@ pub(super) fn display_script_broadcast_summary(
         emoji::CHECK_MARK.to_string()
     };
 
-    // Summary line
-    let mut detail = format!("{tx_count} tx");
+    // Summary line: "1 tx, 1 governor, 1 deployed"
+    let mut parts: Vec<String> = Vec::new();
+    if wallet_count > 0 {
+        parts.push(format!("{wallet_count} tx"));
+    }
+    if !governor_senders.is_empty() {
+        parts.push(format!("{} governor", governor_senders.len()));
+    }
+    if !safe_senders.is_empty() {
+        parts.push(format!("{} safe", safe_senders.len()));
+    }
     if dep_count > 0 {
-        detail.push_str(&format!(", {dep_count} deployed"));
+        parts.push(format!("{dep_count} deployed"));
     }
     if has_proposed {
-        detail.push_str(", proposed");
+        parts.push("proposed".into());
     }
+    let detail = if parts.is_empty() {
+        format!("{} tx", result.transactions.len())
+    } else {
+        parts.join(", ")
+    };
     if use_color {
         eprintln!(
             "  {} {}  ({})",
@@ -1699,6 +2013,8 @@ mod tests {
             description: String::new(),
             executed_at: None,
             execution_tx_hash: String::new(),
+            fork_executed_at: None,
+            actions: Vec::new(),
         }
     }
 
@@ -1762,6 +2078,7 @@ mod tests {
             setup_traces: None,
             safe_transactions: Vec::new(),
             proposed_results: Vec::new(),
+            queued_executions: Vec::new(),
         }
     }
 
@@ -1921,6 +2238,7 @@ needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
             governor_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".parse().unwrap(),
             timelock_address: Some("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".parse().unwrap()),
             proposer: Box::new(proposer),
+            proposer_script: None,
         };
 
         let line = format_verbose_sender("deployer", &sender);
@@ -1938,6 +2256,7 @@ needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
             governor_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".parse().unwrap(),
             timelock_address: None,
             proposer: Box::new(proposer),
+            proposer_script: None,
         };
 
         let line = format_verbose_sender("deployer", &sender);
@@ -2108,6 +2427,7 @@ needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
                 created_at: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
             },
             sender_name: Some("deployer".into()),
+            sender_category: None,
             gas_used: Some(123456),
             trace: None,
         };
@@ -2137,6 +2457,7 @@ needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
                 created_at: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
             },
             sender_name: Some("anvil".into()),
+            sender_category: None,
             gas_used: None,
             trace: None,
         };

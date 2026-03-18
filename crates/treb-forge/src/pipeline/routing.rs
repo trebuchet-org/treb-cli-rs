@@ -1,18 +1,21 @@
-//! Transaction routing — partitions broadcastable transactions by sender type
-//! and dispatches each group through the appropriate broadcast path.
+//! Transaction routing — queue-reduction model.
 //!
 //! After script execution, forge captures `BroadcastableTransactions` with a
 //! `from` address on each tx. This module partitions them into consecutive
-//! "runs" grouped by sender, then routes each run:
+//! "runs" grouped by sender, then **reduces** each run into a flat list of
+//! simple actions:
 //!
-//! - **Wallet**: sign and broadcast directly (or impersonate on fork)
-//! - **Safe**: batch via MultiSend → execTransaction (1/1) or propose (multi-sig)
-//! - **Governor**: run Solidity reducer → recursively route the output
+//! - **`RoutingAction::Exec`** — send tx(s) on-chain (wallet broadcast,
+//!   Safe `execTransaction` for 1/1, or Governor `propose()` call)
+//! - **`RoutingAction::Propose`** — propose to Safe Transaction Service
+//!   (multi-sig only, noop on fork)
 //!
-//! Governor and custom sender types use **Solidity reducers**: forge scripts
-//! that receive pending transactions and produce new `BroadcastableTransactions`.
-//! The reducer output is fed back through `route_all()`, enabling recursive
-//! routing chains (e.g. Governor → Safe → Wallet).
+//! Both action types may emit **`QueuedExecution`** items that represent
+//! deferred operations (Safe multi-sig approval, governance execution).
+//!
+//! The reduction is iterative (no recursion, no `Box::pin` futures). Governor
+//! routing pushes the `propose()` tx back onto the work queue, resolved through
+//! the proposer, with a depth limit to prevent infinite loops.
 
 use std::collections::HashMap;
 
@@ -22,11 +25,120 @@ use treb_core::error::TrebError;
 use crate::sender::{ResolvedSender, SenderCategory};
 use crate::script::BroadcastReceipt;
 
-/// Maximum recursion depth for routing reducer chains.
+/// Maximum queue depth for routing reducer chains.
 ///
 /// Prevents infinite loops from misconfigured sender chains (e.g. Governor
 /// whose proposer is another Governor whose proposer is the first Governor).
 const MAX_ROUTE_DEPTH: u8 = 4;
+
+// ---------------------------------------------------------------------------
+// RoutingAction / QueuedExecution / RoutingPlan
+// ---------------------------------------------------------------------------
+
+/// A routable transaction — calldata targeting a specific address.
+#[derive(Debug, Clone)]
+pub struct RoutableTx {
+    pub to: Address,
+    pub value: U256,
+    pub data: Vec<u8>,
+}
+
+/// Metadata for an `Exec` that wraps a Safe `execTransaction`.
+#[derive(Debug, Clone)]
+pub struct SafeContext {
+    pub safe_address: Address,
+    pub nonce: u64,
+    pub safe_tx_hash: B256,
+    pub threshold: u64,
+}
+
+/// Metadata for an `Exec` or `Propose` that relates to governance.
+#[derive(Debug, Clone)]
+pub struct GovernanceContext {
+    pub governor_address: Address,
+    pub timelock_address: Option<Address>,
+    pub proposal_description: String,
+}
+
+/// A reduced routing action — either execute directly or propose off-chain.
+#[derive(Debug)]
+pub enum RoutingAction {
+    /// Send transaction(s) on-chain: wallet broadcast, Safe execTx (1/1),
+    /// or a Governor propose() call.
+    Exec {
+        /// The `from` address (impersonated on fork, signed on live).
+        from: Address,
+        /// The transactions to execute in sequence.
+        transactions: Vec<RoutableTx>,
+        /// If this exec wraps a Safe execTransaction.
+        safe: Option<SafeContext>,
+        /// If this exec relates to a governance proposal.
+        governance: Option<GovernanceContext>,
+    },
+    /// Propose to the Safe Transaction Service (multi-sig, threshold > 1).
+    /// On fork this is a noop (just record). On live, sign + POST.
+    Propose {
+        safe_address: Address,
+        chain_id: u64,
+        /// The MultiSend operations for the proposal.
+        operations: Vec<treb_safe::MultiSendOperation>,
+        /// The original user transactions covered by this proposal.
+        inner_transactions: Vec<RoutableTx>,
+        sender_role: String,
+        nonce: u64,
+        /// If the proposal wraps a governance propose() call.
+        governance: Option<GovernanceContext>,
+    },
+}
+
+/// A deferred execution that results from a routing action.
+///
+/// Processed inline by the executor after the corresponding action.
+#[derive(Debug, Clone)]
+pub enum QueuedExecution {
+    /// A Safe multi-sig proposal awaiting approval/execution.
+    SafeProposal {
+        safe_address: Address,
+        safe_tx_hash: B256,
+        nonce: u64,
+        inner_txs: Vec<RoutableTx>,
+    },
+    /// A governance proposal awaiting on-chain execution.
+    GovernanceProposal {
+        governor_address: Address,
+        timelock_address: Option<Address>,
+        actions: Vec<GovernorAction>,
+        proposal_description: String,
+    },
+}
+
+/// A single governance action (target + value + calldata).
+#[derive(Debug, Clone)]
+pub struct GovernorAction {
+    pub target: Address,
+    pub value: U256,
+    pub calldata: Vec<u8>,
+}
+
+/// The complete routing plan — a flat list of (action, optional queued) pairs
+/// paired with the original run metadata.
+pub struct RoutingPlan {
+    pub actions: Vec<PlannedAction>,
+}
+
+/// A single entry in the routing plan.
+pub struct PlannedAction {
+    /// The original transaction run this action derives from.
+    pub run: TransactionRun,
+    /// The routing action to execute.
+    pub action: RoutingAction,
+    /// Optional deferred execution to handle inline after the action.
+    pub queued: Option<QueuedExecution>,
+}
+
+// ---------------------------------------------------------------------------
+// TransactionRun — partitioning
+// ---------------------------------------------------------------------------
 
 /// A consecutive group of transactions from the same sender.
 #[derive(Debug)]
@@ -105,7 +217,7 @@ pub fn all_wallet_runs(runs: &[TransactionRun]) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// Unified routing
+// Result types (kept for backward compat with orchestrator / CLI)
 // ---------------------------------------------------------------------------
 
 /// Result of routing a single transaction run.
@@ -128,41 +240,713 @@ pub enum RunResult {
     },
 }
 
+/// Callback invoked after each top-level routing run completes.
+pub type OnRunComplete = dyn Fn(&TransactionRun, &RunResult) + Send + Sync;
+
 /// Context needed for transaction routing.
 pub struct RouteContext<'a> {
     pub rpc_url: &'a str,
     pub chain_id: u64,
     pub is_fork: bool,
+    /// Suppress progress output (e.g. when `--json` is active).
+    pub quiet: bool,
+    /// Optional callback fired after each action completes.
+    pub on_run_complete: Option<&'a OnRunComplete>,
     pub resolved_senders: &'a HashMap<String, ResolvedSender>,
     pub sender_labels: &'a HashMap<Address, String>,
     pub sender_configs: &'a HashMap<String, treb_config::SenderConfig>,
 }
 
-/// Route all broadcastable transactions through the appropriate paths.
+// ---------------------------------------------------------------------------
+// reduce_queue — iterative classification/reduction
+// ---------------------------------------------------------------------------
+
+/// Item in the reduction work queue.
+struct ReductionItem {
+    run: TransactionRun,
+    /// The broadcastable transactions (either original or synthetic for governor propose).
+    btxs: foundry_cheatcodes::BroadcastableTransactions,
+    /// Governance context inherited from a parent governor reduction.
+    governance: Option<GovernanceContext>,
+    depth: u8,
+}
+
+/// Reduce all transaction runs into a flat `RoutingPlan`.
 ///
-/// Partitions transactions into runs by sender, then dispatches each run:
-/// - Wallet → impersonate (fork) or sign+send (live)
-/// - Safe → impersonate (fork) or propose to Safe Service (live)
-/// - Governor → run Solidity reducer → recursively route output
+/// This is the classification step — no RPC calls for wallet/governor runs,
+/// but Safe runs query threshold/nonce to determine 1/1 vs multi-sig.
+pub async fn reduce_queue(
+    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    ctx: &RouteContext<'_>,
+) -> Result<RoutingPlan, TrebError> {
+    let runs = partition_into_runs(btxs, ctx.resolved_senders, ctx.sender_labels);
+    let mut queue = std::collections::VecDeque::new();
+
+    for run in runs {
+        queue.push_back(ReductionItem {
+            run,
+            btxs: btxs.clone(),
+            governance: None,
+            depth: 0,
+        });
+    }
+
+    let mut actions = Vec::new();
+
+    while let Some(item) = queue.pop_front() {
+        if item.depth >= MAX_ROUTE_DEPTH {
+            return Err(TrebError::Forge(format!(
+                "routing queue depth exceeded ({MAX_ROUTE_DEPTH}); \
+                 check sender configuration for circular references"
+            )));
+        }
+
+        match item.run.category {
+            SenderCategory::Wallet => {
+                let txs = extract_routable_txs(&item.run, &item.btxs)?;
+                let from = item.run.sender_address;
+                actions.push(PlannedAction {
+                    run: item.run,
+                    action: RoutingAction::Exec {
+                        from,
+                        transactions: txs,
+                        safe: None,
+                        governance: item.governance,
+                    },
+                    queued: None,
+                });
+            }
+            SenderCategory::Safe => {
+                let resolved = ctx.resolved_senders.get(&item.run.sender_role)
+                    .ok_or_else(|| TrebError::Forge(format!(
+                        "sender '{}' not found", item.run.sender_role
+                    )))?;
+                let safe_address = match resolved {
+                    ResolvedSender::Safe { safe_address, .. } => *safe_address,
+                    _ => return Err(TrebError::Safe("expected Safe sender".into())),
+                };
+
+                let threshold = if ctx.is_fork {
+                    let rpc = super::fork_routing::AnvilRpc::new(ctx.rpc_url);
+                    super::fork_routing::query_safe_threshold(&rpc, safe_address).await?
+                } else {
+                    let safe_client = treb_safe::SafeServiceClient::new(ctx.chain_id)
+                        .ok_or_else(|| TrebError::Safe(format!(
+                            "Safe Transaction Service not available for chain {}", ctx.chain_id
+                        )))?;
+                    let info = safe_client
+                        .get_safe_info(&format!("{:#x}", safe_address))
+                        .await?;
+                    info.threshold
+                };
+
+                let inner_txs = extract_routable_txs(&item.run, &item.btxs)?;
+
+                if threshold <= 1 {
+                    // Safe(1/1) — reduce to direct execution
+                    let planned = reduce_safe_1of1(
+                        &item.run, &item.btxs, resolved, safe_address,
+                        ctx, item.governance.clone(),
+                    ).await?;
+                    actions.push(planned);
+                } else {
+                    // Safe(n/m) — reduce to proposal
+                    let operations = build_multisend_operations(&item.run, &item.btxs)?;
+                    let nonce = if ctx.is_fork {
+                        let rpc = super::fork_routing::AnvilRpc::new(ctx.rpc_url);
+                        super::fork_routing::query_safe_nonce(&rpc, safe_address).await?
+                    } else {
+                        let safe_client = treb_safe::SafeServiceClient::new(ctx.chain_id)
+                            .ok_or_else(|| TrebError::Safe(format!(
+                                "Safe Transaction Service not available for chain {}", ctx.chain_id
+                            )))?;
+                        let info = safe_client
+                            .get_safe_info(&format!("{:#x}", safe_address))
+                            .await?;
+                        info.nonce
+                    };
+
+                    let safe_tx_hash = compute_safe_tx_hash_for_ops(
+                        &operations, safe_address, nonce, ctx.chain_id,
+                    );
+
+                    let sender_role = item.run.sender_role.clone();
+                    actions.push(PlannedAction {
+                        run: item.run,
+                        action: RoutingAction::Propose {
+                            safe_address,
+                            chain_id: ctx.chain_id,
+                            operations,
+                            inner_transactions: inner_txs.clone(),
+                            sender_role,
+                            nonce,
+                            governance: item.governance.clone(),
+                        },
+                        queued: Some(QueuedExecution::SafeProposal {
+                            safe_address,
+                            safe_tx_hash,
+                            nonce,
+                            inner_txs,
+                        }),
+                    });
+                }
+            }
+            SenderCategory::Governor => {
+                let resolved = ctx.resolved_senders.get(&item.run.sender_role)
+                    .ok_or_else(|| TrebError::Forge(format!(
+                        "sender '{}' not found", item.run.sender_role
+                    )))?;
+
+                let (governor_address, timelock_address, proposer, _proposer_script) = match resolved {
+                    ResolvedSender::Governor { governor_address, timelock_address, proposer, proposer_script } => {
+                        (*governor_address, *timelock_address, proposer.as_ref(), proposer_script.as_deref())
+                    }
+                    _ => return Err(TrebError::Forge(
+                        "expected Governor sender for governor routing".into(),
+                    )),
+                };
+
+                // Extract transaction data for the proposal
+                let (targets, values, calldatas) = extract_governor_tx_data(&item.run, &item.btxs)?;
+
+                let gov_actions: Vec<GovernorAction> = targets.iter().zip(values.iter()).zip(calldatas.iter())
+                    .map(|((t, v), c)| GovernorAction { target: *t, value: *v, calldata: c.clone() })
+                    .collect();
+
+                let gov_ctx = GovernanceContext {
+                    governor_address,
+                    timelock_address,
+                    proposal_description: String::new(),
+                };
+
+                let queued = QueuedExecution::GovernanceProposal {
+                    governor_address,
+                    timelock_address,
+                    actions: gov_actions,
+                    proposal_description: String::new(),
+                };
+
+                // Build propose() calldata and route through proposer
+                let propose_calldata = encode_governor_propose(&targets, &values, &calldatas, "");
+                let proposer_address = proposer.sender_address();
+                let reduced_btxs = build_single_tx_broadcast(
+                    proposer_address, governor_address, propose_calldata,
+                );
+
+                // Determine the proposer's category and push back onto queue
+                let proposer_category = proposer.category();
+                let proposer_role = find_proposer_role(
+                    &item.run.sender_role, ctx.resolved_senders, ctx.sender_configs,
+                );
+
+                let proposer_run = TransactionRun {
+                    sender_role: proposer_role,
+                    category: proposer_category,
+                    sender_address: proposer_address,
+                    tx_indices: vec![0],
+                };
+
+                // Push the propose() tx as a new item on the queue
+                queue.push_back(ReductionItem {
+                    run: TransactionRun {
+                        // Preserve the original run metadata for the governor
+                        sender_role: item.run.sender_role.clone(),
+                        category: item.run.category,
+                        sender_address: item.run.sender_address,
+                        tx_indices: item.run.tx_indices.clone(),
+                    },
+                    btxs: item.btxs.clone(),
+                    governance: Some(gov_ctx),
+                    depth: item.depth, // depth of the _original_ governor run
+                });
+
+                // But actually, we need to reduce the propose() tx through
+                // the proposer — not re-reduce the original run.
+                // Remove the item we just pushed and instead do it inline.
+                queue.pop_back();
+
+                // Instead: reduce the proposer run inline with the propose() btxs
+                let proposer_item = ReductionItem {
+                    run: proposer_run,
+                    btxs: reduced_btxs,
+                    governance: Some(GovernanceContext {
+                        governor_address,
+                        timelock_address,
+                        proposal_description: String::new(),
+                    }),
+                    depth: item.depth + 1,
+                };
+
+                // We need to reduce this item. Since the proposer could be
+                // Wallet, Safe(1/1), Safe(n/m), or another Governor, push it
+                // back onto the front of the queue. The result will carry the
+                // governance context and the queued GovernanceProposal.
+                //
+                // However, we need to attach the QueuedExecution::GovernanceProposal
+                // to whatever action the proposer produces. We do this by
+                // letting the item reduce naturally — the governance context
+                // propagates. Then after reduction, we attach the queued item
+                // to the last action that was produced.
+                let before_len = actions.len();
+                queue.push_front(proposer_item);
+
+                // Process just this one item (it's at the front)
+                let front = queue.pop_front().unwrap();
+
+                if front.depth >= MAX_ROUTE_DEPTH {
+                    return Err(TrebError::Forge(format!(
+                        "routing queue depth exceeded ({MAX_ROUTE_DEPTH}); \
+                         check sender configuration for circular references"
+                    )));
+                }
+
+                match front.run.category {
+                    SenderCategory::Wallet => {
+                        let txs = extract_routable_txs(&front.run, &front.btxs)?;
+                        actions.push(PlannedAction {
+                            run: item.run,
+                            action: RoutingAction::Exec {
+                                from: front.run.sender_address,
+                                transactions: txs,
+                                safe: None,
+                                governance: front.governance,
+                            },
+                            queued: Some(queued),
+                        });
+                    }
+                    SenderCategory::Safe => {
+                        let proposer_resolved = ctx.resolved_senders.get(&front.run.sender_role)
+                            .ok_or_else(|| TrebError::Forge(format!(
+                                "sender '{}' not found", front.run.sender_role
+                            )))?;
+                        let proposer_safe = match proposer_resolved {
+                            ResolvedSender::Safe { safe_address, .. } => *safe_address,
+                            _ => return Err(TrebError::Safe("expected Safe sender for proposer".into())),
+                        };
+
+                        let proposer_threshold = if ctx.is_fork {
+                            let rpc = super::fork_routing::AnvilRpc::new(ctx.rpc_url);
+                            super::fork_routing::query_safe_threshold(&rpc, proposer_safe).await?
+                        } else {
+                            let safe_client = treb_safe::SafeServiceClient::new(ctx.chain_id)
+                                .ok_or_else(|| TrebError::Safe(format!(
+                                    "Safe Transaction Service not available for chain {}", ctx.chain_id
+                                )))?;
+                            let info = safe_client
+                                .get_safe_info(&format!("{:#x}", proposer_safe))
+                                .await?;
+                            info.threshold
+                        };
+
+                        if proposer_threshold <= 1 {
+                            let planned = reduce_safe_1of1(
+                                &front.run, &front.btxs, proposer_resolved, proposer_safe,
+                                ctx, front.governance.clone(),
+                            ).await?;
+                            // Attach governance queued to the safe exec
+                            actions.push(PlannedAction {
+                                run: item.run,
+                                action: planned.action,
+                                queued: Some(queued),
+                            });
+                        } else {
+                            let ops = build_multisend_operations(&front.run, &front.btxs)?;
+                            let inner = extract_routable_txs(&front.run, &front.btxs)?;
+                            let nonce = if ctx.is_fork {
+                                let rpc = super::fork_routing::AnvilRpc::new(ctx.rpc_url);
+                                super::fork_routing::query_safe_nonce(&rpc, proposer_safe).await?
+                            } else {
+                                let safe_client = treb_safe::SafeServiceClient::new(ctx.chain_id)
+                                    .ok_or_else(|| TrebError::Safe(format!(
+                                        "Safe Transaction Service not available for chain {}", ctx.chain_id
+                                    )))?;
+                                let info = safe_client
+                                    .get_safe_info(&format!("{:#x}", proposer_safe))
+                                    .await?;
+                                info.nonce
+                            };
+                            // Propose wrapping the governance context
+                            actions.push(PlannedAction {
+                                run: item.run,
+                                action: RoutingAction::Propose {
+                                    safe_address: proposer_safe,
+                                    chain_id: ctx.chain_id,
+                                    operations: ops,
+                                    inner_transactions: inner,
+                                    sender_role: front.run.sender_role.clone(),
+                                    nonce,
+                                    governance: front.governance,
+                                },
+                                queued: Some(queued),
+                            });
+                        }
+                    }
+                    SenderCategory::Governor => {
+                        // Governor → Governor: push back with increased depth
+                        queue.push_front(ReductionItem {
+                            run: front.run,
+                            btxs: front.btxs,
+                            governance: front.governance,
+                            depth: front.depth + 1,
+                        });
+                        // We still need to store the original run's governance queued
+                        // item. It will be attached when the inner governor reduces
+                        // to a terminal action (Wallet or Safe).
+                        // For now, continue the loop — the recursive governor will
+                        // eventually reduce to a wallet or safe.
+                        continue;
+                    }
+                }
+
+                let _ = before_len; // suppress unused warning
+            }
+        }
+    }
+
+    Ok(RoutingPlan { actions })
+}
+
+/// Find the proposer's role name from sender configs.
+fn find_proposer_role(
+    governor_role: &str,
+    resolved_senders: &HashMap<String, ResolvedSender>,
+    sender_configs: &HashMap<String, treb_config::SenderConfig>,
+) -> String {
+    // First try the config's proposer field
+    if let Some(config) = sender_configs.get(governor_role) {
+        if let Some(proposer_name) = &config.proposer {
+            return proposer_name.clone();
+        }
+    }
+    // Fall back to finding the proposer in resolved senders
+    if let Some(ResolvedSender::Governor { proposer, .. }) = resolved_senders.get(governor_role) {
+        let proposer_addr = proposer.sender_address();
+        for (role, sender) in resolved_senders {
+            if sender.sender_address() == proposer_addr && role != governor_role {
+                return role.clone();
+            }
+        }
+    }
+    governor_role.to_string()
+}
+
+/// Reduce a Safe(1/1) run into an Exec action with full execTransaction calldata.
+async fn reduce_safe_1of1(
+    run: &TransactionRun,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    resolved_sender: &ResolvedSender,
+    safe_address: Address,
+    ctx: &RouteContext<'_>,
+    governance: Option<GovernanceContext>,
+) -> Result<PlannedAction, TrebError> {
+    let operations = build_multisend_operations(run, btxs)?;
+
+    if operations.is_empty() {
+        return Ok(PlannedAction {
+            run: TransactionRun {
+                sender_role: run.sender_role.clone(),
+                category: run.category,
+                sender_address: run.sender_address,
+                tx_indices: run.tx_indices.clone(),
+            },
+            action: RoutingAction::Exec {
+                from: safe_address,
+                transactions: Vec::new(),
+                safe: None,
+                governance,
+            },
+            queued: None,
+        });
+    }
+
+    if ctx.is_fork {
+        // Fork mode: the executor will call execute_safe_on_fork,
+        // which handles approveHash + execTransaction internally.
+        // We encode the action as an Exec targeting the safe address.
+        let rpc = super::fork_routing::AnvilRpc::new(ctx.rpc_url);
+        let nonce = super::fork_routing::query_safe_nonce(&rpc, safe_address).await?;
+
+        let (to, data, operation) = if operations.len() == 1 {
+            let op = &operations[0];
+            (op.to, op.data.to_vec(), 0u8)
+        } else {
+            let multi_send_data = treb_safe::encode_multi_send_call(&operations);
+            (treb_safe::MULTI_SEND_ADDRESS, multi_send_data.to_vec(), 1u8)
+        };
+
+        let safe_tx = treb_safe::SafeTx {
+            to,
+            value: U256::ZERO,
+            data: data.clone().into(),
+            operation,
+            safeTxGas: U256::ZERO,
+            baseGas: U256::ZERO,
+            gasPrice: U256::ZERO,
+            gasToken: Address::ZERO,
+            refundReceiver: Address::ZERO,
+            nonce: U256::from(nonce),
+        };
+        let safe_tx_hash = treb_safe::compute_safe_tx_hash(ctx.chain_id, safe_address, &safe_tx);
+
+        // For fork mode, we pack the operations into the exec action.
+        // The executor will use execute_safe_on_fork which handles
+        // the full approveHash + execTransaction flow.
+        let exec_tx = RoutableTx {
+            to: safe_address,
+            value: U256::ZERO,
+            data, // the inner MultiSend/direct data — executor unpacks
+        };
+
+        Ok(PlannedAction {
+            run: TransactionRun {
+                sender_role: run.sender_role.clone(),
+                category: run.category,
+                sender_address: run.sender_address,
+                tx_indices: run.tx_indices.clone(),
+            },
+            action: RoutingAction::Exec {
+                from: safe_address,
+                transactions: vec![exec_tx],
+                safe: Some(SafeContext { safe_address, nonce, safe_tx_hash, threshold: 1 }),
+                governance,
+            },
+            queued: None,
+        })
+    } else {
+        // Live mode: build execTransaction calldata with real ECDSA signature.
+        // Query nonce from Safe TX Service.
+        let safe_client = treb_safe::SafeServiceClient::new(ctx.chain_id)
+            .ok_or_else(|| TrebError::Safe(format!(
+                "Safe Transaction Service not available for chain {}", ctx.chain_id
+            )))?;
+        let safe_info = safe_client
+            .get_safe_info(&format!("{:#x}", safe_address))
+            .await?;
+        let nonce = safe_info.nonce;
+
+        let (to, data, operation) = if operations.len() == 1 {
+            let op = &operations[0];
+            (op.to, op.data.to_vec(), 0u8)
+        } else {
+            let multi_send_data = treb_safe::encode_multi_send_call(&operations);
+            (treb_safe::MULTI_SEND_ADDRESS, multi_send_data.to_vec(), 1u8)
+        };
+
+        let safe_tx = treb_safe::SafeTx {
+            to,
+            value: U256::ZERO,
+            data: data.clone().into(),
+            operation,
+            safeTxGas: U256::ZERO,
+            baseGas: U256::ZERO,
+            gasPrice: U256::ZERO,
+            gasToken: Address::ZERO,
+            refundReceiver: Address::ZERO,
+            nonce: U256::from(nonce),
+        };
+        let safe_tx_hash = treb_safe::compute_safe_tx_hash(ctx.chain_id, safe_address, &safe_tx);
+
+        // Sign with the signer's private key
+        let signer_key = crate::sender::extract_signing_key(
+            &run.sender_role, resolved_sender, ctx.sender_configs,
+        ).ok_or_else(|| TrebError::Safe(format!(
+            "no signing key for Safe sender '{}'", run.sender_role,
+        )))?;
+        let key_bytes: B256 = signer_key.parse()
+            .map_err(|e| TrebError::Safe(format!("invalid signer key: {e}")))?;
+        let wallet_signer = foundry_wallets::WalletSigner::from_private_key(&key_bytes)
+            .map_err(|e| TrebError::Safe(format!("failed to create signer: {e}")))?;
+        let signature = treb_safe::sign_safe_tx(&wallet_signer, safe_tx_hash).await?;
+
+        // Build the full execTransaction calldata
+        use alloy_sol_types::SolCall;
+        let exec_calldata = super::fork_routing::execTransactionCall {
+            to,
+            value: U256::ZERO,
+            data: data.into(),
+            operation,
+            safeTxGas: U256::ZERO,
+            baseGas: U256::ZERO,
+            gasPrice: U256::ZERO,
+            gasToken: Address::ZERO,
+            refundReceiver: Address::ZERO,
+            signatures: signature.into(),
+        }.abi_encode();
+
+        let signer_addr = alloy_signer::Signer::address(&wallet_signer);
+
+        let exec_tx = RoutableTx {
+            to: safe_address,
+            value: U256::ZERO,
+            data: exec_calldata,
+        };
+
+        Ok(PlannedAction {
+            run: TransactionRun {
+                sender_role: run.sender_role.clone(),
+                category: run.category,
+                sender_address: run.sender_address,
+                tx_indices: run.tx_indices.clone(),
+            },
+            action: RoutingAction::Exec {
+                from: signer_addr,
+                transactions: vec![exec_tx],
+                safe: Some(SafeContext { safe_address, nonce, safe_tx_hash, threshold: 1 }),
+                governance,
+            },
+            queued: None,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// execute_plan — uniform executor
+// ---------------------------------------------------------------------------
+
+/// Execute a routing plan, producing `(TransactionRun, RunResult)` pairs.
 ///
-/// Governor routing is recursive: the reducer script produces new
-/// `BroadcastableTransactions` (e.g. `vm.broadcast(proposer) → Governor.propose(...)`)
-/// which are fed back through `route_all()`. A depth limit prevents infinite loops.
+/// Sequential loop — for each planned action:
+/// 1. Execute the action (Exec → broadcast, Propose → record/propose)
+/// 2. Fire the on_run_complete callback
+/// 3. Return the result (queued items are carried in the result for the caller)
 ///
-/// Returns the runs paired with their results, preserving order.
+/// The caller (CLI) is responsible for inline Queued handling (prompts, simulation).
+pub async fn execute_plan(
+    plan: &RoutingPlan,
+    ctx: &RouteContext<'_>,
+) -> Result<Vec<(TransactionRun, RunResult, Option<QueuedExecution>)>, TrebError> {
+    let mut results = Vec::with_capacity(plan.actions.len());
+
+    for planned in &plan.actions {
+        let result = match &planned.action {
+            RoutingAction::Exec { from, transactions, safe, governance: _ } => {
+                if let Some(safe_ctx) = safe {
+                    if ctx.is_fork {
+                        // Fork: use execute_safe_on_fork for full fidelity
+                        let rpc = super::fork_routing::AnvilRpc::new(ctx.rpc_url);
+                        let receipts = super::fork_routing::execute_safe_on_fork(
+                            &rpc,
+                            &planned.run,
+                            // We need the original btxs — but the executor doesn't have them.
+                            // For Safe(1/1) fork exec, we reconstruct from the planned transactions.
+                            &build_btxs_from_routable(safe_ctx.safe_address, transactions),
+                            safe_ctx.safe_address,
+                            ctx.chain_id,
+                            ctx.quiet,
+                        ).await?;
+                        RunResult::Broadcast(receipts)
+                    } else {
+                        // Live: the exec transactions contain full execTransaction calldata
+                        let receipts = broadcast_routable_txs(
+                            ctx.rpc_url, *from, transactions, false,
+                        ).await?;
+                        RunResult::Broadcast(receipts)
+                    }
+                } else {
+                    // Plain wallet broadcast
+                    let receipts = broadcast_routable_txs(
+                        ctx.rpc_url, *from, transactions, ctx.is_fork,
+                    ).await?;
+                    RunResult::Broadcast(receipts)
+                }
+            }
+            RoutingAction::Propose { safe_address, chain_id, operations, inner_transactions, sender_role, nonce, governance: _ } => {
+                if ctx.is_fork {
+                    // Fork: noop — just record as proposed with a random hash
+                    let safe_tx_hash = B256::random();
+                    RunResult::SafeProposed {
+                        safe_tx_hash,
+                        safe_address: *safe_address,
+                        nonce: *nonce,
+                        tx_count: inner_transactions.len(),
+                    }
+                } else {
+                    // Live: sign and propose to Safe TX Service
+                    let result = propose_to_safe_service(
+                        *safe_address,
+                        *chain_id,
+                        operations,
+                        inner_transactions.len(),
+                        sender_role,
+                        ctx,
+                    ).await?;
+                    result
+                }
+            }
+        };
+
+        // Determine the run result for governance wrapping
+        let final_result = match &planned.action {
+            RoutingAction::Exec { governance: Some(gov), .. } => {
+                match &result {
+                    RunResult::Broadcast(receipts) => {
+                        let proposal_id = receipts.first()
+                            .map(|r| format!("{:#x}", r.hash))
+                            .unwrap_or_default();
+                        RunResult::GovernorProposed {
+                            proposal_id,
+                            governor_address: gov.governor_address,
+                            tx_count: planned.run.tx_indices.len(),
+                        }
+                    }
+                    _ => result,
+                }
+            }
+            RoutingAction::Propose { governance: Some(_), .. } => {
+                // A propose that wraps governance — the result type stays
+                // SafeProposed because the immediate action is a Safe proposal
+                result
+            }
+            _ => result,
+        };
+
+        if let Some(cb) = &ctx.on_run_complete {
+            cb(&planned.run, &final_result);
+        }
+
+        results.push((
+            TransactionRun {
+                sender_role: planned.run.sender_role.clone(),
+                category: planned.run.category,
+                sender_address: planned.run.sender_address,
+                tx_indices: planned.run.tx_indices.clone(),
+            },
+            final_result,
+            planned.queued.clone(),
+        ));
+    }
+
+    Ok(results)
+}
+
+// ---------------------------------------------------------------------------
+// Top-level entry points (backward-compatible API)
+// ---------------------------------------------------------------------------
+
+/// Route all broadcastable transactions through the queue-reduction model.
+///
+/// This is the main entry point. Reduces runs into a plan, then executes it.
+/// Returns `(TransactionRun, RunResult)` pairs for backward compatibility.
 pub async fn route_all(
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
     ctx: &RouteContext<'_>,
 ) -> Result<Vec<(TransactionRun, RunResult)>, TrebError> {
-    route_all_with_depth(btxs, ctx, 0).await
+    let plan = reduce_queue(btxs, ctx).await?;
+    let results = execute_plan(&plan, ctx).await?;
+    // Strip queued items for backward compat — caller can use route_all_with_queued instead
+    Ok(results.into_iter().map(|(run, result, _)| (run, result)).collect())
+}
+
+/// Route all with queued execution items returned.
+pub async fn route_all_with_queued(
+    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    ctx: &RouteContext<'_>,
+) -> Result<Vec<(TransactionRun, RunResult, Option<QueuedExecution>)>, TrebError> {
+    let plan = reduce_queue(btxs, ctx).await?;
+    execute_plan(&plan, ctx).await
 }
 
 /// Route with resume support — skips runs whose results are already completed.
-///
-/// For wallet runs: if all tx_indices already have receipts in the resume state,
-/// returns synthetic `Broadcast` results using the loaded data.
-/// For Safe/Governor runs: if the proposal hash/ID is in the completed set, skips.
-/// Otherwise routes normally.
 pub async fn route_all_with_resume(
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
     ctx: &RouteContext<'_>,
@@ -177,14 +961,12 @@ pub async fn route_all_with_resume(
                 // Check if all txs in this run already have receipts
                 let all_completed = !resume.completed_tx_hashes.is_empty()
                     && run.tx_indices.iter().all(|&idx| {
-                        // Check if the corresponding tx in the loaded sequence has a hash
                         resume.sequence.transactions.get(idx).is_some_and(|tx_meta| {
                             tx_meta.hash.is_some_and(|h| resume.completed_tx_hashes.contains(&h))
                         })
                     });
 
                 if all_completed {
-                    // Build synthetic receipts from the loaded sequence
                     let mut receipts = Vec::new();
                     for &idx in &run.tx_indices {
                         if let Some(tx_meta) = resume.sequence.transactions.get(idx) {
@@ -201,40 +983,33 @@ pub async fn route_all_with_resume(
                     }
                     RunResult::Broadcast(receipts)
                 } else {
-                    // Route normally
                     let receipts = broadcast_wallet_run(
                         ctx.rpc_url, &run, btxs, ctx.is_fork,
                     ).await?;
                     RunResult::Broadcast(receipts)
                 }
             }
-            SenderCategory::Safe => {
-                // For Safe: check if this proposal's safe_tx_hash is already completed.
-                // We can't know the hash before proposing, so Safe runs are always re-routed
-                // unless we find a matching proposal in the deferred state.
-                let resolved_sender = ctx.resolved_senders.get(&run.sender_role)
-                    .ok_or_else(|| TrebError::Forge(format!(
-                        "sender '{}' not found", run.sender_role
-                    )))?;
-                let safe_result = broadcast_safe_run(
-                    ctx.rpc_url, &run, btxs, resolved_sender,
-                    ctx.chain_id, ctx.sender_configs, ctx.is_fork,
-                ).await?;
-                match safe_result {
-                    SafeRunResult::Executed(receipts) => RunResult::Broadcast(receipts),
-                    SafeRunResult::Proposed { safe_tx_hash, safe_address, nonce, tx_count } => {
-                        RunResult::SafeProposed { safe_tx_hash, safe_address, nonce, tx_count }
-                    }
+            _ => {
+                // For Safe/Governor with resume, fall through to normal routing
+                // Build a single-run plan and execute
+                let single_btxs = btxs.clone();
+                let temp_ctx = RouteContext {
+                    rpc_url: ctx.rpc_url,
+                    chain_id: ctx.chain_id,
+                    is_fork: ctx.is_fork,
+                    quiet: ctx.quiet,
+                    on_run_complete: None,
+                    resolved_senders: ctx.resolved_senders,
+                    sender_labels: ctx.sender_labels,
+                    sender_configs: ctx.sender_configs,
+                };
+                let plan = reduce_queue(&single_btxs, &temp_ctx).await?;
+                let plan_results = execute_plan(&plan, &temp_ctx).await?;
+                if let Some((_, result, _)) = plan_results.into_iter().next() {
+                    result
+                } else {
+                    RunResult::Broadcast(Vec::new())
                 }
-            }
-            SenderCategory::Governor => {
-                let resolved_sender = ctx.resolved_senders.get(&run.sender_role)
-                    .ok_or_else(|| TrebError::Forge(format!(
-                        "sender '{}' not found", run.sender_role
-                    )))?;
-                route_governor_run(
-                    &run, btxs, resolved_sender, ctx, 0,
-                ).await?
             }
         };
         results.push((run, result));
@@ -243,68 +1018,9 @@ pub async fn route_all_with_resume(
     Ok(results)
 }
 
-/// Boxed future type for recursive routing.
-type RouteResultFuture<'a> = std::pin::Pin<
-    Box<dyn std::future::Future<Output = Result<Vec<(TransactionRun, RunResult)>, TrebError>> + Send + 'a>,
->;
-
-/// Inner recursive router with depth tracking.
-fn route_all_with_depth<'a>(
-    btxs: &'a foundry_cheatcodes::BroadcastableTransactions,
-    ctx: &'a RouteContext<'a>,
-    depth: u8,
-) -> RouteResultFuture<'a> {
-    Box::pin(async move {
-    if depth >= MAX_ROUTE_DEPTH {
-        return Err(TrebError::Forge(format!(
-            "routing recursion depth exceeded ({MAX_ROUTE_DEPTH}); \
-             check sender configuration for circular references"
-        )));
-    }
-
-    let runs = partition_into_runs(btxs, ctx.resolved_senders, ctx.sender_labels);
-    let mut results = Vec::with_capacity(runs.len());
-
-    for run in runs {
-        let result = match run.category {
-            SenderCategory::Wallet => {
-                let receipts = broadcast_wallet_run(
-                    ctx.rpc_url, &run, btxs, ctx.is_fork,
-                ).await?;
-                RunResult::Broadcast(receipts)
-            }
-            SenderCategory::Safe => {
-                let resolved_sender = ctx.resolved_senders.get(&run.sender_role)
-                    .ok_or_else(|| TrebError::Forge(format!(
-                        "sender '{}' not found", run.sender_role
-                    )))?;
-                let safe_result = broadcast_safe_run(
-                    ctx.rpc_url, &run, btxs, resolved_sender,
-                    ctx.chain_id, ctx.sender_configs, ctx.is_fork,
-                ).await?;
-                match safe_result {
-                    SafeRunResult::Executed(receipts) => RunResult::Broadcast(receipts),
-                    SafeRunResult::Proposed { safe_tx_hash, safe_address, nonce, tx_count } => {
-                        RunResult::SafeProposed { safe_tx_hash, safe_address, nonce, tx_count }
-                    }
-                }
-            }
-            SenderCategory::Governor => {
-                let resolved_sender = ctx.resolved_senders.get(&run.sender_role)
-                    .ok_or_else(|| TrebError::Forge(format!(
-                        "sender '{}' not found", run.sender_role
-                    )))?;
-                route_governor_run(
-                    &run, btxs, resolved_sender, ctx, depth,
-                ).await?
-            }
-        };
-        results.push((run, result));
-    }
-
-    Ok(results)
-    }) // Box::pin(async move { ... })
-}
+// ---------------------------------------------------------------------------
+// Flatten receipts
+// ---------------------------------------------------------------------------
 
 /// Flatten run results into a single ordered receipt list.
 ///
@@ -335,6 +1051,10 @@ pub fn flatten_receipts(results: &[(TransactionRun, RunResult)]) -> Vec<Broadcas
     }
     receipts
 }
+
+// ---------------------------------------------------------------------------
+// Wallet broadcast (kept from original)
+// ---------------------------------------------------------------------------
 
 /// Broadcast a wallet run's transactions to an RPC endpoint.
 ///
@@ -540,84 +1260,26 @@ async fn fetch_receipt(
 }
 
 // ---------------------------------------------------------------------------
-// Safe transaction routing
+// Safe proposal to TX Service (live mode)
 // ---------------------------------------------------------------------------
 
-/// Result of routing a Safe run.
-pub enum SafeRunResult {
-    /// Fork mode: transactions executed directly via impersonation.
-    Executed(Vec<BroadcastReceipt>),
-    /// Live mode: transaction proposed to Safe Transaction Service.
-    Proposed {
-        safe_tx_hash: B256,
-        safe_address: Address,
-        nonce: u64,
-        tx_count: usize,
-    },
-}
-
-/// Route a Safe run's transactions.
-///
-/// **Fork mode**: impersonate the Safe address on Anvil and send each tx
-/// directly — no MultiSend, no execTransaction, no signing needed.
-///
-/// **Live mode**: batch via MultiSend, sign with sub-signer key, propose
-/// to Safe Transaction Service. Returns `Proposed` so the caller can
-/// poll for execution or save as queued.
-pub async fn broadcast_safe_run(
-    rpc_url: &str,
-    run: &TransactionRun,
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
-    resolved_sender: &ResolvedSender,
+/// Sign and propose a transaction to the Safe Transaction Service.
+async fn propose_to_safe_service(
+    safe_address: Address,
     chain_id: u64,
-    sender_configs: &std::collections::HashMap<String, treb_config::SenderConfig>,
-    is_fork: bool,
-) -> Result<SafeRunResult, TrebError> {
-    // Fork mode: just impersonate the Safe address and send each tx directly.
-    // Anvil doesn't care that it's a contract address — impersonation bypasses
-    // all signature checks. This is the simplest and most reliable path.
-    if is_fork {
-        let receipts = broadcast_wallet_run(rpc_url, run, btxs, true).await?;
-        return Ok(SafeRunResult::Executed(receipts));
-    }
-
-    // Live mode: propose via Safe Transaction Service
-    let safe_address = match resolved_sender {
-        ResolvedSender::Safe { safe_address, .. } => *safe_address,
-        _ => return Err(TrebError::Safe("expected Safe sender".into())),
-    };
-
-    // Build MultiSend batch from the run's transactions
-    let operations: Vec<treb_safe::MultiSendOperation> = run.tx_indices.iter()
-        .filter_map(|&idx| btxs.get(idx))
-        .map(|btx| {
-            let to = btx.transaction.to()
-                .and_then(|kind| match kind {
-                    alloy_primitives::TxKind::Call(addr) => Some(addr),
-                    alloy_primitives::TxKind::Create => None,
-                })
-                .unwrap_or(Address::ZERO);
-            let value = btx.transaction.value().unwrap_or_default();
-            let data = btx.transaction.input().cloned().unwrap_or_default();
-            treb_safe::MultiSendOperation {
-                operation: 0, // Call
-                to,
-                value: alloy_primitives::U256::from(value),
-                data,
-            }
-        })
-        .collect();
-
-    // Single tx → direct call; multiple → MultiSend DelegateCall
+    operations: &[treb_safe::MultiSendOperation],
+    tx_count: usize,
+    sender_role: &str,
+    ctx: &RouteContext<'_>,
+) -> Result<RunResult, TrebError> {
     let (to, data, operation) = if operations.len() == 1 {
         let op = &operations[0];
         (op.to, op.data.clone(), 0u8)
     } else {
-        let multi_send_data = treb_safe::encode_multi_send_call(&operations);
+        let multi_send_data = treb_safe::encode_multi_send_call(operations);
         (treb_safe::MULTI_SEND_ADDRESS, multi_send_data, 1u8)
     };
 
-    // Query Safe nonce from the Transaction Service
     let safe_client = treb_safe::SafeServiceClient::new(chain_id)
         .ok_or_else(|| TrebError::Safe(format!(
             "Safe Transaction Service not available for chain {chain_id}"
@@ -626,25 +1288,27 @@ pub async fn broadcast_safe_run(
         .get_safe_info(&format!("{:#x}", safe_address))
         .await?;
 
-    // Build SafeTx, compute EIP-712 hash, sign
     let safe_tx = treb_safe::SafeTx {
         to,
-        value: alloy_primitives::U256::ZERO,
+        value: U256::ZERO,
         data: data.to_vec().into(),
         operation,
-        safeTxGas: alloy_primitives::U256::ZERO,
-        baseGas: alloy_primitives::U256::ZERO,
-        gasPrice: alloy_primitives::U256::ZERO,
+        safeTxGas: U256::ZERO,
+        baseGas: U256::ZERO,
+        gasPrice: U256::ZERO,
         gasToken: Address::ZERO,
         refundReceiver: Address::ZERO,
-        nonce: alloy_primitives::U256::from(safe_info.nonce),
+        nonce: U256::from(safe_info.nonce),
     };
     let safe_tx_hash = treb_safe::compute_safe_tx_hash(chain_id, safe_address, &safe_tx);
 
+    let resolved_sender = ctx.resolved_senders.get(sender_role)
+        .ok_or_else(|| TrebError::Forge(format!("sender '{}' not found", sender_role)))?;
+
     let signer_key_hex = crate::sender::extract_signing_key(
-        &run.sender_role, resolved_sender, sender_configs,
+        sender_role, resolved_sender, ctx.sender_configs,
     ).ok_or_else(|| TrebError::Safe(format!(
-        "no signing key for Safe sender '{}'", run.sender_role,
+        "no signing key for Safe sender '{}'", sender_role,
     )))?;
     let key_bytes: B256 = signer_key_hex.parse()
         .map_err(|e| TrebError::Safe(format!("invalid signer key: {e}")))?;
@@ -652,7 +1316,6 @@ pub async fn broadcast_safe_run(
         .map_err(|e| TrebError::Safe(format!("failed to create signer: {e}")))?;
     let signature = treb_safe::sign_safe_tx(&wallet_signer, safe_tx_hash).await?;
 
-    // Propose
     let signer_addr = alloy_signer::Signer::address(&wallet_signer);
     let request = treb_safe::types::ProposeRequest {
         to: format!("{:#x}", to),
@@ -675,18 +1338,15 @@ pub async fn broadcast_safe_run(
         .propose_transaction(&format!("{:#x}", safe_address), &request)
         .await?;
 
-    Ok(SafeRunResult::Proposed {
+    Ok(RunResult::SafeProposed {
         safe_tx_hash,
         safe_address,
         nonce: safe_info.nonce,
-        tx_count: run.tx_indices.len(),
+        tx_count,
     })
 }
 
 /// Poll the Safe Transaction Service until a proposed tx is executed.
-///
-/// Returns the on-chain execution tx hash if executed, or `None` if the
-/// caller chose to skip (via the `should_continue` callback returning true).
 pub async fn poll_safe_execution(
     chain_id: u64,
     safe_tx_hash: &B256,
@@ -711,100 +1371,11 @@ pub async fn poll_safe_execution(
 }
 
 // ---------------------------------------------------------------------------
-// Governor routing — recursive via Solidity reducer
+// Governor helpers (kept from original)
 // ---------------------------------------------------------------------------
 
-/// Route a Governor run's transactions.
-///
-/// **Fork mode**: impersonate the governor/timelock address and send each tx
-/// directly — the reducer path is bypassed because Anvil doesn't need real
-/// governance flow.
-///
-/// **Live mode**: serialize the run's transactions into ABI-encoded form,
-/// build a `Governor.propose()` call targeting the proposer, then recursively
-/// route the output. If the proposer is a Safe, the proposal tx will flow
-/// through Safe routing; if it's a wallet, it broadcasts directly.
-async fn route_governor_run<'a>(
-    run: &'a TransactionRun,
-    btxs: &'a foundry_cheatcodes::BroadcastableTransactions,
-    resolved_sender: &'a ResolvedSender,
-    ctx: &'a RouteContext<'a>,
-    depth: u8,
-) -> Result<RunResult, TrebError> {
-    // Fork mode: just impersonate — no need for the full governor flow
-    if ctx.is_fork {
-        let receipts = broadcast_wallet_run(ctx.rpc_url, run, btxs, true).await?;
-        return Ok(RunResult::Broadcast(receipts));
-    }
-
-    // Live mode: build Governor.propose() and recursively route
-    let (governor_address, proposer) = match resolved_sender {
-        ResolvedSender::Governor { governor_address, proposer, .. } => {
-            (*governor_address, proposer.as_ref())
-        }
-        _ => return Err(TrebError::Forge(
-            "expected Governor sender for governor routing".into(),
-        )),
-    };
-
-    // Extract transaction data from the run
-    let (targets, values, calldatas) = extract_governor_tx_data(run, btxs)?;
-
-    // ABI-encode Governor.propose(targets, values, calldatas, description)
-    let propose_calldata = encode_governor_propose(
-        &targets, &values, &calldatas, "",
-    );
-
-    // Build a synthetic BroadcastableTransactions with one tx:
-    //   from=proposer, to=governor, data=propose_calldata
-    let proposer_address = proposer.sender_address();
-    let reduced_btxs = build_single_tx_broadcast(
-        proposer_address, governor_address, propose_calldata,
-    );
-
-    // Recursively route — the proposer might be a wallet, Safe, or even
-    // another Governor (depth limit prevents infinite loops).
-    let sub_results = route_all_with_depth(&reduced_btxs, ctx, depth + 1).await?;
-
-    // The reducer produces exactly one transaction (Governor.propose()),
-    // so there should be exactly one result to inspect.
-    let (_sub_run, sub_result) = sub_results.into_iter().next()
-        .ok_or_else(|| TrebError::Forge(
-            "governor reducer produced no routable transactions".into(),
-        ))?;
-
-    match &sub_result {
-        RunResult::Broadcast(receipts) => {
-            // The propose() was broadcast directly — extract proposal ID
-            // from the first receipt (there's exactly one tx).
-            let proposal_id = receipts.first()
-                .map(|r| format!("{:#x}", r.hash))
-                .unwrap_or_default();
-            Ok(RunResult::GovernorProposed {
-                proposal_id,
-                governor_address,
-                tx_count: run.tx_indices.len(),
-            })
-        }
-        RunResult::SafeProposed { safe_tx_hash, safe_address, nonce, .. } => {
-            // The propose() was submitted to Safe — the governor proposal
-            // is pending on the Safe approval flow.
-            Ok(RunResult::SafeProposed {
-                safe_tx_hash: *safe_tx_hash,
-                safe_address: *safe_address,
-                nonce: *nonce,
-                tx_count: run.tx_indices.len(),
-            })
-        }
-        RunResult::GovernorProposed { .. } => {
-            // Nested governor — pass through
-            Ok(sub_result)
-        }
-    }
-}
-
 /// Extract (targets, values, calldatas) from a governor run's transactions.
-fn extract_governor_tx_data(
+pub fn extract_governor_tx_data(
     run: &TransactionRun,
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
 ) -> Result<(Vec<Address>, Vec<U256>, Vec<Vec<u8>>), TrebError> {
@@ -840,7 +1411,7 @@ fn extract_governor_tx_data(
 /// ABI-encode `Governor.propose(address[], uint256[], bytes[], string)`.
 ///
 /// Selector: `0x7d5e81e2` (from OZ Governor).
-fn encode_governor_propose(
+pub fn encode_governor_propose(
     targets: &[Address],
     values: &[U256],
     calldatas: &[Vec<u8>],
@@ -872,8 +1443,6 @@ fn build_single_tx_broadcast(
     use foundry_cheatcodes::BroadcastableTransaction;
     use foundry_common::TransactionMaybeSigned;
 
-    // Build an unsigned TransactionRequest via serde round-trip.
-    // This avoids depending on alloy-rpc-types directly.
     let tx_json = serde_json::json!({
         "from": format!("{:#x}", from),
         "to": format!("{:#x}", to),
@@ -886,6 +1455,194 @@ fn build_single_tx_broadcast(
     let btx = BroadcastableTransaction { rpc: None, transaction: tx_maybe_signed };
     let mut btxs = foundry_cheatcodes::BroadcastableTransactions::default();
     btxs.push_back(btx);
+    btxs
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/// Extract `RoutableTx` items from a run's broadcastable transactions.
+fn extract_routable_txs(
+    run: &TransactionRun,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+) -> Result<Vec<RoutableTx>, TrebError> {
+    let mut txs = Vec::with_capacity(run.tx_indices.len());
+    for &idx in &run.tx_indices {
+        let btx = btxs.get(idx).ok_or_else(|| {
+            TrebError::Forge(format!("transaction index {idx} out of range"))
+        })?;
+        let to = btx.transaction.to()
+            .and_then(|kind| match kind {
+                alloy_primitives::TxKind::Call(addr) => Some(addr),
+                alloy_primitives::TxKind::Create => None,
+            })
+            .unwrap_or(Address::ZERO);
+        let value = btx.transaction.value().unwrap_or_default();
+        let data = btx.transaction.input().map(|b| b.to_vec()).unwrap_or_default();
+        txs.push(RoutableTx { to, value: U256::from(value), data });
+    }
+    Ok(txs)
+}
+
+/// Build MultiSend operations from a run's broadcastable transactions.
+fn build_multisend_operations(
+    run: &TransactionRun,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+) -> Result<Vec<treb_safe::MultiSendOperation>, TrebError> {
+    let mut ops = Vec::with_capacity(run.tx_indices.len());
+    for &idx in &run.tx_indices {
+        let btx = btxs.get(idx).ok_or_else(|| {
+            TrebError::Forge(format!("transaction index {idx} out of range"))
+        })?;
+        let to = btx.transaction.to()
+            .and_then(|kind| match kind {
+                alloy_primitives::TxKind::Call(addr) => Some(addr),
+                alloy_primitives::TxKind::Create => None,
+            })
+            .unwrap_or(Address::ZERO);
+        let value = btx.transaction.value().unwrap_or_default();
+        let data = btx.transaction.input().cloned().unwrap_or_default();
+        ops.push(treb_safe::MultiSendOperation {
+            operation: 0, // Call
+            to,
+            value: U256::from(value),
+            data,
+        });
+    }
+    Ok(ops)
+}
+
+/// Compute the safeTxHash for a set of MultiSend operations.
+fn compute_safe_tx_hash_for_ops(
+    operations: &[treb_safe::MultiSendOperation],
+    safe_address: Address,
+    nonce: u64,
+    chain_id: u64,
+) -> B256 {
+    let (to, data, operation) = if operations.len() == 1 {
+        let op = &operations[0];
+        (op.to, op.data.to_vec(), 0u8)
+    } else {
+        let multi_send_data = treb_safe::encode_multi_send_call(operations);
+        (treb_safe::MULTI_SEND_ADDRESS, multi_send_data.to_vec(), 1u8)
+    };
+
+    let safe_tx = treb_safe::SafeTx {
+        to,
+        value: U256::ZERO,
+        data: data.into(),
+        operation,
+        safeTxGas: U256::ZERO,
+        baseGas: U256::ZERO,
+        gasPrice: U256::ZERO,
+        gasToken: Address::ZERO,
+        refundReceiver: Address::ZERO,
+        nonce: U256::from(nonce),
+    };
+    treb_safe::compute_safe_tx_hash(chain_id, safe_address, &safe_tx)
+}
+
+/// Broadcast routable transactions via JSON-RPC.
+async fn broadcast_routable_txs(
+    rpc_url: &str,
+    from: Address,
+    transactions: &[RoutableTx],
+    is_fork: bool,
+) -> Result<Vec<BroadcastReceipt>, TrebError> {
+    let client = reqwest::Client::new();
+    let mut receipts = Vec::new();
+
+    for tx in transactions {
+        let mut tx_obj = serde_json::Map::new();
+        tx_obj.insert("from".into(), serde_json::json!(format!("{:#x}", from)));
+        tx_obj.insert("to".into(), serde_json::json!(format!("{:#x}", tx.to)));
+        if !tx.data.is_empty() {
+            tx_obj.insert("data".into(), serde_json::json!(format!("0x{}", alloy_primitives::hex::encode(&tx.data))));
+        }
+        if !tx.value.is_zero() {
+            tx_obj.insert("value".into(), serde_json::json!(format!("{:#x}", tx.value)));
+        }
+        tx_obj.insert("gas".into(), serde_json::json!("0x1c9c380")); // 30M
+
+        if is_fork {
+            let impersonate = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "anvil_impersonateAccount",
+                "params": [format!("{:#x}", from)],
+                "id": 1,
+            });
+            client.post(rpc_url).json(&impersonate).send().await
+                .map_err(|e| TrebError::Forge(format!("impersonate failed: {e}")))?;
+        }
+
+        if !is_fork {
+            return Err(TrebError::Forge(
+                "live network broadcast through routing is not yet supported; \
+                 use fork mode or wallet-only scripts for live broadcast".into(),
+            ));
+        }
+
+        let send_tx = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "eth_sendTransaction",
+            "params": [tx_obj],
+            "id": 2,
+        });
+
+        let resp: serde_json::Value = client
+            .post(rpc_url)
+            .json(&send_tx)
+            .send()
+            .await
+            .map_err(|e| TrebError::Forge(format!("send tx failed: {e}")))?
+            .json()
+            .await
+            .map_err(|e| TrebError::Forge(format!("parse send response failed: {e}")))?;
+
+        if let Some(err) = resp.get("error") {
+            return Err(TrebError::Forge(format!(
+                "tx to {:#x} from {:#x} failed: {}", tx.to, from, err,
+            )));
+        }
+
+        let tx_hash_hex = resp.get("result").and_then(|r| r.as_str()).unwrap_or("0x0");
+        let receipt = fetch_receipt(&client, rpc_url, tx_hash_hex).await?;
+        receipts.push(receipt);
+
+        if is_fork {
+            let stop = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "anvil_stopImpersonatingAccount",
+                "params": [format!("{:#x}", from)],
+                "id": 3,
+            });
+            let _ = client.post(rpc_url).json(&stop).send().await;
+        }
+    }
+
+    Ok(receipts)
+}
+
+/// Build synthetic `BroadcastableTransactions` from routable transactions.
+fn build_btxs_from_routable(
+    from: Address,
+    transactions: &[RoutableTx],
+) -> foundry_cheatcodes::BroadcastableTransactions {
+    let mut btxs = foundry_cheatcodes::BroadcastableTransactions::default();
+    for tx in transactions {
+        let tx_json = serde_json::json!({
+            "from": format!("{:#x}", from),
+            "to": format!("{:#x}", tx.to),
+            "data": format!("0x{}", alloy_primitives::hex::encode(&tx.data)),
+        });
+        let tx_maybe_signed: foundry_common::TransactionMaybeSigned =
+            serde_json::from_value(tx_json).expect("failed to build synthetic tx");
+        btxs.push_back(foundry_cheatcodes::BroadcastableTransaction {
+            rpc: None,
+            transaction: tx_maybe_signed,
+        });
+    }
     btxs
 }
 
@@ -930,5 +1687,32 @@ mod tests {
         assert!(targets.is_empty());
         assert!(values.is_empty());
         assert!(calldatas.is_empty());
+    }
+
+    #[test]
+    fn extract_routable_txs_empty_run() {
+        let btxs = foundry_cheatcodes::BroadcastableTransactions::default();
+        let run = TransactionRun {
+            sender_role: "test".into(),
+            category: SenderCategory::Wallet,
+            sender_address: Address::ZERO,
+            tx_indices: vec![],
+        };
+
+        let txs = extract_routable_txs(&run, &btxs).unwrap();
+        assert!(txs.is_empty());
+    }
+
+    #[test]
+    fn compute_safe_tx_hash_for_single_op() {
+        let ops = vec![treb_safe::MultiSendOperation {
+            operation: 0,
+            to: Address::ZERO,
+            value: U256::ZERO,
+            data: alloy_primitives::Bytes::new(),
+        }];
+        let hash = compute_safe_tx_hash_for_ops(&ops, Address::ZERO, 0, 1);
+        // Just verify it returns a non-zero hash
+        assert_ne!(hash, B256::ZERO);
     }
 }

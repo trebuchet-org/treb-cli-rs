@@ -215,6 +215,7 @@ impl RunPipeline {
         // 4. Broadcast: hook → confirm → route by sender type
         let mut proposed_results = Vec::new();
         let mut routing_safe_transactions = Vec::new();
+        let mut routing_queued_executions = Vec::new();
 
         let broadcast_confirmed = if wants_broadcast && !recorded_transactions.is_empty() {
             let confirmed = self
@@ -233,17 +234,20 @@ impl RunPipeline {
                         rpc_url,
                         chain_id: self.context.config.chain_id,
                         is_fork: self.context.config.is_fork,
+                        quiet: self.context.config.quiet,
+                        on_run_complete: None,
                         resolved_senders: &self.context.resolved_senders,
                         sender_labels: &self.context.sender_labels,
                         sender_configs: &self.context.sender_configs,
                     };
                     let run_results = if let Some(ref resume) = self.resume_state {
                         super::routing::route_all_with_resume(btxs, &ctx, resume).await?
+                            .into_iter().map(|(run, result)| (run, result, None)).collect()
                     } else {
-                        super::routing::route_all(btxs, &ctx).await?
+                        super::routing::route_all_with_queued(btxs, &ctx).await?
                     };
 
-                    let outcome = apply_routing_results(
+                    let outcome = apply_routing_results_with_queued(
                         &run_results,
                         btxs,
                         &mut recorded_transactions,
@@ -254,6 +258,7 @@ impl RunPipeline {
                     )?;
                     proposed_results = outcome.proposed_results;
                     routing_safe_transactions = outcome.safe_transactions;
+                    routing_queued_executions = outcome.queued_executions;
 
                     report(BroadcastPhase::Complete);
                 }
@@ -330,6 +335,7 @@ impl RunPipeline {
             governor_proposals,
             safe_transactions: all_safe_transactions,
             proposed_results,
+            queued_executions: routing_queued_executions,
             execution_traces,
             setup_traces,
         })
@@ -344,18 +350,20 @@ use super::routing::{RunResult, TransactionRun};
 use super::types::ProposedResult;
 use treb_core::types::safe_transaction::SafeTxData;
 
-/// Build `ProposedResult` and `SafeTransaction` records from routing results.
+/// Build `ProposedResult`, `SafeTransaction`, and `GovernorProposal` records from routing results.
 ///
 /// For each `SafeProposed` or `GovernorProposed` run result, creates the
 /// appropriate registry records so they can be persisted.
 fn build_proposed_records_from_routing(
     run_results: &[(TransactionRun, RunResult)],
+    btxs: &foundry_cheatcodes::BroadcastableTransactions,
     context: &PipelineContext,
     recorded_transactions: &[RecordedTransaction],
-) -> (Vec<ProposedResult>, Vec<treb_core::types::SafeTransaction>) {
+) -> (Vec<ProposedResult>, Vec<treb_core::types::SafeTransaction>, Vec<treb_core::types::GovernorProposal>) {
     let now = chrono::Utc::now();
     let mut proposed = Vec::new();
     let mut safe_txs = Vec::new();
+    let mut gov_proposals = Vec::new();
 
     for (run, result) in run_results {
         match result {
@@ -408,14 +416,64 @@ fn build_proposed_records_from_routing(
                     proposed_at: now,
                     confirmations: Vec::new(),
                     executed_at: None,
+                    fork_executed_at: None,
                     execution_tx_hash: String::new(),
                 });
             }
-            RunResult::GovernorProposed { proposal_id: _, governor_address: _, tx_count } => {
+            RunResult::GovernorProposed { proposal_id, governor_address, tx_count } => {
                 proposed.push(ProposedResult {
                     sender_role: run.sender_role.clone(),
                     run_result: result.clone(),
                     tx_count: *tx_count,
+                });
+
+                // Extract actions from the broadcastable transactions
+                let actions: Vec<treb_core::types::GovernorAction> = run.tx_indices.iter()
+                    .filter_map(|&idx| btxs.get(idx))
+                    .map(|btx| {
+                        let to = btx.transaction.to()
+                            .and_then(|kind| match kind {
+                                alloy_primitives::TxKind::Call(addr) => Some(format!("{:#x}", addr)),
+                                alloy_primitives::TxKind::Create => None,
+                            })
+                            .unwrap_or_default();
+                        let value = format!("{}", btx.transaction.value().unwrap_or_default());
+                        let calldata = btx.transaction.input()
+                            .map(|b| format!("0x{}", alloy_primitives::hex::encode(b)))
+                            .unwrap_or_default();
+                        treb_core::types::GovernorAction { target: to, value, calldata }
+                    })
+                    .collect();
+
+                let tx_ids: Vec<String> = run.tx_indices.iter()
+                    .filter_map(|&idx| recorded_transactions.get(idx))
+                    .map(|rt| rt.transaction.id.clone())
+                    .collect();
+
+                // Determine timelock from resolved sender
+                let timelock_addr = context.resolved_senders.get(&run.sender_role)
+                    .and_then(|s| s.timelock_address())
+                    .map(|a| a.to_checksum(None))
+                    .unwrap_or_default();
+
+                let proposer_addr = context.resolved_senders.get(&run.sender_role)
+                    .map(|s| s.sub_signer().sender_address().to_checksum(None))
+                    .unwrap_or_default();
+
+                gov_proposals.push(treb_core::types::GovernorProposal {
+                    proposal_id: proposal_id.clone(),
+                    governor_address: governor_address.to_checksum(None),
+                    timelock_address: timelock_addr,
+                    chain_id: context.config.chain_id,
+                    status: treb_core::types::ProposalStatus::Pending,
+                    transaction_ids: tx_ids,
+                    proposed_by: proposer_addr,
+                    proposed_at: now,
+                    description: String::new(),
+                    executed_at: None,
+                    execution_tx_hash: String::new(),
+                    fork_executed_at: None,
+                    actions,
                 });
             }
             RunResult::Broadcast(_) => {
@@ -424,7 +482,7 @@ fn build_proposed_records_from_routing(
         }
     }
 
-    (proposed, safe_txs)
+    (proposed, safe_txs, gov_proposals)
 }
 
 /// Update transaction statuses based on routing results.
@@ -461,6 +519,10 @@ pub struct RoutingOutcome {
     pub proposed_results: Vec<ProposedResult>,
     /// Safe transactions produced by routing.
     pub safe_transactions: Vec<treb_core::types::SafeTransaction>,
+    /// Governor proposals produced by routing.
+    pub governor_proposals: Vec<treb_core::types::GovernorProposal>,
+    /// Queued executions from routing (for inline processing by the CLI).
+    pub queued_executions: Vec<super::routing::QueuedExecution>,
 }
 
 /// Apply routing results to recorded transactions: build proposed records,
@@ -478,8 +540,8 @@ pub fn apply_routing_results(
     script_sig: &str,
 ) -> Result<RoutingOutcome, TrebError> {
     // Build Safe/Governor records from routing results
-    let (proposed_results, safe_transactions) =
-        build_proposed_records_from_routing(run_results, context, recorded_transactions);
+    let (proposed_results, safe_transactions, governor_proposals) =
+        build_proposed_records_from_routing(run_results, btxs, context, recorded_transactions);
 
     // Update transaction statuses for proposed runs
     update_transaction_statuses_from_routing(recorded_transactions, run_results, btxs);
@@ -516,7 +578,47 @@ pub fn apply_routing_results(
         rt.transaction.broadcast_file = Some(rel_path.clone());
     }
 
-    Ok(RoutingOutcome { proposed_results, safe_transactions })
+    Ok(RoutingOutcome { proposed_results, safe_transactions, governor_proposals, queued_executions: Vec::new() })
+}
+
+/// Apply routing results with queued execution items.
+///
+/// Same as [`apply_routing_results`] but accepts the full
+/// `(TransactionRun, RunResult, Option<QueuedExecution>)` triples from
+/// `route_all_with_queued` and passes the queued items through.
+pub fn apply_routing_results_with_queued(
+    run_results_with_queued: &[(TransactionRun, RunResult, Option<super::routing::QueuedExecution>)],
+    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    recorded_transactions: &mut [RecordedTransaction],
+    context: &PipelineContext,
+    script_path: &str,
+    chain_id: u64,
+    script_sig: &str,
+) -> Result<RoutingOutcome, TrebError> {
+    // Extract (run, result) pairs for the existing functions
+    let run_results: Vec<(TransactionRun, RunResult)> = run_results_with_queued.iter()
+        .map(|(run, result, _)| (
+            TransactionRun {
+                sender_role: run.sender_role.clone(),
+                category: run.category,
+                sender_address: run.sender_address,
+                tx_indices: run.tx_indices.clone(),
+            },
+            result.clone(),
+        ))
+        .collect();
+
+    // Collect queued items
+    let queued_executions: Vec<super::routing::QueuedExecution> = run_results_with_queued.iter()
+        .filter_map(|(_, _, q)| q.clone())
+        .collect();
+
+    let mut outcome = apply_routing_results(
+        &run_results, btxs, recorded_transactions, context,
+        script_path, chain_id, script_sig,
+    )?;
+    outcome.queued_executions = queued_executions;
+    Ok(outcome)
 }
 
 /// Render traces into human-readable strings and extract per-transaction sub-trees.
@@ -1392,6 +1494,7 @@ impl SessionPipeline {
                         governor_proposals: Vec::new(),
                         safe_transactions: Vec::new(),
                         proposed_results: Vec::new(),
+                        queued_executions: Vec::new(),
                         execution_traces: None,
                         setup_traces: None,
                     },
@@ -1529,6 +1632,7 @@ impl SessionPipeline {
                 governor_proposals: sim.governor_proposals,
                 safe_transactions: sim.safe_transactions,
                 proposed_results: Vec::new(),
+                queued_executions: Vec::new(),
                 execution_traces: sim.execution_traces,
                 setup_traces: sim.setup_traces,
             };
@@ -1664,6 +1768,8 @@ impl SimulatedSession {
                         rpc_url,
                         chain_id: context.config.chain_id,
                         is_fork: context.config.is_fork,
+                        quiet: context.config.quiet,
+                        on_run_complete: None,
                         resolved_senders: &context.resolved_senders,
                         sender_labels: &context.sender_labels,
                         sender_configs: &context.sender_configs,
@@ -1677,17 +1783,19 @@ impl SimulatedSession {
                             &context.config.script_sig,
                         );
                         if let Some(ref rs) = resume_state {
+                            // Resume uses the old path (no queued items)
                             super::routing::route_all_with_resume(btxs, &route_ctx, rs).await
+                                .map(|r| r.into_iter().map(|(run, result)| (run, result, None)).collect())
                         } else {
-                            super::routing::route_all(btxs, &route_ctx).await
+                            super::routing::route_all_with_queued(btxs, &route_ctx).await
                         }
                     } else {
-                        super::routing::route_all(btxs, &route_ctx).await
+                        super::routing::route_all_with_queued(btxs, &route_ctx).await
                     };
 
                     match run_results {
                         Ok(run_results) => {
-                            let outcome = apply_routing_results(
+                            let outcome = apply_routing_results_with_queued(
                                 &run_results,
                                 btxs,
                                 &mut result.transactions,
@@ -1697,15 +1805,23 @@ impl SimulatedSession {
                                 &context.config.script_sig,
                             );
 
-                            if let Ok(outcome) = outcome {
-                                result.proposed_results = outcome.proposed_results;
-                                let routing_safe_txs = outcome.safe_transactions;
-                                let all_safe_txs: Vec<_> = result
-                                    .safe_transactions
-                                    .drain(..)
-                                    .chain(routing_safe_txs)
-                                    .collect();
-                                result.safe_transactions = all_safe_txs;
+                            match outcome {
+                                Ok(outcome) => {
+                                    result.proposed_results = outcome.proposed_results;
+                                    result.queued_executions = outcome.queued_executions;
+                                    let routing_safe_txs = outcome.safe_transactions;
+                                    let routing_gov_proposals = outcome.governor_proposals;
+                                    let all_safe_txs: Vec<_> = result
+                                        .safe_transactions
+                                        .drain(..)
+                                        .chain(routing_safe_txs)
+                                        .collect();
+                                    result.safe_transactions = all_safe_txs;
+                                    result.governor_proposals.extend(routing_gov_proposals);
+                                }
+                                Err(e) => {
+                                    eprintln!("warning: apply_routing_results failed: {e}");
+                                }
                             }
 
                             // Duplicate detection

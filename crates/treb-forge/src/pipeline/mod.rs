@@ -7,6 +7,7 @@
 pub mod broadcast_writer;
 pub mod compose;
 mod duplicates;
+pub mod fork_routing;
 mod hydration;
 mod orchestrator;
 pub mod routing;
@@ -24,11 +25,13 @@ pub use hydration::{
 };
 pub use orchestrator::{
     BroadcastHook, BroadcastPhase, BroadcastProgressCallback, RoutingOutcome, RunPipeline,
-    SessionPipeline, SimulatedSession, apply_routing_results,
+    SessionPipeline, SimulatedSession, apply_routing_results, apply_routing_results_with_queued,
 };
 pub use simulation::{HydrationOptions, SimulationOutput, hydrate_simulation};
 pub use routing::{
-    RouteContext, RunResult, TransactionRun, flatten_receipts, route_all, route_all_with_resume,
+    GovernanceContext, GovernorAction, PlannedAction, QueuedExecution, RoutableTx, RouteContext,
+    RoutingAction, RoutingPlan, RunResult, SafeContext, TransactionRun, flatten_receipts,
+    reduce_queue, route_all, route_all_with_queued, route_all_with_resume,
 };
 pub use types::{
     PipelineConfig, PipelineContext, PipelineResult, ProposedResult, RecordedDeployment,

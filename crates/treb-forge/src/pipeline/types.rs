@@ -43,6 +43,8 @@ pub struct PipelineConfig {
     pub is_fork: bool,
     /// The effective RPC URL for transaction routing.
     pub rpc_url: Option<String>,
+    /// Suppress progress output (e.g. when `--json` is active).
+    pub quiet: bool,
 }
 
 impl Default for PipelineConfig {
@@ -58,6 +60,7 @@ impl Default for PipelineConfig {
             verbosity: 0,
             is_fork: false,
             rpc_url: None,
+            quiet: false,
         }
     }
 }
@@ -121,6 +124,11 @@ pub struct PipelineResult {
     pub safe_transactions: Vec<SafeTransaction>,
     /// Raw routing results for CLI display (proposed vs broadcast per-run).
     pub proposed_results: Vec<ProposedResult>,
+    /// Queued executions from routing (Safe multi-sig, governance proposals).
+    ///
+    /// Each item represents a deferred operation that the CLI can process
+    /// inline (prompt for simulation, poll for execution) or save to registry.
+    pub queued_executions: Vec<super::routing::QueuedExecution>,
     /// Pre-rendered execution traces (shown at `-v` and `-vv`).
     pub execution_traces: Option<String>,
     /// Pre-rendered setup traces (shown at `-vvv`).
@@ -166,6 +174,8 @@ pub struct RecordedTransaction {
     pub transaction: Transaction,
     /// Sender role/name emitted during script execution, if available.
     pub sender_name: Option<String>,
+    /// The routing category of the sender (Wallet, Safe, Governor).
+    pub sender_category: Option<crate::sender::SenderCategory>,
     /// Per-transaction gas estimate or usage, if available from execution artifacts.
     pub gas_used: Option<u64>,
     /// Pre-rendered per-transaction trace sub-tree, if available.
