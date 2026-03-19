@@ -332,8 +332,8 @@ pub async fn reduce_queue(
                 };
 
                 let threshold = if ctx.is_fork {
-                    let rpc = super::fork_routing::AnvilRpc::new(ctx.rpc_url);
-                    super::fork_routing::query_safe_threshold(&rpc, safe_address).await?
+                    let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
+                    super::fork_routing::query_safe_threshold(&provider, safe_address).await?
                 } else {
                     let safe_client = treb_safe::SafeServiceClient::new(ctx.chain_id)
                         .ok_or_else(|| TrebError::Safe(format!(
@@ -358,8 +358,8 @@ pub async fn reduce_queue(
                     // Safe(n/m) — reduce to proposal
                     let operations = build_multisend_operations(&item.run, &item.btxs)?;
                     let nonce = if ctx.is_fork {
-                        let rpc = super::fork_routing::AnvilRpc::new(ctx.rpc_url);
-                        super::fork_routing::query_safe_nonce(&rpc, safe_address).await?
+                        let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
+                        super::fork_routing::query_safe_nonce(&provider, safe_address).await?
                     } else {
                         let safe_client = treb_safe::SafeServiceClient::new(ctx.chain_id)
                             .ok_or_else(|| TrebError::Safe(format!(
@@ -530,8 +530,8 @@ pub async fn reduce_queue(
                         };
 
                         let proposer_threshold = if ctx.is_fork {
-                            let rpc = super::fork_routing::AnvilRpc::new(ctx.rpc_url);
-                            super::fork_routing::query_safe_threshold(&rpc, proposer_safe).await?
+                            let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
+                            super::fork_routing::query_safe_threshold(&provider, proposer_safe).await?
                         } else {
                             let safe_client = treb_safe::SafeServiceClient::new(ctx.chain_id)
                                 .ok_or_else(|| TrebError::Safe(format!(
@@ -558,8 +558,8 @@ pub async fn reduce_queue(
                             let ops = build_multisend_operations(&front.run, &front.btxs)?;
                             let inner = extract_routable_txs(&front.run, &front.btxs)?;
                             let nonce = if ctx.is_fork {
-                                let rpc = super::fork_routing::AnvilRpc::new(ctx.rpc_url);
-                                super::fork_routing::query_safe_nonce(&rpc, proposer_safe).await?
+                                let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
+                                super::fork_routing::query_safe_nonce(&provider, proposer_safe).await?
                             } else {
                                 let safe_client = treb_safe::SafeServiceClient::new(ctx.chain_id)
                                     .ok_or_else(|| TrebError::Safe(format!(
@@ -668,8 +668,8 @@ async fn reduce_safe_1of1(
         // Fork mode: the executor will call execute_safe_on_fork,
         // which handles approveHash + execTransaction internally.
         // We encode the action as an Exec targeting the safe address.
-        let rpc = super::fork_routing::AnvilRpc::new(ctx.rpc_url);
-        let nonce = super::fork_routing::query_safe_nonce(&rpc, safe_address).await?;
+        let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
+        let nonce = super::fork_routing::query_safe_nonce(&provider, safe_address).await?;
 
         let (to, data, operation) = if operations.len() == 1 {
             let op = &operations[0];
@@ -831,11 +831,11 @@ pub async fn execute_plan(
                         // Fork: use execute_safe_on_fork for full fidelity.
                         // Pass original btxs when available so CREATE transactions
                         // are properly detected and routed through CreateCall.
-                        let rpc = super::fork_routing::AnvilRpc::new(ctx.rpc_url);
+                        let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
                         let fallback_btxs = build_btxs_from_routable(safe_ctx.safe_address, transactions);
                         let btxs_to_use = original_btxs.unwrap_or(&fallback_btxs);
                         let receipts = super::fork_routing::execute_safe_on_fork(
-                            &rpc,
+                            &provider,
                             &planned.run,
                             btxs_to_use,
                             safe_ctx.safe_address,
