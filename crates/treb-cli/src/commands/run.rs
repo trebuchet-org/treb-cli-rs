@@ -169,7 +169,7 @@ fn is_active_fork_run(
         .any(|entry| active_fork_matches(entry, cwd, network, effective_rpc_url))
 }
 
-pub(crate) fn deployment_banner_mode(_dry_run: bool, broadcast: bool, _active_fork: bool) -> (&'static str, Style) {
+pub(crate) fn deployment_banner_mode(broadcast: bool, _active_fork: bool) -> (&'static str, Style) {
     if broadcast {
         ("BROADCAST", color::GREEN)
     } else {
@@ -801,7 +801,7 @@ pub async fn run(
         }
 
         // Mode
-        let (mode_label, mode_style) = deployment_banner_mode(dry_run, broadcast, is_fork);
+        let (mode_label, mode_style) = deployment_banner_mode(broadcast, is_fork);
         if use_color {
             println!("  {:10} {}", "Mode:", mode_label.style(mode_style));
         } else {
@@ -2229,10 +2229,10 @@ needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
     #[test]
     fn deployment_banner_mode_uses_go_parity_labels() {
         // Mode is driven by broadcast flag only — fork/live distinction removed
-        assert_eq!(deployment_banner_mode(false, false, false).0, "DRY_RUN");
-        assert_eq!(deployment_banner_mode(false, false, true).0, "DRY_RUN");
-        assert_eq!(deployment_banner_mode(false, true, true).0, "BROADCAST");
-        assert_eq!(deployment_banner_mode(false, true, false).0, "BROADCAST");
+        assert_eq!(deployment_banner_mode(false, false).0, "DRY_RUN");
+        assert_eq!(deployment_banner_mode(false, true).0, "DRY_RUN");
+        assert_eq!(deployment_banner_mode(true, true).0, "BROADCAST");
+        assert_eq!(deployment_banner_mode(true, false).0, "BROADCAST");
     }
 
     #[test]

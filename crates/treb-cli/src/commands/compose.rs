@@ -302,7 +302,6 @@ fn print_compose_banner(
     namespace: &str,
     is_fork: bool,
     broadcast: bool,
-    dry_run: bool,
     senders: &[(String, String)], // (role, address) sorted
 ) {
     let use_color = color::is_color_enabled();
@@ -353,7 +352,7 @@ fn print_compose_banner(
     }
 
     // Mode
-    let (mode_label, mode_style) = super::run::deployment_banner_mode(dry_run, broadcast, is_fork);
+    let (mode_label, mode_style) = super::run::deployment_banner_mode(broadcast, is_fork);
     if use_color {
         eprintln!("  {:12} {}", "Mode:", mode_label.style(mode_style));
     } else {
@@ -474,23 +473,20 @@ fn print_resume_banner(start_step: usize, total: usize) {
 
 fn should_prompt_for_broadcast_confirmation(
     broadcast: bool,
-    dry_run: bool,
     prompts_enabled: bool,
     executing_count: usize,
 ) -> bool {
-    broadcast && !dry_run && prompts_enabled && executing_count > 0
+    broadcast && prompts_enabled && executing_count > 0
 }
 
 fn should_reject_interactive_json_broadcast(
     broadcast: bool,
-    dry_run: bool,
     json: bool,
     prompts_enabled: bool,
     executing_count: usize,
 ) -> bool {
     json && should_prompt_for_broadcast_confirmation(
         broadcast,
-        dry_run,
         prompts_enabled,
         executing_count,
     )
@@ -798,13 +794,11 @@ pub async fn run(
     namespace: Option<String>,
     profile: Option<String>,
     broadcast: bool,
-    dry_run: bool,
     resume: bool,
     verify: bool,
     slow: bool,
     legacy: bool,
     verbose: u8,
-    dump_command: bool,
     json: bool,
     env_vars: Vec<String>,
     non_interactive: bool,
@@ -847,8 +841,8 @@ pub async fn run(
         eprintln!();
     }
 
-    // Dry-run: show execution plan and exit.
-    if dry_run {
+    // Simulation mode: show execution plan and exit (no project init needed).
+    if !broadcast {
         let plan = build_plan(&compose, &order, &skip_set);
         if json {
             output::print_json(&plan)?;
@@ -870,62 +864,12 @@ pub async fn run(
     let cwd = env::current_dir().context("failed to determine current directory")?;
     super::run::ensure_initialized(&cwd)?;
 
-    // ── Dump command: print per-component forge commands and exit ─────
-    if dump_command {
-        let dump_params = ComposeParams {
-            cwd: &cwd,
-            namespace: &namespace,
-            network: &network,
-            rpc_url: &rpc_url,
-            profile: &profile,
-            env_vars: &env_vars,
-            broadcast,
-            slow,
-            legacy,
-            verify,
-            verbose,
-        };
-        for name in &order {
-            let component = &compose.components[name];
-
-            if skip_set.contains(name) {
-                if !json {
-                    println!("# {} (skipped)", name);
-                }
-                continue;
-            }
-
-            let setup = setup_component(name, component, &dump_params)
-                .await
-                .with_context(|| format!("failed to set up component '{}'", name))?;
-
-            let cmd_parts = setup.script_config.to_forge_command();
-            let cmd_str = cmd_parts
-                .iter()
-                .map(|p| {
-                    if p.contains(' ') || p.contains('"') {
-                        format!("'{}'", p.replace('\'', "'\\''"))
-                    } else {
-                        p.clone()
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(" ");
-            if !json {
-                println!("# {}", name);
-                println!("{}", cmd_str);
-            }
-        }
-        return Ok(());
-    }
-
     let prompts_enabled = !is_non_interactive(non_interactive);
     let executing_count = order.iter().filter(|name| !skip_set.contains(*name)).count();
 
     // ── Reject interactive broadcast in JSON mode ─────────────────────
     if should_reject_interactive_json_broadcast(
         broadcast,
-        dry_run,
         json,
         prompts_enabled,
         executing_count,
@@ -1030,7 +974,6 @@ pub async fn run(
             &banner_resolved.namespace,
             banner_is_fork,
             broadcast,
-            dry_run,
             &banner_sender_list,
         );
         if resume {
@@ -2538,20 +2481,18 @@ components:
 
     #[test]
     fn prompt_for_broadcast_confirmation_requires_remaining_components() {
-        assert!(should_prompt_for_broadcast_confirmation(true, false, true, 1));
-        assert!(!should_prompt_for_broadcast_confirmation(true, false, true, 0));
-        assert!(!should_prompt_for_broadcast_confirmation(true, true, true, 1));
-        assert!(!should_prompt_for_broadcast_confirmation(true, false, false, 1));
-        assert!(!should_prompt_for_broadcast_confirmation(false, false, true, 1));
+        assert!(should_prompt_for_broadcast_confirmation(true, true, 1));
+        assert!(!should_prompt_for_broadcast_confirmation(true, true, 0));
+        assert!(!should_prompt_for_broadcast_confirmation(true, false, 1));
+        assert!(!should_prompt_for_broadcast_confirmation(false, true, 1));
     }
 
     #[test]
     fn interactive_json_broadcast_is_not_rejected_when_resume_is_a_no_op() {
-        assert!(should_reject_interactive_json_broadcast(true, false, true, true, 1));
-        assert!(!should_reject_interactive_json_broadcast(true, false, true, true, 0));
-        assert!(!should_reject_interactive_json_broadcast(true, false, true, false, 1));
-        assert!(!should_reject_interactive_json_broadcast(true, false, false, true, 1));
-        assert!(!should_reject_interactive_json_broadcast(true, true, true, true, 1));
+        assert!(should_reject_interactive_json_broadcast(true, true, true, 1));
+        assert!(!should_reject_interactive_json_broadcast(true, true, true, 0));
+        assert!(!should_reject_interactive_json_broadcast(true, true, false, 1));
+        assert!(!should_reject_interactive_json_broadcast(true, false, true, 1));
     }
 
     #[test]
