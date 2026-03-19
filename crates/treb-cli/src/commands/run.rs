@@ -938,7 +938,7 @@ async fn handle_queued_executions(
     chain_id: u64,
     prompts_enabled: bool,
     is_fork: bool,
-    _skip_fork_execution: bool,
+    skip_fork_execution: bool,
     cwd: &std::path::Path,
     registry: &mut treb_registry::Registry,
 ) -> anyhow::Result<()> {
@@ -968,11 +968,19 @@ async fn handle_queued_executions(
                     );
                 }
 
-                if is_fork && prompts_enabled {
-                    let simulate = crate::ui::prompt::confirm(
-                        "  Simulate Safe execution on fork?", true,
-                    );
-                    if simulate {
+                if is_fork {
+                    let should_simulate = if skip_fork_execution {
+                        false
+                    } else if prompts_enabled {
+                        crate::ui::prompt::confirm(
+                            "  Simulate Safe execution on fork?", true,
+                        )
+                    } else {
+                        // Non-interactive fork: auto-simulate (matches Go CLI behavior)
+                        true
+                    };
+
+                    if should_simulate {
                         let fork_rpc = resolve_fork_rpc(cwd, chain_id)?;
                         match treb_forge::pipeline::fork_routing::exec_safe_from_registry(
                             &fork_rpc,
@@ -1023,9 +1031,6 @@ async fn handle_queued_executions(
                     } else {
                         eprintln!("  Saved as queued — execute later via `treb fork exec`");
                     }
-                } else if is_fork {
-                    // Non-interactive fork: save as queued
-                    eprintln!("  Saved as queued — execute later via `treb fork exec`");
                 }
                 // Live mode: already proposed to Safe TX Service
             }
@@ -1056,11 +1061,19 @@ async fn handle_queued_executions(
                     );
                 }
 
-                if is_fork && prompts_enabled {
-                    let simulate = crate::ui::prompt::confirm(
-                        "  Simulate governance execution on fork?", true,
-                    );
-                    if simulate {
+                if is_fork {
+                    let should_simulate = if skip_fork_execution {
+                        false
+                    } else if prompts_enabled {
+                        crate::ui::prompt::confirm(
+                            "  Simulate governance execution on fork?", true,
+                        )
+                    } else {
+                        // Non-interactive fork: auto-simulate (matches Go CLI behavior)
+                        true
+                    };
+
+                    if should_simulate {
                         let fork_rpc = resolve_fork_rpc(cwd, chain_id)?;
                         let governance_addr = timelock_address.unwrap_or(*governor_address);
                         let targets: Vec<_> = actions.iter()
@@ -1118,8 +1131,6 @@ async fn handle_queued_executions(
                     } else {
                         eprintln!("  Saved as queued — execute later via `treb fork exec`");
                     }
-                } else if is_fork {
-                    eprintln!("  Saved as queued — execute later via `treb fork exec`");
                 }
                 // Live mode: governance takes time, just record
             }
