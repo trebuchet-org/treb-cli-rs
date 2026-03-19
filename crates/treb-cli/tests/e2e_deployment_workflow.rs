@@ -14,7 +14,6 @@ use e2e::{
 /// Full deployment lifecycle: init → run → list → show → tag add → list-with-tag →
 /// list-with-nonexistent-tag → tag remove → show-verify-tags.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore] // TODO: re-enable after live broadcast signing is implemented
 async fn e2e_full_deployment_lifecycle() {
     let Some(anvil) = spawn_anvil_or_skip().await else {
         return;
@@ -122,7 +121,6 @@ async fn e2e_full_deployment_lifecycle() {
 
 /// Validate all RunOutputJson fields from `treb run --json`.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore] // TODO: re-enable after live broadcast signing is implemented
 async fn e2e_run_json_output_fields() {
     let Some(anvil) = spawn_anvil_or_skip().await else {
         return;
@@ -183,9 +181,8 @@ async fn e2e_run_json_output_fields() {
     drop(anvil);
 }
 
-/// Dry-run does not write state to deployments.json.
+/// Simulation-only (no --broadcast) does not write state to deployments.json.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore] // TODO: re-enable after live broadcast signing is implemented
 async fn e2e_dry_run_no_registry_mutation() {
     let Some(anvil) = spawn_anvil_or_skip().await else {
         return;
@@ -194,7 +191,7 @@ async fn e2e_dry_run_no_registry_mutation() {
 
     let tmp = setup_project().await;
 
-    // Run with --dry-run — should simulate but not persist.
+    // Run without --broadcast — simulation-only mode, should not persist.
     let tmp_path = tmp.path().to_path_buf();
     let rpc = rpc_url.clone();
     tokio::task::spawn_blocking(move || {
@@ -204,8 +201,6 @@ async fn e2e_dry_run_no_registry_mutation() {
                 "script/TrebDeploySimple.s.sol",
                 "--rpc-url",
                 &rpc,
-                "--broadcast",
-                "--dry-run",
                 "--non-interactive",
             ])
             .current_dir(&tmp_path)
