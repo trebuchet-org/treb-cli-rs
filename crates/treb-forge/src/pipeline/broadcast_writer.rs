@@ -159,6 +159,82 @@ pub fn relative_broadcast_path(
 // Build ScriptSequence
 // ---------------------------------------------------------------------------
 
+/// Build a pre-routing `ScriptSequence` from broadcastable transactions.
+///
+/// Creates a mutable checkpoint target **before** routing begins. Every
+/// transaction from the script is included with `hash: None` and no receipts,
+/// so the sequence can be updated in-place as each transaction is confirmed
+/// during broadcast.
+pub fn build_pre_routing_sequence(
+    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    recorded_txs: &[RecordedTransaction],
+    ctx: &PipelineContext,
+    broadcast_path: PathBuf,
+    cache_path: PathBuf,
+) -> ScriptSequence {
+    let mut transactions = VecDeque::new();
+    let rpc_url = ctx.config.rpc_url.as_deref().unwrap_or_default();
+
+    for (i, btx) in btxs.iter().enumerate() {
+        let tx_maybe_signed = btx.transaction.clone();
+        let mut tx_meta = TransactionWithMetadata::from_tx_request(tx_maybe_signed);
+        tx_meta.rpc = rpc_url.to_string();
+
+        // hash is None — not yet broadcast
+
+        // Determine opcode (Create vs Call)
+        let is_create =
+            btx.transaction
+                .to()
+                .is_none_or(|to| matches!(to, alloy_primitives::TxKind::Create));
+        tx_meta.opcode = if is_create {
+            CallKind::Create
+        } else {
+            CallKind::Call
+        };
+
+        // Set contract metadata from recorded transaction
+        if let Some(rt) = recorded_txs.get(i) {
+            if let Some(op) = rt.transaction.operations.first() {
+                if op.operation_type == "DEPLOY" {
+                    tx_meta.contract_name = Some(op.target.clone());
+                    if let Some(addr_val) = op.result.get("address") {
+                        if let Some(addr_str) = addr_val.as_str() {
+                            tx_meta.contract_address = addr_str.parse().ok();
+                        }
+                    }
+                }
+                if !op.method.is_empty() && op.method != "CREATE" {
+                    tx_meta.function = Some(op.method.clone());
+                }
+            }
+        }
+
+        transactions.push_back(tx_meta);
+    }
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+
+    ScriptSequence {
+        transactions,
+        receipts: Vec::new(),
+        libraries: Vec::new(),
+        pending: Vec::new(),
+        paths: Some((broadcast_path, cache_path)),
+        returns: AlloyHashMap::default(),
+        timestamp,
+        chain: ctx.config.chain_id,
+        commit: if ctx.git_commit.is_empty() {
+            None
+        } else {
+            Some(ctx.git_commit.clone())
+        },
+    }
+}
+
 /// Build a Foundry-compatible `ScriptSequence` from routing results.
 ///
 /// Only includes transactions that were actually broadcast on-chain (wallet
@@ -652,5 +728,262 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let result = load_resume_state(tmp.path(), "script/Deploy.s.sol", 1, "run()");
         assert!(result.is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // build_pre_routing_sequence tests
+    // -----------------------------------------------------------------------
+
+    use alloy_primitives::Address;
+    use foundry_cheatcodes::BroadcastableTransaction;
+    use foundry_common::TransactionMaybeSigned;
+    use treb_core::types::{
+        enums::TransactionStatus,
+        transaction::{Operation, Transaction},
+    };
+
+    /// Build a synthetic broadcastable transaction for testing.
+    fn make_btx(from: Address, to: Option<Address>, data: &[u8]) -> BroadcastableTransaction {
+        let tx_json = if let Some(to_addr) = to {
+            serde_json::json!({
+                "from": format!("{:#x}", from),
+                "to": format!("{:#x}", to_addr),
+                "data": format!("0x{}", alloy_primitives::hex::encode(data)),
+            })
+        } else {
+            // Create transaction (no `to`)
+            serde_json::json!({
+                "from": format!("{:#x}", from),
+                "data": format!("0x{}", alloy_primitives::hex::encode(data)),
+            })
+        };
+        let tx: TransactionMaybeSigned =
+            serde_json::from_value(tx_json).expect("build synthetic tx");
+        BroadcastableTransaction { rpc: None, transaction: tx }
+    }
+
+    /// Build a minimal RecordedTransaction with an optional DEPLOY operation.
+    fn make_recorded_tx(
+        id: &str,
+        deploy_contract: Option<(&str, &str)>,
+        method: &str,
+    ) -> RecordedTransaction {
+        let operations = if let Some((name, addr)) = deploy_contract {
+            let mut result = std::collections::HashMap::new();
+            result.insert("address".into(), serde_json::json!(addr));
+            vec![Operation {
+                operation_type: "DEPLOY".into(),
+                target: name.into(),
+                method: method.into(),
+                result,
+            }]
+        } else if !method.is_empty() {
+            vec![Operation {
+                operation_type: "CALL".into(),
+                target: String::new(),
+                method: method.into(),
+                result: Default::default(),
+            }]
+        } else {
+            Vec::new()
+        };
+
+        RecordedTransaction {
+            transaction: Transaction {
+                id: id.into(),
+                chain_id: 1,
+                hash: String::new(),
+                status: TransactionStatus::Executed,
+                block_number: 0,
+                sender: "0xSender".into(),
+                nonce: 0,
+                deployments: Vec::new(),
+                operations,
+                safe_context: None,
+                broadcast_file: None,
+                environment: "production".into(),
+                created_at: chrono::Utc::now(),
+            },
+            sender_name: None,
+            sender_category: None,
+            gas_used: None,
+            trace: None,
+        }
+    }
+
+    fn test_pipeline_context() -> PipelineContext {
+        PipelineContext {
+            config: super::super::PipelineConfig {
+                script_path: "script/Deploy.s.sol".into(),
+                chain_id: 42220,
+                rpc_url: Some("http://localhost:8545".into()),
+                ..Default::default()
+            },
+            script_path: PathBuf::from("script/Deploy.s.sol"),
+            git_commit: "abc1234".into(),
+            project_root: PathBuf::from("/tmp/project"),
+            resolved_senders: Default::default(),
+            sender_labels: Default::default(),
+            sender_configs: Default::default(),
+            sender_role_names: Default::default(),
+        }
+    }
+
+    #[test]
+    fn pre_routing_sequence_transaction_count_matches_btxs() {
+        let from = Address::repeat_byte(0x01);
+        let to = Address::repeat_byte(0x02);
+        let mut btxs = foundry_cheatcodes::BroadcastableTransactions::default();
+        btxs.push_back(make_btx(from, Some(to), &[0x01]));
+        btxs.push_back(make_btx(from, Some(to), &[0x02]));
+        btxs.push_back(make_btx(from, None, &[0x03]));
+
+        let ctx = test_pipeline_context();
+        let seq = build_pre_routing_sequence(
+            &btxs,
+            &[],
+            &ctx,
+            PathBuf::from("/tmp/broadcast.json"),
+            PathBuf::from("/tmp/cache.json"),
+        );
+
+        assert_eq!(seq.transactions.len(), btxs.len());
+    }
+
+    #[test]
+    fn pre_routing_sequence_all_hashes_none() {
+        let from = Address::repeat_byte(0x01);
+        let to = Address::repeat_byte(0x02);
+        let mut btxs = foundry_cheatcodes::BroadcastableTransactions::default();
+        btxs.push_back(make_btx(from, Some(to), &[0x01]));
+        btxs.push_back(make_btx(from, None, &[0x02]));
+
+        let ctx = test_pipeline_context();
+        let seq = build_pre_routing_sequence(
+            &btxs,
+            &[],
+            &ctx,
+            PathBuf::from("/tmp/broadcast.json"),
+            PathBuf::from("/tmp/cache.json"),
+        );
+
+        for tx_meta in &seq.transactions {
+            assert!(tx_meta.hash.is_none(), "pre-routing hash must be None");
+        }
+    }
+
+    #[test]
+    fn pre_routing_sequence_receipts_and_pending_empty() {
+        let from = Address::repeat_byte(0x01);
+        let mut btxs = foundry_cheatcodes::BroadcastableTransactions::default();
+        btxs.push_back(make_btx(from, Some(Address::repeat_byte(0x02)), &[0x01]));
+
+        let ctx = test_pipeline_context();
+        let seq = build_pre_routing_sequence(
+            &btxs,
+            &[],
+            &ctx,
+            PathBuf::from("/tmp/broadcast.json"),
+            PathBuf::from("/tmp/cache.json"),
+        );
+
+        assert!(seq.receipts.is_empty(), "pre-routing receipts must be empty");
+        assert!(seq.pending.is_empty(), "pre-routing pending must be empty");
+    }
+
+    #[test]
+    fn pre_routing_sequence_contract_metadata_from_recorded_tx() {
+        let from = Address::repeat_byte(0x01);
+        let mut btxs = foundry_cheatcodes::BroadcastableTransactions::default();
+        // Create transaction (deploy)
+        btxs.push_back(make_btx(from, None, &[0x60, 0x80]));
+        // Call transaction
+        btxs.push_back(make_btx(from, Some(Address::repeat_byte(0x02)), &[0xab, 0xcd]));
+
+        let recorded_txs = vec![
+            make_recorded_tx("tx-1", Some(("Counter", "0x0000000000000000000000000000000000001234")), "CREATE"),
+            make_recorded_tx("tx-2", None, "setNumber"),
+        ];
+
+        let ctx = test_pipeline_context();
+        let seq = build_pre_routing_sequence(
+            &btxs,
+            &recorded_txs,
+            &ctx,
+            PathBuf::from("/tmp/broadcast.json"),
+            PathBuf::from("/tmp/cache.json"),
+        );
+
+        // First tx: deploy → should have contract name and address
+        let deploy_tx = &seq.transactions[0];
+        assert_eq!(deploy_tx.contract_name.as_deref(), Some("Counter"));
+        assert!(deploy_tx.contract_address.is_some());
+        assert_eq!(deploy_tx.opcode, CallKind::Create);
+
+        // Second tx: call → should have function name, no contract name
+        let call_tx = &seq.transactions[1];
+        assert_eq!(call_tx.function.as_deref(), Some("setNumber"));
+        assert!(call_tx.contract_name.is_none());
+        assert_eq!(call_tx.opcode, CallKind::Call);
+    }
+
+    #[test]
+    fn pre_routing_sequence_chain_and_commit() {
+        let mut btxs = foundry_cheatcodes::BroadcastableTransactions::default();
+        btxs.push_back(make_btx(
+            Address::repeat_byte(0x01),
+            Some(Address::repeat_byte(0x02)),
+            &[0x01],
+        ));
+
+        let ctx = test_pipeline_context();
+        let seq = build_pre_routing_sequence(
+            &btxs,
+            &[],
+            &ctx,
+            PathBuf::from("/tmp/broadcast.json"),
+            PathBuf::from("/tmp/cache.json"),
+        );
+
+        assert_eq!(seq.chain, 42220);
+        assert_eq!(seq.commit.as_deref(), Some("abc1234"));
+    }
+
+    #[test]
+    fn pre_routing_sequence_empty_btxs() {
+        let btxs = foundry_cheatcodes::BroadcastableTransactions::default();
+        let ctx = test_pipeline_context();
+        let seq = build_pre_routing_sequence(
+            &btxs,
+            &[],
+            &ctx,
+            PathBuf::from("/tmp/broadcast.json"),
+            PathBuf::from("/tmp/cache.json"),
+        );
+
+        assert!(seq.transactions.is_empty());
+        assert!(seq.receipts.is_empty());
+        assert!(seq.pending.is_empty());
+    }
+
+    #[test]
+    fn pre_routing_sequence_rpc_url_set() {
+        let mut btxs = foundry_cheatcodes::BroadcastableTransactions::default();
+        btxs.push_back(make_btx(
+            Address::repeat_byte(0x01),
+            Some(Address::repeat_byte(0x02)),
+            &[0x01],
+        ));
+
+        let ctx = test_pipeline_context();
+        let seq = build_pre_routing_sequence(
+            &btxs,
+            &[],
+            &ctx,
+            PathBuf::from("/tmp/broadcast.json"),
+            PathBuf::from("/tmp/cache.json"),
+        );
+
+        assert_eq!(seq.transactions[0].rpc, "http://localhost:8545");
     }
 }
