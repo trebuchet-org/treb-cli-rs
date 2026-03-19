@@ -2,7 +2,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use alloy_primitives::Address;
+use alloy_primitives::{Address, U256};
+use alloy_provider::Provider;
 
 use crate::sender::ResolvedSender;
 
@@ -20,8 +21,12 @@ pub async fn fund_senders_on_fork(
     resolved_senders: &HashMap<String, ResolvedSender>,
     amount_eth: u64,
 ) -> Vec<(String, Address, bool)> {
-    let balance_wei_hex = format!("{:#x}", amount_eth as u128 * 1_000_000_000_000_000_000u128);
-    let client = reqwest::Client::new();
+    let provider = match crate::provider::build_http_provider(rpc_url) {
+        Ok(p) => p,
+        Err(_) => return Vec::new(),
+    };
+
+    let balance = U256::from(amount_eth) * U256::from(1_000_000_000_000_000_000u128);
 
     let mut seen = HashSet::new();
     let mut results = Vec::new();
@@ -32,17 +37,8 @@ pub async fn fund_senders_on_fork(
             continue;
         }
 
-        let body = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "anvil_setBalance",
-            "params": [format!("{:#x}", addr), &balance_wei_hex],
-            "id": 1
-        });
-
-        let ok = client
-            .post(rpc_url)
-            .json(&body)
-            .send()
+        let ok = provider
+            .raw_request::<_, serde_json::Value>("anvil_setBalance".into(), (addr, balance))
             .await
             .is_ok();
 

@@ -633,11 +633,12 @@ pub async fn load_resume_state(
     let mut pending_tx_hashes = std::collections::HashSet::new();
 
     if !hashes_to_check.is_empty() {
-        let client = reqwest::Client::new();
-        for hash in &hashes_to_check {
-            match poll_receipt_exists(&client, rpc_url, hash).await {
-                true => { completed_tx_hashes.insert(*hash); }
-                false => { pending_tx_hashes.insert(*hash); }
+        if let Ok(provider) = crate::provider::build_http_provider(rpc_url) {
+            for hash in &hashes_to_check {
+                match poll_receipt_exists(&provider, hash).await {
+                    true => { completed_tx_hashes.insert(*hash); }
+                    false => { pending_tx_hashes.insert(*hash); }
+                }
             }
         }
     }
@@ -664,37 +665,13 @@ pub async fn load_resume_state(
 
 /// Check whether an on-chain receipt exists for a transaction hash.
 ///
-/// Returns `true` if the RPC returns a non-null result, `false` otherwise
+/// Returns `true` if the provider returns a receipt, `false` otherwise
 /// (including RPC errors — treated as "not yet confirmed").
 async fn poll_receipt_exists(
-    client: &reqwest::Client,
-    rpc_url: &str,
+    provider: &impl alloy_provider::Provider,
     tx_hash: &B256,
 ) -> bool {
-    let req = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "eth_getTransactionReceipt",
-        "params": [format!("{:#x}", tx_hash)],
-        "id": 1,
-    });
-
-    let resp: Result<serde_json::Value, _> = async {
-        client
-            .post(rpc_url)
-            .json(&req)
-            .send()
-            .await?
-            .json()
-            .await
-    }.await;
-
-    match resp {
-        Ok(val) => {
-            // result is non-null when the receipt exists
-            val.get("result").is_some_and(|r| !r.is_null())
-        }
-        Err(_) => false,
-    }
+    matches!(provider.get_transaction_receipt(*tx_hash).await, Ok(Some(_)))
 }
 
 // ---------------------------------------------------------------------------
@@ -1190,9 +1167,18 @@ mod tests {
                 let result = if is_confirmed {
                     serde_json::json!({
                         "transactionHash": hash_str,
+                        "transactionIndex": "0x0",
+                        "blockHash": "0x0000000000000000000000000000000000000000000000000000000000000001",
                         "blockNumber": "0x1",
+                        "from": "0x0000000000000000000000000000000000000001",
+                        "to": "0x0000000000000000000000000000000000000002",
+                        "cumulativeGasUsed": "0x5208",
                         "gasUsed": "0x5208",
+                        "effectiveGasPrice": "0x3b9aca00",
                         "status": "0x1",
+                        "logs": [],
+                        "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                        "type": "0x0"
                     })
                 } else {
                     serde_json::Value::Null
@@ -1205,7 +1191,7 @@ mod tests {
                 });
                 let resp_str = resp_body.to_string();
                 let http_resp = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                     resp_str.len(),
                     resp_str,
                 );

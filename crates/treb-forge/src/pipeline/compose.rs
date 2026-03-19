@@ -325,33 +325,28 @@ pub async fn replay_transactions_on_fork(
     rpc_url: &str,
     txs: &foundry_cheatcodes::BroadcastableTransactions,
 ) -> Result<(), TrebError> {
-    let client = reqwest::Client::new();
+    use alloy_provider::Provider;
+    use alloy_rpc_types::{TransactionInput, TransactionRequest};
+    use super::fork_routing::{anvil_impersonate, anvil_stop_impersonating};
+
+    let provider = crate::provider::build_http_provider(rpc_url)?;
 
     for (i, btx) in txs.iter().enumerate() {
         let from = btx.transaction.from().unwrap_or_default();
 
         // Impersonate the sender so Anvil accepts the tx without a signature
-        let impersonate = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "anvil_impersonateAccount",
-            "params": [format!("{:#x}", from)],
-            "id": i * 2 + 1,
-        });
-        client
-            .post(rpc_url)
-            .json(&impersonate)
-            .send()
-            .await
-            .map_err(|e| TrebError::Forge(format!("compose replay: impersonate failed: {e}")))?;
+        anvil_impersonate(&provider, from).await.map_err(|e| {
+            TrebError::Forge(format!("compose replay: impersonate failed: {e}"))
+        })?;
 
-        // Build the eth_sendTransaction request
-        let mut tx_obj = serde_json::Map::new();
-        tx_obj.insert("from".into(), serde_json::json!(format!("{:#x}", from)));
+        // Build the transaction request
+        let mut tx = TransactionRequest::default().from(from);
+        tx.gas = Some(30_000_000);
 
         if let Some(to) = btx.transaction.to() {
             match to {
                 alloy_primitives::TxKind::Call(addr) => {
-                    tx_obj.insert("to".into(), serde_json::json!(format!("{:#x}", addr)));
+                    tx = tx.to(addr);
                 }
                 alloy_primitives::TxKind::Create => {}
             }
@@ -359,55 +354,32 @@ pub async fn replay_transactions_on_fork(
 
         if let Some(input) = btx.transaction.input() {
             if !input.is_empty() {
-                tx_obj.insert(
-                    "data".into(),
-                    serde_json::json!(format!("0x{}", alloy_primitives::hex::encode(input))),
-                );
+                tx = tx.input(TransactionInput::new(input.clone()));
             }
         }
 
         let value = btx.transaction.value().unwrap_or_default();
         if !value.is_zero() {
-            tx_obj.insert("value".into(), serde_json::json!(format!("{:#x}", value)));
+            tx = tx.value(value);
         }
 
-        // Set a high gas limit to avoid estimation issues
-        tx_obj.insert("gas".into(), serde_json::json!("0x1c9c380")); // 30M
+        // Send the transaction and wait for receipt
+        let pending = provider.send_transaction(tx).await.map_err(|e| {
+            TrebError::Forge(format!(
+                "compose replay: tx {} from {:#x} failed: {e}",
+                i, from
+            ))
+        })?;
 
-        let send_tx = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "eth_sendTransaction",
-            "params": [tx_obj],
-            "id": i * 2 + 2,
-        });
-
-        let resp: serde_json::Value = client
-            .post(rpc_url)
-            .json(&send_tx)
-            .send()
-            .await
-            .map_err(|e| TrebError::Forge(format!("compose replay: send tx failed: {e}")))?
-            .json()
-            .await
-            .map_err(|e| TrebError::Forge(format!("compose replay: parse response failed: {e}")))?;
-
-        if let Some(err) = resp.get("error") {
-            return Err(TrebError::Forge(format!(
-                "compose replay: tx {} from {:#x} failed: {}",
-                i,
-                from,
-                err
-            )));
-        }
+        pending.get_receipt().await.map_err(|e| {
+            TrebError::Forge(format!(
+                "compose replay: tx {} from {:#x} receipt failed: {e}",
+                i, from
+            ))
+        })?;
 
         // Stop impersonating
-        let stop = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "anvil_stopImpersonatingAccount",
-            "params": [format!("{:#x}", from)],
-            "id": i * 2 + 3,
-        });
-        let _ = client.post(rpc_url).json(&stop).send().await;
+        anvil_stop_impersonating(&provider, from).await;
     }
 
     Ok(())

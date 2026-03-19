@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    time::Duration,
-};
+use std::collections::{HashMap, HashSet};
 
 use alloy_chains::Chain;
 use anyhow::Context;
@@ -404,11 +401,6 @@ pub async fn run(
             errors.push(warning.clone());
         }
 
-        let http_client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .context("failed to build HTTP client")?;
-
         for proposal in &gov_filtered {
             let rpc_url = match rpc_map.get(&proposal.chain_id) {
                 Some(url) => url,
@@ -432,7 +424,6 @@ pub async fn run(
             }
 
             match query_proposal_state(
-                &http_client,
                 rpc_url,
                 &proposal.governor_address,
                 &proposal.proposal_id,
