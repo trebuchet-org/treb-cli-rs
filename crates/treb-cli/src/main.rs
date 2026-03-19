@@ -102,6 +102,9 @@ enum Commands {
         /// Target contract to run (when multiple contracts in script)
         #[arg(long)]
         target_contract: Option<String>,
+        /// Skip fork execution simulation for queued Safe/Governor transactions
+        #[arg(long)]
+        skip_fork_execution: bool,
     },
     /// List deployments from registry
     ///
@@ -1046,6 +1049,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             json,
             env,
             target_contract,
+            skip_fork_execution,
         } => {
             commands::run::run(
                 &script,
@@ -1066,6 +1070,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 env,
                 target_contract,
                 non_interactive,
+                skip_fork_execution,
             )
             .await?
         }

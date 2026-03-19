@@ -376,6 +376,8 @@ pub struct ExecuteScriptOpts {
     pub broadcast_hook: Option<BroadcastHook>,
     /// Source identifier for fork run snapshots (set when `is_fork` is true).
     pub fork_run_source: Option<treb_core::types::fork::ForkRunSource>,
+    /// Skip fork execution simulation for queued Safe/Governor transactions.
+    pub skip_fork_execution: bool,
 }
 
 /// Execute a single script through the full pipeline.
@@ -617,6 +619,7 @@ pub async fn run(
     env_vars: Vec<String>,
     target_contract: Option<String>,
     non_interactive: bool,
+    skip_fork_execution: bool,
 ) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     ensure_initialized(&cwd)?;
@@ -890,6 +893,7 @@ pub async fn run(
             } else {
                 None
             },
+            skip_fork_execution,
         },
         &resolved,
         &mut resolved_senders,
@@ -902,7 +906,7 @@ pub async fn run(
     if !result.queued_executions.is_empty() && !json {
         handle_queued_executions(
             &mut result, chain_id, prompts_enabled,
-            active_fork.is_some(), &cwd, &mut registry,
+            active_fork.is_some(), skip_fork_execution, &cwd, &mut registry,
         ).await?;
     } else if !result.proposed_results.is_empty() && prompts_enabled && !json {
         // Fallback: old-style polling for live mode (no queued items)
@@ -934,6 +938,7 @@ async fn handle_queued_executions(
     chain_id: u64,
     prompts_enabled: bool,
     is_fork: bool,
+    _skip_fork_execution: bool,
     cwd: &std::path::Path,
     registry: &mut treb_registry::Registry,
 ) -> anyhow::Result<()> {

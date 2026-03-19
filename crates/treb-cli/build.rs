@@ -87,6 +87,12 @@ fn build_run() -> ClapCommand {
         .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
         .arg(Arg::new("env").long("env").num_args(1).help("Set environment variables (KEY=VALUE)"))
         .arg(Arg::new("target-contract").long("target-contract").help("Target contract to run"))
+        .arg(
+            Arg::new("skip-fork-execution")
+                .long("skip-fork-execution")
+                .action(ArgAction::SetTrue)
+                .help("Skip fork execution simulation for queued Safe/Governor transactions"),
+        )
 }
 
 fn build_list() -> ClapCommand {
