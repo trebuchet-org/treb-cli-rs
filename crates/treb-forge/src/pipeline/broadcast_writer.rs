@@ -644,8 +644,8 @@ pub async fn load_resume_state(
             }
             Err(_) => {
                 // Provider construction failed (e.g. malformed URL).
-                // Treat all hashes as pending to match old reqwest semantics
-                // where connection failures → no receipt → pending.
+                // Treat all hashes as pending — connection failures mean
+                // we can't confirm receipts, so assume pending.
                 for hash in &hashes_to_check {
                     pending_tx_hashes.insert(*hash);
                 }
