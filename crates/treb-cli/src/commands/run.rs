@@ -1118,7 +1118,7 @@ async fn handle_queued_executions(
                                     }
                                     // Update fork_executed_at on governor proposals
                                     for proposal in &mut result.governor_proposals {
-                                        if proposal.governor_address == format!("{:#x}", governor_address) {
+                                        if proposal.governor_address.eq_ignore_ascii_case(&format!("{:#x}", governor_address)) {
                                             proposal.fork_executed_at = Some(chrono::Utc::now());
                                             let _ = registry.update_governor_proposal(proposal.clone());
                                         }
