@@ -484,8 +484,11 @@ pub async fn execute_script(
         session = session.with_resume(true);
     }
 
-    // Wire progress spinner
-    let wants_broadcast = opts.broadcast && !opts.dry_run && !is_safe && !is_gov;
+    // Wire progress spinner.
+    // Safe/Governor senders still need broadcast_all() for routing — the
+    // ScriptConfig already has broadcast=false to prevent forge's direct
+    // broadcast, so the routing layer handles Safe execution.
+    let wants_broadcast = opts.broadcast && !opts.dry_run;
     let spinner: Arc<Mutex<Option<spinoff::Spinner>>> = Arc::new(Mutex::new(None));
     if !opts.json {
         let is_broadcast = wants_broadcast;
