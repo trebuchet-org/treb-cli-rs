@@ -70,6 +70,9 @@ console = "0.15"
 owo-colors = { version = "4", features = ["supports-colors"] }
 unicode-width = "0.2"
 
+# URL parsing
+url = "2"
+
 # Environment
 dotenvy = "0.15"
 

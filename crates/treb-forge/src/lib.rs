@@ -14,6 +14,7 @@ pub mod events;
 pub mod fund;
 pub mod governor;
 pub mod pipeline;
+pub mod provider;
 pub mod script;
 pub mod sender;
 pub mod sender_config;

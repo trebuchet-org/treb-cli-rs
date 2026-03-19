@@ -1469,13 +1469,7 @@ async fn broadcast_wallet_run_live(
         resolved_senders,
     )?;
 
-    let url: reqwest::Url = rpc_url
-        .parse()
-        .map_err(|e| TrebError::Forge(format!("invalid RPC URL: {e}")))?;
-
-    let provider = alloy_provider::ProviderBuilder::new()
-        .wallet(wallet)
-        .connect_http(url);
+    let provider = crate::provider::build_wallet_provider(rpc_url, wallet)?;
 
     let mut receipts = Vec::new();
     let mut seq = sequence;
@@ -2015,13 +2009,7 @@ async fn broadcast_routable_txs_live(
 
     let wallet = crate::sender::resolve_wallet_for_address(from, resolved_senders)?;
 
-    let url: reqwest::Url = rpc_url
-        .parse()
-        .map_err(|e| TrebError::Forge(format!("invalid RPC URL: {e}")))?;
-
-    let provider = alloy_provider::ProviderBuilder::new()
-        .wallet(wallet)
-        .connect_http(url);
+    let provider = crate::provider::build_wallet_provider(rpc_url, wallet)?;
 
     let mut receipts = Vec::new();
     let mut seq = sequence;

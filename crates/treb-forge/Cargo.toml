@@ -40,6 +40,9 @@ alloy-rpc-types = { workspace = true }
 alloy-dyn-abi = "1.5"
 alloy-json-abi = "1.5"
 
+# URL parsing
+url = { workspace = true }
+
 # Datetime
 chrono = { workspace = true }
 

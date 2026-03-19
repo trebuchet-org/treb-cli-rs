@@ -8371,6 +8371,7 @@ dependencies = [
  "treb-safe",
  "treb-sol",
  "ureq",
+ "url",
 ]
 
 [[package]]
