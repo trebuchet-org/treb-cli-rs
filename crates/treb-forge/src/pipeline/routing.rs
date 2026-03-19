@@ -842,19 +842,22 @@ pub async fn execute_plan(
                         RunResult::Broadcast(receipts)
                     } else {
                         // Live: the exec transactions contain full execTransaction calldata
+                        // Safe exec wrappers don't align 1:1 with btxs indices — no checkpoint
                         let receipts = broadcast_routable_txs(
                             ctx.rpc_url, *from, transactions, false,
                             ctx.resolved_senders,
                             ctx.sequence.as_deref_mut(),
+                            None,
                         ).await?;
                         RunResult::Broadcast(receipts)
                     }
                 } else {
-                    // Plain wallet broadcast
+                    // Plain wallet broadcast — tx_indices align 1:1 with transactions
                     let receipts = broadcast_routable_txs(
                         ctx.rpc_url, *from, transactions, ctx.is_fork,
                         ctx.resolved_senders,
                         ctx.sequence.as_deref_mut(),
+                        Some(&planned.run.tx_indices),
                     ).await?;
                     RunResult::Broadcast(receipts)
                 }
@@ -1094,10 +1097,11 @@ async fn broadcast_wallet_run_fork(
     rpc_url: &str,
     run: &TransactionRun,
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
-    _sequence: Option<&mut ScriptSequence>,
+    sequence: Option<&mut ScriptSequence>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     let client = reqwest::Client::new();
     let mut receipts = Vec::new();
+    let mut seq = sequence;
 
     for &tx_idx in &run.tx_indices {
         let btx = btxs.get(tx_idx).ok_or_else(|| {
@@ -1181,7 +1185,13 @@ async fn broadcast_wallet_run_fork(
 
         // Fetch receipt
         let receipt = fetch_receipt(&client, rpc_url, tx_hash_hex).await?;
-        receipts.push(receipt);
+        receipts.push(receipt.clone());
+
+        // Checkpoint: update sequence and save to disk
+        if let Some(ref mut s) = seq {
+            super::broadcast_writer::update_sequence_checkpoint(s, tx_idx, &receipt);
+            super::broadcast_writer::save_sequence_checkpoint(s)?;
+        }
 
         let stop = serde_json::json!({
             "jsonrpc": "2.0",
@@ -1201,7 +1211,7 @@ async fn broadcast_wallet_run_live(
     run: &TransactionRun,
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
     resolved_senders: &HashMap<String, ResolvedSender>,
-    _sequence: Option<&mut ScriptSequence>,
+    sequence: Option<&mut ScriptSequence>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     use alloy_provider::Provider;
     use alloy_rpc_types::TransactionRequest;
@@ -1220,6 +1230,7 @@ async fn broadcast_wallet_run_live(
         .connect_http(url);
 
     let mut receipts = Vec::new();
+    let mut seq = sequence;
 
     for &tx_idx in &run.tx_indices {
         let btx = btxs.get(tx_idx).ok_or_else(|| {
@@ -1259,7 +1270,7 @@ async fn broadcast_wallet_run_live(
 
         let raw = serde_json::to_value(&receipt).ok();
 
-        receipts.push(BroadcastReceipt {
+        let br = BroadcastReceipt {
             hash: receipt.transaction_hash,
             block_number: receipt.block_number.unwrap_or(0),
             gas_used: receipt.gas_used,
@@ -1267,7 +1278,15 @@ async fn broadcast_wallet_run_live(
             contract_name: None,
             contract_address: receipt.contract_address,
             raw_receipt: raw,
-        });
+        };
+
+        // Checkpoint: update sequence and save to disk
+        if let Some(ref mut s) = seq {
+            super::broadcast_writer::update_sequence_checkpoint(s, tx_idx, &br);
+            super::broadcast_writer::save_sequence_checkpoint(s)?;
+        }
+
+        receipts.push(br);
     }
 
     Ok(receipts)
@@ -1643,11 +1662,12 @@ async fn broadcast_routable_txs(
     is_fork: bool,
     resolved_senders: &HashMap<String, ResolvedSender>,
     sequence: Option<&mut ScriptSequence>,
+    tx_indices: Option<&[usize]>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     if is_fork {
-        broadcast_routable_txs_fork(rpc_url, from, transactions, sequence).await
+        broadcast_routable_txs_fork(rpc_url, from, transactions, sequence, tx_indices).await
     } else {
-        broadcast_routable_txs_live(rpc_url, from, transactions, resolved_senders, sequence).await
+        broadcast_routable_txs_live(rpc_url, from, transactions, resolved_senders, sequence, tx_indices).await
     }
 }
 
@@ -1656,12 +1676,16 @@ async fn broadcast_routable_txs_fork(
     rpc_url: &str,
     from: Address,
     transactions: &[RoutableTx],
-    _sequence: Option<&mut ScriptSequence>,
+    sequence: Option<&mut ScriptSequence>,
+    tx_indices: Option<&[usize]>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     let client = reqwest::Client::new();
     let mut receipts = Vec::new();
+    let mut seq = sequence;
+    // Only checkpoint when tx_indices aligns 1:1 with transactions
+    let can_checkpoint = tx_indices.is_some_and(|idx| idx.len() == transactions.len());
 
-    for tx in transactions {
+    for (i, tx) in transactions.iter().enumerate() {
         let mut tx_obj = serde_json::Map::new();
         tx_obj.insert("from".into(), serde_json::json!(format!("{:#x}", from)));
         tx_obj.insert("to".into(), serde_json::json!(format!("{:#x}", tx.to)));
@@ -1707,7 +1731,15 @@ async fn broadcast_routable_txs_fork(
 
         let tx_hash_hex = resp.get("result").and_then(|r| r.as_str()).unwrap_or("0x0");
         let receipt = fetch_receipt(&client, rpc_url, tx_hash_hex).await?;
-        receipts.push(receipt);
+        receipts.push(receipt.clone());
+
+        // Checkpoint: update sequence and save to disk
+        if can_checkpoint {
+            if let (Some(s), Some(idx)) = (&mut seq, tx_indices.and_then(|ti| ti.get(i))) {
+                super::broadcast_writer::update_sequence_checkpoint(s, *idx, &receipt);
+                super::broadcast_writer::save_sequence_checkpoint(s)?;
+            }
+        }
 
         let stop = serde_json::json!({
             "jsonrpc": "2.0",
@@ -1727,7 +1759,8 @@ async fn broadcast_routable_txs_live(
     from: Address,
     transactions: &[RoutableTx],
     resolved_senders: &HashMap<String, ResolvedSender>,
-    _sequence: Option<&mut ScriptSequence>,
+    sequence: Option<&mut ScriptSequence>,
+    tx_indices: Option<&[usize]>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     use alloy_provider::Provider;
     use alloy_rpc_types::TransactionRequest;
@@ -1743,8 +1776,11 @@ async fn broadcast_routable_txs_live(
         .connect_http(url);
 
     let mut receipts = Vec::new();
+    let mut seq = sequence;
+    // Only checkpoint when tx_indices aligns 1:1 with transactions
+    let can_checkpoint = tx_indices.is_some_and(|idx| idx.len() == transactions.len());
 
-    for tx in transactions {
+    for (i, tx) in transactions.iter().enumerate() {
         let mut tx_req = TransactionRequest::default();
         tx_req = tx_req.from(from);
         tx_req = tx_req.to(tx.to);
@@ -1769,7 +1805,7 @@ async fn broadcast_routable_txs_live(
 
         let raw = serde_json::to_value(&receipt).ok();
 
-        receipts.push(BroadcastReceipt {
+        let br = BroadcastReceipt {
             hash: receipt.transaction_hash,
             block_number: receipt.block_number.unwrap_or(0),
             gas_used: receipt.gas_used,
@@ -1777,7 +1813,17 @@ async fn broadcast_routable_txs_live(
             contract_name: None,
             contract_address: receipt.contract_address,
             raw_receipt: raw,
-        });
+        };
+
+        // Checkpoint: update sequence and save to disk
+        if can_checkpoint {
+            if let (Some(s), Some(idx)) = (&mut seq, tx_indices.and_then(|ti| ti.get(i))) {
+                super::broadcast_writer::update_sequence_checkpoint(s, *idx, &br);
+                super::broadcast_writer::save_sequence_checkpoint(s)?;
+            }
+        }
+
+        receipts.push(br);
     }
 
     Ok(receipts)

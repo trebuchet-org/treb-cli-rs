@@ -178,6 +178,45 @@ pub fn update_sequence_checkpoint(
     }
 }
 
+/// Ensure broadcast and cache directories exist for the sequence's paths.
+///
+/// Must be called before the first `save_sequence_checkpoint()` so that
+/// Foundry's `ScriptSequence::save()` can write to the expected locations.
+pub fn ensure_broadcast_dirs(sequence: &ScriptSequence) -> Result<(), TrebError> {
+    if let Some((ref broadcast_path, ref cache_path)) = sequence.paths {
+        if let Some(parent) = broadcast_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| {
+                TrebError::Forge(format!(
+                    "failed to create broadcast directory {}: {e}",
+                    parent.display()
+                ))
+            })?;
+        }
+        if let Some(parent) = cache_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| {
+                TrebError::Forge(format!(
+                    "failed to create cache directory {}: {e}",
+                    parent.display()
+                ))
+            })?;
+        }
+    }
+    Ok(())
+}
+
+/// Write a checkpoint of the sequence to `run-latest.json` (no timestamped copy).
+///
+/// Called after each confirmed receipt so that a crash mid-broadcast preserves
+/// all prior progress. The timestamped copy is only written by the final
+/// `write_broadcast_artifacts()` call.
+pub fn save_sequence_checkpoint(
+    sequence: &mut ScriptSequence,
+) -> Result<(), TrebError> {
+    sequence.save(true, false).map_err(|e| {
+        TrebError::Forge(format!("failed to write checkpoint: {e}"))
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Build ScriptSequence
 // ---------------------------------------------------------------------------
