@@ -961,11 +961,20 @@ pub async fn run_history(network: Option<String>, json: bool) -> anyhow::Result<
 
     if json {
         let data = store.data();
+        let history: Vec<_> = if let Some(ref net) = network {
+            data.history
+                .iter()
+                .filter(|e| e.network.split(", ").any(|n| n == net.as_str()))
+                .cloned()
+                .collect()
+        } else {
+            data.history.clone()
+        };
         let output = serde_json::json!({
             "active": data.active,
             "enteredAt": data.entered_at,
             "runSnapshots": data.run_snapshots,
-            "history": data.history,
+            "history": history,
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
         return Ok(());

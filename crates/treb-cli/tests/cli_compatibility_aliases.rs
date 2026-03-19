@@ -424,7 +424,6 @@ fn fork_exit_holistic_succeeds() {
 
 /// Fork history: `--network` flag filters correctly.
 #[test]
-#[ignore] // Phase 9: fork history --network filter was removed; test needs rewrite or deletion
 fn fork_history_network_filter() {
     let tmp = setup_config_project();
     seed_fork_history(tmp.path());
@@ -432,12 +431,12 @@ fn fork_history_network_filter() {
     let all = run_treb_in(tmp.path(), &["fork", "history", "--json"]);
     assert!(all.status.success());
     let all_json: serde_json::Value = serde_json::from_slice(&all.stdout).unwrap();
-    assert_eq!(all_json.as_array().unwrap().len(), 3);
+    assert_eq!(all_json["history"].as_array().unwrap().len(), 3);
 
     let filtered = run_treb_in(tmp.path(), &["fork", "history", "--network", "mainnet", "--json"]);
     assert!(filtered.status.success());
     let filtered_json: serde_json::Value = serde_json::from_slice(&filtered.stdout).unwrap();
-    assert_eq!(filtered_json.as_array().unwrap().len(), 2);
+    assert_eq!(filtered_json["history"].as_array().unwrap().len(), 2);
 }
 
 /// Fork status: `--json` output includes holistic `active` field.
