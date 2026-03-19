@@ -369,6 +369,27 @@ pub fn write_broadcast_artifacts(
     sequence: &mut ScriptSequence,
     deferred: &DeferredOperations,
 ) -> Result<(), TrebError> {
+    // Ensure broadcast and cache directories exist before Foundry's save(),
+    // which assumes the parent directories are already present.
+    if let Some((ref broadcast_path, ref cache_path)) = sequence.paths {
+        if let Some(parent) = broadcast_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| {
+                TrebError::Forge(format!(
+                    "failed to create broadcast directory {}: {e}",
+                    parent.display()
+                ))
+            })?;
+        }
+        if let Some(parent) = cache_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| {
+                TrebError::Forge(format!(
+                    "failed to create cache directory {}: {e}",
+                    parent.display()
+                ))
+            })?;
+        }
+    }
+
     // Save the main ScriptSequence using Foundry's save method
     // (writes run-latest.json + run-{timestamp}.json + cache/ sensitive copy)
     sequence.save(true, true).map_err(|e| {
