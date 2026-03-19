@@ -317,6 +317,51 @@ pub fn read_transactions(project_root: &Path) -> serde_json::Value {
     read_registry_file(project_root, "transactions.json")
 }
 
+/// Assert that broadcast artifacts exist and contain valid data after a broadcast.
+///
+/// Checks:
+/// - `broadcast/` directory exists under the project root
+/// - `broadcast/<script_name>/<chain_id>/run-latest.json` exists and parses as valid JSON
+/// - `transactions` array is non-empty with a non-null `hash` on each entry
+/// - `receipts` array is non-empty with `transactionHash` and `status` fields on each entry
+pub fn assert_broadcast_artifacts(project_root: &Path, script_name: &str, chain_id: u64) {
+    let broadcast_dir = project_root.join("broadcast");
+    assert!(broadcast_dir.exists(), "broadcast/ directory must exist after broadcast");
+
+    let run_latest = broadcast_dir
+        .join(script_name)
+        .join(chain_id.to_string())
+        .join("run-latest.json");
+    assert!(run_latest.exists(), "run-latest.json must exist at {}", run_latest.display());
+
+    let data = fs::read_to_string(&run_latest)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", run_latest.display()));
+    let json: serde_json::Value =
+        serde_json::from_str(&data).unwrap_or_else(|e| panic!("run-latest.json is not valid JSON: {e}"));
+
+    // Validate transactions array.
+    let transactions = json["transactions"]
+        .as_array()
+        .expect("run-latest.json must have a 'transactions' array");
+    assert!(!transactions.is_empty(), "transactions array must not be empty");
+    for (i, tx) in transactions.iter().enumerate() {
+        assert!(!tx["hash"].is_null(), "transactions[{i}].hash must not be null");
+    }
+
+    // Validate receipts array.
+    let receipts = json["receipts"]
+        .as_array()
+        .expect("run-latest.json must have a 'receipts' array");
+    assert!(!receipts.is_empty(), "receipts array must not be empty");
+    for (i, receipt) in receipts.iter().enumerate() {
+        assert!(
+            !receipt["transactionHash"].is_null(),
+            "receipts[{i}].transactionHash must not be null"
+        );
+        assert!(!receipt["status"].is_null(), "receipts[{i}].status must not be null");
+    }
+}
+
 /// Count the number of deployments in `.treb/deployments.json`.
 pub fn deployment_count(project_root: &Path) -> usize {
     let deps = read_deployments(project_root);
