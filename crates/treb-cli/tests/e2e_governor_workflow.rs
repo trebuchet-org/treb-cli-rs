@@ -586,3 +586,260 @@ async fn governor_safe_propose_on_fork() {
 
     drop(anvil);
 }
+
+/// Governor with Wallet proposer and --skip-fork-execution: deploy governance
+/// stack → fork enter → treb run DeployViaGovernor.s.sol --skip-fork-execution →
+/// verify proposal is recorded but NOT fork-simulated → verify QUEUED status
+/// and populated actions array.
+#[tokio::test(flavor = "multi_thread")]
+async fn governor_skip_fork_execution() {
+    // 1. Spawn Anvil
+    let Some(anvil) = spawn_anvil_or_skip().await else {
+        return;
+    };
+    let rpc_url = anvil.rpc_url().to_string();
+
+    // 2. Set up project directory
+    let tmp = tempfile::tempdir().unwrap();
+    copy_dir_recursive(&fixture_project(), tmp.path());
+
+    // 3. Deploy governance stack (token, timelock, governor) on Anvil
+    let project_dir = tmp.path().to_path_buf();
+    let rpc = rpc_url.clone();
+    let gov = tokio::task::spawn_blocking(move || deploy_governor(&project_dir, &rpc, 1))
+        .await
+        .expect("deploy_governor should not panic");
+
+    // Verify governance stack is functional
+    {
+        let rpc = rpc_url.clone();
+        let gov_ref = e2e::deploy_governor::DeployedGovernor {
+            governor_address: gov.governor_address,
+            timelock_address: gov.timelock_address,
+            token_address: gov.token_address,
+            timelock_delay: gov.timelock_delay,
+        };
+        tokio::task::spawn_blocking(move || {
+            verify_governor_via_eth_call(&rpc, &gov_ref);
+        })
+        .await
+        .unwrap();
+    }
+
+    // 4. Write treb.toml with Governor sender config (wallet proposer)
+    write_governor_wallet_treb_toml(tmp.path(), &gov.governor_address, &gov.timelock_address);
+
+    // 5. Run `treb init`
+    let tmp_path = tmp.path().to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        treb().arg("init").current_dir(&tmp_path).assert().success();
+    })
+    .await
+    .unwrap();
+
+    // 6. Enter fork mode
+    let tmp_path = tmp.path().to_path_buf();
+    let rpc = rpc_url.clone();
+    tokio::task::spawn_blocking(move || {
+        treb()
+            .args(["fork", "enter", "--network", "anvil-31337", "--rpc-url", &rpc])
+            .current_dir(&tmp_path)
+            .assert()
+            .success();
+    })
+    .await
+    .unwrap();
+
+    // 7. Run deployment through Governor with --skip-fork-execution
+    let timelock_env = format!("TIMELOCK_ADDRESS={}", gov.timelock_address);
+    let tmp_path = tmp.path().to_path_buf();
+    let rpc = rpc_url.clone();
+    tokio::task::spawn_blocking(move || {
+        let output = treb()
+            .args([
+                "run",
+                "script/DeployViaGovernor.s.sol",
+                "--network",
+                "anvil-31337",
+                "--rpc-url",
+                &rpc,
+                "--broadcast",
+                "--non-interactive",
+                "--skip-fork-execution",
+                "--env",
+                &timelock_env,
+            ])
+            .current_dir(&tmp_path)
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "treb run failed.\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    })
+    .await
+    .unwrap();
+
+    // 8. Verify registry records
+
+    // 8a. Check deployments exist
+    let deps = e2e::read_registry_file(tmp.path(), "deployments.json");
+    let deps_map = deps.as_object().expect("deployments.json must be object");
+    assert_eq!(
+        deps_map.len(),
+        1,
+        "should have exactly 1 deployment, got {}",
+        deps_map.len()
+    );
+
+    // 8b. Verify the deployment has the Counter contract with non-zero address
+    let (_, dep) = deps_map.iter().next().unwrap();
+    assert_eq!(
+        dep["contractName"].as_str(),
+        Some("Counter"),
+        "deployment should be for Counter contract"
+    );
+    let dep_address = dep["address"].as_str().unwrap();
+    assert!(
+        dep_address.starts_with("0x"),
+        "deployment address should start with 0x"
+    );
+    assert_ne!(
+        dep_address,
+        "0x0000000000000000000000000000000000000000",
+        "deployment address should be non-zero"
+    );
+
+    // 8c. Verify governor-txs.json
+    let gov_txs = e2e::read_registry_file(tmp.path(), "governor-txs.json");
+    let gov_txs_map = gov_txs.as_object().expect("governor-txs.json must be object");
+    assert_eq!(
+        gov_txs_map.len(),
+        1,
+        "should have exactly 1 governor proposal, got {}",
+        gov_txs_map.len()
+    );
+
+    let (proposal_id_key, proposal) = gov_txs_map.iter().next().unwrap();
+
+    // proposalId should be non-empty
+    let proposal_id = proposal["proposalId"].as_str().unwrap();
+    assert!(
+        !proposal_id.is_empty(),
+        "proposalId should be non-empty"
+    );
+    assert_eq!(
+        proposal_id, proposal_id_key,
+        "proposalId value should match the map key"
+    );
+
+    // status should be pending (not executed, since we skipped fork execution)
+    assert_eq!(
+        proposal["status"].as_str(),
+        Some("pending"),
+        "governor proposal status should be 'pending'"
+    );
+
+    // governorAddress should match deployed governor
+    assert_eq!(
+        proposal["governorAddress"]
+            .as_str()
+            .unwrap()
+            .to_lowercase(),
+        format!("{}", gov.governor_address).to_lowercase(),
+        "governorAddress should match deployed governor"
+    );
+
+    // timelockAddress should match deployed timelock
+    assert_eq!(
+        proposal["timelockAddress"]
+            .as_str()
+            .unwrap()
+            .to_lowercase(),
+        format!("{}", gov.timelock_address).to_lowercase(),
+        "timelockAddress should match deployed timelock"
+    );
+
+    // chainId should be 31337 (Anvil)
+    assert_eq!(
+        proposal["chainId"].as_u64(),
+        Some(31337),
+        "chainId should be 31337"
+    );
+
+    // forkExecutedAt should NOT be set (--skip-fork-execution was used)
+    assert!(
+        proposal.get("forkExecutedAt").is_none()
+            || proposal["forkExecutedAt"].is_null(),
+        "forkExecutedAt should NOT be set when --skip-fork-execution is used, got: {:?}",
+        proposal.get("forkExecutedAt")
+    );
+
+    // actions should be a non-empty array with target/value/calldata
+    let actions = proposal["actions"]
+        .as_array()
+        .expect("actions must be an array");
+    assert!(
+        !actions.is_empty(),
+        "actions array should have at least 1 entry for Counter deployment"
+    );
+    for action in actions {
+        assert!(
+            action["target"].as_str().is_some(),
+            "action should have a target field"
+        );
+        assert!(
+            action["value"].is_string() || action["value"].is_number(),
+            "action should have a value field"
+        );
+        assert!(
+            action["calldata"].as_str().is_some(),
+            "action should have a calldata field"
+        );
+    }
+
+    // transactionIds should be non-empty
+    let tx_ids = proposal["transactionIds"]
+        .as_array()
+        .expect("transactionIds must be array");
+    assert!(
+        !tx_ids.is_empty(),
+        "should have at least 1 linked transactionId"
+    );
+
+    // 8d. Verify transaction records — all should be QUEUED (not EXECUTED)
+    let txs = read_transactions(tmp.path());
+    let txs_map = txs.as_object().expect("transactions.json must be object");
+    assert!(
+        !txs_map.is_empty(),
+        "should have at least 1 transaction record"
+    );
+
+    let timelock_addr_str = format!("{}", gov.timelock_address);
+    for tx_id in tx_ids {
+        let tx_id_str = tx_id.as_str().unwrap();
+        let tx = &txs_map[tx_id_str];
+
+        // Sender should be the timelock address
+        assert_eq!(
+            tx["sender"].as_str().unwrap().to_lowercase(),
+            timelock_addr_str.to_lowercase(),
+            "transaction sender should be the timelock address"
+        );
+
+        // With --skip-fork-execution, transactions must be strictly QUEUED
+        assert_eq!(
+            tx["status"].as_str(),
+            Some("QUEUED"),
+            "linked transaction {tx_id_str} should be QUEUED when --skip-fork-execution is used"
+        );
+    }
+
+    // 8e. Verify registry consistency
+    e2e::assert_registry_consistent(tmp.path());
+
+    drop(anvil);
+}
