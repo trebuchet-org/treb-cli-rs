@@ -123,7 +123,7 @@ impl RunPipeline {
 
         // Derive deployer sender category from resolved_senders for broadcast gating.
         let deployer_is_safe = self.context.resolved_senders.get("deployer").is_some_and(|s| s.is_safe());
-        let deployer_is_governor = self.context.resolved_senders.get("deployer").is_some_and(|s| s.is_governor());
+        let has_governor_sender = self.context.resolved_senders.values().any(|s| s.is_governor());
 
         // 1. Compile project for artifact index
         report(BroadcastPhase::Compiling);
@@ -306,7 +306,7 @@ impl RunPipeline {
                 || !resolved.to_update.is_empty()
                 || !recorded_transactions.is_empty()
                 || !all_safe_transactions.is_empty()
-                || (deployer_is_governor && !governor_proposals.is_empty()));
+                || (has_governor_sender && !governor_proposals.is_empty()));
 
         // 14. Record to registry (or build dry-run result)
         let mut recorded_deployments = Vec::new();
@@ -328,10 +328,8 @@ impl RunPipeline {
             for safe_tx in &all_safe_transactions {
                 registry.insert_safe_transaction(safe_tx.clone())?;
             }
-            if deployer_is_governor {
-                for proposal in &governor_proposals {
-                    registry.insert_governor_proposal(proposal.clone())?;
-                }
+            for proposal in &governor_proposals {
+                registry.insert_governor_proposal(proposal.clone())?;
             }
         } else {
             for dep in resolved.to_insert.into_iter().chain(resolved.to_update) {
@@ -1904,11 +1902,8 @@ impl SimulatedSession {
                             for safe_tx in &result.safe_transactions {
                                 let _ = registry.insert_safe_transaction(safe_tx.clone());
                             }
-                            let deployer_is_governor = context.resolved_senders.get("deployer").is_some_and(|s| s.is_governor());
-                            if deployer_is_governor {
-                                for proposal in &result.governor_proposals {
-                                    let _ = registry.insert_governor_proposal(proposal.clone());
-                                }
+                            for proposal in &result.governor_proposals {
+                                let _ = registry.insert_governor_proposal(proposal.clone());
                             }
 
                             result.deployments = recorded_deployments;
