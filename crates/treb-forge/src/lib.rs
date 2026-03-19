@@ -43,7 +43,7 @@ pub use script::{
 };
 pub use sender::{
     ResolvedSender, SenderCategory, default_test_signers, extract_signing_key, in_memory_signer,
-    resolve_all_senders, resolve_sender,
+    resolve_all_senders, resolve_sender, resolve_wallet_for_address,
 };
 pub use fund::fund_senders_on_fork;
 pub use governor::{is_terminal, query_proposal_state};

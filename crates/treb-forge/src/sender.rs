@@ -11,6 +11,7 @@ use std::{
     pin::Pin,
 };
 
+use alloy_network::EthereumWallet;
 use alloy_primitives::{Address, B256, hex};
 use alloy_signer::Signer;
 use alloy_signer_ledger::HDPath as LedgerHDPath;
@@ -231,8 +232,52 @@ pub fn extract_signing_key<'a>(
     }
 }
 
+/// Resolve an [`EthereumWallet`] for a given on-chain address.
+///
+/// Looks up the `ResolvedSender` whose [`broadcast_address()`] matches `address`,
+/// walks the sender chain (Safe→signer, Governor→proposer) to the leaf wallet,
+/// and wraps the underlying signer in an `EthereumWallet` for use with alloy providers.
+pub fn resolve_wallet_for_address(
+    address: Address,
+    resolved_senders: &HashMap<String, ResolvedSender>,
+) -> Result<EthereumWallet, TrebError> {
+    let sender = resolved_senders
+        .values()
+        .find(|s| s.broadcast_address() == address)
+        .ok_or_else(|| {
+            TrebError::Forge(format!("no resolved sender found for address {address}"))
+        })?;
+
+    leaf_ethereum_wallet(sender)
+}
+
+/// Walk a sender chain to the leaf wallet and wrap it in an [`EthereumWallet`].
+fn leaf_ethereum_wallet(sender: &ResolvedSender) -> Result<EthereumWallet, TrebError> {
+    match sender {
+        ResolvedSender::Wallet(ws) | ResolvedSender::InMemory(ws) => {
+            wallet_signer_to_ethereum_wallet(ws)
+        }
+        ResolvedSender::Safe { signer, .. } => leaf_ethereum_wallet(signer),
+        ResolvedSender::Governor { proposer, .. } => leaf_ethereum_wallet(proposer),
+    }
+}
+
+/// Convert a [`WalletSigner`] reference into an owned [`EthereumWallet`].
+///
+/// Currently supports `Local` (private-key / mnemonic) signers, which are `Clone`.
+/// Hardware wallet signers (Ledger, Trezor) are not yet supported for live signing.
+fn wallet_signer_to_ethereum_wallet(ws: &WalletSigner) -> Result<EthereumWallet, TrebError> {
+    match ws {
+        WalletSigner::Local(pk) => Ok(EthereumWallet::new(pk.clone())),
+        _ => Err(TrebError::Forge(
+            "live signing is not yet supported for hardware wallet signers (Ledger/Trezor)"
+                .to_string(),
+        )),
+    }
+}
+
 // ---------------------------------------------------------------------------
-// Per-type resolution stubs (implemented in US-002 / US-003)
+// Per-type resolution helpers
 // ---------------------------------------------------------------------------
 
 async fn resolve_private_key(
@@ -411,6 +456,7 @@ pub fn default_test_signers(count: u32) -> treb_core::Result<Vec<WalletSigner>> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_network::{Ethereum, NetworkWallet};
     use alloy_primitives::address;
     use treb_config::SenderType;
 
@@ -965,5 +1011,110 @@ mod tests {
         };
         assert_eq!(safe.broadcast_address(), safe_addr);
         assert_eq!(safe.broadcast_address(), safe.sender_address());
+    }
+
+    // ---- resolve_wallet_for_address tests ----
+
+    #[test]
+    fn resolve_wallet_for_address_direct_wallet() {
+        let ws = in_memory_signer(0).unwrap();
+        let addr = ws.address();
+        let mut senders = HashMap::new();
+        senders.insert("deployer".to_string(), ResolvedSender::Wallet(ws));
+
+        let wallet = resolve_wallet_for_address(addr, &senders).unwrap();
+        assert_eq!(NetworkWallet::<Ethereum>::default_signer_address(&wallet), addr);
+    }
+
+    #[test]
+    fn resolve_wallet_for_address_in_memory() {
+        let ws = in_memory_signer(1).unwrap();
+        let addr = ws.address();
+        let mut senders = HashMap::new();
+        senders.insert("test".to_string(), ResolvedSender::InMemory(ws));
+
+        let wallet = resolve_wallet_for_address(addr, &senders).unwrap();
+        assert_eq!(NetworkWallet::<Ethereum>::default_signer_address(&wallet), addr);
+    }
+
+    #[test]
+    fn resolve_wallet_for_address_safe_chain() {
+        let ws = in_memory_signer(0).unwrap();
+        let wallet_addr = ws.address();
+        let safe_addr = address!("0000000000000000000000000000000000000042");
+        let mut senders = HashMap::new();
+        senders.insert(
+            "my-safe".to_string(),
+            ResolvedSender::Safe {
+                safe_address: safe_addr,
+                signer: Box::new(ResolvedSender::Wallet(ws)),
+            },
+        );
+
+        // Safe's broadcast_address() == safe_address
+        let wallet = resolve_wallet_for_address(safe_addr, &senders).unwrap();
+        // The EthereumWallet wraps the leaf signer's address
+        assert_eq!(NetworkWallet::<Ethereum>::default_signer_address(&wallet), wallet_addr);
+    }
+
+    #[test]
+    fn resolve_wallet_for_address_governor_chain() {
+        let ws = in_memory_signer(0).unwrap();
+        let wallet_addr = ws.address();
+        let gov_addr = address!("0000000000000000000000000000000000000099");
+        let mut senders = HashMap::new();
+        senders.insert(
+            "my-gov".to_string(),
+            ResolvedSender::Governor {
+                governor_address: gov_addr,
+                timelock_address: None,
+                proposer: Box::new(ResolvedSender::Wallet(ws)),
+                proposer_script: None,
+            },
+        );
+
+        // Governor without timelock: broadcast_address() == governor_address
+        let wallet = resolve_wallet_for_address(gov_addr, &senders).unwrap();
+        assert_eq!(NetworkWallet::<Ethereum>::default_signer_address(&wallet), wallet_addr);
+    }
+
+    #[test]
+    fn resolve_wallet_for_address_governor_with_timelock() {
+        let ws = in_memory_signer(0).unwrap();
+        let wallet_addr = ws.address();
+        let gov_addr = address!("0000000000000000000000000000000000000099");
+        let tl_addr = address!("0000000000000000000000000000000000000088");
+        let mut senders = HashMap::new();
+        senders.insert(
+            "my-gov".to_string(),
+            ResolvedSender::Governor {
+                governor_address: gov_addr,
+                timelock_address: Some(tl_addr),
+                proposer: Box::new(ResolvedSender::Wallet(ws)),
+                proposer_script: None,
+            },
+        );
+
+        // Governor with timelock: broadcast_address() == timelock_address
+        let wallet = resolve_wallet_for_address(tl_addr, &senders).unwrap();
+        assert_eq!(NetworkWallet::<Ethereum>::default_signer_address(&wallet), wallet_addr);
+    }
+
+    #[test]
+    fn resolve_wallet_for_address_missing_address_error() {
+        let senders = HashMap::new();
+        let addr = address!("0000000000000000000000000000000000000001");
+        let err = resolve_wallet_for_address(addr, &senders).unwrap_err();
+
+        match err {
+            TrebError::Forge(msg) => {
+                assert!(
+                    msg.contains("no resolved sender found"),
+                    "should mention missing sender: {msg}"
+                );
+                assert!(msg.contains(&format!("{addr}")), "should include the address: {msg}");
+            }
+            other => panic!("expected Forge error, got {other:?}"),
+        }
     }
 }
