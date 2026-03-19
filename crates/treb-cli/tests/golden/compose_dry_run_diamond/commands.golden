@@ -1,4 +1,4 @@
-=== cmd 0: [compose diamond.yaml --dry-run] ===
+=== cmd 0: [compose diamond.yaml] ===
 🚧 [DRY RUN] Showing execution plan only — no changes will be made.
 
 

@@ -1,4 +1,4 @@
-=== cmd 0: [compose simple.yaml --dry-run --json] ===
+=== cmd 0: [compose simple.yaml --json] ===
 [
   {
     "component": "registry",

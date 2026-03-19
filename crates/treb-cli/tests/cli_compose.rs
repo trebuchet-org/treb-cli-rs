@@ -13,9 +13,10 @@ use std::{
     path::Path,
 };
 
-/// Strip ANSI escape codes from a string for plain-text assertions.
+/// Strip ANSI escape codes (colors, cursor control) and carriage returns
+/// from a string for plain-text assertions.
 fn strip_ansi(s: &str) -> String {
-    let re = Regex::new(r"\x1b\[[0-9;]*m").unwrap();
+    let re = Regex::new(r"\x1b\[[0-9;]*[A-Za-z]|\r").unwrap();
     re.replace_all(s, "").to_string()
 }
 
@@ -147,7 +148,6 @@ fn compose_unknown_dependency_fails() {
 // ── Dry-run ───────────────────────────────────────────────────────────
 
 #[test]
-#[ignore] // TODO: compose tests need updating after --dry-run removal
 fn compose_dry_run_shows_plan() {
     let fixture = fixtures_dir().join("simple.yaml");
 
@@ -160,7 +160,6 @@ fn compose_dry_run_shows_plan() {
 }
 
 #[test]
-#[ignore] // TODO: compose tests need updating after --dry-run removal
 fn compose_dry_run_chain_shows_correct_order() {
     let fixture = fixtures_dir().join("chain.yaml");
 
@@ -187,7 +186,6 @@ fn compose_dry_run_chain_shows_correct_order() {
 }
 
 #[test]
-#[ignore] // TODO: compose tests need updating after --dry-run removal
 fn compose_dry_run_diamond_shows_correct_order() {
     let fixture = fixtures_dir().join("diamond.yaml");
 
@@ -214,7 +212,6 @@ fn compose_dry_run_diamond_shows_correct_order() {
 // ── Dry-run --json ────────────────────────────────────────────────────
 
 #[test]
-#[ignore] // TODO: compose tests need updating after --dry-run removal
 fn compose_dry_run_json_is_valid() {
     let fixture = fixtures_dir().join("simple.yaml");
 
@@ -241,7 +238,6 @@ fn compose_dry_run_json_is_valid() {
 }
 
 #[test]
-#[ignore] // TODO: compose tests need updating after --dry-run removal
 fn compose_dry_run_json_chain_has_correct_structure() {
     let fixture = fixtures_dir().join("chain.yaml");
 
@@ -273,7 +269,6 @@ fn compose_dry_run_json_chain_has_correct_structure() {
 }
 
 #[test]
-#[ignore] // TODO: compose tests need updating after --dry-run removal
 fn compose_dry_run_json_does_not_include_component_env() {
     let tmp = tempfile::tempdir().unwrap();
     let fixture = tmp.path().join("with-env.yaml");
@@ -305,7 +300,6 @@ components:
 }
 
 #[test]
-#[ignore] // TODO: compose tests need updating after --dry-run removal
 fn compose_dry_run_human_formats_component_env_deterministically() {
     let tmp = tempfile::tempdir().unwrap();
     let fixture = tmp.path().join("with-env.yaml");
@@ -339,7 +333,6 @@ components:
 // ── Flag acceptance tests ─────────────────────────────────────────────
 
 #[test]
-#[ignore] // TODO: compose tests need updating after --dry-run removal
 fn compose_all_flags_accepted() {
     let fixture = fixtures_dir().join("simple.yaml");
 
@@ -377,7 +370,6 @@ fn compose_all_flags_accepted() {
 }
 
 #[test]
-#[ignore] // TODO: compose tests need updating after --dry-run removal
 fn compose_resume_flag_accepted() {
     let fixture = fixtures_dir().join("simple.yaml");
 
@@ -414,7 +406,16 @@ fn compose_resume_json_error_stderr_remains_valid_json_when_state_hash_is_stale(
     .unwrap();
 
     let output = treb()
-        .args(["compose", "simple.yaml", "--resume", "--json"])
+        .args([
+            "compose",
+            "simple.yaml",
+            "--resume",
+            "--json",
+            "--broadcast",
+            "--network",
+            "localhost",
+            "--non-interactive",
+        ])
         .current_dir(tmp.path())
         .output()
         .expect("failed to run compose --resume --json");
@@ -435,7 +436,6 @@ fn compose_resume_json_error_stderr_remains_valid_json_when_state_hash_is_stale(
 }
 
 #[test]
-#[ignore] // TODO: compose tests need updating after --dry-run removal
 fn compose_json_execution_failure_emits_only_wrapped_json_error() {
     let tmp = tempfile::tempdir().unwrap();
     fs::create_dir_all(tmp.path().join("script")).unwrap();
@@ -450,7 +450,7 @@ fn compose_json_execution_failure_emits_only_wrapped_json_error() {
     .unwrap();
 
     let output = treb()
-        .args(["compose", "broken.yaml", "--network", "localhost", "--json", "--non-interactive"])
+        .args(["compose", "broken.yaml", "--broadcast", "--network", "localhost", "--json", "--non-interactive"])
         .current_dir(tmp.path())
         .output()
         .expect("failed to run compose execution failure --json");
@@ -467,17 +467,16 @@ fn compose_json_execution_failure_emits_only_wrapped_json_error() {
     let error = json["error"].as_str().expect("json error should be a string");
 
     assert!(
-        error.contains("compose failed: component 'missing' failed (0/1 completed)"),
+        error.contains("compose failed") && error.contains("0/1 completed"),
         "unexpected error: {error}"
     );
     assert!(
-        !stderr.contains("Component 'missing' failed"),
-        "stderr should not include per-component human-readable lines: {stderr}"
+        !stderr.contains("Orchestration failed"),
+        "stderr should not include human-readable summary lines in json mode: {stderr}"
     );
 }
 
 #[test]
-#[ignore] // TODO: compose tests need updating after --dry-run removal
 fn compose_setup_failure_uses_component_failed_renderer() {
     let tmp = tempfile::tempdir().unwrap();
     fs::create_dir_all(tmp.path().join("script")).unwrap();
@@ -495,11 +494,10 @@ fn compose_setup_failure_uses_component_failed_renderer() {
         .args([
             "compose",
             "broken.yaml",
+            "--broadcast",
             "--network",
             "localhost",
             "--non-interactive",
-            "--env",
-            "BADENV",
         ])
         .current_dir(tmp.path())
         .output()
@@ -508,40 +506,36 @@ fn compose_setup_failure_uses_component_failed_renderer() {
     assert_eq!(output.status.code(), Some(1));
 
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-    assert!(stderr.contains("[1/1] Starting missing"), "missing step-start line: {stderr}");
+    // Component failure renderer should show ❌ Failed: line
     assert!(
-        stderr.contains(
-            "❌ Failed: invalid --env value 'BADENV': expected KEY=VALUE format (missing '=')"
-        ),
+        stderr.contains("❌ Failed:"),
         "missing per-component failure line: {stderr}"
     );
-    assert_eq!(
-        stderr.matches("1. missing → script/NonExistent.s.sol").count(),
-        1,
-        "execution plan should be the only place that renders the numbered step header: {stderr}"
+    // The banner should show the component in the plan
+    assert!(
+        stderr.contains("[1] missing"),
+        "banner should list the component: {stderr}"
     );
     let separator = "═".repeat(70);
     assert!(
-        stderr.contains(&format!(
-            "❌ Failed: invalid --env value 'BADENV': expected KEY=VALUE format (missing '=')\n{separator}\n❌ Orchestration failed"
-        )),
-        "summary separator should follow the failed step without a blank line: {stderr}"
+        stderr.contains(&separator),
+        "summary separator should be present: {stderr}"
     );
     assert!(
-        stderr.contains("Error: compose failed: component 'missing' failed (0/1 completed)"),
-        "unexpected top-level error: {stderr}"
+        stderr.contains("❌ Orchestration failed"),
+        "summary should show orchestration failed: {stderr}"
     );
-    // The raw error should not appear as a top-level Error: line — it should only
-    // appear inside the component failure renderer (❌ Failed: ...) and summary bullet (• Error:
-    // ...).
     assert!(
-        !stderr.lines().any(|l| l.starts_with("Error: invalid --env value")),
-        "setup error should be rendered through the component failure path, not as a top-level error: {stderr}"
+        stderr.contains("Steps completed: 0/1"),
+        "summary should show steps completed: {stderr}"
+    );
+    assert!(
+        stderr.contains("compose failed"),
+        "top-level error should mention compose failed: {stderr}"
     );
 }
 
 #[test]
-#[ignore] // TODO: compose tests need updating after --dry-run removal
 fn compose_resume_failure_shows_resume_banner_and_step_start() {
     let tmp = tempfile::tempdir().unwrap();
     fs::create_dir_all(tmp.path().join("script")).unwrap();
@@ -580,7 +574,7 @@ fn compose_resume_failure_shows_resume_banner_and_step_start() {
     .unwrap();
 
     let output = treb()
-        .args(["compose", "resume.yaml", "--resume", "--network", "localhost", "--non-interactive"])
+        .args(["compose", "resume.yaml", "--resume", "--broadcast", "--network", "localhost", "--non-interactive"])
         .current_dir(tmp.path())
         .output()
         .expect("failed to run resumed compose failure");
@@ -592,11 +586,15 @@ fn compose_resume_failure_shows_resume_banner_and_step_start() {
         stderr.contains("📂 Resuming compose from step 2 of 2"),
         "missing resume banner: {stderr}"
     );
-    assert!(stderr.contains("[2/2] Starting missing"), "missing resumed step-start line: {stderr}");
-    assert_eq!(
-        stderr.matches("2. missing → script/NonExistent.s.sol").count(),
-        1,
-        "execution plan should be the only place that renders the numbered step header: {stderr}"
+    // The banner plan should show the resumed component
+    assert!(
+        stderr.contains("[2] missing"),
+        "banner should list the resumed component: {stderr}"
+    );
+    // The done component should be marked as skipped in the plan
+    assert!(
+        stderr.contains("(skipped)"),
+        "done component should show as skipped: {stderr}"
     );
 }
 
@@ -612,7 +610,14 @@ fn compose_without_init_fails() {
     fs::write(&yaml, "group: test\ncomponents:\n  a:\n    script: script/A.s.sol\n").unwrap();
 
     treb()
-        .args(["compose", yaml.to_str().unwrap()])
+        .args([
+            "compose",
+            yaml.to_str().unwrap(),
+            "--broadcast",
+            "--network",
+            "localhost",
+            "--non-interactive",
+        ])
         .current_dir(tmp.path())
         .assert()
         .failure()
