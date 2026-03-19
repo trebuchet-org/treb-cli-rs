@@ -376,6 +376,8 @@ pub struct ExecuteScriptOpts {
     pub broadcast_hook: Option<BroadcastHook>,
     /// Source identifier for fork run snapshots (set when `is_fork` is true).
     pub fork_run_source: Option<treb_core::types::fork::ForkRunSource>,
+    /// Skip fork execution simulation for queued Safe/Governor transactions.
+    pub skip_fork_execution: bool,
 }
 
 /// Execute a single script through the full pipeline.
@@ -617,6 +619,7 @@ pub async fn run(
     env_vars: Vec<String>,
     target_contract: Option<String>,
     non_interactive: bool,
+    skip_fork_execution: bool,
 ) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
     ensure_initialized(&cwd)?;
@@ -890,6 +893,7 @@ pub async fn run(
             } else {
                 None
             },
+            skip_fork_execution,
         },
         &resolved,
         &mut resolved_senders,
@@ -902,7 +906,7 @@ pub async fn run(
     if !result.queued_executions.is_empty() && !json {
         handle_queued_executions(
             &mut result, chain_id, prompts_enabled,
-            active_fork.is_some(), &cwd, &mut registry,
+            active_fork.is_some(), skip_fork_execution, &cwd, &mut registry,
         ).await?;
     } else if !result.proposed_results.is_empty() && prompts_enabled && !json {
         // Fallback: old-style polling for live mode (no queued items)
@@ -934,6 +938,7 @@ async fn handle_queued_executions(
     chain_id: u64,
     prompts_enabled: bool,
     is_fork: bool,
+    skip_fork_execution: bool,
     cwd: &std::path::Path,
     registry: &mut treb_registry::Registry,
 ) -> anyhow::Result<()> {
@@ -963,11 +968,19 @@ async fn handle_queued_executions(
                     );
                 }
 
-                if is_fork && prompts_enabled {
-                    let simulate = crate::ui::prompt::confirm(
-                        "  Simulate Safe execution on fork?", true,
-                    );
-                    if simulate {
+                if is_fork {
+                    let should_simulate = if skip_fork_execution {
+                        false
+                    } else if prompts_enabled {
+                        crate::ui::prompt::confirm(
+                            "  Simulate Safe execution on fork?", true,
+                        )
+                    } else {
+                        // Non-interactive fork: auto-simulate (matches Go CLI behavior)
+                        true
+                    };
+
+                    if should_simulate {
                         let fork_rpc = resolve_fork_rpc(cwd, chain_id)?;
                         match treb_forge::pipeline::fork_routing::exec_safe_from_registry(
                             &fork_rpc,
@@ -1018,9 +1031,6 @@ async fn handle_queued_executions(
                     } else {
                         eprintln!("  Saved as queued — execute later via `treb fork exec`");
                     }
-                } else if is_fork {
-                    // Non-interactive fork: save as queued
-                    eprintln!("  Saved as queued — execute later via `treb fork exec`");
                 }
                 // Live mode: already proposed to Safe TX Service
             }
@@ -1051,11 +1061,19 @@ async fn handle_queued_executions(
                     );
                 }
 
-                if is_fork && prompts_enabled {
-                    let simulate = crate::ui::prompt::confirm(
-                        "  Simulate governance execution on fork?", true,
-                    );
-                    if simulate {
+                if is_fork {
+                    let should_simulate = if skip_fork_execution {
+                        false
+                    } else if prompts_enabled {
+                        crate::ui::prompt::confirm(
+                            "  Simulate governance execution on fork?", true,
+                        )
+                    } else {
+                        // Non-interactive fork: auto-simulate (matches Go CLI behavior)
+                        true
+                    };
+
+                    if should_simulate {
                         let fork_rpc = resolve_fork_rpc(cwd, chain_id)?;
                         let governance_addr = timelock_address.unwrap_or(*governor_address);
                         let targets: Vec<_> = actions.iter()
@@ -1113,8 +1131,6 @@ async fn handle_queued_executions(
                     } else {
                         eprintln!("  Saved as queued — execute later via `treb fork exec`");
                     }
-                } else if is_fork {
-                    eprintln!("  Saved as queued — execute later via `treb fork exec`");
                 }
                 // Live mode: governance takes time, just record
             }
@@ -1653,9 +1669,9 @@ pub(super) fn display_script_broadcast_summary(
                     pr.sender_role, hash, nonce,
                 );
                 if use_color {
-                    eprintln!("    {}", line.style(color::YELLOW));
+                    eprintln!("    {} {}", emoji::HOURGLASS.style(color::YELLOW), line.style(color::YELLOW));
                 } else {
-                    eprintln!("    {line}");
+                    eprintln!("    {} {line}", emoji::HOURGLASS);
                 }
             }
             treb_forge::pipeline::RunResult::GovernorProposed {
@@ -1667,9 +1683,9 @@ pub(super) fn display_script_broadcast_summary(
                     pr.sender_role, gov, proposal_id,
                 );
                 if use_color {
-                    eprintln!("    {}", line.style(color::YELLOW));
+                    eprintln!("    {} {}", emoji::HOURGLASS.style(color::YELLOW), line.style(color::YELLOW));
                 } else {
-                    eprintln!("    {line}");
+                    eprintln!("    {} {line}", emoji::HOURGLASS);
                 }
             }
             _ => {}
