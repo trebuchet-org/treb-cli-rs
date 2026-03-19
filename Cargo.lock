@@ -8270,6 +8270,7 @@ version = "0.1.0"
 dependencies = [
  "alloy-chains",
  "alloy-primitives 1.5.7",
+ "alloy-provider",
  "anyhow",
  "assert_cmd",
  "chrono",

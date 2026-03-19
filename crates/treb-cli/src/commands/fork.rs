@@ -12,6 +12,8 @@ use std::{
     time::Duration,
 };
 
+use alloy_primitives::Address;
+use alloy_provider::Provider;
 use anyhow::{Context, bail};
 use chrono::Utc;
 use clap::Subcommand;
@@ -25,6 +27,7 @@ use treb_forge::{
         poll_anvil_health, stop_background_anvil,
     },
     createx::createx_deployed_bytecode,
+    provider::build_http_provider,
 };
 use treb_registry::{ForkStateStore, remove_snapshot, restore_registry, snapshot_registry};
 
@@ -223,8 +226,6 @@ pub async fn run_enter(
     let priv_dir = treb_dir.join("priv");
     std::fs::create_dir_all(&priv_dir).context("failed to create priv directory")?;
 
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
-
     // Resolve fork URLs synchronously (needs filesystem access for foundry.toml)
     let mut fork_configs: Vec<(String, String)> = Vec::new();
     let mut errors: Vec<(String, String)> = Vec::new();
@@ -298,7 +299,6 @@ pub async fn run_enter(
     let mut spinner = spinoff::Spinner::new(spinoff::spinners::Dots2, "Starting forks...", spinoff::Color::Cyan);
     let mut spawn_set = tokio::task::JoinSet::new();
     for setup in setups {
-        let client = client.clone();
         spawn_set.spawn(async move {
             // Spawn Anvil (sync — runs quickly)
             let anvil_config = BackgroundAnvilConfig {
@@ -335,12 +335,12 @@ pub async fn run_enter(
             }
 
             // Deploy CreateX
-            if let Err(e) = deploy_createx_http(&client, &rpc_url).await {
+            if let Err(e) = deploy_createx_http(&rpc_url).await {
                 eprintln!("Warning: failed to deploy CreateX on {}: {e}", setup.network);
             }
 
             // Take initial EVM snapshot
-            let snapshot_id = evm_snapshot_http(&client, &rpc_url).await.map_err(|e| {
+            let snapshot_id = evm_snapshot_http(&rpc_url).await.map_err(|e| {
                 let _ = stop_background_anvil(&pid_file);
                 (setup.network.clone(), format!("failed to take EVM snapshot: {e}"))
             })?;
@@ -468,7 +468,6 @@ pub async fn snapshot_fork_before_broadcast(
         .context("failed to snapshot registry before broadcast")?;
 
     // 2. Take EVM snapshot for each active fork
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
     let mut evm_snapshots: HashMap<String, String> = HashMap::new();
 
     let forks: Vec<(String, ForkEntry)> = store
@@ -485,7 +484,7 @@ pub async fn snapshot_fork_before_broadcast(
 
     for (key, entry) in &forks {
         if is_port_reachable(entry.port).await {
-            match evm_snapshot_http(&client, &entry.rpc_url).await {
+            match evm_snapshot_http(&entry.rpc_url).await {
                 Ok(snap_id) => {
                     evm_snapshots.insert(key.clone(), snap_id);
                 }
@@ -608,8 +607,6 @@ pub async fn run_revert() -> anyhow::Result<()> {
         .pop_run_snapshot()?
         .ok_or_else(|| anyhow::anyhow!("no run snapshots to revert"))?;
 
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
-
     // Revert EVM state for each fork that had a snapshot
     for (fork_key, snap_id) in &snapshot.evm_snapshots {
         if let Some(entry) = store.get_active_fork(fork_key) {
@@ -620,14 +617,14 @@ pub async fn run_revert() -> anyhow::Result<()> {
                 );
                 continue;
             }
-            let reverted = evm_revert_http(&client, &entry.rpc_url, snap_id)
+            let reverted = evm_revert_http(&entry.rpc_url, snap_id)
                 .await
                 .with_context(|| format!("failed to revert EVM state for '{fork_key}'"))?;
             if !reverted {
                 eprintln!("Warning: EVM revert failed for '{fork_key}' (snapshot: {snap_id})");
             }
             // Re-snapshot for idempotency (evm_revert consumes the snapshot)
-            let new_snap_id = evm_snapshot_http(&client, &entry.rpc_url)
+            let new_snap_id = evm_snapshot_http(&entry.rpc_url)
                 .await
                 .with_context(|| {
                     format!("failed to re-snapshot EVM state for '{fork_key}'")
@@ -788,16 +785,11 @@ pub async fn run_restart(
                 return Err((network.clone(), format!("anvil not ready: {e}")));
             }
 
-            let client = reqwest::Client::builder()
-                .timeout(Duration::from_secs(10))
-                .build()
-                .map_err(|e| (network.clone(), format!("{e}")))?;
-
-            if let Err(e) = deploy_createx_http(&client, &rpc_url).await {
+            if let Err(e) = deploy_createx_http(&rpc_url).await {
                 eprintln!("Warning: failed to deploy CreateX on {network}: {e}");
             }
 
-            let snapshot_id = evm_snapshot_http(&client, &rpc_url)
+            let snapshot_id = evm_snapshot_http(&rpc_url)
                 .await
                 .map_err(|e| (network.clone(), format!("EVM snapshot failed: {e}")))?;
 
@@ -1302,72 +1294,25 @@ fn resolve_fork_url(
 }
 
 async fn fetch_chain_id(rpc_url: &str) -> anyhow::Result<u64> {
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
-    let body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "eth_chainId",
-        "params": [],
-        "id": 1
-    });
+    let provider = build_http_provider(rpc_url)
+        .map_err(|e| anyhow::anyhow!("failed to build provider: {e}"))?;
 
-    let resp = client
-        .post(rpc_url)
-        .json(&body)
-        .send()
+    let chain_id = tokio::time::timeout(Duration::from_secs(10), provider.get_chain_id())
         .await
-        .with_context(|| format!("failed to connect to {rpc_url}"))?;
+        .with_context(|| format!("timed out connecting to {rpc_url}"))?
+        .with_context(|| format!("failed to fetch chain ID from {rpc_url}"))?;
 
-    let json: serde_json::Value =
-        resp.json().await.context("failed to parse eth_chainId response")?;
-
-    let hex = json
-        .get("result")
-        .and_then(|r| r.as_str())
-        .ok_or_else(|| anyhow::anyhow!("missing 'result' in eth_chainId response"))?;
-
-    let hex = hex.strip_prefix("0x").unwrap_or(hex);
-    u64::from_str_radix(hex, 16).with_context(|| format!("invalid chain ID hex: '{hex}'"))
-}
-
-/// Generic JSON-RPC call over HTTP.  Returns the `result` field of the response.
-async fn json_rpc_call(
-    client: &reqwest::Client,
-    url: &str,
-    method: &str,
-    params: serde_json::Value,
-) -> anyhow::Result<serde_json::Value> {
-    let params_arr = match params {
-        serde_json::Value::Null => serde_json::json!([]),
-        serde_json::Value::Array(a) => serde_json::Value::Array(a),
-        other => serde_json::json!([other]),
-    };
-    let body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method":  method,
-        "params":  params_arr,
-        "id":      1,
-    });
-    let resp = client
-        .post(url)
-        .json(&body)
-        .send()
-        .await
-        .with_context(|| format!("failed to connect to {url}"))?;
-    let json: serde_json::Value = resp.json().await.context("failed to parse JSON-RPC response")?;
-    if let Some(err) = json.get("error") {
-        bail!("JSON-RPC error from {url}: {err}");
-    }
-    json.get("result")
-        .cloned()
-        .ok_or_else(|| anyhow::anyhow!("missing 'result' in JSON-RPC response"))
+    Ok(chain_id)
 }
 
 /// Take an EVM snapshot and return the snapshot ID as a hex string.
-pub(crate) async fn evm_snapshot_http(
-    client: &reqwest::Client,
-    rpc_url: &str,
-) -> anyhow::Result<String> {
-    let result = json_rpc_call(client, rpc_url, "evm_snapshot", serde_json::Value::Null).await?;
+pub(crate) async fn evm_snapshot_http(rpc_url: &str) -> anyhow::Result<String> {
+    let provider = build_http_provider(rpc_url)
+        .map_err(|e| anyhow::anyhow!("failed to build provider: {e}"))?;
+    let result: serde_json::Value = provider
+        .raw_request("evm_snapshot".into(), ())
+        .await
+        .context("evm_snapshot RPC call failed")?;
     result
         .as_str()
         .map(|s| s.to_string())
@@ -1375,38 +1320,40 @@ pub(crate) async fn evm_snapshot_http(
 }
 
 /// Revert EVM state to a previously created snapshot.  Returns `true` on success.
-async fn evm_revert_http(
-    client: &reqwest::Client,
-    rpc_url: &str,
-    snapshot_id: &str,
-) -> anyhow::Result<bool> {
-    let result =
-        json_rpc_call(client, rpc_url, "evm_revert", serde_json::json!([snapshot_id])).await?;
+async fn evm_revert_http(rpc_url: &str, snapshot_id: &str) -> anyhow::Result<bool> {
+    let provider = build_http_provider(rpc_url)
+        .map_err(|e| anyhow::anyhow!("failed to build provider: {e}"))?;
+    let result: serde_json::Value = provider
+        .raw_request("evm_revert".into(), (snapshot_id,))
+        .await
+        .context("evm_revert RPC call failed")?;
     result.as_bool().ok_or_else(|| anyhow::anyhow!("unexpected evm_revert result type: {result}"))
 }
 
 /// Deploy the CreateX factory bytecode at its canonical address via `anvil_setCode`.
-async fn deploy_createx_http(client: &reqwest::Client, rpc_url: &str) -> anyhow::Result<()> {
+async fn deploy_createx_http(rpc_url: &str) -> anyhow::Result<()> {
+    let provider = build_http_provider(rpc_url)
+        .map_err(|e| anyhow::anyhow!("failed to build provider: {e}"))?;
+
+    let createx_addr: Address = CREATEX_ADDRESS.parse().expect("valid CreateX address");
+
     // Check if CreateX already exists (e.g., on a forked chain where it's
     // natively deployed). Skip deployment if code is already present.
-    let code_resp = json_rpc_call(
-        client,
-        rpc_url,
-        "eth_getCode",
-        serde_json::json!([CREATEX_ADDRESS, "latest"]),
-    )
-    .await?;
-    let existing_code = code_resp.as_str().unwrap_or("0x");
-    if existing_code.len() > 2 {
-        // CreateX already has code — don't overwrite it
+    let existing_code = provider
+        .get_code_at(createx_addr)
+        .await
+        .context("failed to check CreateX code")?;
+    if !existing_code.is_empty() {
         return Ok(());
     }
 
     let bytecode_bytes = createx_deployed_bytecode();
     let hex: String = bytecode_bytes.iter().map(|b| format!("{b:02x}")).collect();
     let hex_str = format!("0x{hex}");
-    json_rpc_call(client, rpc_url, "anvil_setCode", serde_json::json!([CREATEX_ADDRESS, hex_str]))
-        .await?;
+    let _: serde_json::Value = provider
+        .raw_request("anvil_setCode".into(), (CREATEX_ADDRESS, &hex_str))
+        .await
+        .context("anvil_setCode RPC call failed")?;
     Ok(())
 }
 
