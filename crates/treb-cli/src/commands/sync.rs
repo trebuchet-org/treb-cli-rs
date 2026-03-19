@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
 use alloy_chains::Chain;
 use anyhow::Context;
@@ -423,13 +424,28 @@ pub async fn run(
                 );
             }
 
-            match query_proposal_state(
-                rpc_url,
-                &proposal.governor_address,
-                &proposal.proposal_id,
+            let state_result = match tokio::time::timeout(
+                Duration::from_secs(30),
+                query_proposal_state(
+                    rpc_url,
+                    &proposal.governor_address,
+                    &proposal.proposal_id,
+                ),
             )
             .await
             {
+                Err(_elapsed) => {
+                    let msg = format!(
+                        "governor {} (chain {}): RPC request timed out after 30s",
+                        output::truncate_address(&proposal.governor_address),
+                        proposal.chain_id,
+                    );
+                    errors.push(msg);
+                    continue;
+                }
+                Ok(inner) => inner,
+            };
+            match state_result {
                 Ok(new_status) => {
                     if new_status != proposal.status {
                         let mut updated = proposal.clone();

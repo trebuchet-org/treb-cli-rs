@@ -633,11 +633,21 @@ pub async fn load_resume_state(
     let mut pending_tx_hashes = std::collections::HashSet::new();
 
     if !hashes_to_check.is_empty() {
-        if let Ok(provider) = crate::provider::build_http_provider(rpc_url) {
-            for hash in &hashes_to_check {
-                match poll_receipt_exists(&provider, hash).await {
-                    true => { completed_tx_hashes.insert(*hash); }
-                    false => { pending_tx_hashes.insert(*hash); }
+        match crate::provider::build_http_provider(rpc_url) {
+            Ok(provider) => {
+                for hash in &hashes_to_check {
+                    match poll_receipt_exists(&provider, hash).await {
+                        true => { completed_tx_hashes.insert(*hash); }
+                        false => { pending_tx_hashes.insert(*hash); }
+                    }
+                }
+            }
+            Err(_) => {
+                // Provider construction failed (e.g. malformed URL).
+                // Treat all hashes as pending to match old reqwest semantics
+                // where connection failures → no receipt → pending.
+                for hash in &hashes_to_check {
+                    pending_tx_hashes.insert(*hash);
                 }
             }
         }
