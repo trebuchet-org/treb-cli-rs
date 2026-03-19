@@ -147,7 +147,6 @@ fn compose_unknown_dependency_fails() {
 // ── Dry-run ───────────────────────────────────────────────────────────
 
 #[test]
-#[ignore] // TODO: compose tests need updating after --dry-run removal
 fn compose_dry_run_shows_plan() {
     let fixture = fixtures_dir().join("simple.yaml");
 
@@ -160,7 +159,6 @@ fn compose_dry_run_shows_plan() {
 }
 
 #[test]
-#[ignore] // TODO: compose tests need updating after --dry-run removal
 fn compose_dry_run_chain_shows_correct_order() {
     let fixture = fixtures_dir().join("chain.yaml");
 
@@ -187,7 +185,6 @@ fn compose_dry_run_chain_shows_correct_order() {
 }
 
 #[test]
-#[ignore] // TODO: compose tests need updating after --dry-run removal
 fn compose_dry_run_diamond_shows_correct_order() {
     let fixture = fixtures_dir().join("diamond.yaml");
 
@@ -214,7 +211,6 @@ fn compose_dry_run_diamond_shows_correct_order() {
 // ── Dry-run --json ────────────────────────────────────────────────────
 
 #[test]
-#[ignore] // TODO: compose tests need updating after --dry-run removal
 fn compose_dry_run_json_is_valid() {
     let fixture = fixtures_dir().join("simple.yaml");
 
@@ -241,7 +237,6 @@ fn compose_dry_run_json_is_valid() {
 }
 
 #[test]
-#[ignore] // TODO: compose tests need updating after --dry-run removal
 fn compose_dry_run_json_chain_has_correct_structure() {
     let fixture = fixtures_dir().join("chain.yaml");
 
@@ -273,7 +268,6 @@ fn compose_dry_run_json_chain_has_correct_structure() {
 }
 
 #[test]
-#[ignore] // TODO: compose tests need updating after --dry-run removal
 fn compose_dry_run_json_does_not_include_component_env() {
     let tmp = tempfile::tempdir().unwrap();
     let fixture = tmp.path().join("with-env.yaml");
@@ -305,7 +299,6 @@ components:
 }
 
 #[test]
-#[ignore] // TODO: compose tests need updating after --dry-run removal
 fn compose_dry_run_human_formats_component_env_deterministically() {
     let tmp = tempfile::tempdir().unwrap();
     let fixture = tmp.path().join("with-env.yaml");
@@ -339,7 +332,6 @@ components:
 // ── Flag acceptance tests ─────────────────────────────────────────────
 
 #[test]
-#[ignore] // TODO: compose tests need updating after --dry-run removal
 fn compose_all_flags_accepted() {
     let fixture = fixtures_dir().join("simple.yaml");
 
@@ -377,7 +369,6 @@ fn compose_all_flags_accepted() {
 }
 
 #[test]
-#[ignore] // TODO: compose tests need updating after --dry-run removal
 fn compose_resume_flag_accepted() {
     let fixture = fixtures_dir().join("simple.yaml");
 
@@ -414,7 +405,16 @@ fn compose_resume_json_error_stderr_remains_valid_json_when_state_hash_is_stale(
     .unwrap();
 
     let output = treb()
-        .args(["compose", "simple.yaml", "--resume", "--json"])
+        .args([
+            "compose",
+            "simple.yaml",
+            "--resume",
+            "--json",
+            "--broadcast",
+            "--network",
+            "localhost",
+            "--non-interactive",
+        ])
         .current_dir(tmp.path())
         .output()
         .expect("failed to run compose --resume --json");
@@ -612,7 +612,14 @@ fn compose_without_init_fails() {
     fs::write(&yaml, "group: test\ncomponents:\n  a:\n    script: script/A.s.sol\n").unwrap();
 
     treb()
-        .args(["compose", yaml.to_str().unwrap()])
+        .args([
+            "compose",
+            yaml.to_str().unwrap(),
+            "--broadcast",
+            "--network",
+            "localhost",
+            "--non-interactive",
+        ])
         .current_dir(tmp.path())
         .assert()
         .failure()
