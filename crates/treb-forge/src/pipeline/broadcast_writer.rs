@@ -90,8 +90,10 @@ pub struct DeferredGovernorProposal {
 pub struct ResumeState {
     pub sequence: ScriptSequence,
     pub deferred: Option<DeferredOperations>,
-    /// Tx hashes of wallet txs that already have receipts.
+    /// Tx hashes of wallet txs that already have on-chain receipts.
     pub completed_tx_hashes: std::collections::HashSet<B256>,
+    /// Tx hashes that were sent but have no on-chain receipt yet.
+    pub pending_tx_hashes: std::collections::HashSet<B256>,
     /// safeTxHash values already proposed.
     pub completed_safe_hashes: std::collections::HashSet<String>,
     /// Governor proposal IDs already submitted.
@@ -586,11 +588,16 @@ pub fn write_broadcast_artifacts(
 /// Load existing broadcast files for `--resume`.
 ///
 /// Returns `None` if no broadcast file exists for this script/chain/sig combo.
-pub fn load_resume_state(
+///
+/// Polls `eth_getTransactionReceipt` for each transaction that has a hash to
+/// distinguish confirmed (on-chain receipt) from pending (no receipt yet).
+/// Transactions with `hash: None` are unsent and appear in neither set.
+pub async fn load_resume_state(
     project_root: &Path,
     script_path: &str,
     chain_id: u64,
     sig: &str,
+    rpc_url: &str,
 ) -> Option<ResumeState> {
     let (_, broadcast_path, _cache_path) =
         compute_broadcast_paths(project_root, script_path, chain_id, sig);
@@ -615,12 +622,25 @@ pub fn load_resume_state(
         None
     };
 
-    // Build completed sets from the loaded sequence
-    let completed_tx_hashes: std::collections::HashSet<B256> = sequence
+    // Poll on-chain receipts for transactions that have hashes
+    let hashes_to_check: Vec<B256> = sequence
         .transactions
         .iter()
         .filter_map(|tx_meta| tx_meta.hash)
         .collect();
+
+    let mut completed_tx_hashes = std::collections::HashSet::new();
+    let mut pending_tx_hashes = std::collections::HashSet::new();
+
+    if !hashes_to_check.is_empty() {
+        let client = reqwest::Client::new();
+        for hash in &hashes_to_check {
+            match poll_receipt_exists(&client, rpc_url, hash).await {
+                true => { completed_tx_hashes.insert(*hash); }
+                false => { pending_tx_hashes.insert(*hash); }
+            }
+        }
+    }
 
     let completed_safe_hashes: std::collections::HashSet<String> = deferred
         .as_ref()
@@ -636,9 +656,45 @@ pub fn load_resume_state(
         sequence,
         deferred,
         completed_tx_hashes,
+        pending_tx_hashes,
         completed_safe_hashes,
         completed_gov_ids,
     })
+}
+
+/// Check whether an on-chain receipt exists for a transaction hash.
+///
+/// Returns `true` if the RPC returns a non-null result, `false` otherwise
+/// (including RPC errors — treated as "not yet confirmed").
+async fn poll_receipt_exists(
+    client: &reqwest::Client,
+    rpc_url: &str,
+    tx_hash: &B256,
+) -> bool {
+    let req = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "eth_getTransactionReceipt",
+        "params": [format!("{:#x}", tx_hash)],
+        "id": 1,
+    });
+
+    let resp: Result<serde_json::Value, _> = async {
+        client
+            .post(rpc_url)
+            .json(&req)
+            .send()
+            .await?
+            .json()
+            .await
+    }.await;
+
+    match resp {
+        Ok(val) => {
+            // result is non-null when the receipt exists
+            val.get("result").is_some_and(|r| !r.is_null())
+        }
+        Err(_) => false,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -785,10 +841,12 @@ mod tests {
         assert_eq!(parsed.safe_proposals[0].transaction_ids.len(), 2);
     }
 
-    #[test]
-    fn load_resume_state_returns_none_for_missing() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn load_resume_state_returns_none_for_missing() {
         let tmp = tempfile::tempdir().unwrap();
-        let result = load_resume_state(tmp.path(), "script/Deploy.s.sol", 1, "run()");
+        let result = load_resume_state(
+            tmp.path(), "script/Deploy.s.sol", 1, "run()", "http://localhost:8545",
+        ).await;
         assert!(result.is_none());
     }
 
@@ -1047,5 +1105,214 @@ mod tests {
         );
 
         assert_eq!(seq.transactions[0].rpc, "http://localhost:8545");
+    }
+
+    // -----------------------------------------------------------------------
+    // load_resume_state polling tests
+    // -----------------------------------------------------------------------
+
+    /// Write a minimal ScriptSequence JSON to the Foundry broadcast path.
+    ///
+    /// `tx_hashes` entries: `Some(hash)` = transaction has a hash, `None` = unsent.
+    fn write_sequence_fixture(
+        project_root: &Path,
+        script_path: &str,
+        chain_id: u64,
+        sig: &str,
+        tx_hashes: &[Option<B256>],
+    ) {
+        let (broadcast_dir, broadcast_path, _) =
+            compute_broadcast_paths(project_root, script_path, chain_id, sig);
+        fs::create_dir_all(&broadcast_dir).unwrap();
+
+        let from = Address::repeat_byte(0x01);
+        let to = Address::repeat_byte(0x02);
+        let mut transactions = VecDeque::new();
+        for hash in tx_hashes {
+            let btx = make_btx(from, Some(to), &[0x01]);
+            let mut tx_meta = TransactionWithMetadata::from_tx_request(btx.transaction);
+            tx_meta.hash = *hash;
+            tx_meta.rpc = "http://localhost:8545".into();
+            transactions.push_back(tx_meta);
+        }
+
+        let seq = ScriptSequence {
+            transactions,
+            receipts: Vec::new(),
+            libraries: Vec::new(),
+            pending: Vec::new(),
+            paths: Some((broadcast_path.clone(), PathBuf::from("/tmp/cache.json"))),
+            returns: AlloyHashMap::default(),
+            timestamp: 0,
+            chain: chain_id,
+            commit: None,
+        };
+
+        let json = serde_json::to_string_pretty(&seq).unwrap();
+        fs::write(&broadcast_path, json).unwrap();
+    }
+
+    /// Start a tiny async HTTP server that responds to `eth_getTransactionReceipt`.
+    ///
+    /// `confirmed_hashes` defines which hashes return a receipt; all others return null.
+    async fn start_mock_rpc(
+        confirmed_hashes: std::collections::HashSet<B256>,
+    ) -> (u16, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let handle = tokio::spawn(async move {
+            // Serve a limited number of requests then stop
+            for _ in 0..20 {
+                let Ok((mut stream, _)) = listener.accept().await else { break };
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+                let mut buf = vec![0u8; 4096];
+                let n = stream.read(&mut buf).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..n]);
+
+                // Extract JSON body after \r\n\r\n
+                let body = request.split("\r\n\r\n").nth(1).unwrap_or("{}");
+                let req_json: serde_json::Value =
+                    serde_json::from_str(body).unwrap_or_default();
+
+                let hash_str = req_json
+                    .get("params")
+                    .and_then(|p| p.get(0))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+
+                let is_confirmed = hash_str
+                    .parse::<B256>()
+                    .ok()
+                    .is_some_and(|h| confirmed_hashes.contains(&h));
+
+                let result = if is_confirmed {
+                    serde_json::json!({
+                        "transactionHash": hash_str,
+                        "blockNumber": "0x1",
+                        "gasUsed": "0x5208",
+                        "status": "0x1",
+                    })
+                } else {
+                    serde_json::Value::Null
+                };
+
+                let resp_body = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": req_json.get("id").cloned().unwrap_or(serde_json::json!(1)),
+                    "result": result,
+                });
+                let resp_str = resp_body.to_string();
+                let http_resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                    resp_str.len(),
+                    resp_str,
+                );
+                let _ = stream.write_all(http_resp.as_bytes()).await;
+            }
+        });
+
+        (port, handle)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn resume_state_all_unsent() {
+        // All transactions have hash: None → both completed and pending are empty
+        let tmp = tempfile::tempdir().unwrap();
+        write_sequence_fixture(
+            tmp.path(), "script/Deploy.s.sol", 1, "run()",
+            &[None, None],
+        );
+
+        let (port, handle) = start_mock_rpc(std::collections::HashSet::new()).await;
+        let rpc_url = format!("http://127.0.0.1:{port}");
+
+        let state = load_resume_state(
+            tmp.path(), "script/Deploy.s.sol", 1, "run()", &rpc_url,
+        ).await.expect("should load");
+
+        assert_eq!(state.sequence.transactions.len(), 2);
+        assert!(state.completed_tx_hashes.is_empty(), "no completed hashes for unsent txs");
+        assert!(state.pending_tx_hashes.is_empty(), "no pending hashes for unsent txs");
+
+        handle.abort();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn resume_state_completed_via_rpc_poll() {
+        // Hash is set and RPC returns a receipt → completed
+        let hash = B256::repeat_byte(0xAA);
+        let tmp = tempfile::tempdir().unwrap();
+        write_sequence_fixture(
+            tmp.path(), "script/Deploy.s.sol", 1, "run()",
+            &[Some(hash)],
+        );
+
+        let mut confirmed = std::collections::HashSet::new();
+        confirmed.insert(hash);
+        let (port, handle) = start_mock_rpc(confirmed).await;
+        let rpc_url = format!("http://127.0.0.1:{port}");
+
+        let state = load_resume_state(
+            tmp.path(), "script/Deploy.s.sol", 1, "run()", &rpc_url,
+        ).await.expect("should load");
+
+        assert!(state.completed_tx_hashes.contains(&hash), "hash should be completed");
+        assert!(state.pending_tx_hashes.is_empty(), "no pending hashes");
+
+        handle.abort();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn resume_state_pending_via_rpc_poll() {
+        // Hash is set but RPC returns null → pending
+        let hash = B256::repeat_byte(0xBB);
+        let tmp = tempfile::tempdir().unwrap();
+        write_sequence_fixture(
+            tmp.path(), "script/Deploy.s.sol", 1, "run()",
+            &[Some(hash)],
+        );
+
+        // Empty confirmed set: all hashes come back as null
+        let (port, handle) = start_mock_rpc(std::collections::HashSet::new()).await;
+        let rpc_url = format!("http://127.0.0.1:{port}");
+
+        let state = load_resume_state(
+            tmp.path(), "script/Deploy.s.sol", 1, "run()", &rpc_url,
+        ).await.expect("should load");
+
+        assert!(state.completed_tx_hashes.is_empty(), "no completed hashes");
+        assert!(state.pending_tx_hashes.contains(&hash), "hash should be pending");
+
+        handle.abort();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn resume_state_mixed_confirmed_pending_unsent() {
+        let confirmed_hash = B256::repeat_byte(0x11);
+        let pending_hash = B256::repeat_byte(0x22);
+        let tmp = tempfile::tempdir().unwrap();
+        write_sequence_fixture(
+            tmp.path(), "script/Deploy.s.sol", 1, "run()",
+            &[Some(confirmed_hash), Some(pending_hash), None],
+        );
+
+        let mut confirmed = std::collections::HashSet::new();
+        confirmed.insert(confirmed_hash);
+        let (port, handle) = start_mock_rpc(confirmed).await;
+        let rpc_url = format!("http://127.0.0.1:{port}");
+
+        let state = load_resume_state(
+            tmp.path(), "script/Deploy.s.sol", 1, "run()", &rpc_url,
+        ).await.expect("should load");
+
+        assert_eq!(state.sequence.transactions.len(), 3);
+        assert_eq!(state.completed_tx_hashes.len(), 1, "one confirmed");
+        assert!(state.completed_tx_hashes.contains(&confirmed_hash));
+        assert_eq!(state.pending_tx_hashes.len(), 1, "one pending");
+        assert!(state.pending_tx_hashes.contains(&pending_hash));
+
+        handle.abort();
     }
 }

@@ -1814,7 +1814,8 @@ impl SimulatedSession {
                             &context.config.script_path,
                             context.config.chain_id,
                             &context.config.script_sig,
-                        );
+                            rpc_url,
+                        ).await;
                         if let Some(ref rs) = resume_state {
                             // Resume uses the old path (no queued items)
                             super::routing::route_all_with_resume(btxs, &mut route_ctx, rs).await
