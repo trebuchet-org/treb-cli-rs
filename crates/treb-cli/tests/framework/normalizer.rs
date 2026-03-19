@@ -208,7 +208,16 @@ impl Normalizer for SpinnerNormalizer {
         // Collapse consecutive "Compiling" spinner frames into a single normalized line
         let compiling =
             Regex::new(r"((?:\r)*\[[^\]]+\] Compiling[^\n\r]*\s*(?:\r?\n|\r))+").unwrap();
-        compiling.replace_all(&result, "\r[⠃] Compiling...\n").into_owned()
+        let result = compiling.replace_all(&result, "\r[⠃] Compiling...\n");
+
+        // Collapse braille-character spinner frames (⣾⣽⣻⢿⡿⣟⣯⣷) for all phases.
+        // These appear after ANSI stripping as e.g. "⣾ Simulating" or "⣽ Broadcasting".
+        let braille_spinner =
+            Regex::new(r"(?:[⣾⣽⣻⢿⡿⣟⣯⣷]\s*(?:Compiling|Simulating|Broadcasting)\s*)+")
+                .unwrap();
+        braille_spinner
+            .replace_all(&result, "[spinner]\n")
+            .into_owned()
     }
 }
 

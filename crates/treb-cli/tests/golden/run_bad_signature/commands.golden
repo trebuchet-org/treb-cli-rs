@@ -1,8 +1,10 @@
 === cmd 0: [run script/Deploy.s.sol --network anvil-31337 --sig nonexistent() --broadcast --non-interactive] ===
-No files changed, compilation skipped
-🔨 Compiling and executing script/Deploy.s.sol...
-📡 Broadcasting...
-Error: pipeline execution failed
-
-Caused by:
-    forge error: forge execution preparation failed: Function `nonexistent()` is not implemented in your script.
+──────────────────────────────────────────────────
+  Script:    script/Deploy.s.sol
+  Network:   anvil-31337 (31337)
+  Namespace: default
+  Mode:      BROADCAST
+  Senders:   anvil  0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+──────────────────────────────────────────────────
+[spinner]
+Error: forge error: forge execution preparation failed: Function `nonexistent()` is not implemented in your script.

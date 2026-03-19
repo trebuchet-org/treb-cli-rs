@@ -5,7 +5,7 @@
     "chainId": 31337,
     "contractName": "Counter",
     "label": "CounterA",
-    "address": "0xd9003177dC465aAA89e20678675dca7FA5f5CAD5",
+    "address": "0x7AaCc5300ec7Ac58fe86645D08f21b1BEcadf99a",
     "type": "SINGLETON",
     "transactionId": "tx-<ID>",
     "deploymentStrategy": {
@@ -33,7 +33,7 @@
     "chainId": 31337,
     "contractName": "Counter",
     "label": "CounterB",
-    "address": "0x143514cFa5E66eC945bB19A024627c8bdE524156",
+    "address": "0x9121cce589dd296201c22E9D054D7304FA807b6a",
     "type": "SINGLETON",
     "transactionId": "tx-<ID>",
     "deploymentStrategy": {

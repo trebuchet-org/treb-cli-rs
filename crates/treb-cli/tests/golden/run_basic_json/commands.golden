@@ -3,7 +3,7 @@
   "consoleLogs": [],
   "deployments": [
     {
-      "address": "0x5b73C5498c1E3b4dbA84de0F1833c4a029d90519",
+      "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
       "chainId": 31337,
       "contractName": "Counter",
       "deploymentType": "SINGLETON",
@@ -18,9 +18,9 @@
   "success": true,
   "transactions": [
     {
-      "hash": "",
+      "hash": "0xa658636a34df2719e7d6647add190fd14073e55c10231cabdd0fbd3fd022cab8",
       "id": "tx-<ID>",
-      "status": "SIMULATED"
+      "status": "EXECUTED"
     }
   ]
 }

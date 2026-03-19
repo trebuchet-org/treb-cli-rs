@@ -1,7 +1,10 @@
 === cmd 0: [run script/NonExistent.s.sol --network anvil-31337 --broadcast --non-interactive] ===
-🔨 Compiling and executing script/NonExistent.s.sol...
-📡 Broadcasting...
-Error: pipeline execution failed
-
-Caused by:
-    forge error: forge preprocessing failed: error sending request for url (http://localhost:8545/)
+──────────────────────────────────────────────────
+  Script:    script/NonExistent.s.sol
+  Network:   anvil-31337
+  Namespace: default
+  Mode:      BROADCAST
+  Senders:   anvil  0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+──────────────────────────────────────────────────
+[spinner]
+Error: forge error: forge preprocessing failed: error sending request for url (http://localhost:8545/)

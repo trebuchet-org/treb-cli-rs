@@ -1,2 +1,29 @@
-=== cmd 0: [run script/Deploy.s.sol --network anvil-31337 --broadcast --non-interactive --dump-command] ===
-forge script script/Deploy.s.sol --rpc-url anvil-31337 --broadcast
+=== cmd 0: [run script/Deploy.s.sol --network anvil-31337 --broadcast --non-interactive --verbose] ===
+──────────────────────────────────────────────────
+  Script:    script/Deploy.s.sol
+  Network:   anvil-31337 (31337)
+  Namespace: default
+  Mode:      BROADCAST
+  Senders:   anvil  0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+──────────────────────────────────────────────────
+[spinner]
+1 transaction:
+
+  0: from=anvil
+       Tx: 0x<HASH> | Block: <BLOCK> | Gas: <GAS>
+
+
+
+📦 Deployment Summary:
+──────────────────────────────────────────────────
+  Counter:Counter at 0x5FbDB2315678afecb367f032d93F642f64180aa3
+
+Traces:
+  [138989] DeployScript::run()
+    ├─ [0] VM::startBroadcast()
+    │   └─ ← [Return]
+    ├─ [85533] → new Counter:Counter@0x5FbDB2315678afecb367f032d93F642f64180aa3
+    │   └─ ← [Return] 427 bytes of code
+    ├─ [0] VM::stopBroadcast()
+    │   └─ ← [Return]
+    └─ ← [Stop]
