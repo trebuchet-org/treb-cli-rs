@@ -1,7 +1,6 @@
 //! Compilation verification for the `project` fixture.
 //!
-//! These tests are `#[ignore]` because they require `forge` to be installed.
-//! Run them explicitly with: `cargo test -p treb-cli --test fixture_compile -- --ignored`
+//! These tests require `forge` to be installed in the test environment.
 
 mod framework;
 
@@ -17,7 +16,6 @@ fn project_fixture() -> std::path::PathBuf {
 /// This ensures all Solidity source contracts, library stubs, remappings,
 /// and the deploy script compile without errors.
 #[test]
-#[ignore]
 fn fixture_forge_build() {
     let fixture = project_fixture();
     let w = TestWorkdir::new(&fixture);

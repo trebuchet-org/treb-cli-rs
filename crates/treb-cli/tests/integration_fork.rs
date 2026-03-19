@@ -74,7 +74,7 @@ fn fork_status_no_forks() {
 /// 7 columns (Network, RPC URL, Port, Chain ID, Fork Block, Started At, Status)
 /// and status "stopped" since the port is not reachable.
 #[test]
-#[ignore] // TODO: fork behavior changed, needs golden refresh
+#[ignore] // Phase 9: fork status golden needs refresh (Uptime field drifts)
 fn fork_status_with_active_fork() {
     let ctx = TestContext::new("minimal-project");
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
@@ -398,7 +398,7 @@ fn fork_revert_not_forked() {
 /// `treb fork revert` when the fork's Anvil port (18545) is not reachable
 /// should still succeed (skipping unreachable forks), and restore the registry.
 #[test]
-#[ignore] // TODO: fork behavior changed, needs golden refresh
+#[ignore] // Phase 9: fork revert golden needs refresh after holistic fork model changes
 fn fork_revert_port_unreachable() {
     let ctx = TestContext::new("minimal-project");
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
@@ -438,7 +438,7 @@ fn fork_restart_not_forked() {
 /// and starts fresh, but still needs the snapshot directory for registry
 /// restoration.
 #[test]
-#[ignore] // TODO: fork behavior changed, needs golden refresh
+#[ignore] // Phase 9: fork restart behavior changed — now succeeds instead of erroring, golden + expect_err need update
 fn fork_restart_port_unreachable() {
     let ctx = TestContext::new("minimal-project");
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);

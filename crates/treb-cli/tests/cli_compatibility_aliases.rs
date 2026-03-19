@@ -326,7 +326,7 @@ fn completion_bash_primary_and_compat_forms_succeed() {
 }
 
 #[test]
-#[ignore] // TODO: config show output format changed
+#[ignore] // Phase 9: bare `treb config` no longer prints "Current config" — output format diverged from `treb config show`
 fn bare_config_matches_config_show() {
     let tmp = setup_config_project();
 
@@ -425,7 +425,7 @@ fn fork_exit_holistic_succeeds() {
 
 /// Fork history: `--network` flag filters correctly.
 #[test]
-#[ignore] // TODO: fork history --network filter removed per design decision
+#[ignore] // Phase 9: fork history --network filter was removed; test needs rewrite or deletion
 fn fork_history_network_filter() {
     let tmp = setup_config_project();
     seed_fork_history(tmp.path());
