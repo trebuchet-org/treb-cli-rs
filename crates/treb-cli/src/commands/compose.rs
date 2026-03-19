@@ -1071,7 +1071,9 @@ pub async fn run(
         let _foundry_shell = super::run::FoundryShellGuard::suppress();
         let r = session.simulate_all(&mut registry).await;
         drop(spinner.lock().unwrap().take());
-        eprint!("\x1b[2K\r");
+        if !json {
+            eprint!("\x1b[2K\r");
+        }
         r
     };
 
@@ -1363,7 +1365,9 @@ pub async fn run(
             let _foundry_shell = super::run::FoundryShellGuard::suppress();
             let r = simulated.broadcast_all(&mut registry).await;
             drop(broadcast_spinner.lock().unwrap().take());
-            eprint!("\x1b[2K\r");
+            if !json {
+                eprint!("\x1b[2K\r");
+            }
             r
         };
 
