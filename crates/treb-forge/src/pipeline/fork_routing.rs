@@ -166,7 +166,7 @@ async fn anvil_set_balance(
     Ok(())
 }
 
-async fn anvil_impersonate(
+pub(crate) async fn anvil_impersonate(
     provider: &impl Provider,
     addr: Address,
 ) -> Result<(), TrebError> {
@@ -177,7 +177,7 @@ async fn anvil_impersonate(
     Ok(())
 }
 
-async fn anvil_stop_impersonating(provider: &impl Provider, addr: Address) {
+pub(crate) async fn anvil_stop_impersonating(provider: &impl Provider, addr: Address) {
     let _ = provider
         .raw_request::<_, serde_json::Value>(
             "anvil_stopImpersonatingAccount".into(),
