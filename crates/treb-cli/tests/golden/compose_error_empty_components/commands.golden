@@ -1,2 +1,2 @@
-=== cmd 0: [compose empty-components.yaml --dry-run] ===
+=== cmd 0: [compose empty-components.yaml] ===
 Error: invalid orchestration configuration: at least one component is required
