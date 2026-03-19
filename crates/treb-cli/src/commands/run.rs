@@ -1089,8 +1089,9 @@ async fn handle_queued_executions(
                             .map(|a| a.calldata.clone())
                             .collect();
 
+                        let governance_provider = treb_forge::provider::build_http_provider(&fork_rpc)?;
                         match treb_forge::pipeline::fork_routing::simulate_governance_on_fork(
-                            &treb_forge::pipeline::fork_routing::AnvilRpc::new(&fork_rpc),
+                            &governance_provider,
                             &targets,
                             &values,
                             &calldatas,

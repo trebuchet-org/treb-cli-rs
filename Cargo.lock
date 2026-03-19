@@ -8270,6 +8270,7 @@ version = "0.1.0"
 dependencies = [
  "alloy-chains",
  "alloy-primitives 1.5.7",
+ "alloy-provider",
  "anyhow",
  "assert_cmd",
  "chrono",
@@ -8358,7 +8359,6 @@ dependencies = [
  "foundry-linking",
  "foundry-wallets",
  "libc",
- "reqwest 0.12.28",
  "revm-inspectors",
  "serde",
  "serde_json",
@@ -8371,6 +8371,7 @@ dependencies = [
  "treb-safe",
  "treb-sol",
  "ureq",
+ "url",
 ]
 
 [[package]]

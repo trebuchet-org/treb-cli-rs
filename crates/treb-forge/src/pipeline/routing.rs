@@ -20,6 +20,7 @@
 use std::collections::HashMap;
 
 use alloy_primitives::{Address, B256, U256};
+use alloy_provider::Provider;
 use treb_core::error::TrebError;
 
 use forge_script_sequence::ScriptSequence;
@@ -332,8 +333,8 @@ pub async fn reduce_queue(
                 };
 
                 let threshold = if ctx.is_fork {
-                    let rpc = super::fork_routing::AnvilRpc::new(ctx.rpc_url);
-                    super::fork_routing::query_safe_threshold(&rpc, safe_address).await?
+                    let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
+                    super::fork_routing::query_safe_threshold(&provider, safe_address).await?
                 } else {
                     let safe_client = treb_safe::SafeServiceClient::new(ctx.chain_id)
                         .ok_or_else(|| TrebError::Safe(format!(
@@ -358,8 +359,8 @@ pub async fn reduce_queue(
                     // Safe(n/m) — reduce to proposal
                     let operations = build_multisend_operations(&item.run, &item.btxs)?;
                     let nonce = if ctx.is_fork {
-                        let rpc = super::fork_routing::AnvilRpc::new(ctx.rpc_url);
-                        super::fork_routing::query_safe_nonce(&rpc, safe_address).await?
+                        let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
+                        super::fork_routing::query_safe_nonce(&provider, safe_address).await?
                     } else {
                         let safe_client = treb_safe::SafeServiceClient::new(ctx.chain_id)
                             .ok_or_else(|| TrebError::Safe(format!(
@@ -530,8 +531,8 @@ pub async fn reduce_queue(
                         };
 
                         let proposer_threshold = if ctx.is_fork {
-                            let rpc = super::fork_routing::AnvilRpc::new(ctx.rpc_url);
-                            super::fork_routing::query_safe_threshold(&rpc, proposer_safe).await?
+                            let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
+                            super::fork_routing::query_safe_threshold(&provider, proposer_safe).await?
                         } else {
                             let safe_client = treb_safe::SafeServiceClient::new(ctx.chain_id)
                                 .ok_or_else(|| TrebError::Safe(format!(
@@ -558,8 +559,8 @@ pub async fn reduce_queue(
                             let ops = build_multisend_operations(&front.run, &front.btxs)?;
                             let inner = extract_routable_txs(&front.run, &front.btxs)?;
                             let nonce = if ctx.is_fork {
-                                let rpc = super::fork_routing::AnvilRpc::new(ctx.rpc_url);
-                                super::fork_routing::query_safe_nonce(&rpc, proposer_safe).await?
+                                let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
+                                super::fork_routing::query_safe_nonce(&provider, proposer_safe).await?
                             } else {
                                 let safe_client = treb_safe::SafeServiceClient::new(ctx.chain_id)
                                     .ok_or_else(|| TrebError::Safe(format!(
@@ -668,8 +669,8 @@ async fn reduce_safe_1of1(
         // Fork mode: the executor will call execute_safe_on_fork,
         // which handles approveHash + execTransaction internally.
         // We encode the action as an Exec targeting the safe address.
-        let rpc = super::fork_routing::AnvilRpc::new(ctx.rpc_url);
-        let nonce = super::fork_routing::query_safe_nonce(&rpc, safe_address).await?;
+        let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
+        let nonce = super::fork_routing::query_safe_nonce(&provider, safe_address).await?;
 
         let (to, data, operation) = if operations.len() == 1 {
             let op = &operations[0];
@@ -831,11 +832,11 @@ pub async fn execute_plan(
                         // Fork: use execute_safe_on_fork for full fidelity.
                         // Pass original btxs when available so CREATE transactions
                         // are properly detected and routed through CreateCall.
-                        let rpc = super::fork_routing::AnvilRpc::new(ctx.rpc_url);
+                        let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
                         let fallback_btxs = build_btxs_from_routable(safe_ctx.safe_address, transactions);
                         let btxs_to_use = original_btxs.unwrap_or(&fallback_btxs);
                         let receipts = super::fork_routing::execute_safe_on_fork(
-                            &rpc,
+                            &provider,
                             &planned.run,
                             btxs_to_use,
                             safe_ctx.safe_address,
@@ -1086,90 +1087,23 @@ pub fn is_nonce_conflict(err: &TrebError) -> bool {
 
 /// Poll for a pending transaction receipt with retry.
 ///
-/// Sends `eth_getTransactionReceipt` up to `max_retries` times with
+/// Calls `get_transaction_receipt` up to `max_retries` times with
 /// `delay_secs` between attempts. Returns `Some(receipt)` if confirmed,
 /// `None` if still pending after all retries.
 async fn poll_pending_receipt(
-    client: &reqwest::Client,
-    rpc_url: &str,
+    provider: &impl Provider,
     tx_hash: &B256,
     max_retries: u32,
     delay_secs: u64,
 ) -> Option<BroadcastReceipt> {
-    let hash_hex = format!("{:#x}", tx_hash);
-
     for attempt in 0..max_retries {
         if attempt > 0 {
             tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
         }
 
-        let req = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "eth_getTransactionReceipt",
-            "params": [&hash_hex],
-            "id": 1,
-        });
-
-        let resp: serde_json::Value = match client
-            .post(rpc_url)
-            .json(&req)
-            .send()
-            .await
-        {
-            Ok(r) => match r.json().await {
-                Ok(v) => v,
-                Err(_) => continue,
-            },
-            Err(_) => continue,
-        };
-
-        let result = match resp.get("result") {
-            Some(r) if !r.is_null() => r,
-            _ => continue, // null or missing = still pending
-        };
-
-        // Parse the receipt
-        let hash = result
-            .get("transactionHash")
-            .and_then(|v| v.as_str())
-            .and_then(|s| s.parse::<B256>().ok())
-            .unwrap_or(*tx_hash);
-
-        let block_hex = result
-            .get("blockNumber")
-            .and_then(|v| v.as_str())
-            .unwrap_or("0x0");
-        let block_number =
-            u64::from_str_radix(block_hex.strip_prefix("0x").unwrap_or(block_hex), 16)
-                .unwrap_or(0);
-
-        let gas_hex = result
-            .get("gasUsed")
-            .and_then(|v| v.as_str())
-            .unwrap_or("0x0");
-        let gas_used =
-            u64::from_str_radix(gas_hex.strip_prefix("0x").unwrap_or(gas_hex), 16).unwrap_or(0);
-
-        let status_hex = result
-            .get("status")
-            .and_then(|v| v.as_str())
-            .unwrap_or("0x1");
-        let status = status_hex != "0x0";
-
-        let contract_address = result
-            .get("contractAddress")
-            .and_then(|v| v.as_str())
-            .and_then(|s| s.parse::<Address>().ok());
-
-        return Some(BroadcastReceipt {
-            hash,
-            block_number,
-            gas_used,
-            status,
-            contract_name: None,
-            contract_address,
-            raw_receipt: Some(result.clone()),
-        });
+        if let Ok(receipt) = fetch_receipt(provider, *tx_hash).await {
+            return Some(receipt);
+        }
     }
 
     None
@@ -1221,9 +1155,9 @@ async fn resume_wallet_run(
         .collect();
 
     if !pending_items.is_empty() {
-        let client = reqwest::Client::new();
+        let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
         for (idx, hash) in &pending_items {
-            match poll_pending_receipt(&client, ctx.rpc_url, hash, 3, 2).await {
+            match poll_pending_receipt(&provider, hash, 3, 2).await {
                 Some(receipt) => {
                     receipt_map.insert(*idx, receipt);
                 }
@@ -1347,7 +1281,9 @@ async fn broadcast_wallet_run_fork(
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
     sequence: Option<&mut ScriptSequence>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
-    let client = reqwest::Client::new();
+    use alloy_rpc_types::TransactionRequest;
+
+    let provider = crate::provider::build_http_provider(rpc_url)?;
     let mut receipts = Vec::new();
     let mut seq = sequence;
 
@@ -1358,14 +1294,13 @@ async fn broadcast_wallet_run_fork(
 
         let from = btx.transaction.from().unwrap_or_default();
 
-        // Build the transaction object
-        let mut tx_obj = serde_json::Map::new();
-        tx_obj.insert("from".into(), serde_json::json!(format!("{:#x}", from)));
+        // Build the transaction request
+        let mut tx_req = TransactionRequest::default().from(from);
 
         if let Some(to) = btx.transaction.to() {
             match to {
                 alloy_primitives::TxKind::Call(addr) => {
-                    tx_obj.insert("to".into(), serde_json::json!(format!("{:#x}", addr)));
+                    tx_req = tx_req.to(addr);
                 }
                 alloy_primitives::TxKind::Create => {}
             }
@@ -1373,81 +1308,38 @@ async fn broadcast_wallet_run_fork(
 
         if let Some(input) = btx.transaction.input() {
             if !input.is_empty() {
-                tx_obj.insert(
-                    "data".into(),
-                    serde_json::json!(format!("0x{}", alloy_primitives::hex::encode(input))),
-                );
+                tx_req.input = alloy_rpc_types::TransactionInput::new(input.clone());
             }
         }
 
         let value = btx.transaction.value().unwrap_or_default();
         if !value.is_zero() {
-            tx_obj.insert("value".into(), serde_json::json!(format!("{:#x}", value)));
+            tx_req = tx_req.value(value);
         }
 
-        // High gas limit — let the node estimate or cap
-        tx_obj.insert("gas".into(), serde_json::json!("0x1c9c380")); // 30M
+        tx_req.gas = Some(30_000_000);
 
         // Fork mode: impersonate + sendTransaction (no signing needed)
-        let impersonate = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "anvil_impersonateAccount",
-            "params": [format!("{:#x}", from)],
-            "id": 1,
-        });
-        client
-            .post(rpc_url)
-            .json(&impersonate)
-            .send()
+        super::fork_routing::anvil_impersonate(&provider, from).await?;
+
+        let receipt = provider
+            .send_transaction(tx_req)
             .await
-            .map_err(|e| TrebError::Forge(format!("impersonate failed: {e}")))?;
-
-        let send_tx = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "eth_sendTransaction",
-            "params": [tx_obj],
-            "id": 2,
-        });
-
-        let resp: serde_json::Value = client
-            .post(rpc_url)
-            .json(&send_tx)
-            .send()
+            .map_err(|e| TrebError::Forge(format!("tx {} from {:#x} failed: {}", tx_idx, from, e)))?
+            .get_receipt()
             .await
-            .map_err(|e| TrebError::Forge(format!("send tx failed: {e}")))?
-            .json()
-            .await
-            .map_err(|e| TrebError::Forge(format!("parse send response failed: {e}")))?;
+            .map_err(|e| TrebError::Forge(format!("get receipt failed: {e}")))?;
 
-        if let Some(err) = resp.get("error") {
-            return Err(TrebError::Forge(format!(
-                "tx {} from {:#x} failed: {}",
-                tx_idx, from, err
-            )));
-        }
-
-        let tx_hash_hex = resp
-            .get("result")
-            .and_then(|r| r.as_str())
-            .unwrap_or("0x0");
-
-        // Fetch receipt
-        let receipt = fetch_receipt(&client, rpc_url, tx_hash_hex).await?;
-        receipts.push(receipt.clone());
+        let br = super::fork_routing::receipt_to_broadcast_receipt(&receipt);
+        receipts.push(br.clone());
 
         // Checkpoint: update sequence and save to disk
         if let Some(ref mut s) = seq {
-            super::broadcast_writer::update_sequence_checkpoint(s, tx_idx, &receipt);
+            super::broadcast_writer::update_sequence_checkpoint(s, tx_idx, &br);
             super::broadcast_writer::save_sequence_checkpoint(s)?;
         }
 
-        let stop = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "anvil_stopImpersonatingAccount",
-            "params": [format!("{:#x}", from)],
-            "id": 3,
-        });
-        let _ = client.post(rpc_url).json(&stop).send().await;
+        super::fork_routing::anvil_stop_impersonating(&provider, from).await;
     }
 
     Ok(receipts)
@@ -1461,7 +1353,6 @@ async fn broadcast_wallet_run_live(
     resolved_senders: &HashMap<String, ResolvedSender>,
     sequence: Option<&mut ScriptSequence>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
-    use alloy_provider::Provider;
     use alloy_rpc_types::TransactionRequest;
 
     let wallet = crate::sender::resolve_wallet_for_address(
@@ -1469,13 +1360,7 @@ async fn broadcast_wallet_run_live(
         resolved_senders,
     )?;
 
-    let url: reqwest::Url = rpc_url
-        .parse()
-        .map_err(|e| TrebError::Forge(format!("invalid RPC URL: {e}")))?;
-
-    let provider = alloy_provider::ProviderBuilder::new()
-        .wallet(wallet)
-        .connect_http(url);
+    let provider = crate::provider::build_wallet_provider(rpc_url, wallet)?;
 
     let mut receipts = Vec::new();
     let mut seq = sequence;
@@ -1516,17 +1401,7 @@ async fn broadcast_wallet_run_live(
             .await
             .map_err(|e| TrebError::Forge(format!("get receipt failed: {e}")))?;
 
-        let raw = serde_json::to_value(&receipt).ok();
-
-        let br = BroadcastReceipt {
-            hash: receipt.transaction_hash,
-            block_number: receipt.block_number.unwrap_or(0),
-            gas_used: receipt.gas_used,
-            status: receipt.inner.status(),
-            contract_name: None,
-            contract_address: receipt.contract_address,
-            raw_receipt: raw,
-        };
+        let br = super::fork_routing::receipt_to_broadcast_receipt(&receipt);
 
         // Checkpoint: update sequence and save to disk
         if let Some(ref mut s) = seq {
@@ -1540,79 +1415,18 @@ async fn broadcast_wallet_run_live(
     Ok(receipts)
 }
 
-/// Fetch a transaction receipt by hash.
+/// Fetch a transaction receipt by hash via alloy provider.
 async fn fetch_receipt(
-    client: &reqwest::Client,
-    rpc_url: &str,
-    tx_hash: &str,
+    provider: &impl Provider,
+    tx_hash: B256,
 ) -> Result<BroadcastReceipt, TrebError> {
-    let req = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "eth_getTransactionReceipt",
-        "params": [tx_hash],
-        "id": 1,
-    });
-
-    let resp: serde_json::Value = client
-        .post(rpc_url)
-        .json(&req)
-        .send()
+    let receipt = provider
+        .get_transaction_receipt(tx_hash)
         .await
         .map_err(|e| TrebError::Forge(format!("fetch receipt failed: {e}")))?
-        .json()
-        .await
-        .map_err(|e| TrebError::Forge(format!("parse receipt failed: {e}")))?;
+        .ok_or_else(|| TrebError::Forge(format!("no receipt for tx {:#x}", tx_hash)))?;
 
-    let result = resp.get("result").ok_or_else(|| {
-        TrebError::Forge(format!("no receipt for tx {tx_hash}"))
-    })?;
-
-    let hash = result
-        .get("transactionHash")
-        .and_then(|v| v.as_str())
-        .unwrap_or(tx_hash);
-    let hash = hash.parse::<B256>().unwrap_or_default();
-
-    let block_hex = result
-        .get("blockNumber")
-        .and_then(|v| v.as_str())
-        .unwrap_or("0x0");
-    let block_number = u64::from_str_radix(
-        block_hex.strip_prefix("0x").unwrap_or(block_hex),
-        16,
-    )
-    .unwrap_or(0);
-
-    let gas_hex = result
-        .get("gasUsed")
-        .and_then(|v| v.as_str())
-        .unwrap_or("0x0");
-    let gas_used = u64::from_str_radix(
-        gas_hex.strip_prefix("0x").unwrap_or(gas_hex),
-        16,
-    )
-    .unwrap_or(0);
-
-    let status_hex = result
-        .get("status")
-        .and_then(|v| v.as_str())
-        .unwrap_or("0x1");
-    let status = status_hex != "0x0";
-
-    let contract_address = result
-        .get("contractAddress")
-        .and_then(|v| v.as_str())
-        .and_then(|s| s.parse::<Address>().ok());
-
-    Ok(BroadcastReceipt {
-        hash,
-        block_number,
-        gas_used,
-        status,
-        contract_name: None,
-        contract_address,
-        raw_receipt: Some(result.clone()),
-    })
+    Ok(super::fork_routing::receipt_to_broadcast_receipt(&receipt))
 }
 
 // ---------------------------------------------------------------------------
@@ -1927,75 +1741,48 @@ async fn broadcast_routable_txs_fork(
     sequence: Option<&mut ScriptSequence>,
     tx_indices: Option<&[usize]>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
-    let client = reqwest::Client::new();
+    use alloy_rpc_types::TransactionRequest;
+
+    let provider = crate::provider::build_http_provider(rpc_url)?;
     let mut receipts = Vec::new();
     let mut seq = sequence;
     // Only checkpoint when tx_indices aligns 1:1 with transactions
     let can_checkpoint = tx_indices.is_some_and(|idx| idx.len() == transactions.len());
 
     for (i, tx) in transactions.iter().enumerate() {
-        let mut tx_obj = serde_json::Map::new();
-        tx_obj.insert("from".into(), serde_json::json!(format!("{:#x}", from)));
-        tx_obj.insert("to".into(), serde_json::json!(format!("{:#x}", tx.to)));
+        let mut tx_req = TransactionRequest::default().from(from).to(tx.to);
         if !tx.data.is_empty() {
-            tx_obj.insert("data".into(), serde_json::json!(format!("0x{}", alloy_primitives::hex::encode(&tx.data))));
+            tx_req.input = alloy_rpc_types::TransactionInput::new(
+                alloy_primitives::Bytes::from(tx.data.clone()),
+            );
         }
         if !tx.value.is_zero() {
-            tx_obj.insert("value".into(), serde_json::json!(format!("{:#x}", tx.value)));
+            tx_req = tx_req.value(tx.value);
         }
-        tx_obj.insert("gas".into(), serde_json::json!("0x1c9c380")); // 30M
+        tx_req.gas = Some(30_000_000);
 
-        let impersonate = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "anvil_impersonateAccount",
-            "params": [format!("{:#x}", from)],
-            "id": 1,
-        });
-        client.post(rpc_url).json(&impersonate).send().await
-            .map_err(|e| TrebError::Forge(format!("impersonate failed: {e}")))?;
+        super::fork_routing::anvil_impersonate(&provider, from).await?;
 
-        let send_tx = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "eth_sendTransaction",
-            "params": [tx_obj],
-            "id": 2,
-        });
-
-        let resp: serde_json::Value = client
-            .post(rpc_url)
-            .json(&send_tx)
-            .send()
+        let receipt = provider
+            .send_transaction(tx_req)
             .await
-            .map_err(|e| TrebError::Forge(format!("send tx failed: {e}")))?
-            .json()
+            .map_err(|e| TrebError::Forge(format!("tx to {:#x} from {:#x} failed: {}", tx.to, from, e)))?
+            .get_receipt()
             .await
-            .map_err(|e| TrebError::Forge(format!("parse send response failed: {e}")))?;
+            .map_err(|e| TrebError::Forge(format!("get receipt failed: {e}")))?;
 
-        if let Some(err) = resp.get("error") {
-            return Err(TrebError::Forge(format!(
-                "tx to {:#x} from {:#x} failed: {}", tx.to, from, err,
-            )));
-        }
-
-        let tx_hash_hex = resp.get("result").and_then(|r| r.as_str()).unwrap_or("0x0");
-        let receipt = fetch_receipt(&client, rpc_url, tx_hash_hex).await?;
-        receipts.push(receipt.clone());
+        let br = super::fork_routing::receipt_to_broadcast_receipt(&receipt);
+        receipts.push(br.clone());
 
         // Checkpoint: update sequence and save to disk
         if can_checkpoint {
             if let (Some(s), Some(idx)) = (&mut seq, tx_indices.and_then(|ti| ti.get(i))) {
-                super::broadcast_writer::update_sequence_checkpoint(s, *idx, &receipt);
+                super::broadcast_writer::update_sequence_checkpoint(s, *idx, &br);
                 super::broadcast_writer::save_sequence_checkpoint(s)?;
             }
         }
 
-        let stop = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "anvil_stopImpersonatingAccount",
-            "params": [format!("{:#x}", from)],
-            "id": 3,
-        });
-        let _ = client.post(rpc_url).json(&stop).send().await;
+        super::fork_routing::anvil_stop_impersonating(&provider, from).await;
     }
 
     Ok(receipts)
@@ -2010,18 +1797,11 @@ async fn broadcast_routable_txs_live(
     sequence: Option<&mut ScriptSequence>,
     tx_indices: Option<&[usize]>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
-    use alloy_provider::Provider;
     use alloy_rpc_types::TransactionRequest;
 
     let wallet = crate::sender::resolve_wallet_for_address(from, resolved_senders)?;
 
-    let url: reqwest::Url = rpc_url
-        .parse()
-        .map_err(|e| TrebError::Forge(format!("invalid RPC URL: {e}")))?;
-
-    let provider = alloy_provider::ProviderBuilder::new()
-        .wallet(wallet)
-        .connect_http(url);
+    let provider = crate::provider::build_wallet_provider(rpc_url, wallet)?;
 
     let mut receipts = Vec::new();
     let mut seq = sequence;
@@ -2051,17 +1831,7 @@ async fn broadcast_routable_txs_live(
             .await
             .map_err(|e| TrebError::Forge(format!("get receipt failed: {e}")))?;
 
-        let raw = serde_json::to_value(&receipt).ok();
-
-        let br = BroadcastReceipt {
-            hash: receipt.transaction_hash,
-            block_number: receipt.block_number.unwrap_or(0),
-            gas_used: receipt.gas_used,
-            status: receipt.inner.status(),
-            contract_name: None,
-            contract_address: receipt.contract_address,
-            raw_receipt: raw,
-        };
+        let br = super::fork_routing::receipt_to_broadcast_receipt(&receipt);
 
         // Checkpoint: update sequence and save to disk
         if can_checkpoint {
@@ -2363,7 +2133,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn poll_pending_receipt_returns_receipt_on_confirm() {
-        // Start a mock RPC server that returns a receipt
+        // Start a mock RPC server that returns a complete receipt
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let rpc_url = format!("http://127.0.0.1:{port}");
@@ -2373,27 +2143,37 @@ mod tests {
             use tokio::io::{AsyncReadExt, AsyncWriteExt};
             let mut buf = vec![0u8; 4096];
             let _ = stream.read(&mut buf).await;
+            let zeros_bloom = "0x".to_owned() + &"0".repeat(512);
             let resp_body = serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": 1,
                 "result": {
                     "transactionHash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+                    "transactionIndex": "0x0",
+                    "blockHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "blockNumber": "0xa",
+                    "from": "0x0000000000000000000000000000000000000000",
+                    "to": "0x0000000000000000000000000000000000000000",
                     "gasUsed": "0x5208",
+                    "cumulativeGasUsed": "0x5208",
+                    "effectiveGasPrice": "0x0",
                     "status": "0x1",
+                    "logs": [],
+                    "logsBloom": zeros_bloom,
+                    "type": "0x0",
                 },
             });
             let resp_str = resp_body.to_string();
             let http_resp = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
                 resp_str.len(), resp_str,
             );
             let _ = stream.write_all(http_resp.as_bytes()).await;
         });
 
-        let client = reqwest::Client::new();
+        let provider = crate::provider::build_http_provider(&rpc_url).unwrap();
         let hash = B256::repeat_byte(0x11);
-        let result = poll_pending_receipt(&client, &rpc_url, &hash, 1, 0).await;
+        let result = poll_pending_receipt(&provider, &hash, 1, 0).await;
         assert!(result.is_some(), "should return receipt");
         let receipt = result.unwrap();
         assert_eq!(receipt.block_number, 10);
@@ -2422,17 +2202,17 @@ mod tests {
                 });
                 let resp_str = resp_body.to_string();
                 let http_resp = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
                     resp_str.len(), resp_str,
                 );
                 let _ = stream.write_all(http_resp.as_bytes()).await;
             }
         });
 
-        let client = reqwest::Client::new();
+        let provider = crate::provider::build_http_provider(&rpc_url).unwrap();
         let hash = B256::repeat_byte(0x22);
         // Use 0 delay so test is fast; 3 retries
-        let result = poll_pending_receipt(&client, &rpc_url, &hash, 3, 0).await;
+        let result = poll_pending_receipt(&provider, &hash, 3, 0).await;
         assert!(result.is_none(), "should return None for pending tx");
 
         handle.abort();
