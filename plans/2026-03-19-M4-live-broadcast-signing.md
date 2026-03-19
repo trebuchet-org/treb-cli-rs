@@ -73,13 +73,13 @@ Re-enable and fix the wallet broadcast e2e tests. These test the full pipeline: 
 
 ## Phase 5 -- Compose Test Fixes
 
-Fix the 12 ignored compose tests broken by `--dry-run` and `--dump-command` removal. Compose simulation mode (no `--broadcast`) should produce the same output the old `--dry-run` did.
+Fix the 12 ignored `cli_compose` tests and 15 ignored `integration_compose` tests. The compose command behavior is correct — simulation (no `--broadcast`) runs the full pipeline (compile, execute scripts, collect broadcastable transactions). The tests fail because they pass bare YAML files without a foundry project setup. Fix by adding `foundry.toml` + `treb init` to tests that need it, and updating assertions for the removed `--dry-run` and `--dump-command` flags. Do NOT change compose behavior.
 
 **Deliverables**
-- Re-enable: 12 `cli_compose` tests
-- Update compose assertions to match current flag set
-- Verify compose simulation output (human + JSON) is correct
-- Re-enable: 15 `integration_compose` tests (broadcast-dependent)
+- Re-enable: 12 `cli_compose` tests — add foundry project setup where needed
+- Remove references to `--dry-run` and `--dump-command` in test assertions
+- Re-enable: 15 `integration_compose` tests (broadcast-dependent, need Phase 1)
+- Verify no compose behavior changes — only test setup changes
 
 **User stories:** 4
 **Dependencies:** Phase 1
