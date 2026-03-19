@@ -12,7 +12,7 @@ use treb_registry::{DEPLOYMENTS_FILE, ForkStateStore, TRANSACTIONS_FILE};
 use framework::{
     context::TestContext,
     integration_test::{IntegrationTest, run_integration_test},
-    normalizer::PathNormalizer,
+    normalizer::{PathNormalizer, UptimeNormalizer},
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -74,7 +74,6 @@ fn fork_status_no_forks() {
 /// 7 columns (Network, RPC URL, Port, Chain ID, Fork Block, Started At, Status)
 /// and status "stopped" since the port is not reachable.
 #[test]
-#[ignore] // Phase 9: fork status golden needs refresh (Uptime field drifts)
 fn fork_status_with_active_fork() {
     let ctx = TestContext::new("minimal-project");
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
@@ -83,7 +82,8 @@ fn fork_status_with_active_fork() {
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_fork_status(ctx.path()))
         .test(&["fork", "status"])
-        .extra_normalizer(Box::new(path_normalizer));
+        .extra_normalizer(Box::new(path_normalizer))
+        .extra_normalizer(Box::new(UptimeNormalizer));
 
     run_integration_test(&test, &ctx);
 }
