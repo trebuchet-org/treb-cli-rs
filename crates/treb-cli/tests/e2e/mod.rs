@@ -5,6 +5,8 @@
 //! Provides reusable helpers for project setup, Anvil spawning, CLI invocation,
 //! JSON assertion, and direct registry file reading.
 
+pub mod deploy_safe;
+
 use assert_cmd::cargo::cargo_bin_cmd;
 use std::{fs, path::Path};
 
