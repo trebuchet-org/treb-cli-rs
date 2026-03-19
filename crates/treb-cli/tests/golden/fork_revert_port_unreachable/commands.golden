@@ -1,3 +1,5 @@
 === cmd 0: [fork revert] ===
-Registry restored from snapshot.
+Reverted: run Deploy.s.sol
+  3 deployment(s), 5 transaction(s) undone
+  0 snapshot(s) remaining
 Warning: Anvil for 'mainnet' not reachable at port 18545; skipping EVM revert

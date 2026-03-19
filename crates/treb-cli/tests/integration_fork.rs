@@ -6,13 +6,13 @@
 mod framework;
 
 use chrono::{TimeZone, Utc};
-use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
+use treb_core::types::fork::{ForkEntry, ForkHistoryEntry, ForkRunSnapshot, ForkRunSource};
 use treb_registry::{DEPLOYMENTS_FILE, ForkStateStore, TRANSACTIONS_FILE};
 
 use framework::{
     context::TestContext,
     integration_test::{IntegrationTest, run_integration_test},
-    normalizer::PathNormalizer,
+    normalizer::{PathNormalizer, UptimeNormalizer},
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -52,6 +52,43 @@ fn seed_fork_status(project_root: &std::path::Path) {
     store.insert_active_fork(entry).unwrap();
 }
 
+/// Pre-populate fork state with one active entry AND a run snapshot for revert tests.
+fn seed_fork_with_run_snapshot(project_root: &std::path::Path) {
+    use std::collections::HashMap;
+
+    let treb_dir = project_root.join(".treb");
+    let entry = sample_fork_entry(&treb_dir);
+    let snapshot_dir = std::path::PathBuf::from(&entry.snapshot_dir);
+    std::fs::create_dir_all(&snapshot_dir).unwrap();
+
+    // Create the run snapshot directory with minimal registry files so restore succeeds
+    let run_snapshot_dir = treb_dir.join("priv/snapshots/run-0");
+    std::fs::create_dir_all(&run_snapshot_dir).unwrap();
+    std::fs::write(run_snapshot_dir.join(DEPLOYMENTS_FILE), "{}").unwrap();
+    std::fs::write(run_snapshot_dir.join(TRANSACTIONS_FILE), "{}").unwrap();
+
+    let mut store = ForkStateStore::new(&treb_dir);
+    store.enter_fork_mode(&entry.snapshot_dir).unwrap();
+    store.insert_active_fork(entry).unwrap();
+
+    let ts = Utc.with_ymd_and_hms(2026, 1, 15, 11, 0, 0).unwrap();
+    let mut evm_snapshots = HashMap::new();
+    evm_snapshots.insert("mainnet".to_string(), "0x1".to_string());
+    store
+        .push_run_snapshot(ForkRunSnapshot {
+            index: 0,
+            source: ForkRunSource::Run {
+                script: "Deploy.s.sol".to_string(),
+            },
+            registry_snapshot_dir: run_snapshot_dir.to_string_lossy().into_owned(),
+            evm_snapshots,
+            deployment_count: 3,
+            transaction_count: 5,
+            timestamp: ts,
+        })
+        .unwrap();
+}
+
 // ── fork status: no forks ────────────────────────────────────────────────
 
 /// `treb fork status` with an empty fork state should print "No active forks."
@@ -74,7 +111,6 @@ fn fork_status_no_forks() {
 /// 7 columns (Network, RPC URL, Port, Chain ID, Fork Block, Started At, Status)
 /// and status "stopped" since the port is not reachable.
 #[test]
-#[ignore] // Phase 9: fork status golden needs refresh (Uptime field drifts)
 fn fork_status_with_active_fork() {
     let ctx = TestContext::new("minimal-project");
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
@@ -83,7 +119,8 @@ fn fork_status_with_active_fork() {
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_fork_status(ctx.path()))
         .test(&["fork", "status"])
-        .extra_normalizer(Box::new(path_normalizer));
+        .extra_normalizer(Box::new(path_normalizer))
+        .extra_normalizer(Box::new(UptimeNormalizer));
 
     run_integration_test(&test, &ctx);
 }
@@ -398,14 +435,13 @@ fn fork_revert_not_forked() {
 /// `treb fork revert` when the fork's Anvil port (18545) is not reachable
 /// should still succeed (skipping unreachable forks), and restore the registry.
 #[test]
-#[ignore] // Phase 9: fork revert golden needs refresh after holistic fork model changes
 fn fork_revert_port_unreachable() {
     let ctx = TestContext::new("minimal-project");
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("fork_revert_port_unreachable")
         .setup(&["init"])
-        .post_setup_hook(|ctx| seed_fork_status(ctx.path()))
+        .post_setup_hook(|ctx| seed_fork_with_run_snapshot(ctx.path()))
         .test(&["fork", "revert"])
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -432,13 +468,12 @@ fn fork_restart_not_forked() {
 
 // ── fork restart: no snapshot dir ────────────────────────────────────────
 
-/// `treb fork restart --network mainnet` when the holistic snapshot directory
-/// does not exist should error mentioning "failed to restore registry".
-/// With background Anvil subprocess behavior, restart kills the old process
-/// and starts fresh, but still needs the snapshot directory for registry
-/// restoration.
+/// `treb fork restart --network mainnet` when the old fork's Anvil port is
+/// unreachable succeeds at the function level (returns Ok) but collects the
+/// Anvil spawn failure into stderr. The restart kills the old process,
+/// restores the holistic registry snapshot, then spawns a fresh Anvil which
+/// fails because the fork URL is unreachable.
 #[test]
-#[ignore] // Phase 9: fork restart behavior changed — now succeeds instead of erroring, golden + expect_err need update
 fn fork_restart_port_unreachable() {
     let ctx = TestContext::new("minimal-project");
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
@@ -447,7 +482,6 @@ fn fork_restart_port_unreachable() {
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_fork_status(ctx.path()))
         .test(&["fork", "restart", "--network", "mainnet"])
-        .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);

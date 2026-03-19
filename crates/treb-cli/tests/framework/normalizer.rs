@@ -211,9 +211,11 @@ impl Normalizer for SpinnerNormalizer {
         let result = compiling.replace_all(&result, "\r[⠃] Compiling...\n");
 
         // Collapse braille-character spinner frames (⣾⣽⣻⢿⡿⣟⣯⣷) for all phases.
-        // These appear after ANSI stripping as e.g. "⣾ Simulating" or "⣽ Broadcasting".
+        // These appear after ANSI stripping as e.g. "⣾ Simulating", "⣽ Broadcasting",
+        // or "⣾ Restarting fork...".  Match any text between consecutive braille chars
+        // so new spinner messages don't require updating this regex.
         let braille_spinner =
-            Regex::new(r"(?:[⣾⣽⣻⢿⡿⣟⣯⣷]\s*(?:Compiling|Simulating|Broadcasting)\s*)+")
+            Regex::new(r"(?:[⣾⣽⣻⢿⡿⣟⣯⣷][^⣾⣽⣻⢿⡿⣟⣯⣷\n]*)+")
                 .unwrap();
         braille_spinner
             .replace_all(&result, "[spinner]\n")
