@@ -819,6 +819,7 @@ async fn reduce_safe_1of1(
 pub async fn execute_plan(
     plan: &RoutingPlan,
     ctx: &mut RouteContext<'_>,
+    original_btxs: Option<&foundry_cheatcodes::BroadcastableTransactions>,
 ) -> Result<Vec<(TransactionRun, RunResult, Option<QueuedExecution>)>, TrebError> {
     let mut results = Vec::with_capacity(plan.actions.len());
 
@@ -827,14 +828,16 @@ pub async fn execute_plan(
             RoutingAction::Exec { from, transactions, safe, governance: _ } => {
                 if let Some(safe_ctx) = safe {
                     if ctx.is_fork {
-                        // Fork: use execute_safe_on_fork for full fidelity
+                        // Fork: use execute_safe_on_fork for full fidelity.
+                        // Pass original btxs when available so CREATE transactions
+                        // are properly detected and routed through CreateCall.
                         let rpc = super::fork_routing::AnvilRpc::new(ctx.rpc_url);
+                        let fallback_btxs = build_btxs_from_routable(safe_ctx.safe_address, transactions);
+                        let btxs_to_use = original_btxs.unwrap_or(&fallback_btxs);
                         let receipts = super::fork_routing::execute_safe_on_fork(
                             &rpc,
                             &planned.run,
-                            // We need the original btxs — but the executor doesn't have them.
-                            // For Safe(1/1) fork exec, we reconstruct from the planned transactions.
-                            &build_btxs_from_routable(safe_ctx.safe_address, transactions),
+                            btxs_to_use,
                             safe_ctx.safe_address,
                             ctx.chain_id,
                             ctx.quiet,
@@ -864,8 +867,11 @@ pub async fn execute_plan(
             }
             RoutingAction::Propose { safe_address, chain_id, operations, inner_transactions, sender_role, nonce, governance: _ } => {
                 if ctx.is_fork {
-                    // Fork: noop — just record as proposed with a random hash
-                    let safe_tx_hash = B256::random();
+                    // Fork: noop — record as proposed with the pre-computed EIP-712 hash
+                    let safe_tx_hash = match &planned.queued {
+                        Some(QueuedExecution::SafeProposal { safe_tx_hash, .. }) => *safe_tx_hash,
+                        _ => compute_safe_tx_hash_for_ops(operations, *safe_address, *nonce, *chain_id),
+                    };
                     RunResult::SafeProposed {
                         safe_tx_hash,
                         safe_address: *safe_address,
@@ -944,7 +950,7 @@ pub async fn route_all(
     ctx: &mut RouteContext<'_>,
 ) -> Result<Vec<(TransactionRun, RunResult)>, TrebError> {
     let plan = reduce_queue(btxs, ctx).await?;
-    let results = execute_plan(&plan, ctx).await?;
+    let results = execute_plan(&plan, ctx, Some(btxs)).await?;
     // Strip queued items for backward compat — caller can use route_all_with_queued instead
     Ok(results.into_iter().map(|(run, result, _)| (run, result)).collect())
 }
@@ -955,7 +961,7 @@ pub async fn route_all_with_queued(
     ctx: &mut RouteContext<'_>,
 ) -> Result<Vec<(TransactionRun, RunResult, Option<QueuedExecution>)>, TrebError> {
     let plan = reduce_queue(btxs, ctx).await?;
-    execute_plan(&plan, ctx).await
+    execute_plan(&plan, ctx, Some(btxs)).await
 }
 
 /// Route with resume support — skips confirmed, polls pending, re-sends unsent.
@@ -997,7 +1003,7 @@ pub async fn route_all_with_resume(
                     sequence: None,
                 };
                 let plan = reduce_queue(&single_btxs, &temp_ctx).await?;
-                let plan_results = execute_plan(&plan, &mut temp_ctx).await?;
+                let plan_results = execute_plan(&plan, &mut temp_ctx, Some(&single_btxs)).await?;
                 if let Some((_, result, _)) = plan_results.into_iter().next() {
                     result
                 } else {

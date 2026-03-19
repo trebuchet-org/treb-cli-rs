@@ -41,6 +41,9 @@ sol! {
     ) external returns (bool);
     function nonce() external view returns (uint256);
 
+    // CreateCall — used to deploy contracts via Safe DelegateCall
+    function performCreate(uint256 value, bytes deploymentData) external returns (address);
+
     // TimelockController
     function getMinDelay() external view returns (uint256);
     function scheduleBatch(
@@ -164,6 +167,15 @@ impl<'a> AnvilRpc<'a> {
         Ok(())
     }
 
+    /// Set the bytecode at an address using `anvil_setCode`.
+    async fn set_code(&self, addr: Address, code: &[u8]) -> Result<(), TrebError> {
+        self.rpc_call("anvil_setCode", serde_json::json!([
+            format!("{:#x}", addr),
+            format!("0x{}", alloy_primitives::hex::encode(code)),
+        ])).await?;
+        Ok(())
+    }
+
     async fn estimate_gas(&self, from: Address, to: Address, data: &[u8]) -> Result<u64, TrebError> {
         let mut tx_obj = serde_json::Map::new();
         tx_obj.insert("from".into(), serde_json::json!(format!("{:#x}", from)));
@@ -267,6 +279,16 @@ fn parse_hex_u64(hex: &str) -> Result<u64, TrebError> {
     u64::from_str_radix(stripped, 16).map_err(|e| TrebError::Forge(format!("hex parse: {e}")))
 }
 
+/// Deterministic address for the CreateCall helper deployed on fork.
+const CREATE_CALL_ADDRESS: Address = Address::new([
+    0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC,
+    0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0x01,
+]);
+
+/// Runtime bytecode for CreateCall.sol compiled with solc 0.8.30.
+/// Source: crates/treb-cli/tests/fixtures/project/src/safe/CreateCall.sol
+const CREATE_CALL_BYTECODE: &str = "608060405234801561000f575f5ffd5b5060043610610029575f3560e01c80634c8c9ea11461002d575b5f5ffd5b6100476004803603810190610042919061029f565b61005d565b6040516100549190610338565b60405180910390f35b5f81516020830184f090505f73ffffffffffffffffffffffffffffffffffffffff168173ffffffffffffffffffffffffffffffffffffffff16036100d6576040517f08c379a00000000000000000000000000000000000000000000000000000000081526004016100cd906103ab565b60405180910390fd5b8073ffffffffffffffffffffffffffffffffffffffff167f4db17dd5e4732fb6da34a148104a592783ca119a1e7bb8829eba6cbadef0b51160405160405180910390a292915050565b5f604051905090565b5f5ffd5b5f5ffd5b5f819050919050565b61014281610130565b811461014c575f5ffd5b50565b5f8135905061015d81610139565b92915050565b5f5ffd5b5f5ffd5b5f601f19601f8301169050919050565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52604160045260245ffd5b6101b18261016b565b810181811067ffffffffffffffff821117156101d0576101cf61017b565b5b80604052505050565b5f6101e261011f565b90506101ee82826101a8565b919050565b5f67ffffffffffffffff82111561020d5761020c61017b565b5b6102168261016b565b9050602081019050919050565b828183375f83830152505050565b5f61024361023e846101f3565b6101d9565b90508281526020810184848401111561025f5761025e610167565b5b61026a848285610223565b509392505050565b5f82601f83011261028657610285610163565b5b8135610296848260208601610231565b91505092915050565b5f5f604083850312156102b5576102b4610128565b5b5f6102c28582860161014f565b925050602083013567ffffffffffffffff8111156102e3576102e261012c565b5b6102ef85828601610272565b9150509250929050565b5f73ffffffffffffffffffffffffffffffffffffffff82169050919050565b5f610322826102f9565b9050919050565b61033281610318565b82525050565b5f60208201905061034b5f830184610329565b92915050565b5f82825260208201905092915050565b7f436f756c64206e6f74206465706c6f7920636f6e7472616374000000000000005f82015250565b5f610395601983610351565b91506103a082610361565b602082019050919050565b5f6020820190508181035f8301526103c281610389565b905091905056";
+
 // ---------------------------------------------------------------------------
 // Safe fork execution
 // ---------------------------------------------------------------------------
@@ -284,23 +306,54 @@ pub async fn execute_safe_on_fork(
     chain_id: u64,
     quiet: bool,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
-    // Build MultiSend operations from the run's transactions
+    // Check if any transactions are CREATE (contract deployment).
+    // Safe.execTransaction cannot directly deploy contracts — CREATE txs
+    // must be routed through a CreateCall helper via DelegateCall.
+    let has_creates = run.tx_indices.iter()
+        .filter_map(|&idx| btxs.get(idx))
+        .any(|btx| matches!(btx.transaction.to(), Some(alloy_primitives::TxKind::Create) | None));
+
+    if has_creates {
+        // Deploy CreateCall helper at a deterministic address
+        let bytecode = alloy_primitives::hex::decode(CREATE_CALL_BYTECODE)
+            .map_err(|e| TrebError::Forge(format!("invalid CreateCall bytecode: {e}")))?;
+        rpc.set_code(CREATE_CALL_ADDRESS, &bytecode).await?;
+    }
+
+    // Build MultiSend operations from the run's transactions.
+    // CREATE transactions are wrapped as DelegateCall to CreateCall.performCreate().
     let operations: Vec<treb_safe::MultiSendOperation> = run.tx_indices.iter()
         .filter_map(|&idx| btxs.get(idx))
         .map(|btx| {
-            let to = btx.transaction.to()
-                .and_then(|kind| match kind {
-                    alloy_primitives::TxKind::Call(addr) => Some(addr),
-                    alloy_primitives::TxKind::Create => None,
-                })
-                .unwrap_or(Address::ZERO);
+            let is_create = matches!(btx.transaction.to(), Some(alloy_primitives::TxKind::Create) | None);
             let value = btx.transaction.value().unwrap_or_default();
-            let data = btx.transaction.input().cloned().unwrap_or_default();
-            treb_safe::MultiSendOperation {
-                operation: 0, // Call
-                to,
-                value: U256::from(value),
-                data,
+            let input = btx.transaction.input().cloned().unwrap_or_default();
+
+            if is_create {
+                // Wrap as DelegateCall to CreateCall.performCreate(value, bytecode)
+                let calldata = performCreateCall {
+                    value: U256::from(value),
+                    deploymentData: input,
+                }.abi_encode();
+                treb_safe::MultiSendOperation {
+                    operation: 1, // DelegateCall
+                    to: CREATE_CALL_ADDRESS,
+                    value: U256::ZERO,
+                    data: calldata.into(),
+                }
+            } else {
+                let to = btx.transaction.to()
+                    .and_then(|kind| match kind {
+                        alloy_primitives::TxKind::Call(addr) => Some(addr),
+                        alloy_primitives::TxKind::Create => None,
+                    })
+                    .unwrap_or(Address::ZERO);
+                treb_safe::MultiSendOperation {
+                    operation: 0, // Call
+                    to,
+                    value: U256::from(value),
+                    data: input,
+                }
             }
         })
         .collect();
@@ -412,10 +465,11 @@ async fn execute_safe_batch(
     safe_address: Address,
     chain_id: u64,
 ) -> Result<BroadcastReceipt, TrebError> {
-    // Build the execTransaction target + data + operation
+    // Build the execTransaction target + data + operation.
+    // For single-op batches, use the operation's own type (Call or DelegateCall).
     let (to, data, operation) = if batch.len() == 1 {
         let op = &batch[0];
-        (op.to, op.data.clone(), 0u8)
+        (op.to, op.data.clone(), op.operation)
     } else {
         let multi_send_data = treb_safe::encode_multi_send_call(batch);
         (treb_safe::MULTI_SEND_ADDRESS, multi_send_data, 1u8)
