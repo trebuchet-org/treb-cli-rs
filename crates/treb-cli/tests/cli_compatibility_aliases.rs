@@ -326,7 +326,6 @@ fn completion_bash_primary_and_compat_forms_succeed() {
 }
 
 #[test]
-#[ignore] // Phase 9: bare `treb config` no longer prints "Current config" — output format diverged from `treb config show`
 fn bare_config_matches_config_show() {
     let tmp = setup_config_project();
 
@@ -342,7 +341,7 @@ fn bare_config_matches_config_show() {
 
     let bare_stdout = String::from_utf8_lossy(&bare.stdout);
     assert!(
-        bare_stdout.contains("Current config"),
+        bare_stdout.contains("Namespace:"),
         "bare config output should include the config summary"
     );
     assert_eq!(bare.stdout, explicit.stdout);
