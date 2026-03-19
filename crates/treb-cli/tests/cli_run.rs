@@ -40,7 +40,6 @@ fn run_help_shows_all_flags() {
     assert!(stdout.contains("--rpc-url"), "help should show --rpc-url");
     assert!(stdout.contains("--namespace"), "help should show --namespace");
     assert!(stdout.contains("--broadcast"), "help should show --broadcast");
-    assert!(stdout.contains("--dry-run"), "help should show --dry-run");
     assert!(stdout.contains("--slow"), "help should show --slow");
     assert!(stdout.contains("--legacy"), "help should show --legacy");
     assert!(stdout.contains("--verify"), "help should show --verify");

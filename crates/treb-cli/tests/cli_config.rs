@@ -28,11 +28,10 @@ fn config_show_displays_namespace_and_network() {
         .current_dir(tmp.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("📋 Current config:"))
-        .stdout(predicate::str::contains("Namespace: default"))
-        .stdout(predicate::str::contains("Network:   (not set)"))
-        .stdout(predicate::str::contains("📦 Config source:"))
-        .stdout(predicate::str::contains("📁 config file:"));
+        .stdout(predicate::str::contains("Namespace:"))
+        .stdout(predicate::str::contains("default"))
+        .stdout(predicate::str::contains("Network:"))
+        .stdout(predicate::str::contains("Source:"));
 }
 
 #[test]

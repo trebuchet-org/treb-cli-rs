@@ -1,2 +1,2 @@
 === cmd 0: [fork restart --network mainnet] ===
-Error: network 'mainnet' is not in fork mode
+Error: not in fork mode

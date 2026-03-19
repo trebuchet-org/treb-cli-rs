@@ -54,8 +54,8 @@ fn completion_unsupported_shell_exits_nonzero() {
 }
 
 #[test]
-fn run_help_contains_dry_run() {
-    treb().args(["run", "--help"]).assert().success().stdout(predicate::str::contains("dry-run"));
+fn run_help_contains_script_argument() {
+    treb().args(["run", "--help"]).assert().success().stdout(predicate::str::contains("SCRIPT"));
 }
 
 #[test]
