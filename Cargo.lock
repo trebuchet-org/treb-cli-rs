@@ -8333,9 +8333,13 @@ dependencies = [
 name = "treb-forge"
 version = "0.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-dyn-abi",
  "alloy-json-abi 1.5.7",
+ "alloy-network",
  "alloy-primitives 1.5.7",
+ "alloy-provider",
+ "alloy-rpc-types",
  "alloy-signer",
  "alloy-signer-ledger",
  "alloy-signer-trezor",
