@@ -4,6 +4,9 @@ pragma solidity >=0.8.0;
 interface Vm {
     function startBroadcast() external;
     function stopBroadcast() external;
+    function envAddress(string calldata name, string calldata delim) external view returns (address[] memory);
+    function envUint(string calldata name) external view returns (uint256);
+    function envOr(string calldata name, uint256 defaultValue) external view returns (uint256);
 }
 
 library console {
