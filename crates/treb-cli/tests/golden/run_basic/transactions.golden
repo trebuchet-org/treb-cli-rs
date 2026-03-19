@@ -2,23 +2,21 @@
   "tx-<ID>": {
     "id": "tx-<ID>",
     "chainId": 31337,
-    "hash": "",
-    "status": "SIMULATED",
-    "sender": "0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38",
+    "hash": "0xa658636a34df2719e7d6647add190fd14073e55c10231cabdd0fbd3fd022cab8",
+    "status": "EXECUTED",
+    "blockNumber": 1,
+    "sender": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
     "nonce": 0,
-    "deployments": [
-      "default/31337/Counter:Counter"
-    ],
+    "deployments": [],
     "operations": [
       {
         "type": "DEPLOY",
-        "target": "0x5b73C5498c1E3b4dbA84de0F1833c4a029d90519",
-        "method": "CREATE",
-        "result": {
-          "address": "0x5b73C5498c1E3b4dbA84de0F1833c4a029d90519"
-        }
+        "target": "contract creation",
+        "method": "0x60806040",
+        "result": {}
       }
     ],
+    "broadcastFile": "broadcast/Deploy.s.sol/31337/run-latest.json",
     "environment": "default",
     "createdAt": "<TIMESTAMP>"
   }

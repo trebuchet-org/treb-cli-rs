@@ -1,19 +1,26 @@
 === cmd 0: [run script/DeployMulti.s.sol --network anvil-31337 --broadcast --non-interactive] ===
-No files changed, compilation skipped
-
-🔄 Transactions:
 ──────────────────────────────────────────────────
+  Script:    script/DeployMulti.s.sol
+  Network:   anvil-31337 (31337)
+  Namespace: default
+  Mode:      BROADCAST
+  Senders:   anvil  0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+──────────────────────────────────────────────────
+[spinner]
+1 transaction:
 
-  simulated anvil → 0xd9003177dC465aAA89e20678675dca7FA5f5CAD5::CREATE(DEPLOY) | 0x143514cFa5E66eC945bB19A024627c8bdE524156::CREATE(DEPLOY)
+  0: from=anvil
+    [236319] BatchCounterFactory::deployPair()
+      ├─ [85533] → new Counter:CounterA@0x7AaCc5300ec7Ac58fe86645D08f21b1BEcadf99a
+      │   └─ ← [Return] 427 bytes of code
+      ├─ [85533] → new Counter:CounterB@0x9121cce589dd296201c22E9D054D7304FA807b6a
+      │   └─ ← [Return] 427 bytes of code
+      └─ ← [Return] Counter:CounterA: [0x7AaCc5300ec7Ac58fe86645D08f21b1BEcadf99a], Counter:CounterB: [0x9121cce589dd296201c22E9D054D7304FA807b6a]
+       Tx: 0x<HASH> | Block: <BLOCK> | Gas: <GAS>
+
 
 
 📦 Deployment Summary:
 ──────────────────────────────────────────────────
-  Counter:CounterA at 0xd9003177dC465aAA89e20678675dca7FA5f5CAD5
-  Counter:CounterB at 0x143514cFa5E66eC945bB19A024627c8bdE524156
-
-
-✓ Updated registry for anvil-31337 network in namespace default
-✓ Script execution completed successfully
-🔨 Compiling and executing script/DeployMulti.s.sol...
-📡 Broadcasting...
+  Counter:CounterA at 0x7AaCc5300ec7Ac58fe86645D08f21b1BEcadf99a
+  Counter:CounterB at 0x9121cce589dd296201c22E9D054D7304FA807b6a

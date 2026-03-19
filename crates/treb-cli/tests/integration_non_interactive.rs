@@ -21,7 +21,6 @@ use framework::{
 /// Uses `version --json` (no init required) and verifies exit code 0
 /// with valid JSON on stdout via golden file comparison.
 #[test]
-#[ignore] // TODO: re-enable after live broadcast signing is implemented
 fn exit_code_zero_on_json_success() {
     let ctx = TestContext::new("project");
 

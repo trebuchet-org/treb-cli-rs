@@ -415,10 +415,17 @@ pub async fn execute_script(
         script_config.rpc_url(url);
     }
 
+    // Resolve the RPC URL from the network alias (foundry.toml [rpc_endpoints])
+    // so that downstream broadcast code receives a real URL, not the alias name.
+    let resolved_rpc_url = opts
+        .effective_rpc_url
+        .as_deref()
+        .and_then(|network_or_url| resolve_rpc_url_for_chain_id(network_or_url, cwd))
+        .or_else(|| opts.effective_rpc_url.clone());
+
     // Resolve chain ID from RPC
-    let chain_id = if let Some(ref network_or_url) = opts.effective_rpc_url {
-        let actual_url = resolve_rpc_url_for_chain_id(network_or_url, cwd);
-        if let Some(url) = actual_url { fetch_chain_id(&url).await.unwrap_or(0) } else { 0 }
+    let chain_id = if let Some(ref url) = resolved_rpc_url {
+        fetch_chain_id(url).await.unwrap_or(0)
     } else {
         0
     };
@@ -433,7 +440,7 @@ pub async fn execute_script(
         script_args: Vec::new(),
         verbosity: opts.verbose,
         is_fork: opts.is_fork,
-        rpc_url: opts.effective_rpc_url.clone(),
+        rpc_url: resolved_rpc_url,
         quiet: opts.json,
         ..Default::default()
     };

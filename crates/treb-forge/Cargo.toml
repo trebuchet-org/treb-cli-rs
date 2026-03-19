@@ -32,6 +32,10 @@ alloy-signer = { workspace = true }
 alloy-signer-ledger = { workspace = true }
 alloy-signer-trezor = { workspace = true }
 alloy-sol-types = { workspace = true }
+alloy-provider = { workspace = true }
+alloy-consensus = { workspace = true }
+alloy-network = { workspace = true }
+alloy-rpc-types = { workspace = true }
 # Use v1.x to match foundry-common's alloy version (workspace has v0.8 for other crates)
 alloy-dyn-abi = "1.5"
 alloy-json-abi = "1.5"

@@ -1,9 +1,9 @@
-=== cmd 0: [run script/Deploy.s.sol --dry-run --non-interactive --verbose --json] ===
+=== cmd 0: [run script/Deploy.s.sol --non-interactive --verbose --json] ===
 {
   "consoleLogs": [],
   "deployments": [
     {
-      "address": "0x7FA9385bE102ac3EAc297483Dd6233D62b3e1496",
+      "address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
       "chainId": 0,
       "contractName": "Counter",
       "deploymentType": "SINGLETON",

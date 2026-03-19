@@ -48,6 +48,10 @@ alloy-signer = "1.1"
 alloy-signer-ledger = "1.1"
 alloy-signer-trezor = "1.1"
 alloy-sol-types = "1.5"
+alloy-provider = { version = "1.1", default-features = false, features = ["reqwest-rustls-tls"] }
+alloy-consensus = "1.1"
+alloy-network = "1.1"
+alloy-rpc-types = "1.1"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

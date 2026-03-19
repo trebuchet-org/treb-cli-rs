@@ -839,6 +839,7 @@ pub async fn execute_plan(
                         // Live: the exec transactions contain full execTransaction calldata
                         let receipts = broadcast_routable_txs(
                             ctx.rpc_url, *from, transactions, false,
+                            ctx.resolved_senders,
                         ).await?;
                         RunResult::Broadcast(receipts)
                     }
@@ -846,6 +847,7 @@ pub async fn execute_plan(
                     // Plain wallet broadcast
                     let receipts = broadcast_routable_txs(
                         ctx.rpc_url, *from, transactions, ctx.is_fork,
+                        ctx.resolved_senders,
                     ).await?;
                     RunResult::Broadcast(receipts)
                 }
@@ -984,7 +986,7 @@ pub async fn route_all_with_resume(
                     RunResult::Broadcast(receipts)
                 } else {
                     let receipts = broadcast_wallet_run(
-                        ctx.rpc_url, &run, btxs, ctx.is_fork,
+                        ctx.rpc_url, &run, btxs, ctx.is_fork, ctx.resolved_senders,
                     ).await?;
                     RunResult::Broadcast(receipts)
                 }
@@ -1059,8 +1061,8 @@ pub fn flatten_receipts(results: &[(TransactionRun, RunResult)]) -> Vec<Broadcas
 /// Broadcast a wallet run's transactions to an RPC endpoint.
 ///
 /// For fork mode (Anvil): uses `anvil_impersonateAccount` + `eth_sendTransaction`.
-/// For live mode: signs each transaction with the sender's private key and
-/// uses `eth_sendRawTransaction`.
+/// For live mode: signs each transaction with the sender's private key via
+/// alloy provider and uses `eth_sendRawTransaction`.
 ///
 /// Returns one `BroadcastReceipt` per transaction.
 pub async fn broadcast_wallet_run(
@@ -1068,6 +1070,20 @@ pub async fn broadcast_wallet_run(
     run: &TransactionRun,
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
     is_fork: bool,
+    resolved_senders: &HashMap<String, ResolvedSender>,
+) -> Result<Vec<BroadcastReceipt>, TrebError> {
+    if is_fork {
+        broadcast_wallet_run_fork(rpc_url, run, btxs).await
+    } else {
+        broadcast_wallet_run_live(rpc_url, run, btxs, resolved_senders).await
+    }
+}
+
+/// Fork mode: impersonate accounts and send unsigned transactions via Anvil.
+async fn broadcast_wallet_run_fork(
+    rpc_url: &str,
+    run: &TransactionRun,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     let client = reqwest::Client::new();
     let mut receipts = Vec::new();
@@ -1109,37 +1125,23 @@ pub async fn broadcast_wallet_run(
         // High gas limit — let the node estimate or cap
         tx_obj.insert("gas".into(), serde_json::json!("0x1c9c380")); // 30M
 
-        if is_fork {
-            // Fork mode: impersonate + sendTransaction (no signing needed)
-            let impersonate = serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "anvil_impersonateAccount",
-                "params": [format!("{:#x}", from)],
-                "id": 1,
-            });
-            client
-                .post(rpc_url)
-                .json(&impersonate)
-                .send()
-                .await
-                .map_err(|e| TrebError::Forge(format!("impersonate failed: {e}")))?;
-        }
-
-        let send_method = if is_fork { "eth_sendTransaction" } else { "eth_sendRawTransaction" };
-
-        // For live mode, we'd need to sign here — currently only fork mode is supported.
-        // TODO: implement signing with WalletSigner for live broadcast
-        if !is_fork {
-            return Err(TrebError::Forge(
-                "live network broadcast through routing is not yet supported; \
-                 use fork mode or wallet-only scripts for live broadcast"
-                    .into(),
-            ));
-        }
+        // Fork mode: impersonate + sendTransaction (no signing needed)
+        let impersonate = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "anvil_impersonateAccount",
+            "params": [format!("{:#x}", from)],
+            "id": 1,
+        });
+        client
+            .post(rpc_url)
+            .json(&impersonate)
+            .send()
+            .await
+            .map_err(|e| TrebError::Forge(format!("impersonate failed: {e}")))?;
 
         let send_tx = serde_json::json!({
             "jsonrpc": "2.0",
-            "method": send_method,
+            "method": "eth_sendTransaction",
             "params": [tx_obj],
             "id": 2,
         });
@@ -1170,15 +1172,90 @@ pub async fn broadcast_wallet_run(
         let receipt = fetch_receipt(&client, rpc_url, tx_hash_hex).await?;
         receipts.push(receipt);
 
-        if is_fork {
-            let stop = serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "anvil_stopImpersonatingAccount",
-                "params": [format!("{:#x}", from)],
-                "id": 3,
-            });
-            let _ = client.post(rpc_url).json(&stop).send().await;
+        let stop = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "anvil_stopImpersonatingAccount",
+            "params": [format!("{:#x}", from)],
+            "id": 3,
+        });
+        let _ = client.post(rpc_url).json(&stop).send().await;
+    }
+
+    Ok(receipts)
+}
+
+/// Live mode: sign each transaction with the sender's wallet via alloy provider.
+async fn broadcast_wallet_run_live(
+    rpc_url: &str,
+    run: &TransactionRun,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    resolved_senders: &HashMap<String, ResolvedSender>,
+) -> Result<Vec<BroadcastReceipt>, TrebError> {
+    use alloy_provider::Provider;
+    use alloy_rpc_types::TransactionRequest;
+
+    let wallet = crate::sender::resolve_wallet_for_address(
+        run.sender_address,
+        resolved_senders,
+    )?;
+
+    let url: reqwest::Url = rpc_url
+        .parse()
+        .map_err(|e| TrebError::Forge(format!("invalid RPC URL: {e}")))?;
+
+    let provider = alloy_provider::ProviderBuilder::new()
+        .wallet(wallet)
+        .connect_http(url);
+
+    let mut receipts = Vec::new();
+
+    for &tx_idx in &run.tx_indices {
+        let btx = btxs.get(tx_idx).ok_or_else(|| {
+            TrebError::Forge(format!("transaction index {tx_idx} out of range"))
+        })?;
+
+        let mut tx_req = TransactionRequest::default();
+
+        if let Some(from) = btx.transaction.from() {
+            tx_req = tx_req.from(from);
         }
+
+        if let Some(to) = btx.transaction.to() {
+            if let alloy_primitives::TxKind::Call(addr) = to {
+                tx_req = tx_req.to(addr);
+            }
+        }
+
+        if let Some(input) = btx.transaction.input() {
+            if !input.is_empty() {
+                tx_req.input = alloy_rpc_types::TransactionInput::new(input.clone());
+            }
+        }
+
+        let value = btx.transaction.value().unwrap_or_default();
+        if !value.is_zero() {
+            tx_req = tx_req.value(value);
+        }
+
+        let receipt = provider
+            .send_transaction(tx_req)
+            .await
+            .map_err(|e| TrebError::Forge(format!("send tx failed: {e}")))?
+            .get_receipt()
+            .await
+            .map_err(|e| TrebError::Forge(format!("get receipt failed: {e}")))?;
+
+        let raw = serde_json::to_value(&receipt).ok();
+
+        receipts.push(BroadcastReceipt {
+            hash: receipt.transaction_hash,
+            block_number: receipt.block_number.unwrap_or(0),
+            gas_used: receipt.gas_used,
+            status: receipt.inner.status(),
+            contract_name: None,
+            contract_address: receipt.contract_address,
+            raw_receipt: raw,
+        });
     }
 
     Ok(receipts)
@@ -1544,11 +1621,28 @@ fn compute_safe_tx_hash_for_ops(
 }
 
 /// Broadcast routable transactions via JSON-RPC.
+///
+/// For fork mode (Anvil): uses `anvil_impersonateAccount` + `eth_sendTransaction`.
+/// For live mode: signs each transaction with the sender's wallet via alloy provider.
 async fn broadcast_routable_txs(
     rpc_url: &str,
     from: Address,
     transactions: &[RoutableTx],
     is_fork: bool,
+    resolved_senders: &HashMap<String, ResolvedSender>,
+) -> Result<Vec<BroadcastReceipt>, TrebError> {
+    if is_fork {
+        broadcast_routable_txs_fork(rpc_url, from, transactions).await
+    } else {
+        broadcast_routable_txs_live(rpc_url, from, transactions, resolved_senders).await
+    }
+}
+
+/// Fork mode: impersonate accounts and send unsigned routable transactions via Anvil.
+async fn broadcast_routable_txs_fork(
+    rpc_url: &str,
+    from: Address,
+    transactions: &[RoutableTx],
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     let client = reqwest::Client::new();
     let mut receipts = Vec::new();
@@ -1565,23 +1659,14 @@ async fn broadcast_routable_txs(
         }
         tx_obj.insert("gas".into(), serde_json::json!("0x1c9c380")); // 30M
 
-        if is_fork {
-            let impersonate = serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "anvil_impersonateAccount",
-                "params": [format!("{:#x}", from)],
-                "id": 1,
-            });
-            client.post(rpc_url).json(&impersonate).send().await
-                .map_err(|e| TrebError::Forge(format!("impersonate failed: {e}")))?;
-        }
-
-        if !is_fork {
-            return Err(TrebError::Forge(
-                "live network broadcast through routing is not yet supported; \
-                 use fork mode or wallet-only scripts for live broadcast".into(),
-            ));
-        }
+        let impersonate = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "anvil_impersonateAccount",
+            "params": [format!("{:#x}", from)],
+            "id": 1,
+        });
+        client.post(rpc_url).json(&impersonate).send().await
+            .map_err(|e| TrebError::Forge(format!("impersonate failed: {e}")))?;
 
         let send_tx = serde_json::json!({
             "jsonrpc": "2.0",
@@ -1610,15 +1695,74 @@ async fn broadcast_routable_txs(
         let receipt = fetch_receipt(&client, rpc_url, tx_hash_hex).await?;
         receipts.push(receipt);
 
-        if is_fork {
-            let stop = serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "anvil_stopImpersonatingAccount",
-                "params": [format!("{:#x}", from)],
-                "id": 3,
-            });
-            let _ = client.post(rpc_url).json(&stop).send().await;
+        let stop = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "anvil_stopImpersonatingAccount",
+            "params": [format!("{:#x}", from)],
+            "id": 3,
+        });
+        let _ = client.post(rpc_url).json(&stop).send().await;
+    }
+
+    Ok(receipts)
+}
+
+/// Live mode: sign each routable transaction with the sender's wallet via alloy provider.
+async fn broadcast_routable_txs_live(
+    rpc_url: &str,
+    from: Address,
+    transactions: &[RoutableTx],
+    resolved_senders: &HashMap<String, ResolvedSender>,
+) -> Result<Vec<BroadcastReceipt>, TrebError> {
+    use alloy_provider::Provider;
+    use alloy_rpc_types::TransactionRequest;
+
+    let wallet = crate::sender::resolve_wallet_for_address(from, resolved_senders)?;
+
+    let url: reqwest::Url = rpc_url
+        .parse()
+        .map_err(|e| TrebError::Forge(format!("invalid RPC URL: {e}")))?;
+
+    let provider = alloy_provider::ProviderBuilder::new()
+        .wallet(wallet)
+        .connect_http(url);
+
+    let mut receipts = Vec::new();
+
+    for tx in transactions {
+        let mut tx_req = TransactionRequest::default();
+        tx_req = tx_req.from(from);
+        tx_req = tx_req.to(tx.to);
+
+        if !tx.data.is_empty() {
+            tx_req.input = alloy_rpc_types::TransactionInput::new(
+                alloy_primitives::Bytes::from(tx.data.clone()),
+            );
         }
+
+        if !tx.value.is_zero() {
+            tx_req = tx_req.value(tx.value);
+        }
+
+        let receipt = provider
+            .send_transaction(tx_req)
+            .await
+            .map_err(|e| TrebError::Forge(format!("send tx failed: {e}")))?
+            .get_receipt()
+            .await
+            .map_err(|e| TrebError::Forge(format!("get receipt failed: {e}")))?;
+
+        let raw = serde_json::to_value(&receipt).ok();
+
+        receipts.push(BroadcastReceipt {
+            hash: receipt.transaction_hash,
+            block_number: receipt.block_number.unwrap_or(0),
+            gas_used: receipt.gas_used,
+            status: receipt.inner.status(),
+            contract_name: None,
+            contract_address: receipt.contract_address,
+            raw_receipt: raw,
+        });
     }
 
     Ok(receipts)

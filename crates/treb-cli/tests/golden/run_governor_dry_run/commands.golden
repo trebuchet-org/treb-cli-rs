@@ -1,10 +1,14 @@
-=== cmd 0: [run script/GovernorProposal.s.sol --dry-run --non-interactive] ===
-No files changed, compilation skipped
-
-🔄 Transactions:
+=== cmd 0: [run script/GovernorProposal.s.sol --non-interactive] ===
 ──────────────────────────────────────────────────
-
-  simulated governance → 0x0000000000000000000000000000000000001000::0xdeadbeef(CALL)
+  Script:    script/GovernorProposal.s.sol
+  Network:   (none)
+  Namespace: default
+  Mode:      DRY_RUN
+  Senders:   anvil     0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+             deployer  governor=0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB timelock=0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB proposer=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+──────────────────────────────────────────────────
+[spinner]
+No transactions recorded
 
 
 🏛️ Governor Proposals:
@@ -12,7 +16,3 @@ No files changed, compilation skipped
 
   42 (would be proposed)
    Governor: 0xaAaA...aaAa | Timelock: 0xbBbB...BBbB | Status: pending | 1 linked transaction
-
-✓ Script execution completed successfully
-🔨 Compiling and executing script/GovernorProposal.s.sol...
-🧪 Simulating...

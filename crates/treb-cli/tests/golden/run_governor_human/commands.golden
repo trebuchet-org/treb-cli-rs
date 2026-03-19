@@ -1,20 +1,18 @@
 === cmd 0: [run script/GovernorProposal.s.sol --network anvil-31337 --broadcast --non-interactive] ===
-No files changed, compilation skipped
-
-🔄 Transactions:
 ──────────────────────────────────────────────────
+  Script:    script/GovernorProposal.s.sol
+  Network:   anvil-31337 (31337)
+  Namespace: default
+  Mode:      BROADCAST
+  Senders:   anvil     0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+             deployer  governor=0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB timelock=0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB proposer=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+──────────────────────────────────────────────────
+[spinner]
+No transactions recorded
 
-  simulated governance → 0x0000000000000000000000000000000000001000::0xdeadbeef(CALL)
-
-
-✓ Updated registry for anvil-31337 network in namespace default
 
 🏛️ Governor Proposals:
 ──────────────────────────────────────────────────
 
-  42 (proposed)
+  42 (would be proposed)
    Governor: 0xaAaA...aaAa | Timelock: 0xbBbB...BBbB | Status: pending | 1 linked transaction
-
-✓ Script execution completed successfully
-🔨 Compiling and executing script/GovernorProposal.s.sol...
-🏛️ Creating governance proposal...

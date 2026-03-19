@@ -2,7 +2,7 @@
 {
   "consoleLogs": [],
   "deployments": [],
-  "dryRun": false,
+  "dryRun": true,
   "gasUsed": 35948,
   "governorProposals": [
     {
@@ -17,11 +17,5 @@
   ],
   "skipped": [],
   "success": true,
-  "transactions": [
-    {
-      "hash": "",
-      "id": "tx-<ID>",
-      "status": "SIMULATED"
-    }
-  ]
+  "transactions": []
 }

@@ -2,32 +2,21 @@
   "tx-<ID>": {
     "id": "tx-<ID>",
     "chainId": 31337,
-    "hash": "",
-    "status": "SIMULATED",
-    "sender": "0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38",
+    "hash": "0x82519152359473725ae719ac40ef64fdc425306dcf9fd265f1a148470bd33f04",
+    "status": "EXECUTED",
+    "blockNumber": 1,
+    "sender": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
     "nonce": 0,
-    "deployments": [
-      "default/31337/Counter:CounterA",
-      "default/31337/Counter:CounterB"
-    ],
+    "deployments": [],
     "operations": [
       {
-        "type": "DEPLOY",
-        "target": "0xd9003177dC465aAA89e20678675dca7FA5f5CAD5",
-        "method": "CREATE",
-        "result": {
-          "address": "0xd9003177dC465aAA89e20678675dca7FA5f5CAD5"
-        }
-      },
-      {
-        "type": "DEPLOY",
-        "target": "0x143514cFa5E66eC945bB19A024627c8bdE524156",
-        "method": "CREATE",
-        "result": {
-          "address": "0x143514cFa5E66eC945bB19A024627c8bdE524156"
-        }
+        "type": "CALL",
+        "target": "0xC7f2Cf4845C6db0e1a1e91ED41Bcd0FcC1b0E141",
+        "method": "0x84491a77",
+        "result": {}
       }
     ],
+    "broadcastFile": "broadcast/DeployMulti.s.sol/31337/run-latest.json",
     "environment": "default",
     "createdAt": "<TIMESTAMP>"
   }
