@@ -3,6 +3,13 @@ Warning: compose file has changed since the last run; resuming anyway
 Compose hash:  acc3612c0a2b6c49
     Skipping:  1
 
-Error: no foundry.toml found in <PROJECT_ROOT>
+🚧 [DRY RUN] Showing execution plan only — no changes will be made.
 
-Run `forge init` to create a Foundry project, then `treb init`.
+
+🎯 Orchestrating simple-deploy
+📋 Execution plan: 2 components
+
+📋 Execution Plan:
+──────────────────────────────────────────────────
+1. registry → script/DeployRegistry.s.sol (skipped)
+2. token → script/DeployToken.s.sol
