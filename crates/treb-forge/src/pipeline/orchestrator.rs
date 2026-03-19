@@ -230,7 +230,7 @@ impl RunPipeline {
                         ))?;
 
                     report(BroadcastPhase::Broadcasting);
-                    let ctx = super::routing::RouteContext {
+                    let mut ctx = super::routing::RouteContext {
                         rpc_url,
                         chain_id: self.context.config.chain_id,
                         is_fork: self.context.config.is_fork,
@@ -239,12 +239,13 @@ impl RunPipeline {
                         resolved_senders: &self.context.resolved_senders,
                         sender_labels: &self.context.sender_labels,
                         sender_configs: &self.context.sender_configs,
+                        sequence: None,
                     };
                     let run_results = if let Some(ref resume) = self.resume_state {
-                        super::routing::route_all_with_resume(btxs, &ctx, resume).await?
+                        super::routing::route_all_with_resume(btxs, &mut ctx, resume).await?
                             .into_iter().map(|(run, result)| (run, result, None)).collect()
                     } else {
-                        super::routing::route_all_with_queued(btxs, &ctx).await?
+                        super::routing::route_all_with_queued(btxs, &mut ctx).await?
                     };
 
                     let outcome = apply_routing_results_with_queued(
@@ -1764,7 +1765,7 @@ impl SimulatedSession {
                     };
 
                     report(&SessionPhase::Broadcasting(name.clone()));
-                    let route_ctx = super::routing::RouteContext {
+                    let mut route_ctx = super::routing::RouteContext {
                         rpc_url,
                         chain_id: context.config.chain_id,
                         is_fork: context.config.is_fork,
@@ -1773,6 +1774,7 @@ impl SimulatedSession {
                         resolved_senders: &context.resolved_senders,
                         sender_labels: &context.sender_labels,
                         sender_configs: &context.sender_configs,
+                        sequence: None,
                     };
 
                     let run_results = if self.resume {
@@ -1784,13 +1786,13 @@ impl SimulatedSession {
                         );
                         if let Some(ref rs) = resume_state {
                             // Resume uses the old path (no queued items)
-                            super::routing::route_all_with_resume(btxs, &route_ctx, rs).await
+                            super::routing::route_all_with_resume(btxs, &mut route_ctx, rs).await
                                 .map(|r| r.into_iter().map(|(run, result)| (run, result, None)).collect())
                         } else {
-                            super::routing::route_all_with_queued(btxs, &route_ctx).await
+                            super::routing::route_all_with_queued(btxs, &mut route_ctx).await
                         }
                     } else {
-                        super::routing::route_all_with_queued(btxs, &route_ctx).await
+                        super::routing::route_all_with_queued(btxs, &mut route_ctx).await
                     };
 
                     match run_results {

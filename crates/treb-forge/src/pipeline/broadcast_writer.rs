@@ -156,6 +156,29 @@ pub fn relative_broadcast_path(
 }
 
 // ---------------------------------------------------------------------------
+// Checkpoint helper
+// ---------------------------------------------------------------------------
+
+/// Update a pre-built `ScriptSequence` in-place after a transaction is confirmed.
+///
+/// Sets the hash on the transaction at `tx_idx` and appends the raw receipt
+/// (if available) to the sequence's receipts list.
+pub fn update_sequence_checkpoint(
+    sequence: &mut ScriptSequence,
+    tx_idx: usize,
+    receipt: &crate::script::BroadcastReceipt,
+) {
+    if let Some(tx_meta) = sequence.transactions.get_mut(tx_idx) {
+        tx_meta.hash = Some(receipt.hash);
+    }
+    if let Some(ref raw) = receipt.raw_receipt {
+        if let Ok(any_receipt) = serde_json::from_value(raw.clone()) {
+            sequence.receipts.push(any_receipt);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Build ScriptSequence
 // ---------------------------------------------------------------------------
 

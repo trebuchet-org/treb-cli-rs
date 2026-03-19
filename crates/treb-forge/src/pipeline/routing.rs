@@ -22,6 +22,8 @@ use std::collections::HashMap;
 use alloy_primitives::{Address, B256, U256};
 use treb_core::error::TrebError;
 
+use forge_script_sequence::ScriptSequence;
+
 use crate::sender::{ResolvedSender, SenderCategory};
 use crate::script::BroadcastReceipt;
 
@@ -255,6 +257,9 @@ pub struct RouteContext<'a> {
     pub resolved_senders: &'a HashMap<String, ResolvedSender>,
     pub sender_labels: &'a HashMap<Address, String>,
     pub sender_configs: &'a HashMap<String, treb_config::SenderConfig>,
+    /// Optional mutable reference to a pre-built ScriptSequence for in-place
+    /// checkpoint updates during broadcast.
+    pub sequence: Option<&'a mut ScriptSequence>,
 }
 
 // ---------------------------------------------------------------------------
@@ -813,7 +818,7 @@ async fn reduce_safe_1of1(
 /// The caller (CLI) is responsible for inline Queued handling (prompts, simulation).
 pub async fn execute_plan(
     plan: &RoutingPlan,
-    ctx: &RouteContext<'_>,
+    ctx: &mut RouteContext<'_>,
 ) -> Result<Vec<(TransactionRun, RunResult, Option<QueuedExecution>)>, TrebError> {
     let mut results = Vec::with_capacity(plan.actions.len());
 
@@ -840,6 +845,7 @@ pub async fn execute_plan(
                         let receipts = broadcast_routable_txs(
                             ctx.rpc_url, *from, transactions, false,
                             ctx.resolved_senders,
+                            ctx.sequence.as_deref_mut(),
                         ).await?;
                         RunResult::Broadcast(receipts)
                     }
@@ -848,6 +854,7 @@ pub async fn execute_plan(
                     let receipts = broadcast_routable_txs(
                         ctx.rpc_url, *from, transactions, ctx.is_fork,
                         ctx.resolved_senders,
+                        ctx.sequence.as_deref_mut(),
                     ).await?;
                     RunResult::Broadcast(receipts)
                 }
@@ -931,7 +938,7 @@ pub async fn execute_plan(
 /// Returns `(TransactionRun, RunResult)` pairs for backward compatibility.
 pub async fn route_all(
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
-    ctx: &RouteContext<'_>,
+    ctx: &mut RouteContext<'_>,
 ) -> Result<Vec<(TransactionRun, RunResult)>, TrebError> {
     let plan = reduce_queue(btxs, ctx).await?;
     let results = execute_plan(&plan, ctx).await?;
@@ -942,7 +949,7 @@ pub async fn route_all(
 /// Route all with queued execution items returned.
 pub async fn route_all_with_queued(
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
-    ctx: &RouteContext<'_>,
+    ctx: &mut RouteContext<'_>,
 ) -> Result<Vec<(TransactionRun, RunResult, Option<QueuedExecution>)>, TrebError> {
     let plan = reduce_queue(btxs, ctx).await?;
     execute_plan(&plan, ctx).await
@@ -951,7 +958,7 @@ pub async fn route_all_with_queued(
 /// Route with resume support — skips runs whose results are already completed.
 pub async fn route_all_with_resume(
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
-    ctx: &RouteContext<'_>,
+    ctx: &mut RouteContext<'_>,
     resume: &super::broadcast_writer::ResumeState,
 ) -> Result<Vec<(TransactionRun, RunResult)>, TrebError> {
     let runs = partition_into_runs(btxs, ctx.resolved_senders, ctx.sender_labels);
@@ -987,6 +994,7 @@ pub async fn route_all_with_resume(
                 } else {
                     let receipts = broadcast_wallet_run(
                         ctx.rpc_url, &run, btxs, ctx.is_fork, ctx.resolved_senders,
+                        ctx.sequence.as_deref_mut(),
                     ).await?;
                     RunResult::Broadcast(receipts)
                 }
@@ -995,7 +1003,7 @@ pub async fn route_all_with_resume(
                 // For Safe/Governor with resume, fall through to normal routing
                 // Build a single-run plan and execute
                 let single_btxs = btxs.clone();
-                let temp_ctx = RouteContext {
+                let mut temp_ctx = RouteContext {
                     rpc_url: ctx.rpc_url,
                     chain_id: ctx.chain_id,
                     is_fork: ctx.is_fork,
@@ -1004,9 +1012,10 @@ pub async fn route_all_with_resume(
                     resolved_senders: ctx.resolved_senders,
                     sender_labels: ctx.sender_labels,
                     sender_configs: ctx.sender_configs,
+                    sequence: None,
                 };
                 let plan = reduce_queue(&single_btxs, &temp_ctx).await?;
-                let plan_results = execute_plan(&plan, &temp_ctx).await?;
+                let plan_results = execute_plan(&plan, &mut temp_ctx).await?;
                 if let Some((_, result, _)) = plan_results.into_iter().next() {
                     result
                 } else {
@@ -1071,11 +1080,12 @@ pub async fn broadcast_wallet_run(
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
     is_fork: bool,
     resolved_senders: &HashMap<String, ResolvedSender>,
+    sequence: Option<&mut ScriptSequence>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     if is_fork {
-        broadcast_wallet_run_fork(rpc_url, run, btxs).await
+        broadcast_wallet_run_fork(rpc_url, run, btxs, sequence).await
     } else {
-        broadcast_wallet_run_live(rpc_url, run, btxs, resolved_senders).await
+        broadcast_wallet_run_live(rpc_url, run, btxs, resolved_senders, sequence).await
     }
 }
 
@@ -1084,6 +1094,7 @@ async fn broadcast_wallet_run_fork(
     rpc_url: &str,
     run: &TransactionRun,
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    _sequence: Option<&mut ScriptSequence>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     let client = reqwest::Client::new();
     let mut receipts = Vec::new();
@@ -1190,6 +1201,7 @@ async fn broadcast_wallet_run_live(
     run: &TransactionRun,
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
     resolved_senders: &HashMap<String, ResolvedSender>,
+    _sequence: Option<&mut ScriptSequence>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     use alloy_provider::Provider;
     use alloy_rpc_types::TransactionRequest;
@@ -1630,11 +1642,12 @@ async fn broadcast_routable_txs(
     transactions: &[RoutableTx],
     is_fork: bool,
     resolved_senders: &HashMap<String, ResolvedSender>,
+    sequence: Option<&mut ScriptSequence>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     if is_fork {
-        broadcast_routable_txs_fork(rpc_url, from, transactions).await
+        broadcast_routable_txs_fork(rpc_url, from, transactions, sequence).await
     } else {
-        broadcast_routable_txs_live(rpc_url, from, transactions, resolved_senders).await
+        broadcast_routable_txs_live(rpc_url, from, transactions, resolved_senders, sequence).await
     }
 }
 
@@ -1643,6 +1656,7 @@ async fn broadcast_routable_txs_fork(
     rpc_url: &str,
     from: Address,
     transactions: &[RoutableTx],
+    _sequence: Option<&mut ScriptSequence>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     let client = reqwest::Client::new();
     let mut receipts = Vec::new();
@@ -1713,6 +1727,7 @@ async fn broadcast_routable_txs_live(
     from: Address,
     transactions: &[RoutableTx],
     resolved_senders: &HashMap<String, ResolvedSender>,
+    _sequence: Option<&mut ScriptSequence>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     use alloy_provider::Provider;
     use alloy_rpc_types::TransactionRequest;
