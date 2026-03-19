@@ -229,8 +229,25 @@ impl RunPipeline {
                             "RPC URL required for broadcast".into(),
                         ))?;
 
+                    // Build pre-routing sequence and ensure directories exist
+                    // before broadcast so checkpoints can be saved incrementally.
+                    let (_, bp, cp) = super::broadcast_writer::compute_broadcast_paths(
+                        &self.context.project_root,
+                        &self.context.config.script_path,
+                        self.context.config.chain_id,
+                        &self.context.config.script_sig,
+                    );
+                    let mut pre_sequence = super::broadcast_writer::build_pre_routing_sequence(
+                        btxs,
+                        &recorded_transactions,
+                        &self.context,
+                        bp,
+                        cp,
+                    );
+                    super::broadcast_writer::ensure_broadcast_dirs(&pre_sequence)?;
+
                     report(BroadcastPhase::Broadcasting);
-                    let ctx = super::routing::RouteContext {
+                    let mut ctx = super::routing::RouteContext {
                         rpc_url,
                         chain_id: self.context.config.chain_id,
                         is_fork: self.context.config.is_fork,
@@ -239,12 +256,13 @@ impl RunPipeline {
                         resolved_senders: &self.context.resolved_senders,
                         sender_labels: &self.context.sender_labels,
                         sender_configs: &self.context.sender_configs,
+                        sequence: Some(&mut pre_sequence),
                     };
                     let run_results = if let Some(ref resume) = self.resume_state {
-                        super::routing::route_all_with_resume(btxs, &ctx, resume).await?
+                        super::routing::route_all_with_resume(btxs, &mut ctx, resume).await?
                             .into_iter().map(|(run, result)| (run, result, None)).collect()
                     } else {
-                        super::routing::route_all_with_queued(btxs, &ctx).await?
+                        super::routing::route_all_with_queued(btxs, &mut ctx).await?
                     };
 
                     let outcome = apply_routing_results_with_queued(
@@ -255,6 +273,7 @@ impl RunPipeline {
                         &self.context.config.script_path,
                         self.context.config.chain_id,
                         &self.context.config.script_sig,
+                        Some(pre_sequence),
                     )?;
                     proposed_results = outcome.proposed_results;
                     routing_safe_transactions = outcome.safe_transactions;
@@ -530,6 +549,10 @@ pub struct RoutingOutcome {
 ///
 /// This is the shared post-routing path used by both the orchestrator and
 /// compose's Phase 4 broadcast loop.
+///
+/// When `pre_built_sequence` is `Some`, skips `build_script_sequence()` and
+/// uses the pre-built (and already checkpointed) sequence for the final
+/// broadcast artifact write.
 pub fn apply_routing_results(
     run_results: &[(TransactionRun, RunResult)],
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
@@ -538,6 +561,7 @@ pub fn apply_routing_results(
     script_path: &str,
     chain_id: u64,
     script_sig: &str,
+    pre_built_sequence: Option<forge_script_sequence::ScriptSequence>,
 ) -> Result<RoutingOutcome, TrebError> {
     // Build Safe/Governor records from routing results
     let (proposed_results, safe_transactions, governor_proposals) =
@@ -550,21 +574,27 @@ pub fn apply_routing_results(
     let receipts = super::routing::flatten_receipts(run_results);
     super::hydration::apply_receipts(recorded_transactions, &receipts);
 
-    // Write Foundry-compatible broadcast files
+    // Write Foundry-compatible broadcast files.
+    // When a pre-built sequence is provided (from incremental checkpointing),
+    // reuse it instead of rebuilding from routing results.
     let (_, bp, cp) = super::broadcast_writer::compute_broadcast_paths(
         &context.project_root,
         script_path,
         chain_id,
         script_sig,
     );
-    let mut sequence = super::broadcast_writer::build_script_sequence(
-        btxs,
-        run_results,
-        recorded_transactions,
-        context,
-        bp.clone(),
-        cp,
-    );
+    let mut sequence = if let Some(seq) = pre_built_sequence {
+        seq
+    } else {
+        super::broadcast_writer::build_script_sequence(
+            btxs,
+            run_results,
+            recorded_transactions,
+            context,
+            bp.clone(),
+            cp,
+        )
+    };
     let deferred = super::broadcast_writer::build_deferred_operations(
         run_results,
         recorded_transactions,
@@ -594,6 +624,7 @@ pub fn apply_routing_results_with_queued(
     script_path: &str,
     chain_id: u64,
     script_sig: &str,
+    pre_built_sequence: Option<forge_script_sequence::ScriptSequence>,
 ) -> Result<RoutingOutcome, TrebError> {
     // Extract (run, result) pairs for the existing functions
     let run_results: Vec<(TransactionRun, RunResult)> = run_results_with_queued.iter()
@@ -616,6 +647,7 @@ pub fn apply_routing_results_with_queued(
     let mut outcome = apply_routing_results(
         &run_results, btxs, recorded_transactions, context,
         script_path, chain_id, script_sig,
+        pre_built_sequence,
     )?;
     outcome.queued_executions = queued_executions;
     Ok(outcome)
@@ -1764,7 +1796,7 @@ impl SimulatedSession {
                     };
 
                     report(&SessionPhase::Broadcasting(name.clone()));
-                    let route_ctx = super::routing::RouteContext {
+                    let mut route_ctx = super::routing::RouteContext {
                         rpc_url,
                         chain_id: context.config.chain_id,
                         is_fork: context.config.is_fork,
@@ -1773,6 +1805,7 @@ impl SimulatedSession {
                         resolved_senders: &context.resolved_senders,
                         sender_labels: &context.sender_labels,
                         sender_configs: &context.sender_configs,
+                        sequence: None,
                     };
 
                     let run_results = if self.resume {
@@ -1781,16 +1814,17 @@ impl SimulatedSession {
                             &context.config.script_path,
                             context.config.chain_id,
                             &context.config.script_sig,
-                        );
+                            rpc_url,
+                        ).await;
                         if let Some(ref rs) = resume_state {
                             // Resume uses the old path (no queued items)
-                            super::routing::route_all_with_resume(btxs, &route_ctx, rs).await
+                            super::routing::route_all_with_resume(btxs, &mut route_ctx, rs).await
                                 .map(|r| r.into_iter().map(|(run, result)| (run, result, None)).collect())
                         } else {
-                            super::routing::route_all_with_queued(btxs, &route_ctx).await
+                            super::routing::route_all_with_queued(btxs, &mut route_ctx).await
                         }
                     } else {
-                        super::routing::route_all_with_queued(btxs, &route_ctx).await
+                        super::routing::route_all_with_queued(btxs, &mut route_ctx).await
                     };
 
                     match run_results {
@@ -1803,6 +1837,7 @@ impl SimulatedSession {
                                 &context.config.script_path,
                                 context.config.chain_id,
                                 &context.config.script_sig,
+                                None,
                             );
 
                             match outcome {

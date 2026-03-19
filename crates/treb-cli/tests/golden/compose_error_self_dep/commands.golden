@@ -1,2 +1,2 @@
-=== cmd 0: [compose self-dep.yaml --dry-run] ===
+=== cmd 0: [compose self-dep.yaml] ===
 Error: invalid orchestration configuration: component 'a' cannot depend on itself

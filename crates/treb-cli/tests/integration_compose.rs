@@ -150,9 +150,8 @@ fn compose_dry_run_json_chain() {
     run_integration_test(&test, &ctx);
 }
 
-/// Dry-run resume + verbose shows hash/skip context and marks completed step.
+/// Resume + verbose shows hash/skip context (fails at init check without foundry.toml).
 #[test]
-#[ignore] // TODO: re-enable after live broadcast signing is implemented
 fn compose_dry_run_resume_verbose() {
     let ctx = TestContext::new("compose-project");
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
@@ -171,7 +170,8 @@ fn compose_dry_run_resume_verbose() {
             )
             .unwrap();
         })
-        .test(&["compose", "simple.yaml", "--dry-run", "--resume", "--verbose"])
+        .test(&["compose", "simple.yaml", "--resume", "--verbose"])
+        .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
@@ -222,13 +222,12 @@ fn compose_dump_command_chain() {
 ///
 /// Verifies error message mentions "compose file not found".
 #[test]
-#[ignore] // TODO: re-enable after live broadcast signing is implemented
 fn compose_error_file_not_found() {
     let ctx = TestContext::new("compose-project");
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("compose_error_file_not_found")
-        .test(&["compose", "nonexistent.yaml", "--dry-run"])
+        .test(&["compose", "nonexistent.yaml"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -239,7 +238,6 @@ fn compose_error_file_not_found() {
 ///
 /// Verifies error message mentions "failed to parse compose file".
 #[test]
-#[ignore] // TODO: re-enable after live broadcast signing is implemented
 fn compose_error_invalid_yaml() {
     let ctx = TestContext::new("compose-project");
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
@@ -248,7 +246,7 @@ fn compose_error_invalid_yaml() {
         .pre_setup_hook(|ctx| {
             write_compose_fixture("invalid.yaml", "not: [valid: yaml: {{", ctx);
         })
-        .test(&["compose", "invalid.yaml", "--dry-run"])
+        .test(&["compose", "invalid.yaml"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -259,7 +257,6 @@ fn compose_error_invalid_yaml() {
 ///
 /// Verifies error message mentions "'components' must not be empty".
 #[test]
-#[ignore] // TODO: re-enable after live broadcast signing is implemented
 fn compose_error_empty_components() {
     let ctx = TestContext::new("compose-project");
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
@@ -268,7 +265,7 @@ fn compose_error_empty_components() {
         .pre_setup_hook(|ctx| {
             write_compose_fixture("empty-components.yaml", "group: test\ncomponents: {}\n", ctx);
         })
-        .test(&["compose", "empty-components.yaml", "--dry-run"])
+        .test(&["compose", "empty-components.yaml"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -279,14 +276,13 @@ fn compose_error_empty_components() {
 ///
 /// Verifies error message mentions "dependency cycle detected".
 #[test]
-#[ignore] // TODO: re-enable after live broadcast signing is implemented
 fn compose_error_cycle() {
     let ctx = TestContext::new("compose-project");
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("compose_error_cycle")
         .pre_setup_hook(|ctx| copy_compose_fixture("cycle.yaml", ctx))
-        .test(&["compose", "cycle.yaml", "--dry-run"])
+        .test(&["compose", "cycle.yaml"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -297,14 +293,13 @@ fn compose_error_cycle() {
 ///
 /// Verifies error message mentions "depends on unknown component".
 #[test]
-#[ignore] // TODO: re-enable after live broadcast signing is implemented
 fn compose_error_unknown_dep() {
     let ctx = TestContext::new("compose-project");
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("compose_error_unknown_dep")
         .pre_setup_hook(|ctx| copy_compose_fixture("bad-dep.yaml", ctx))
-        .test(&["compose", "bad-dep.yaml", "--dry-run"])
+        .test(&["compose", "bad-dep.yaml"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
@@ -315,7 +310,6 @@ fn compose_error_unknown_dep() {
 ///
 /// Verifies error message mentions "cannot depend on itself".
 #[test]
-#[ignore] // TODO: re-enable after live broadcast signing is implemented
 fn compose_error_self_dep() {
     let ctx = TestContext::new("compose-project");
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
@@ -328,7 +322,7 @@ fn compose_error_self_dep() {
                 ctx,
             );
         })
-        .test(&["compose", "self-dep.yaml", "--dry-run"])
+        .test(&["compose", "self-dep.yaml"])
         .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 

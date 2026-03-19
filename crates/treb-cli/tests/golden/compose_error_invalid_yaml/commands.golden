@@ -1,4 +1,4 @@
-=== cmd 0: [compose invalid.yaml --dry-run] ===
+=== cmd 0: [compose invalid.yaml] ===
 Error: failed to parse compose file: invalid.yaml
 
 Caused by:

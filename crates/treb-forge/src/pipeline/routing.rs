@@ -22,6 +22,8 @@ use std::collections::HashMap;
 use alloy_primitives::{Address, B256, U256};
 use treb_core::error::TrebError;
 
+use forge_script_sequence::ScriptSequence;
+
 use crate::sender::{ResolvedSender, SenderCategory};
 use crate::script::BroadcastReceipt;
 
@@ -255,6 +257,9 @@ pub struct RouteContext<'a> {
     pub resolved_senders: &'a HashMap<String, ResolvedSender>,
     pub sender_labels: &'a HashMap<Address, String>,
     pub sender_configs: &'a HashMap<String, treb_config::SenderConfig>,
+    /// Optional mutable reference to a pre-built ScriptSequence for in-place
+    /// checkpoint updates during broadcast.
+    pub sequence: Option<&'a mut ScriptSequence>,
 }
 
 // ---------------------------------------------------------------------------
@@ -813,7 +818,7 @@ async fn reduce_safe_1of1(
 /// The caller (CLI) is responsible for inline Queued handling (prompts, simulation).
 pub async fn execute_plan(
     plan: &RoutingPlan,
-    ctx: &RouteContext<'_>,
+    ctx: &mut RouteContext<'_>,
 ) -> Result<Vec<(TransactionRun, RunResult, Option<QueuedExecution>)>, TrebError> {
     let mut results = Vec::with_capacity(plan.actions.len());
 
@@ -837,17 +842,22 @@ pub async fn execute_plan(
                         RunResult::Broadcast(receipts)
                     } else {
                         // Live: the exec transactions contain full execTransaction calldata
+                        // Safe exec wrappers don't align 1:1 with btxs indices — no checkpoint
                         let receipts = broadcast_routable_txs(
                             ctx.rpc_url, *from, transactions, false,
                             ctx.resolved_senders,
+                            ctx.sequence.as_deref_mut(),
+                            None,
                         ).await?;
                         RunResult::Broadcast(receipts)
                     }
                 } else {
-                    // Plain wallet broadcast
+                    // Plain wallet broadcast — tx_indices align 1:1 with transactions
                     let receipts = broadcast_routable_txs(
                         ctx.rpc_url, *from, transactions, ctx.is_fork,
                         ctx.resolved_senders,
+                        ctx.sequence.as_deref_mut(),
+                        Some(&planned.run.tx_indices),
                     ).await?;
                     RunResult::Broadcast(receipts)
                 }
@@ -931,7 +941,7 @@ pub async fn execute_plan(
 /// Returns `(TransactionRun, RunResult)` pairs for backward compatibility.
 pub async fn route_all(
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
-    ctx: &RouteContext<'_>,
+    ctx: &mut RouteContext<'_>,
 ) -> Result<Vec<(TransactionRun, RunResult)>, TrebError> {
     let plan = reduce_queue(btxs, ctx).await?;
     let results = execute_plan(&plan, ctx).await?;
@@ -942,16 +952,25 @@ pub async fn route_all(
 /// Route all with queued execution items returned.
 pub async fn route_all_with_queued(
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
-    ctx: &RouteContext<'_>,
+    ctx: &mut RouteContext<'_>,
 ) -> Result<Vec<(TransactionRun, RunResult, Option<QueuedExecution>)>, TrebError> {
     let plan = reduce_queue(btxs, ctx).await?;
     execute_plan(&plan, ctx).await
 }
 
-/// Route with resume support — skips runs whose results are already completed.
+/// Route with resume support — skips confirmed, polls pending, re-sends unsent.
+///
+/// For wallet runs, each transaction is classified as:
+/// - **Confirmed**: has an on-chain receipt → skipped, cached receipt used
+/// - **Pending**: has a hash but no receipt → polled with retry (3 attempts, 2s delay)
+/// - **Unsent**: hash is `None` → re-broadcast
+///
+/// Pending transactions that remain unconfirmed after polling are treated as
+/// dropped and re-broadcast. Nonce conflicts during re-broadcast produce a
+/// warning instead of a fatal error.
 pub async fn route_all_with_resume(
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
-    ctx: &RouteContext<'_>,
+    ctx: &mut RouteContext<'_>,
     resume: &super::broadcast_writer::ResumeState,
 ) -> Result<Vec<(TransactionRun, RunResult)>, TrebError> {
     let runs = partition_into_runs(btxs, ctx.resolved_senders, ctx.sender_labels);
@@ -960,42 +979,13 @@ pub async fn route_all_with_resume(
     for run in runs {
         let result = match run.category {
             SenderCategory::Wallet => {
-                // Check if all txs in this run already have receipts
-                let all_completed = !resume.completed_tx_hashes.is_empty()
-                    && run.tx_indices.iter().all(|&idx| {
-                        resume.sequence.transactions.get(idx).is_some_and(|tx_meta| {
-                            tx_meta.hash.is_some_and(|h| resume.completed_tx_hashes.contains(&h))
-                        })
-                    });
-
-                if all_completed {
-                    let mut receipts = Vec::new();
-                    for &idx in &run.tx_indices {
-                        if let Some(tx_meta) = resume.sequence.transactions.get(idx) {
-                            receipts.push(crate::script::BroadcastReceipt {
-                                hash: tx_meta.hash.unwrap_or_default(),
-                                block_number: 0,
-                                gas_used: 0,
-                                status: true,
-                                contract_name: tx_meta.contract_name.clone(),
-                                contract_address: tx_meta.contract_address,
-                                raw_receipt: None,
-                            });
-                        }
-                    }
-                    RunResult::Broadcast(receipts)
-                } else {
-                    let receipts = broadcast_wallet_run(
-                        ctx.rpc_url, &run, btxs, ctx.is_fork, ctx.resolved_senders,
-                    ).await?;
-                    RunResult::Broadcast(receipts)
-                }
+                resume_wallet_run(&run, btxs, ctx, resume).await?
             }
             _ => {
                 // For Safe/Governor with resume, fall through to normal routing
                 // Build a single-run plan and execute
                 let single_btxs = btxs.clone();
-                let temp_ctx = RouteContext {
+                let mut temp_ctx = RouteContext {
                     rpc_url: ctx.rpc_url,
                     chain_id: ctx.chain_id,
                     is_fork: ctx.is_fork,
@@ -1004,9 +994,10 @@ pub async fn route_all_with_resume(
                     resolved_senders: ctx.resolved_senders,
                     sender_labels: ctx.sender_labels,
                     sender_configs: ctx.sender_configs,
+                    sequence: None,
                 };
                 let plan = reduce_queue(&single_btxs, &temp_ctx).await?;
-                let plan_results = execute_plan(&plan, &temp_ctx).await?;
+                let plan_results = execute_plan(&plan, &mut temp_ctx).await?;
                 if let Some((_, result, _)) = plan_results.into_iter().next() {
                     result
                 } else {
@@ -1018,6 +1009,269 @@ pub async fn route_all_with_resume(
     }
 
     Ok(results)
+}
+
+// ---------------------------------------------------------------------------
+// Resume helpers
+// ---------------------------------------------------------------------------
+
+/// Classification of a transaction's resume status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TxResumeStatus {
+    /// Transaction has an on-chain receipt.
+    Confirmed,
+    /// Transaction has a hash but no on-chain receipt yet.
+    Pending,
+    /// Transaction was never sent (hash: None).
+    Unsent,
+}
+
+/// Classify each transaction in a run by its resume status.
+pub fn classify_run_transactions(
+    run: &TransactionRun,
+    resume: &super::broadcast_writer::ResumeState,
+) -> Vec<(usize, TxResumeStatus)> {
+    run.tx_indices
+        .iter()
+        .map(|&idx| {
+            let status = resume
+                .sequence
+                .transactions
+                .get(idx)
+                .map(|tx_meta| match tx_meta.hash {
+                    Some(h) if resume.completed_tx_hashes.contains(&h) => {
+                        TxResumeStatus::Confirmed
+                    }
+                    Some(_) => TxResumeStatus::Pending,
+                    None => TxResumeStatus::Unsent,
+                })
+                .unwrap_or(TxResumeStatus::Unsent);
+            (idx, status)
+        })
+        .collect()
+}
+
+/// Build a partial `TransactionRun` containing only the specified tx indices.
+pub fn build_partial_run(run: &TransactionRun, indices: &[usize]) -> TransactionRun {
+    TransactionRun {
+        sender_role: run.sender_role.clone(),
+        category: run.category,
+        sender_address: run.sender_address,
+        tx_indices: indices.to_vec(),
+    }
+}
+
+/// Check whether an error indicates a nonce conflict.
+///
+/// Nonce conflicts occur when a pending transaction confirms while we attempt
+/// to re-send, or when a node has already seen the same nonce. These are
+/// non-fatal during resume — the original transaction went through.
+pub fn is_nonce_conflict(err: &TrebError) -> bool {
+    let msg = match err {
+        TrebError::Forge(s) => s,
+        _ => return false,
+    };
+    let lower = msg.to_lowercase();
+    lower.contains("nonce too low")
+        || lower.contains("nonce has already been used")
+        || lower.contains("already known")
+        || lower.contains("replacement transaction underpriced")
+}
+
+/// Poll for a pending transaction receipt with retry.
+///
+/// Sends `eth_getTransactionReceipt` up to `max_retries` times with
+/// `delay_secs` between attempts. Returns `Some(receipt)` if confirmed,
+/// `None` if still pending after all retries.
+async fn poll_pending_receipt(
+    client: &reqwest::Client,
+    rpc_url: &str,
+    tx_hash: &B256,
+    max_retries: u32,
+    delay_secs: u64,
+) -> Option<BroadcastReceipt> {
+    let hash_hex = format!("{:#x}", tx_hash);
+
+    for attempt in 0..max_retries {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
+        }
+
+        let req = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "eth_getTransactionReceipt",
+            "params": [&hash_hex],
+            "id": 1,
+        });
+
+        let resp: serde_json::Value = match client
+            .post(rpc_url)
+            .json(&req)
+            .send()
+            .await
+        {
+            Ok(r) => match r.json().await {
+                Ok(v) => v,
+                Err(_) => continue,
+            },
+            Err(_) => continue,
+        };
+
+        let result = match resp.get("result") {
+            Some(r) if !r.is_null() => r,
+            _ => continue, // null or missing = still pending
+        };
+
+        // Parse the receipt
+        let hash = result
+            .get("transactionHash")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<B256>().ok())
+            .unwrap_or(*tx_hash);
+
+        let block_hex = result
+            .get("blockNumber")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0x0");
+        let block_number =
+            u64::from_str_radix(block_hex.strip_prefix("0x").unwrap_or(block_hex), 16)
+                .unwrap_or(0);
+
+        let gas_hex = result
+            .get("gasUsed")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0x0");
+        let gas_used =
+            u64::from_str_radix(gas_hex.strip_prefix("0x").unwrap_or(gas_hex), 16).unwrap_or(0);
+
+        let status_hex = result
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0x1");
+        let status = status_hex != "0x0";
+
+        let contract_address = result
+            .get("contractAddress")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<Address>().ok());
+
+        return Some(BroadcastReceipt {
+            hash,
+            block_number,
+            gas_used,
+            status,
+            contract_name: None,
+            contract_address,
+            raw_receipt: Some(result.clone()),
+        });
+    }
+
+    None
+}
+
+/// Resume a wallet run: skip confirmed, poll pending, re-broadcast unsent.
+async fn resume_wallet_run(
+    run: &TransactionRun,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    ctx: &mut RouteContext<'_>,
+    resume: &super::broadcast_writer::ResumeState,
+) -> Result<RunResult, TrebError> {
+    let classified = classify_run_transactions(run, resume);
+
+    // Build a receipt map keyed by tx index
+    let mut receipt_map: HashMap<usize, BroadcastReceipt> = HashMap::new();
+
+    // 1. Collect confirmed receipts from resume state
+    for &(idx, status) in &classified {
+        if status == TxResumeStatus::Confirmed {
+            if let Some(tx_meta) = resume.sequence.transactions.get(idx) {
+                receipt_map.insert(
+                    idx,
+                    BroadcastReceipt {
+                        hash: tx_meta.hash.unwrap_or_default(),
+                        block_number: 0,
+                        gas_used: 0,
+                        status: true,
+                        contract_name: tx_meta.contract_name.clone(),
+                        contract_address: tx_meta.contract_address,
+                        raw_receipt: None,
+                    },
+                );
+            }
+        }
+    }
+
+    // 2. Poll pending transactions with retry (3 attempts, 2s delay)
+    let pending_items: Vec<(usize, B256)> = classified
+        .iter()
+        .filter(|(_, s)| *s == TxResumeStatus::Pending)
+        .filter_map(|(idx, _)| {
+            resume
+                .sequence
+                .transactions
+                .get(*idx)
+                .and_then(|tx| tx.hash.map(|h| (*idx, h)))
+        })
+        .collect();
+
+    if !pending_items.is_empty() {
+        let client = reqwest::Client::new();
+        for (idx, hash) in &pending_items {
+            match poll_pending_receipt(&client, ctx.rpc_url, hash, 3, 2).await {
+                Some(receipt) => {
+                    receipt_map.insert(*idx, receipt);
+                }
+                None => {
+                    eprintln!(
+                        "warning: tx {:#x} still pending after 3 poll attempts, will re-send",
+                        hash
+                    );
+                }
+            }
+        }
+    }
+
+    // 3. Collect indices that still need broadcasting (unsent + dropped pending)
+    let need_broadcast: Vec<usize> = run
+        .tx_indices
+        .iter()
+        .filter(|idx| !receipt_map.contains_key(idx))
+        .copied()
+        .collect();
+
+    // 4. Re-broadcast the unsent/dropped subset
+    if !need_broadcast.is_empty() {
+        let partial = build_partial_run(run, &need_broadcast);
+        match broadcast_wallet_run(
+            ctx.rpc_url,
+            &partial,
+            btxs,
+            ctx.is_fork,
+            ctx.resolved_senders,
+            ctx.sequence.as_deref_mut(),
+        )
+        .await
+        {
+            Ok(new_receipts) => {
+                for (receipt, &idx) in new_receipts.into_iter().zip(&need_broadcast) {
+                    receipt_map.insert(idx, receipt);
+                }
+            }
+            Err(e) if is_nonce_conflict(&e) => {
+                eprintln!("warning: nonce conflict during resume broadcast: {e}");
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    // 5. Assemble receipts in run order
+    let receipts: Vec<BroadcastReceipt> = run
+        .tx_indices
+        .iter()
+        .filter_map(|idx| receipt_map.remove(idx))
+        .collect();
+
+    Ok(RunResult::Broadcast(receipts))
 }
 
 // ---------------------------------------------------------------------------
@@ -1071,11 +1325,12 @@ pub async fn broadcast_wallet_run(
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
     is_fork: bool,
     resolved_senders: &HashMap<String, ResolvedSender>,
+    sequence: Option<&mut ScriptSequence>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     if is_fork {
-        broadcast_wallet_run_fork(rpc_url, run, btxs).await
+        broadcast_wallet_run_fork(rpc_url, run, btxs, sequence).await
     } else {
-        broadcast_wallet_run_live(rpc_url, run, btxs, resolved_senders).await
+        broadcast_wallet_run_live(rpc_url, run, btxs, resolved_senders, sequence).await
     }
 }
 
@@ -1084,9 +1339,11 @@ async fn broadcast_wallet_run_fork(
     rpc_url: &str,
     run: &TransactionRun,
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    sequence: Option<&mut ScriptSequence>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     let client = reqwest::Client::new();
     let mut receipts = Vec::new();
+    let mut seq = sequence;
 
     for &tx_idx in &run.tx_indices {
         let btx = btxs.get(tx_idx).ok_or_else(|| {
@@ -1170,7 +1427,13 @@ async fn broadcast_wallet_run_fork(
 
         // Fetch receipt
         let receipt = fetch_receipt(&client, rpc_url, tx_hash_hex).await?;
-        receipts.push(receipt);
+        receipts.push(receipt.clone());
+
+        // Checkpoint: update sequence and save to disk
+        if let Some(ref mut s) = seq {
+            super::broadcast_writer::update_sequence_checkpoint(s, tx_idx, &receipt);
+            super::broadcast_writer::save_sequence_checkpoint(s)?;
+        }
 
         let stop = serde_json::json!({
             "jsonrpc": "2.0",
@@ -1190,6 +1453,7 @@ async fn broadcast_wallet_run_live(
     run: &TransactionRun,
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
     resolved_senders: &HashMap<String, ResolvedSender>,
+    sequence: Option<&mut ScriptSequence>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     use alloy_provider::Provider;
     use alloy_rpc_types::TransactionRequest;
@@ -1208,6 +1472,7 @@ async fn broadcast_wallet_run_live(
         .connect_http(url);
 
     let mut receipts = Vec::new();
+    let mut seq = sequence;
 
     for &tx_idx in &run.tx_indices {
         let btx = btxs.get(tx_idx).ok_or_else(|| {
@@ -1247,7 +1512,7 @@ async fn broadcast_wallet_run_live(
 
         let raw = serde_json::to_value(&receipt).ok();
 
-        receipts.push(BroadcastReceipt {
+        let br = BroadcastReceipt {
             hash: receipt.transaction_hash,
             block_number: receipt.block_number.unwrap_or(0),
             gas_used: receipt.gas_used,
@@ -1255,7 +1520,15 @@ async fn broadcast_wallet_run_live(
             contract_name: None,
             contract_address: receipt.contract_address,
             raw_receipt: raw,
-        });
+        };
+
+        // Checkpoint: update sequence and save to disk
+        if let Some(ref mut s) = seq {
+            super::broadcast_writer::update_sequence_checkpoint(s, tx_idx, &br);
+            super::broadcast_writer::save_sequence_checkpoint(s)?;
+        }
+
+        receipts.push(br);
     }
 
     Ok(receipts)
@@ -1630,11 +1903,13 @@ async fn broadcast_routable_txs(
     transactions: &[RoutableTx],
     is_fork: bool,
     resolved_senders: &HashMap<String, ResolvedSender>,
+    sequence: Option<&mut ScriptSequence>,
+    tx_indices: Option<&[usize]>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     if is_fork {
-        broadcast_routable_txs_fork(rpc_url, from, transactions).await
+        broadcast_routable_txs_fork(rpc_url, from, transactions, sequence, tx_indices).await
     } else {
-        broadcast_routable_txs_live(rpc_url, from, transactions, resolved_senders).await
+        broadcast_routable_txs_live(rpc_url, from, transactions, resolved_senders, sequence, tx_indices).await
     }
 }
 
@@ -1643,11 +1918,16 @@ async fn broadcast_routable_txs_fork(
     rpc_url: &str,
     from: Address,
     transactions: &[RoutableTx],
+    sequence: Option<&mut ScriptSequence>,
+    tx_indices: Option<&[usize]>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     let client = reqwest::Client::new();
     let mut receipts = Vec::new();
+    let mut seq = sequence;
+    // Only checkpoint when tx_indices aligns 1:1 with transactions
+    let can_checkpoint = tx_indices.is_some_and(|idx| idx.len() == transactions.len());
 
-    for tx in transactions {
+    for (i, tx) in transactions.iter().enumerate() {
         let mut tx_obj = serde_json::Map::new();
         tx_obj.insert("from".into(), serde_json::json!(format!("{:#x}", from)));
         tx_obj.insert("to".into(), serde_json::json!(format!("{:#x}", tx.to)));
@@ -1693,7 +1973,15 @@ async fn broadcast_routable_txs_fork(
 
         let tx_hash_hex = resp.get("result").and_then(|r| r.as_str()).unwrap_or("0x0");
         let receipt = fetch_receipt(&client, rpc_url, tx_hash_hex).await?;
-        receipts.push(receipt);
+        receipts.push(receipt.clone());
+
+        // Checkpoint: update sequence and save to disk
+        if can_checkpoint {
+            if let (Some(s), Some(idx)) = (&mut seq, tx_indices.and_then(|ti| ti.get(i))) {
+                super::broadcast_writer::update_sequence_checkpoint(s, *idx, &receipt);
+                super::broadcast_writer::save_sequence_checkpoint(s)?;
+            }
+        }
 
         let stop = serde_json::json!({
             "jsonrpc": "2.0",
@@ -1713,6 +2001,8 @@ async fn broadcast_routable_txs_live(
     from: Address,
     transactions: &[RoutableTx],
     resolved_senders: &HashMap<String, ResolvedSender>,
+    sequence: Option<&mut ScriptSequence>,
+    tx_indices: Option<&[usize]>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     use alloy_provider::Provider;
     use alloy_rpc_types::TransactionRequest;
@@ -1728,8 +2018,11 @@ async fn broadcast_routable_txs_live(
         .connect_http(url);
 
     let mut receipts = Vec::new();
+    let mut seq = sequence;
+    // Only checkpoint when tx_indices aligns 1:1 with transactions
+    let can_checkpoint = tx_indices.is_some_and(|idx| idx.len() == transactions.len());
 
-    for tx in transactions {
+    for (i, tx) in transactions.iter().enumerate() {
         let mut tx_req = TransactionRequest::default();
         tx_req = tx_req.from(from);
         tx_req = tx_req.to(tx.to);
@@ -1754,7 +2047,7 @@ async fn broadcast_routable_txs_live(
 
         let raw = serde_json::to_value(&receipt).ok();
 
-        receipts.push(BroadcastReceipt {
+        let br = BroadcastReceipt {
             hash: receipt.transaction_hash,
             block_number: receipt.block_number.unwrap_or(0),
             gas_used: receipt.gas_used,
@@ -1762,7 +2055,17 @@ async fn broadcast_routable_txs_live(
             contract_name: None,
             contract_address: receipt.contract_address,
             raw_receipt: raw,
-        });
+        };
+
+        // Checkpoint: update sequence and save to disk
+        if can_checkpoint {
+            if let (Some(s), Some(idx)) = (&mut seq, tx_indices.and_then(|ti| ti.get(i))) {
+                super::broadcast_writer::update_sequence_checkpoint(s, *idx, &br);
+                super::broadcast_writer::save_sequence_checkpoint(s)?;
+            }
+        }
+
+        receipts.push(br);
     }
 
     Ok(receipts)
@@ -1858,5 +2161,274 @@ mod tests {
         let hash = compute_safe_tx_hash_for_ops(&ops, Address::ZERO, 0, 1);
         // Just verify it returns a non-zero hash
         assert_ne!(hash, B256::ZERO);
+    }
+
+    // -----------------------------------------------------------------------
+    // Resume helper tests
+    // -----------------------------------------------------------------------
+
+    use std::collections::VecDeque;
+    use alloy_primitives::map::HashMap as AlloyHashMap;
+    use forge_script_sequence::{ScriptSequence, TransactionWithMetadata};
+    use foundry_common::TransactionMaybeSigned;
+
+    /// Build a minimal ScriptSequence with transactions having the given hashes.
+    fn make_resume_sequence(tx_hashes: &[Option<B256>]) -> ScriptSequence {
+        let from = Address::repeat_byte(0x01);
+        let to = Address::repeat_byte(0x02);
+        let mut transactions = VecDeque::new();
+        for hash in tx_hashes {
+            let tx_json = serde_json::json!({
+                "from": format!("{:#x}", from),
+                "to": format!("{:#x}", to),
+                "data": "0x01",
+            });
+            let tx: TransactionMaybeSigned =
+                serde_json::from_value(tx_json).expect("build test tx");
+            let mut tx_meta = TransactionWithMetadata::from_tx_request(tx);
+            tx_meta.hash = *hash;
+            transactions.push_back(tx_meta);
+        }
+        ScriptSequence {
+            transactions,
+            receipts: Vec::new(),
+            libraries: Vec::new(),
+            pending: Vec::new(),
+            paths: None,
+            returns: AlloyHashMap::default(),
+            timestamp: 0,
+            chain: 1,
+            commit: None,
+        }
+    }
+
+    /// Build a ResumeState from given hash classifications.
+    fn make_resume_state(
+        tx_hashes: &[Option<B256>],
+        completed: &[B256],
+        pending: &[B256],
+    ) -> super::super::broadcast_writer::ResumeState {
+        super::super::broadcast_writer::ResumeState {
+            sequence: make_resume_sequence(tx_hashes),
+            deferred: None,
+            completed_tx_hashes: completed.iter().copied().collect(),
+            pending_tx_hashes: pending.iter().copied().collect(),
+            completed_safe_hashes: std::collections::HashSet::new(),
+            completed_gov_ids: std::collections::HashSet::new(),
+        }
+    }
+
+    #[test]
+    fn classify_all_confirmed() {
+        let h1 = B256::repeat_byte(0x11);
+        let h2 = B256::repeat_byte(0x22);
+        let resume = make_resume_state(&[Some(h1), Some(h2)], &[h1, h2], &[]);
+        let run = TransactionRun {
+            sender_role: "deployer".into(),
+            category: SenderCategory::Wallet,
+            sender_address: Address::repeat_byte(0x01),
+            tx_indices: vec![0, 1],
+        };
+
+        let classified = classify_run_transactions(&run, &resume);
+        assert_eq!(classified.len(), 2);
+        assert_eq!(classified[0], (0, TxResumeStatus::Confirmed));
+        assert_eq!(classified[1], (1, TxResumeStatus::Confirmed));
+    }
+
+    #[test]
+    fn classify_all_unsent() {
+        let resume = make_resume_state(&[None, None], &[], &[]);
+        let run = TransactionRun {
+            sender_role: "deployer".into(),
+            category: SenderCategory::Wallet,
+            sender_address: Address::repeat_byte(0x01),
+            tx_indices: vec![0, 1],
+        };
+
+        let classified = classify_run_transactions(&run, &resume);
+        assert_eq!(classified[0].1, TxResumeStatus::Unsent);
+        assert_eq!(classified[1].1, TxResumeStatus::Unsent);
+    }
+
+    #[test]
+    fn classify_mixed_confirmed_pending_unsent() {
+        let confirmed_hash = B256::repeat_byte(0x11);
+        let pending_hash = B256::repeat_byte(0x22);
+        let resume = make_resume_state(
+            &[Some(confirmed_hash), Some(pending_hash), None],
+            &[confirmed_hash],
+            &[pending_hash],
+        );
+        let run = TransactionRun {
+            sender_role: "deployer".into(),
+            category: SenderCategory::Wallet,
+            sender_address: Address::repeat_byte(0x01),
+            tx_indices: vec![0, 1, 2],
+        };
+
+        let classified = classify_run_transactions(&run, &resume);
+        assert_eq!(classified[0], (0, TxResumeStatus::Confirmed));
+        assert_eq!(classified[1], (1, TxResumeStatus::Pending));
+        assert_eq!(classified[2], (2, TxResumeStatus::Unsent));
+    }
+
+    #[test]
+    fn classify_out_of_range_index_is_unsent() {
+        let resume = make_resume_state(&[None], &[], &[]);
+        let run = TransactionRun {
+            sender_role: "deployer".into(),
+            category: SenderCategory::Wallet,
+            sender_address: Address::repeat_byte(0x01),
+            tx_indices: vec![99], // out of range
+        };
+
+        let classified = classify_run_transactions(&run, &resume);
+        assert_eq!(classified[0].1, TxResumeStatus::Unsent);
+    }
+
+    #[test]
+    fn build_partial_run_preserves_metadata() {
+        let run = TransactionRun {
+            sender_role: "deployer".into(),
+            category: SenderCategory::Wallet,
+            sender_address: Address::repeat_byte(0x01),
+            tx_indices: vec![0, 1, 2, 3, 4],
+        };
+
+        let partial = build_partial_run(&run, &[1, 3]);
+        assert_eq!(partial.sender_role, "deployer");
+        assert_eq!(partial.category, SenderCategory::Wallet);
+        assert_eq!(partial.sender_address, Address::repeat_byte(0x01));
+        assert_eq!(partial.tx_indices, vec![1, 3]);
+    }
+
+    #[test]
+    fn build_partial_run_empty_indices() {
+        let run = TransactionRun {
+            sender_role: "admin".into(),
+            category: SenderCategory::Wallet,
+            sender_address: Address::repeat_byte(0x02),
+            tx_indices: vec![0, 1, 2],
+        };
+
+        let partial = build_partial_run(&run, &[]);
+        assert!(partial.tx_indices.is_empty());
+        assert_eq!(partial.sender_role, "admin");
+    }
+
+    #[test]
+    fn is_nonce_conflict_detects_nonce_too_low() {
+        let err = TrebError::Forge("send tx failed: nonce too low".into());
+        assert!(is_nonce_conflict(&err));
+    }
+
+    #[test]
+    fn is_nonce_conflict_detects_already_known() {
+        let err = TrebError::Forge("tx from 0x01 failed: already known".into());
+        assert!(is_nonce_conflict(&err));
+    }
+
+    #[test]
+    fn is_nonce_conflict_detects_replacement_underpriced() {
+        let err = TrebError::Forge(
+            "send tx failed: replacement transaction underpriced".into(),
+        );
+        assert!(is_nonce_conflict(&err));
+    }
+
+    #[test]
+    fn is_nonce_conflict_detects_nonce_already_used() {
+        let err = TrebError::Forge("nonce has already been used".into());
+        assert!(is_nonce_conflict(&err));
+    }
+
+    #[test]
+    fn is_nonce_conflict_false_for_other_errors() {
+        let err = TrebError::Forge("insufficient funds for gas".into());
+        assert!(!is_nonce_conflict(&err));
+    }
+
+    #[test]
+    fn is_nonce_conflict_false_for_non_forge_errors() {
+        let err = TrebError::Registry("nonce too low".into());
+        assert!(!is_nonce_conflict(&err));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn poll_pending_receipt_returns_receipt_on_confirm() {
+        // Start a mock RPC server that returns a receipt
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let rpc_url = format!("http://127.0.0.1:{port}");
+
+        let handle = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let mut buf = vec![0u8; 4096];
+            let _ = stream.read(&mut buf).await;
+            let resp_body = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {
+                    "transactionHash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+                    "blockNumber": "0xa",
+                    "gasUsed": "0x5208",
+                    "status": "0x1",
+                },
+            });
+            let resp_str = resp_body.to_string();
+            let http_resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                resp_str.len(), resp_str,
+            );
+            let _ = stream.write_all(http_resp.as_bytes()).await;
+        });
+
+        let client = reqwest::Client::new();
+        let hash = B256::repeat_byte(0x11);
+        let result = poll_pending_receipt(&client, &rpc_url, &hash, 1, 0).await;
+        assert!(result.is_some(), "should return receipt");
+        let receipt = result.unwrap();
+        assert_eq!(receipt.block_number, 10);
+        assert!(receipt.status);
+
+        handle.abort();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn poll_pending_receipt_returns_none_when_still_pending() {
+        // Mock server that always returns null result
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let rpc_url = format!("http://127.0.0.1:{port}");
+
+        let handle = tokio::spawn(async move {
+            for _ in 0..3 {
+                let Ok((mut stream, _)) = listener.accept().await else { break };
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut buf = vec![0u8; 4096];
+                let _ = stream.read(&mut buf).await;
+                let resp_body = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": null,
+                });
+                let resp_str = resp_body.to_string();
+                let http_resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                    resp_str.len(), resp_str,
+                );
+                let _ = stream.write_all(http_resp.as_bytes()).await;
+            }
+        });
+
+        let client = reqwest::Client::new();
+        let hash = B256::repeat_byte(0x22);
+        // Use 0 delay so test is fast; 3 retries
+        let result = poll_pending_receipt(&client, &rpc_url, &hash, 3, 0).await;
+        assert!(result.is_none(), "should return None for pending tx");
+
+        handle.abort();
     }
 }
