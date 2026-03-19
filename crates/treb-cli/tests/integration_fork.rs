@@ -468,13 +468,12 @@ fn fork_restart_not_forked() {
 
 // ── fork restart: no snapshot dir ────────────────────────────────────────
 
-/// `treb fork restart --network mainnet` when the holistic snapshot directory
-/// does not exist should error mentioning "failed to restore registry".
-/// With background Anvil subprocess behavior, restart kills the old process
-/// and starts fresh, but still needs the snapshot directory for registry
-/// restoration.
+/// `treb fork restart --network mainnet` when the old fork's Anvil port is
+/// unreachable succeeds at the function level (returns Ok) but collects the
+/// Anvil spawn failure into stderr. The restart kills the old process,
+/// restores the holistic registry snapshot, then spawns a fresh Anvil which
+/// fails because the fork URL is unreachable.
 #[test]
-#[ignore] // Phase 9: fork restart behavior changed — now succeeds instead of erroring, golden + expect_err need update
 fn fork_restart_port_unreachable() {
     let ctx = TestContext::new("minimal-project");
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
@@ -483,7 +482,6 @@ fn fork_restart_port_unreachable() {
         .setup(&["init"])
         .post_setup_hook(|ctx| seed_fork_status(ctx.path()))
         .test(&["fork", "restart", "--network", "mainnet"])
-        .expect_err(true)
         .extra_normalizer(Box::new(path_normalizer));
 
     run_integration_test(&test, &ctx);
