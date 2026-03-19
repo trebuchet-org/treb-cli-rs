@@ -1669,9 +1669,9 @@ pub(super) fn display_script_broadcast_summary(
                     pr.sender_role, hash, nonce,
                 );
                 if use_color {
-                    eprintln!("    {}", line.style(color::YELLOW));
+                    eprintln!("    {} {}", emoji::HOURGLASS.style(color::YELLOW), line.style(color::YELLOW));
                 } else {
-                    eprintln!("    {line}");
+                    eprintln!("    {} {line}", emoji::HOURGLASS);
                 }
             }
             treb_forge::pipeline::RunResult::GovernorProposed {
@@ -1683,9 +1683,9 @@ pub(super) fn display_script_broadcast_summary(
                     pr.sender_role, gov, proposal_id,
                 );
                 if use_color {
-                    eprintln!("    {}", line.style(color::YELLOW));
+                    eprintln!("    {} {}", emoji::HOURGLASS.style(color::YELLOW), line.style(color::YELLOW));
                 } else {
-                    eprintln!("    {line}");
+                    eprintln!("    {} {line}", emoji::HOURGLASS);
                 }
             }
             _ => {}
