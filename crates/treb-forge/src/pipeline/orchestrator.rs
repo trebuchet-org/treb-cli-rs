@@ -567,12 +567,16 @@ pub fn apply_routing_results(
     let (proposed_results, safe_transactions, governor_proposals) =
         build_proposed_records_from_routing(run_results, btxs, context, recorded_transactions);
 
-    // Update transaction statuses for proposed runs
-    update_transaction_statuses_from_routing(recorded_transactions, run_results, btxs);
-
-    // Apply receipts from broadcast results
+    // Apply receipts from broadcast results first, then override statuses
+    // for proposed runs. Order matters: apply_receipts sets status based on
+    // receipt.status (Executed/Failed), but proposed runs use placeholder
+    // receipts. update_transaction_statuses_from_routing must run second
+    // so Queued overrides the placeholder Executed for proposed transactions.
     let receipts = super::routing::flatten_receipts(run_results);
     super::hydration::apply_receipts(recorded_transactions, &receipts);
+
+    // Override status to Queued for proposed (Safe/Governor) runs
+    update_transaction_statuses_from_routing(recorded_transactions, run_results, btxs);
 
     // Write Foundry-compatible broadcast files.
     // When a pre-built sequence is provided (from incremental checkpointing),

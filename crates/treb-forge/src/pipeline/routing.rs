@@ -867,8 +867,11 @@ pub async fn execute_plan(
             }
             RoutingAction::Propose { safe_address, chain_id, operations, inner_transactions, sender_role, nonce, governance: _ } => {
                 if ctx.is_fork {
-                    // Fork: noop — just record as proposed with a random hash
-                    let safe_tx_hash = B256::random();
+                    // Fork: noop — record as proposed with the pre-computed EIP-712 hash
+                    let safe_tx_hash = match &planned.queued {
+                        Some(QueuedExecution::SafeProposal { safe_tx_hash, .. }) => *safe_tx_hash,
+                        _ => compute_safe_tx_hash_for_ops(operations, *safe_address, *nonce, *chain_id),
+                    };
                     RunResult::SafeProposed {
                         safe_tx_hash,
                         safe_address: *safe_address,
