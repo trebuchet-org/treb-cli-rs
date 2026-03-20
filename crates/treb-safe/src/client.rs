@@ -7,6 +7,17 @@ use treb_core::error::TrebError;
 
 use crate::types::{ProposeRequest, SafeInfoResponse, SafeServiceMultisigResponse, SafeServiceTx};
 
+/// Convert an address string to EIP-55 checksummed form.
+///
+/// The Safe Transaction Service rejects non-checksummed addresses with 422.
+fn to_checksum_address(addr: &str) -> String {
+    if let Ok(parsed) = addr.parse::<alloy_primitives::Address>() {
+        format!("{}", parsed)
+    } else {
+        addr.to_string()
+    }
+}
+
 /// HTTP client for the Safe Transaction Service API.
 pub struct SafeServiceClient {
     http: Client,
@@ -42,7 +53,8 @@ impl SafeServiceClient {
         safe_address: &str,
         request: &ProposeRequest,
     ) -> Result<(), TrebError> {
-        let url = format!("{}/safes/{}/multisig-transactions/", self.base_url, safe_address);
+        let checksummed = to_checksum_address(safe_address);
+        let url = format!("{}/safes/{}/multisig-transactions/", self.base_url, checksummed);
         let resp = self
             .http
             .post(&url)
@@ -68,7 +80,8 @@ impl SafeServiceClient {
         &self,
         safe_address: &str,
     ) -> Result<SafeServiceMultisigResponse, TrebError> {
-        let url = format!("{}/safes/{}/multisig-transactions/", self.base_url, safe_address);
+        let checksummed = to_checksum_address(safe_address);
+        let url = format!("{}/safes/{}/multisig-transactions/", self.base_url, checksummed);
         let resp =
             self.http.get(&url).send().await.map_err(|e| {
                 TrebError::Safe(format!("multisig transactions request failed: {e}"))
@@ -97,9 +110,10 @@ impl SafeServiceClient {
         &self,
         safe_address: &str,
     ) -> Result<SafeServiceMultisigResponse, TrebError> {
+        let checksummed = to_checksum_address(safe_address);
         let url = format!(
             "{}/safes/{}/multisig-transactions/?executed=false",
-            self.base_url, safe_address
+            self.base_url, checksummed
         );
         let resp =
             self.http.get(&url).send().await.map_err(|e| {
@@ -149,7 +163,9 @@ impl SafeServiceClient {
     ///
     /// Endpoint: `GET /safes/{safe_address}/`
     pub async fn get_safe_info(&self, safe_address: &str) -> Result<SafeInfoResponse, TrebError> {
-        let url = format!("{}/safes/{}/", self.base_url, safe_address);
+        // Safe Transaction Service requires EIP-55 checksummed addresses
+        let checksummed = to_checksum_address(safe_address);
+        let url = format!("{}/safes/{}/", self.base_url, checksummed);
         let resp = self
             .http
             .get(&url)
