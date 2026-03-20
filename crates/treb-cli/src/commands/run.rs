@@ -1016,10 +1016,15 @@ async fn handle_queued_executions(
                             Ok(receipts) => {
                                 let all_ok = receipts.iter().all(|r| r.status);
                                 if all_ok {
+                                    let range = if first_idx == last_idx {
+                                        format!("{first_idx}")
+                                    } else {
+                                        format!("{first_idx}-{last_idx}")
+                                    };
                                     for receipt in &receipts {
                                         display.on_tx_simulated(
                                             run_sender_role,
-                                            first_idx,
+                                            &range,
                                             &format!("{:#x}", receipt.hash),
                                             receipt.block_number,
                                             receipt.gas_used,
@@ -1096,7 +1101,7 @@ async fn handle_queued_executions(
                                     if receipt.status {
                                         display.on_tx_simulated(
                                             run_sender_role,
-                                            first_idx + i,
+                                            &format!("{}", first_idx + i),
                                             &format!("{:#x}", receipt.hash),
                                             receipt.block_number,
                                             receipt.gas_used,
