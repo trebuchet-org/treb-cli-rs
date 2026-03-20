@@ -1391,7 +1391,7 @@ async fn run_exec(
         bail!("specify a safe tx hash or proposal ID, or use --all");
     }
 
-    let mut registry = treb_registry::Registry::open(&treb_dir)?;
+    let mut registry = treb_registry::Registry::open(&cwd)?;
 
     // Collect queued Safe transactions
     let all_safe_txs = registry.list_safe_transactions();

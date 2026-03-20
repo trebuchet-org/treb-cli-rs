@@ -72,7 +72,7 @@ pub async fn queued_command(
             println!("  SAFE TRANSACTIONS");
         }
         for stx in &queued_safe {
-            let hash_short = truncate_hash(&stx.safe_tx_hash);
+            let hash_short = &stx.safe_tx_hash;
             let tx_count = stx.transactions.len();
             let age = format_age(&stx.proposed_at);
             let fork_sim = if stx.fork_executed_at.is_some() { " [simulated]" } else { "" };
@@ -97,7 +97,7 @@ pub async fn queued_command(
             println!("  GOVERNANCE PROPOSALS");
         }
         for p in &queued_proposals {
-            let id_short = truncate_hash(&p.proposal_id);
+            let id_short = &p.proposal_id;
             let tx_count = p.transaction_ids.len();
             let age = format_age(&p.proposed_at);
             let fork_sim = if p.fork_executed_at.is_some() { " [simulated]" } else { "" };
@@ -110,9 +110,9 @@ pub async fn queued_command(
                 fork_sim,
             );
             if !p.governor_address.is_empty() || !p.timelock_address.is_empty() {
-                let mut detail = format!("  Governor {}", truncate_hash(&p.governor_address));
+                let mut detail = format!("  Governor {}", &p.governor_address);
                 if !p.timelock_address.is_empty() {
-                    detail.push_str(&format!(" -> Timelock {}", truncate_hash(&p.timelock_address)));
+                    detail.push_str(&format!(" -> Timelock {}", &p.timelock_address));
                 }
                 if use_color {
                     println!("  {}", detail.style(color::GRAY));
