@@ -837,18 +837,51 @@ pub async fn exec_governance_from_registry(
 
 /// Query the Safe contract's threshold on a fork.
 pub async fn query_safe_threshold(provider: &impl Provider, safe: Address) -> Result<u64, TrebError> {
-    let threshold_bytes = eth_call_bytes(provider, safe, &getThresholdCall {}.abi_encode(), None).await?;
+    let threshold_bytes = eth_call_bytes(provider, safe, &getThresholdCall {}.abi_encode(), None).await
+        .map_err(|e| TrebError::Safe(format!(
+            "failed to query Safe {:#x}: {e}\n\n\
+             The Safe contract may not exist on this fork. \
+             If it was deployed after the fork was created, \
+             run `treb fork restart` to re-fork from the latest block.",
+            safe
+        )))?;
+    if threshold_bytes.is_empty() {
+        return Err(TrebError::Safe(format!(
+            "Safe {:#x} has no code on this fork.\n\n\
+             The Safe contract may not exist yet at the forked block. \
+             Run `treb fork restart` to re-fork from the latest block.",
+            safe
+        )));
+    }
     let val = U256::abi_decode(&threshold_bytes)
-        .map_err(|e| TrebError::Forge(format!("decode threshold: {e}")))?;
-    val.try_into().map_err(|_| TrebError::Forge("threshold too large".into()))
+        .map_err(|e| TrebError::Safe(format!(
+            "failed to decode threshold from Safe {:#x}: {e}\n\n\
+             The contract may not be a Safe. Check the safe address in your config.",
+            safe
+        )))?;
+    val.try_into().map_err(|_| TrebError::Safe("threshold too large".into()))
 }
 
 /// Query the Safe contract's nonce on a fork.
 pub async fn query_safe_nonce(provider: &impl Provider, safe: Address) -> Result<u64, TrebError> {
-    let nonce_bytes = eth_call_bytes(provider, safe, &nonceCall {}.abi_encode(), None).await?;
+    let nonce_bytes = eth_call_bytes(provider, safe, &nonceCall {}.abi_encode(), None).await
+        .map_err(|e| TrebError::Safe(format!(
+            "failed to query Safe {:#x}: {e}",
+            safe
+        )))?;
+    if nonce_bytes.is_empty() {
+        return Err(TrebError::Safe(format!(
+            "Safe {:#x} has no code on this fork.\n\n\
+             Run `treb fork restart` to re-fork from the latest block.",
+            safe
+        )));
+    }
     let val = U256::abi_decode(&nonce_bytes)
-        .map_err(|e| TrebError::Forge(format!("decode nonce: {e}")))?;
-    val.try_into().map_err(|_| TrebError::Forge("nonce too large".into()))
+        .map_err(|e| TrebError::Safe(format!(
+            "failed to decode nonce from Safe {:#x}: {e}",
+            safe
+        )))?;
+    val.try_into().map_err(|_| TrebError::Safe("nonce too large".into()))
 }
 
 // ---------------------------------------------------------------------------

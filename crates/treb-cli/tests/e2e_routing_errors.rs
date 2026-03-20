@@ -250,8 +250,9 @@ async fn threshold_query_failure_on_fork() {
         assert!(
             stderr.contains("threshold")
                 || stderr.contains("eth_call")
-                || stderr.contains("decode"),
-            "stderr should contain a threshold-related error, got:\n{stderr}"
+                || stderr.contains("decode")
+                || stderr.contains("has no code"),
+            "stderr should contain a Safe query error, got:\n{stderr}"
         );
     })
     .await
