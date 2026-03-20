@@ -1514,18 +1514,18 @@ async fn propose_to_safe_service(
 
     let signer_addr = alloy_signer::Signer::address(&wallet_signer);
     let request = treb_safe::types::ProposeRequest {
-        to: format!("{:#x}", to),
+        to: format!("{}", to),
         value: "0".into(),
         data: Some(format!("0x{}", alloy_primitives::hex::encode(&data))),
         operation,
         safe_tx_gas: "0".into(),
         base_gas: "0".into(),
         gas_price: "0".into(),
-        gas_token: format!("{:#x}", Address::ZERO),
-        refund_receiver: format!("{:#x}", Address::ZERO),
+        gas_token: format!("{}", Address::ZERO),
+        refund_receiver: format!("{}", Address::ZERO),
         nonce: safe_info.nonce,
         contract_transaction_hash: format!("{:#x}", safe_tx_hash),
-        sender: format!("{:#x}", signer_addr),
+        sender: format!("{}", signer_addr),
         signature: format!("0x{}", alloy_primitives::hex::encode(&signature)),
         origin: Some("treb".into()),
     };
