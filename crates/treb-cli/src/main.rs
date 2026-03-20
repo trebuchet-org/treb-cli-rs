@@ -1233,11 +1233,13 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 namespace,
                 profile,
                 broadcast,
+                false, // dry_run (removed)
                 resume,
                 verify,
                 slow,
                 legacy,
                 verbose,
+                false, // dump_command (removed)
                 json,
                 env,
                 non_interactive,
