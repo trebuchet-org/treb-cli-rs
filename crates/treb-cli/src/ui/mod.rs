@@ -1,6 +1,7 @@
 //! Interactive UI utilities: fuzzy selectors, confirmation prompts, and color output.
 
 pub mod badge;
+pub mod broadcast_display;
 pub mod color;
 pub mod emoji;
 pub mod interactive;

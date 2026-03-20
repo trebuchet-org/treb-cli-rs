@@ -1414,27 +1414,17 @@ pub async fn run(
             }
         }
 
-        // Broadcast with spinner + inline output
-        let broadcast_spinner: std::sync::Arc<std::sync::Mutex<Option<spinoff::Spinner>>> =
-            std::sync::Arc::new(std::sync::Mutex::new(None));
+        // Broadcast with inline output via BroadcastDisplay
+        let mut broadcast_display = crate::ui::broadcast_display::BroadcastDisplay::new(json);
         if !json {
-            *broadcast_spinner.lock().unwrap() = Some(spinoff::Spinner::new(
-                spinoff::spinners::Dots2,
-                "Broadcasting",
-                spinoff::Color::Cyan,
-            ));
-            simulated.set_on_action_complete(
-                super::run::build_broadcast_callback(
-                    broadcast_spinner.clone(),
-                    std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-                ),
-            );
+            broadcast_display.start_spinner("Broadcasting");
+            simulated.set_on_action_complete(broadcast_display.build_callback());
         }
 
         let broadcast_result = {
             let _foundry_shell = super::run::FoundryShellGuard::suppress();
             let r = simulated.broadcast_all(&mut registry).await;
-            drop(broadcast_spinner.lock().unwrap().take());
+            broadcast_display.stop();
             if !json {
                 eprint!("\x1b[2K\r");
             }

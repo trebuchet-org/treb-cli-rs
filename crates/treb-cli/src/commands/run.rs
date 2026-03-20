@@ -539,6 +539,8 @@ pub async fn execute_script(
         false
     };
 
+    let mut broadcast_display = crate::ui::broadcast_display::BroadcastDisplay::new(opts.json);
+
     if should_broadcast {
         // Pre-broadcast fork snapshot (if in fork mode)
         if opts.is_fork {
@@ -555,24 +557,15 @@ pub async fn execute_script(
             }
         }
 
-        let spinner2: Arc<Mutex<Option<spinoff::Spinner>>> = Arc::new(Mutex::new(None));
         if !opts.json {
-            let spinner_ref = spinner2.clone();
-            *spinner_ref.lock().unwrap() = Some(spinoff::Spinner::new(
-                spinoff::spinners::Dots2,
-                "Broadcasting",
-                spinoff::Color::Cyan,
-            ));
-
-            let global_tx_counter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-            simulated.set_on_action_complete(build_broadcast_callback(spinner2.clone(), global_tx_counter));
+            broadcast_display.start_spinner("Broadcasting");
+            simulated.set_on_action_complete(broadcast_display.build_callback());
         }
 
         let result = {
             let _foundry_shell = FoundryShellGuard::suppress();
             let r = simulated.broadcast_all(registry).await;
-            drop(spinner2.lock().unwrap().take());
-            eprint!("\x1b[2K\r");
+            broadcast_display.stop();
             match r {
                 Ok(results) => results
                     .into_iter()
@@ -909,9 +902,10 @@ pub async fn run(
     .await?;
 
     // ── Inline queued execution handling ────────────────────────────────
+    let queued_display = crate::ui::broadcast_display::BroadcastDisplay::new(json);
     if !result.queued_executions.is_empty() && !json {
         handle_queued_executions(
-            &mut result, chain_id, prompts_enabled,
+            &mut result, &queued_display, chain_id, prompts_enabled,
             active_fork.is_some(), skip_fork_execution, &cwd, &mut registry,
         ).await?;
     } else if !result.proposed_results.is_empty() && prompts_enabled && !json {
@@ -942,104 +936,13 @@ pub async fn run(
 
 // ── Inline queued execution ──────────────────────────────────────────────
 
-/// Create the on_action_complete callback for inline broadcast output.
-///
-/// Format:
-///   executed  deployer [0]  tx=0xd8bc...  block=61854569  gas=243904
-///   queued    governor [2-5]  proposal=0x5cd5...
-///
-/// `global_offset` tracks a running tx counter across scripts (for compose).
-pub(super) fn build_broadcast_callback(
-    spinner: std::sync::Arc<std::sync::Mutex<Option<spinoff::Spinner>>>,
-    global_offset: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-) -> treb_forge::pipeline::OnActionComplete {
-    let use_color = color::is_color_enabled();
-    Box::new(move |run, result| {
-        // Clear the "Broadcasting..." status line. We use a simple static
-        // line (no spinner thread) to avoid race conditions with ANSI escapes.
-        use std::io::Write;
-        let _ = write!(std::io::stderr(), "\r\x1b[2K");
-        let _ = std::io::stderr().flush();
-
-        let offset = global_offset.load(std::sync::atomic::Ordering::Relaxed);
-
-        match result {
-            treb_forge::pipeline::RunResult::Broadcast(receipts) => {
-                for (i, receipt) in receipts.iter().enumerate() {
-                    let global_idx = offset + run.tx_indices.get(i).copied().unwrap_or(i);
-                    let hash = format!("{:#x}", receipt.hash);
-                    let block = if receipt.block_number > 0 { format!("  block={}", receipt.block_number) } else { String::new() };
-                    let gas = if receipt.gas_used > 0 { format!("  gas={}", receipt.gas_used) } else { String::new() };
-                    if use_color {
-                        eprintln!("  {:<9} {:>10} [{:>2}]  tx={}{}{}",
-                            "executed".style(color::GREEN),
-                            run.sender_role.style(color::CYAN),
-                            global_idx,
-                            hash, block, gas,
-                        );
-                    } else {
-                        eprintln!("  {:<9} {:>10} [{:>2}]  tx={}{}{}",
-                            "executed", run.sender_role, global_idx, hash, block, gas);
-                    }
-                }
-                global_offset.fetch_add(receipts.len(), std::sync::atomic::Ordering::Relaxed);
-            }
-            treb_forge::pipeline::RunResult::GovernorProposed { proposal_id, tx_count, .. } => {
-                let first = offset;
-                let last = offset + tx_count.saturating_sub(1);
-                let range = if first == last { format!("[{first}]") } else { format!("[{first}-{last}]") };
-                if use_color {
-                    eprintln!("  {:<9} {:>10} {:>5}  proposal={}",
-                        "queued".style(color::YELLOW),
-                        run.sender_role.style(color::CYAN),
-                        range,
-                        proposal_id,
-                    );
-                } else {
-                    eprintln!("  {:<9} {:>10} {:>5}  proposal={}",
-                        "queued", run.sender_role, range, proposal_id);
-                }
-                global_offset.fetch_add(*tx_count, std::sync::atomic::Ordering::Relaxed);
-            }
-            treb_forge::pipeline::RunResult::SafeProposed { safe_tx_hash, nonce, tx_count, .. } => {
-                let first = offset;
-                let last = offset + tx_count.saturating_sub(1);
-                let range = if first == last { format!("[{first}]") } else { format!("[{first}-{last}]") };
-                if use_color {
-                    eprintln!("  {:<9} {:>10} {:>5}  safe-hash={:#x}  nonce={}",
-                        "queued".style(color::YELLOW),
-                        run.sender_role.style(color::CYAN),
-                        range,
-                        safe_tx_hash, nonce,
-                    );
-                } else {
-                    eprintln!("  {:<9} {:>10} {:>5}  safe-hash={:#x}  nonce={}",
-                        "queued", run.sender_role, range, safe_tx_hash, nonce);
-                }
-                global_offset.fetch_add(*tx_count, std::sync::atomic::Ordering::Relaxed);
-            }
-        }
-
-        // Show static status line after executed results (not after queued —
-        // queued is followed by prompts). No background spinner to avoid races.
-        if matches!(result, treb_forge::pipeline::RunResult::Broadcast(_)) {
-            if use_color {
-                let _ = write!(std::io::stderr(), "  {}",
-                    "Broadcasting...".style(color::GRAY));
-            } else {
-                let _ = write!(std::io::stderr(), "  Broadcasting...");
-            }
-            let _ = std::io::stderr().flush();
-        }
-    })
-}
-
 /// Handle queued executions inline after broadcast.
 ///
 /// For each `QueuedExecution` item, prints a status line and optionally
 /// prompts the user to simulate execution on fork.
 async fn handle_queued_executions(
     result: &mut PipelineResult,
+    display: &crate::ui::broadcast_display::BroadcastDisplay,
     chain_id: u64,
     prompts_enabled: bool,
     is_fork: bool,
@@ -1049,7 +952,6 @@ async fn handle_queued_executions(
 ) -> anyhow::Result<()> {
     use treb_forge::pipeline::QueuedExecution;
 
-    let use_color = color::is_color_enabled();
     let queued = std::mem::take(&mut result.queued_executions);
 
     // Compute the global start index for queued items:
@@ -1107,23 +1009,15 @@ async fn handle_queued_executions(
                             Ok(receipts) => {
                                 let all_ok = receipts.iter().all(|r| r.status);
                                 if all_ok {
-                                    // Safe executes as batched MultiSend — show one line per batch receipt
+                                    // Safe executes as batched MultiSend — show per-batch receipt
                                     for receipt in &receipts {
-                                        let tx_hash = format!("{:#x}", receipt.hash);
-                                        let block = if receipt.block_number > 0 { format!("  block={}", receipt.block_number) } else { String::new() };
-                                        let gas = if receipt.gas_used > 0 { format!("  gas={}", receipt.gas_used) } else { String::new() };
-                                        if use_color {
-                                            eprintln!("  {:<9} {:>10} {:>5}  safe-hash={:#x}  tx={}{}{}",
-                                                "simulated".style(color::GREEN),
-                                                run_sender_role.style(color::CYAN),
-                                                range,
-                                                safe_tx_hash,
-                                                tx_hash, block, gas,
-                                            );
-                                        } else {
-                                            eprintln!("  {:<9} {:>10} {:>5}  safe-hash={:#x}  tx={}{}{}",
-                                                "simulated", run_sender_role, range, safe_tx_hash, tx_hash, block, gas);
-                                        }
+                                        display.on_tx_simulated(
+                                            run_sender_role,
+                                            first_idx,
+                                            &format!("{:#x}", receipt.hash),
+                                            receipt.block_number,
+                                            receipt.gas_used,
+                                        );
                                     }
                                     for safe_tx in &mut result.safe_transactions {
                                         if safe_tx.safe_tx_hash == format!("{:#x}", safe_tx_hash) {
@@ -1200,20 +1094,13 @@ async fn handle_queued_executions(
                                 if all_ok {
                                     // Per-action simulated lines
                                     for (i, receipt) in receipts.iter().enumerate() {
-                                        let idx = first_idx + i;
-                                        let tx_hash = format!("{:#x}", receipt.hash);
-                                        let block = if receipt.block_number > 0 { format!("  block={}", receipt.block_number) } else { String::new() };
-                                        let gas = if receipt.gas_used > 0 { format!("  gas={}", receipt.gas_used) } else { String::new() };
-                                        if use_color {
-                                            eprintln!("  {:<9} {:>10} [{:>2}]  tx={}{}{}",
-                                                "simulated".style(color::GREEN),
-                                                run_sender_role.style(color::CYAN),
-                                                idx, tx_hash, block, gas,
-                                            );
-                                        } else {
-                                            eprintln!("  {:<9} {:>10} [{:>2}]  tx={}{}{}",
-                                                "simulated", run_sender_role, idx, tx_hash, block, gas);
-                                        }
+                                        display.on_tx_simulated(
+                                            run_sender_role,
+                                            first_idx + i,
+                                            &format!("{:#x}", receipt.hash),
+                                            receipt.block_number,
+                                            receipt.gas_used,
+                                        );
                                     }
                                     // Update fork_executed_at on governor proposals
                                     for proposal in &mut result.governor_proposals {
