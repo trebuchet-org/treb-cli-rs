@@ -392,7 +392,8 @@ pub struct ShortHexNormalizer;
 
 impl Normalizer for ShortHexNormalizer {
     fn normalize(&self, input: &str) -> String {
-        let re = Regex::new(r"\b[0-9a-f]{7,10}\b").unwrap();
+        // Match short hex hashes, optionally followed by `-dirty`
+        let re = Regex::new(r"\b[0-9a-f]{7,10}(-dirty)?\b").unwrap();
         re.replace_all(input, "<SHORT_HASH>").into_owned()
     }
 }

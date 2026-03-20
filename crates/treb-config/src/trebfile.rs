@@ -141,7 +141,7 @@ pub(crate) fn expand_sender_config_env_vars(config: &mut crate::SenderConfig) {
     if let Some(ref mut v) = config.proposer {
         *v = expand_env_vars(v);
     }
-    if let Some(ref mut v) = config.proposer_script {
+    if let Some(ref mut v) = config.reducer {
         *v = expand_env_vars(v);
     }
 }

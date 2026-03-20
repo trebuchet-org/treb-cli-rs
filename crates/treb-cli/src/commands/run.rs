@@ -2289,7 +2289,7 @@ needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
             governor_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".parse().unwrap(),
             timelock_address: Some("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".parse().unwrap()),
             proposer: Box::new(proposer),
-            proposer_script: None,
+            reducer: None,
         };
 
         let line = format_verbose_sender("deployer", &sender);
@@ -2307,7 +2307,7 @@ needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
             governor_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".parse().unwrap(),
             timelock_address: None,
             proposer: Box::new(proposer),
-            proposer_script: None,
+            reducer: None,
         };
 
         let line = format_verbose_sender("deployer", &sender);

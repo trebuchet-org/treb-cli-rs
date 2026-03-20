@@ -10,6 +10,7 @@ mod duplicates;
 pub mod fork_routing;
 mod hydration;
 mod orchestrator;
+pub mod reducer;
 pub mod routing;
 pub mod simulation;
 mod types;

@@ -1160,7 +1160,7 @@ mod tests {
             governor_address: address!("0000000000000000000000000000000000000099"),
             timelock_address: Some(timelock_addr),
             proposer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
-            proposer_script: None,
+            reducer: None,
         });
 
         let events = vec![GovernorProposalCreated {

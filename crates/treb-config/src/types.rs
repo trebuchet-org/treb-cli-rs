@@ -82,8 +82,8 @@ pub struct SenderConfig {
     pub timelock: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposer: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub proposer_script: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "proposer_script")]
+    pub reducer: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

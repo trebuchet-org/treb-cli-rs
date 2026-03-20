@@ -403,9 +403,9 @@ pub async fn reduce_queue(
                         "sender '{}' not found", item.run.sender_role
                     )))?;
 
-                let (governor_address, timelock_address, proposer, _proposer_script) = match resolved {
-                    ResolvedSender::Governor { governor_address, timelock_address, proposer, proposer_script } => {
-                        (*governor_address, *timelock_address, proposer.as_ref(), proposer_script.as_deref())
+                let (governor_address, timelock_address, proposer, reducer_field) = match resolved {
+                    ResolvedSender::Governor { governor_address, timelock_address, proposer, reducer } => {
+                        (*governor_address, *timelock_address, proposer.as_ref(), reducer.clone())
                     }
                     _ => return Err(TrebError::Forge(
                         "expected Governor sender for governor routing".into(),
@@ -432,12 +432,39 @@ pub async fn reduce_queue(
                     proposal_description: String::new(),
                 };
 
-                // Build propose() calldata and route through proposer
-                let propose_calldata = encode_governor_propose(&targets, &values, &calldatas, "");
                 let proposer_address = proposer.sender_address();
-                let reduced_btxs = build_single_tx_broadcast(
-                    proposer_address, governor_address, propose_calldata,
+
+                // Try reducer script, fall back to inline Rust encoding
+                let project_root = std::env::current_dir().unwrap_or_default();
+                let reducer_script = super::reducer::resolve_reducer_path(
+                    reducer_field.as_deref(),
+                    &project_root,
                 );
+
+                let reduced_btxs = if let Some(reducer_path) = reducer_script {
+                    let env_vars = super::reducer::build_reducer_env_vars(
+                        governor_address,
+                        proposer_address,
+                        &targets,
+                        &values,
+                        &calldatas,
+                        "", // description
+                        timelock_address,
+                        ctx.chain_id,
+                    );
+                    super::reducer::invoke_reducer(
+                        &reducer_path,
+                        env_vars,
+                        ctx.rpc_url,
+                        ctx.chain_id,
+                    ).await?
+                } else {
+                    // Fallback: inline Rust encoding (backward compat)
+                    let propose_calldata = encode_governor_propose(&targets, &values, &calldatas, "");
+                    build_single_tx_broadcast(
+                        proposer_address, governor_address, propose_calldata,
+                    )
+                };
 
                 // Determine the proposer's category and push back onto queue
                 let proposer_category = proposer.category();

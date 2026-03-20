@@ -563,12 +563,13 @@ pub async fn run_tx_hash(
         println!("Syncing transaction {tx_hash}...");
     }
 
-    // Try to match this tx hash to an existing registry record (safe tx or governor proposal)
-    let matched = match_tx_to_registry(&tx_hash, &registry);
-
     // Process the receipt for proxy upgrades and new deployments
     let processed = receipt::process_tx_receipt(&effective_rpc_url, tx_hash).await?;
     let result = receipt::apply_receipt_to_registry(&processed, &mut registry, tx_hash)?;
+
+    // Try to match this tx hash to an existing registry record (safe tx or governor proposal)
+    // Uses multi-strategy matching: direct hash → log events → trace calls
+    let matched = match_tx_to_registry(tx_hash, &registry, &processed);
 
     // If the tx matches a known safe transaction or governor proposal, update its status
     if let Some(matched_record) = &matched {
@@ -702,23 +703,79 @@ enum MatchedRecord {
     GovernorProposal(String),
 }
 
-/// Try to match a tx hash to a known safe transaction or governor proposal in the registry.
-fn match_tx_to_registry(tx_hash: &str, registry: &Registry) -> Option<MatchedRecord> {
-    // Check safe transactions — match on execution_tx_hash
+/// Try to match a tx hash to a known safe transaction or governor proposal.
+///
+/// Uses a multi-strategy approach (returns on first match):
+/// 1. **Direct hash match** — check `execution_tx_hash` on all pending records
+/// 2. **Log-based matching** — parse receipt logs for `ProposalExecuted` / `ExecutionSuccess`
+/// 3. **Trace-based matching** — walk callTracer output for calls to governance/safe addresses
+fn match_tx_to_registry(
+    tx_hash: &str,
+    registry: &Registry,
+    processed: &crate::commands::receipt::ProcessedReceipt,
+) -> Option<MatchedRecord> {
+    // Strategy 1: Direct hash match (existing behavior)
     for stx in registry.list_safe_transactions() {
         if stx.execution_tx_hash.eq_ignore_ascii_case(tx_hash) {
             return Some(MatchedRecord::SafeTransaction(stx.safe_tx_hash.clone()));
         }
     }
-
-    // Check governor proposals — match on execution_tx_hash
     for proposal in registry.list_governor_proposals() {
         if proposal.execution_tx_hash.eq_ignore_ascii_case(tx_hash) {
             return Some(MatchedRecord::GovernorProposal(proposal.proposal_id.clone()));
         }
     }
 
+    // Collect pending records for strategies 2 and 3
+    let pending_proposals: Vec<&treb_core::types::GovernorProposal> = registry
+        .list_governor_proposals()
+        .into_iter()
+        .filter(|p| p.status != ProposalStatus::Executed && p.status != ProposalStatus::Canceled)
+        .collect();
+
+    let pending_safe_txs: Vec<&treb_core::types::SafeTransaction> = registry
+        .list_safe_transactions()
+        .into_iter()
+        .filter(|s| s.status != TransactionStatus::Executed)
+        .collect();
+
+    if pending_proposals.is_empty() && pending_safe_txs.is_empty() {
+        return None;
+    }
+
+    // Strategy 2: Log-based matching
+    if let Some(gov_match) = crate::commands::receipt::match_governance_logs(
+        &processed.raw_receipt,
+        &pending_proposals,
+        &pending_safe_txs,
+    ) {
+        return Some(governance_match_to_record(gov_match));
+    }
+
+    // Strategy 3: Trace-based matching (fallback)
+    if let Some(trace) = &processed.raw_trace {
+        if let Some(gov_match) = crate::commands::receipt::match_governance_trace(
+            trace,
+            &pending_proposals,
+            &pending_safe_txs,
+        ) {
+            return Some(governance_match_to_record(gov_match));
+        }
+    }
+
     None
+}
+
+/// Convert a `GovernanceMatch` to a `MatchedRecord`.
+fn governance_match_to_record(m: crate::commands::receipt::GovernanceMatch) -> MatchedRecord {
+    match m {
+        crate::commands::receipt::GovernanceMatch::GovernorProposal { proposal_id } => {
+            MatchedRecord::GovernorProposal(proposal_id)
+        }
+        crate::commands::receipt::GovernanceMatch::SafeTransaction { safe_tx_hash } => {
+            MatchedRecord::SafeTransaction(safe_tx_hash)
+        }
+    }
 }
 
 /// Resolve the RPC URL for `sync --tx-hash`.

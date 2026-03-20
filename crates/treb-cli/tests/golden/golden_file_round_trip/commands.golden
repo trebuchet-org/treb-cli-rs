@@ -1,4 +1,4 @@
-treb <SHORT_HASH>-dirty
+treb <SHORT_HASH>
 
 commit: <COMMIT>
 built:  <DATE>

@@ -53,7 +53,7 @@ pub enum ResolvedSender {
         governor_address: Address,
         timelock_address: Option<Address>,
         proposer: Box<ResolvedSender>,
-        proposer_script: Option<String>,
+        reducer: Option<String>,
     },
 }
 
@@ -428,7 +428,7 @@ async fn resolve_governance(
         governor_address,
         timelock_address,
         proposer: Box::new(proposer),
-        proposer_script: config.proposer_script.clone(),
+        reducer: config.reducer.clone(),
     })
 }
 
@@ -836,7 +836,7 @@ mod tests {
             governor_address: address!("0000000000000000000000000000000000000099"),
             timelock_address: None,
             proposer: Box::new(proposer),
-            proposer_script: None,
+            reducer: None,
         };
         assert!(gov.is_governor());
         assert!(!gov.is_safe());
@@ -870,7 +870,7 @@ mod tests {
             governor_address: address!("0000000000000000000000000000000000000099"),
             timelock_address: None,
             proposer: Box::new(ResolvedSender::Wallet(ws)),
-            proposer_script: None,
+            reducer: None,
         };
         let sub = gov.sub_signer();
         assert!(matches!(sub, ResolvedSender::Wallet(_)));
@@ -927,7 +927,7 @@ mod tests {
             governor_address: addr,
             timelock_address: None,
             proposer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
-            proposer_script: None,
+            reducer: None,
         };
         assert_eq!(gov.governor_address(), Some(addr));
     }
@@ -945,7 +945,7 @@ mod tests {
             governor_address: address!("0000000000000000000000000000000000000099"),
             timelock_address: Some(tl),
             proposer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
-            proposer_script: None,
+            reducer: None,
         };
         assert_eq!(gov.timelock_address(), Some(tl));
     }
@@ -956,7 +956,7 @@ mod tests {
             governor_address: address!("0000000000000000000000000000000000000099"),
             timelock_address: None,
             proposer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
-            proposer_script: None,
+            reducer: None,
         };
         assert!(gov.timelock_address().is_none());
     }
@@ -976,7 +976,7 @@ mod tests {
             governor_address: address!("0000000000000000000000000000000000000099"),
             timelock_address: Some(tl),
             proposer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
-            proposer_script: None,
+            reducer: None,
         };
         assert_eq!(gov.broadcast_address(), tl);
     }
@@ -988,7 +988,7 @@ mod tests {
             governor_address: gov_addr,
             timelock_address: None,
             proposer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
-            proposer_script: None,
+            reducer: None,
         };
         assert_eq!(gov.broadcast_address(), gov_addr);
     }
@@ -1069,7 +1069,7 @@ mod tests {
                 governor_address: gov_addr,
                 timelock_address: None,
                 proposer: Box::new(ResolvedSender::Wallet(ws)),
-                proposer_script: None,
+                reducer: None,
             },
         );
 
@@ -1091,7 +1091,7 @@ mod tests {
                 governor_address: gov_addr,
                 timelock_address: Some(tl_addr),
                 proposer: Box::new(ResolvedSender::Wallet(ws)),
-                proposer_script: None,
+                reducer: None,
             },
         );
 

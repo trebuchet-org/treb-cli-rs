@@ -14,6 +14,7 @@ Main Commands:
 
 Management Commands:
   registry      Manage the deployment registry
+  queued        List queued Safe/Governor operations
   addressbook   Manage named addresses scoped by chain ID
   dev           Development utilities
   networks      List available networks from foundry.toml
