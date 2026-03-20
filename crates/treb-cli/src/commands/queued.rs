@@ -17,7 +17,7 @@ pub async fn queued_command(
         anyhow::bail!("no .treb directory found — run `treb init` first");
     }
 
-    let registry = Registry::open(&treb_dir)?;
+    let registry = Registry::open(&cwd)?;
 
     // Collect queued safe transactions
     let all_safe_txs = registry.list_safe_transactions();
