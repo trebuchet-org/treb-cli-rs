@@ -257,6 +257,7 @@ impl RunPipeline {
                         sender_labels: &self.context.sender_labels,
                         sender_configs: &self.context.sender_configs,
                         sequence: Some(&mut pre_sequence),
+                        safe_nonce_offsets: std::collections::HashMap::new(),
                     };
                     let run_results = if let Some(ref resume) = self.resume_state {
                         super::routing::route_all_with_resume(btxs, &mut ctx, resume).await?
@@ -1790,6 +1791,8 @@ impl SimulatedSession {
         };
 
         let mut results: Vec<ScriptResult> = self.skipped_results;
+        // Persists across components so sequential Safe proposals get incrementing nonces
+        let mut safe_nonce_offsets: std::collections::HashMap<alloy_primitives::Address, u64> = std::collections::HashMap::new();
 
         for sim_script in self.scripts {
             let SimulatedScript { name, mut result, btxs, context } = sim_script;
@@ -1830,6 +1833,7 @@ impl SimulatedSession {
                         sender_labels: &context.sender_labels,
                         sender_configs: &context.sender_configs,
                         sequence: None,
+                        safe_nonce_offsets: safe_nonce_offsets.clone(),
                     };
 
                     let run_results = if self.resume {
@@ -1850,6 +1854,9 @@ impl SimulatedSession {
                     } else {
                         super::routing::route_all_with_queued(btxs, &mut route_ctx).await
                     };
+
+                    // Carry nonce offsets forward for the next component
+                    safe_nonce_offsets = route_ctx.safe_nonce_offsets;
 
                     match run_results {
                         Ok(run_results) => {

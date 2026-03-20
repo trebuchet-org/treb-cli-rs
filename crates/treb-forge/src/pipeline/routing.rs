@@ -261,6 +261,9 @@ pub struct RouteContext<'a> {
     /// Optional mutable reference to a pre-built ScriptSequence for in-place
     /// checkpoint updates during broadcast.
     pub sequence: Option<&'a mut ScriptSequence>,
+    /// Tracks nonce offsets per Safe address across multiple `reduce_queue` calls.
+    /// Each proposal increments the offset so sequential proposals get unique nonces.
+    pub safe_nonce_offsets: HashMap<Address, u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -283,7 +286,7 @@ struct ReductionItem {
 /// but Safe runs query threshold/nonce to determine 1/1 vs multi-sig.
 pub async fn reduce_queue(
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
-    ctx: &RouteContext<'_>,
+    ctx: &mut RouteContext<'_>,
 ) -> Result<RoutingPlan, TrebError> {
     let runs = partition_into_runs(btxs, ctx.resolved_senders, ctx.sender_labels);
     let mut queue = std::collections::VecDeque::new();
@@ -341,7 +344,7 @@ pub async fn reduce_queue(
                             "Safe Transaction Service not available for chain {}", ctx.chain_id
                         )))?;
                     let info = safe_client
-                        .get_safe_info(&format!("{:#x}", safe_address))
+                        .get_safe_info(&format!("{}", safe_address))
                         .await?;
                     info.threshold
                 };
@@ -358,7 +361,7 @@ pub async fn reduce_queue(
                 } else {
                     // Safe(n/m) — reduce to proposal
                     let operations = build_multisend_operations(&item.run, &item.btxs)?;
-                    let nonce = if ctx.is_fork {
+                    let base_nonce = if ctx.is_fork {
                         let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
                         super::fork_routing::query_safe_nonce(&provider, safe_address).await?
                     } else {
@@ -367,10 +370,13 @@ pub async fn reduce_queue(
                                 "Safe Transaction Service not available for chain {}", ctx.chain_id
                             )))?;
                         let info = safe_client
-                            .get_safe_info(&format!("{:#x}", safe_address))
+                            .get_safe_info(&format!("{}", safe_address))
                             .await?;
                         info.nonce
                     };
+                    let offset = ctx.safe_nonce_offsets.entry(safe_address).or_insert(0);
+                    let nonce = base_nonce + *offset;
+                    *offset += 1;
 
                     let safe_tx_hash = compute_safe_tx_hash_for_ops(
                         &operations, safe_address, nonce, ctx.chain_id,
@@ -566,7 +572,7 @@ pub async fn reduce_queue(
                                     "Safe Transaction Service not available for chain {}", ctx.chain_id
                                 )))?;
                             let info = safe_client
-                                .get_safe_info(&format!("{:#x}", proposer_safe))
+                                .get_safe_info(&format!("{}", proposer_safe))
                                 .await?;
                             info.threshold
                         };
@@ -585,7 +591,7 @@ pub async fn reduce_queue(
                         } else {
                             let ops = build_multisend_operations(&front.run, &front.btxs)?;
                             let inner = extract_routable_txs(&front.run, &front.btxs)?;
-                            let nonce = if ctx.is_fork {
+                            let base_nonce = if ctx.is_fork {
                                 let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
                                 super::fork_routing::query_safe_nonce(&provider, proposer_safe).await?
                             } else {
@@ -594,10 +600,13 @@ pub async fn reduce_queue(
                                         "Safe Transaction Service not available for chain {}", ctx.chain_id
                                     )))?;
                                 let info = safe_client
-                                    .get_safe_info(&format!("{:#x}", proposer_safe))
+                                    .get_safe_info(&format!("{}", proposer_safe))
                                     .await?;
                                 info.nonce
                             };
+                            let offset = ctx.safe_nonce_offsets.entry(proposer_safe).or_insert(0);
+                            let nonce = base_nonce + *offset;
+                            *offset += 1;
                             // Propose wrapping the governance context
                             actions.push(PlannedAction {
                                 run: item.run,
@@ -753,7 +762,7 @@ async fn reduce_safe_1of1(
                 "Safe Transaction Service not available for chain {}", ctx.chain_id
             )))?;
         let safe_info = safe_client
-            .get_safe_info(&format!("{:#x}", safe_address))
+            .get_safe_info(&format!("{}", safe_address))
             .await?;
         let nonce = safe_info.nonce;
 
@@ -895,7 +904,7 @@ pub async fn execute_single_action(
                 }
             } else {
                 propose_to_safe_service(
-                    *safe_address, *chain_id, operations,
+                    *safe_address, *chain_id, *nonce, operations,
                     inner_transactions.len(), sender_role, ctx,
                 ).await?
             }
@@ -1028,8 +1037,9 @@ pub async fn route_all_with_resume(
                     sender_labels: ctx.sender_labels,
                     sender_configs: ctx.sender_configs,
                     sequence: None,
+                    safe_nonce_offsets: ctx.safe_nonce_offsets.clone(),
                 };
-                let plan = reduce_queue(&single_btxs, &temp_ctx).await?;
+                let plan = reduce_queue(&single_btxs, &mut temp_ctx).await?;
                 let plan_results = execute_plan(&plan, &mut temp_ctx, Some(&single_btxs)).await?;
                 if let Some((_, result, _)) = plan_results.into_iter().next() {
                     result
@@ -1463,6 +1473,7 @@ async fn fetch_receipt(
 async fn propose_to_safe_service(
     safe_address: Address,
     chain_id: u64,
+    nonce: u64,
     operations: &[treb_safe::MultiSendOperation],
     tx_count: usize,
     sender_role: &str,
@@ -1476,14 +1487,6 @@ async fn propose_to_safe_service(
         (treb_safe::MULTI_SEND_ADDRESS, multi_send_data, 1u8)
     };
 
-    let safe_client = treb_safe::SafeServiceClient::new(chain_id)
-        .ok_or_else(|| TrebError::Safe(format!(
-            "Safe Transaction Service not available for chain {chain_id}"
-        )))?;
-    let safe_info = safe_client
-        .get_safe_info(&format!("{:#x}", safe_address))
-        .await?;
-
     let safe_tx = treb_safe::SafeTx {
         to,
         value: U256::ZERO,
@@ -1494,7 +1497,7 @@ async fn propose_to_safe_service(
         gasPrice: U256::ZERO,
         gasToken: Address::ZERO,
         refundReceiver: Address::ZERO,
-        nonce: U256::from(safe_info.nonce),
+        nonce: U256::from(nonce),
     };
     let safe_tx_hash = treb_safe::compute_safe_tx_hash(chain_id, safe_address, &safe_tx);
 
@@ -1523,21 +1526,25 @@ async fn propose_to_safe_service(
         gas_price: "0".into(),
         gas_token: format!("{}", Address::ZERO),
         refund_receiver: format!("{}", Address::ZERO),
-        nonce: safe_info.nonce,
+        nonce,
         contract_transaction_hash: format!("{:#x}", safe_tx_hash),
         sender: format!("{}", signer_addr),
         signature: format!("0x{}", alloy_primitives::hex::encode(&signature)),
         origin: Some("treb".into()),
     };
 
+    let safe_client = treb_safe::SafeServiceClient::new(chain_id)
+        .ok_or_else(|| TrebError::Safe(format!(
+            "Safe Transaction Service not available for chain {chain_id}"
+        )))?;
     safe_client
-        .propose_transaction(&format!("{:#x}", safe_address), &request)
+        .propose_transaction(&format!("{}", safe_address), &request)
         .await?;
 
     Ok(RunResult::SafeProposed {
         safe_tx_hash,
         safe_address,
-        nonce: safe_info.nonce,
+        nonce,
         tx_count,
     })
 }
