@@ -325,11 +325,28 @@ pub async fn replay_transactions_on_fork(
     rpc_url: &str,
     txs: &foundry_cheatcodes::BroadcastableTransactions,
 ) -> Result<(), TrebError> {
+    use alloy_primitives::U256;
     use alloy_provider::Provider;
     use alloy_rpc_types::{TransactionInput, TransactionRequest};
     use super::fork_routing::{anvil_impersonate, anvil_stop_impersonating};
 
     let provider = crate::provider::build_http_provider(rpc_url)?;
+
+    // Collect unique senders and fund them on the fork
+    let mut funded = std::collections::HashSet::new();
+    for btx in txs.iter() {
+        let from = btx.transaction.from().unwrap_or_default();
+        if funded.insert(from) {
+            // 100 ETH — enough for any gas cost on the fork
+            provider
+                .raw_request::<_, serde_json::Value>(
+                    "anvil_setBalance".into(),
+                    (from, U256::from(100_000_000_000_000_000_000u128)),
+                )
+                .await
+                .map_err(|e| TrebError::Forge(format!("compose replay: fund sender failed: {e}")))?;
+        }
+    }
 
     for (i, btx) in txs.iter().enumerate() {
         let from = btx.transaction.from().unwrap_or_default();
