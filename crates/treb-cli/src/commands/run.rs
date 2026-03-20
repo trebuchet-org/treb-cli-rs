@@ -955,19 +955,9 @@ pub(super) fn build_broadcast_callback(
 ) -> treb_forge::pipeline::OnActionComplete {
     let use_color = color::is_color_enabled();
     Box::new(move |run, result| {
-        // Stop the spinner thread, then overwrite its last frame.
-        // spinoff's clear() joins the spinner thread so no more writes happen.
-        // After that we: carriage return, erase line, flush — this guarantees
-        // the spinner's last frame (with ANSI color codes) is fully cleared
-        // before we print our output on the same line.
-        {
-            let mut guard = spinner.lock().unwrap();
-            if let Some(mut s) = guard.take() {
-                s.clear();
-            }
-        }
+        // Clear the "Broadcasting..." status line. We use a simple static
+        // line (no spinner thread) to avoid race conditions with ANSI escapes.
         use std::io::Write;
-        // \r moves to column 0, then \x1b[2K erases the entire line
         let _ = write!(std::io::stderr(), "\r\x1b[2K");
         let _ = std::io::stderr().flush();
 
@@ -1030,13 +1020,16 @@ pub(super) fn build_broadcast_callback(
             }
         }
 
-        // Restart spinner only after executed results, not after queued
+        // Show static status line after executed results (not after queued —
+        // queued is followed by prompts). No background spinner to avoid races.
         if matches!(result, treb_forge::pipeline::RunResult::Broadcast(_)) {
-            *spinner.lock().unwrap() = Some(spinoff::Spinner::new(
-                spinoff::spinners::Dots2,
-                "Broadcasting",
-                spinoff::Color::Cyan,
-            ));
+            if use_color {
+                let _ = write!(std::io::stderr(), "  {}",
+                    "Broadcasting...".style(color::GRAY));
+            } else {
+                let _ = write!(std::io::stderr(), "  Broadcasting...");
+            }
+            let _ = std::io::stderr().flush();
         }
     })
 }
