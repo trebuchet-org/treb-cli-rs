@@ -564,7 +564,8 @@ pub async fn execute_script(
                 spinoff::Color::Cyan,
             ));
 
-            simulated.set_on_action_complete(build_broadcast_callback(spinner2.clone()));
+            let global_tx_counter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            simulated.set_on_action_complete(build_broadcast_callback(spinner2.clone(), global_tx_counter));
         }
 
         let result = {
@@ -946,8 +947,11 @@ pub async fn run(
 /// The callback clears the spinner, prints the result line, and restarts
 /// the spinner (only after Broadcast results, not after queued items).
 /// Used by both `treb run` and `treb compose`.
+///
+/// `global_offset` tracks a running tx counter across scripts (for compose).
 pub(super) fn build_broadcast_callback(
     spinner: std::sync::Arc<std::sync::Mutex<Option<spinoff::Spinner>>>,
+    global_offset: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 ) -> treb_forge::pipeline::OnActionComplete {
     let use_color = color::is_color_enabled();
     Box::new(move |run, result| {
@@ -957,62 +961,72 @@ pub(super) fn build_broadcast_callback(
         }
         eprint!("\x1b[2K\r");
 
-        // Print inline result line
-        let indices = if run.tx_indices.len() == 1 {
-            format!("[{}]", run.tx_indices[0])
-        } else if run.tx_indices.len() > 1 {
-            format!("[{}-{}]", run.tx_indices[0], run.tx_indices[run.tx_indices.len() - 1])
-        } else {
-            String::new()
-        };
+        let offset = global_offset.load(std::sync::atomic::Ordering::Relaxed);
 
         match result {
             treb_forge::pipeline::RunResult::Broadcast(receipts) => {
                 for (i, receipt) in receipts.iter().enumerate() {
-                    let idx = run.tx_indices.get(i).copied().unwrap_or(0);
+                    let global_idx = offset + run.tx_indices.get(i).copied().unwrap_or(i);
                     let hash = format!("{:#x}", receipt.hash);
-                    let gas = if receipt.gas_used > 0 { format!(" gas={}", receipt.gas_used) } else { String::new() };
-                    let block = if receipt.block_number > 0 { format!(" block={}", receipt.block_number) } else { String::new() };
+                    let block = if receipt.block_number > 0 { format!("{}", receipt.block_number) } else { String::new() };
+                    let gas = if receipt.gas_used > 0 { format!("{}", receipt.gas_used) } else { String::new() };
                     if use_color {
-                        eprintln!("  {} {} [{}] {}{}{}",
+                        eprintln!("  {} {:>10} {:>4}  {}  {}  {}",
                             emoji::CHECK_MARK.style(color::GREEN),
                             run.sender_role.style(color::CYAN),
-                            idx, hash, block, gas,
+                            format!("[{}]", global_idx).style(color::GRAY),
+                            hash,
+                            if block.is_empty() { String::new() } else { format!("block={}", block) },
+                            if gas.is_empty() { String::new() } else { format!("gas={}", gas) },
                         );
                     } else {
-                        eprintln!("  {} {} [{}] {}{}{}", emoji::CHECK_MARK, run.sender_role, idx, hash, block, gas);
+                        eprintln!("  {} {:>10} [{:>2}]  {}  {}  {}",
+                            emoji::CHECK_MARK, run.sender_role, global_idx, hash,
+                            if block.is_empty() { String::new() } else { format!("block={}", block) },
+                            if gas.is_empty() { String::new() } else { format!("gas={}", gas) },
+                        );
                     }
                 }
+                // Advance global counter
+                global_offset.fetch_add(receipts.len(), std::sync::atomic::Ordering::Relaxed);
             }
-            treb_forge::pipeline::RunResult::GovernorProposed { proposal_id, governor_address, .. } => {
+            treb_forge::pipeline::RunResult::GovernorProposed { proposal_id, governor_address, tx_count, .. } => {
+                let first = offset;
+                let last = offset + tx_count.saturating_sub(1);
+                let range = if first == last { format!("[{}]", first) } else { format!("[{}-{}]", first, last) };
                 let gov = output::truncate_address(&format!("{:#x}", governor_address));
                 let prop = output::truncate_address(proposal_id);
                 if use_color {
-                    eprintln!("  {} {} {} {} proposed to Governor {} (proposal={})",
+                    eprintln!("  {} {:>10} {:>4}  proposed to Governor {} (proposal={})",
                         emoji::HOURGLASS.style(color::YELLOW),
-                        "queued".style(color::YELLOW),
                         run.sender_role.style(color::CYAN),
-                        indices, gov, prop,
+                        range.style(color::GRAY),
+                        gov, prop,
                     );
                 } else {
-                    eprintln!("  {} queued {} {} proposed to Governor {} (proposal={})",
-                        emoji::HOURGLASS, run.sender_role, indices, gov, prop);
+                    eprintln!("  {} {:>10} {:>4}  proposed to Governor {} (proposal={})",
+                        emoji::HOURGLASS, run.sender_role, range, gov, prop);
                 }
+                global_offset.fetch_add(*tx_count, std::sync::atomic::Ordering::Relaxed);
             }
-            treb_forge::pipeline::RunResult::SafeProposed { safe_tx_hash, safe_address, nonce, .. } => {
+            treb_forge::pipeline::RunResult::SafeProposed { safe_tx_hash, safe_address, nonce, tx_count, .. } => {
+                let first = offset;
+                let last = offset + tx_count.saturating_sub(1);
+                let range = if first == last { format!("[{}]", first) } else { format!("[{}-{}]", first, last) };
                 let safe = output::truncate_address(&format!("{:#x}", safe_address));
                 let hash = output::truncate_address(&format!("{:#x}", safe_tx_hash));
                 if use_color {
-                    eprintln!("  {} {} {} {} proposed to Safe {} (safeTxHash={}, nonce={})",
+                    eprintln!("  {} {:>10} {:>4}  proposed to Safe {} (safeTxHash={}, nonce={})",
                         emoji::HOURGLASS.style(color::YELLOW),
-                        "queued".style(color::YELLOW),
                         run.sender_role.style(color::CYAN),
-                        indices, safe, hash, nonce,
+                        range.style(color::GRAY),
+                        safe, hash, nonce,
                     );
                 } else {
-                    eprintln!("  {} queued {} {} proposed to Safe {} (safeTxHash={}, nonce={})",
-                        emoji::HOURGLASS, run.sender_role, indices, safe, hash, nonce);
+                    eprintln!("  {} {:>10} {:>4}  proposed to Safe {} (safeTxHash={}, nonce={})",
+                        emoji::HOURGLASS, run.sender_role, range, safe, hash, nonce);
                 }
+                global_offset.fetch_add(*tx_count, std::sync::atomic::Ordering::Relaxed);
             }
         }
 

@@ -1424,7 +1424,10 @@ pub async fn run(
                 spinoff::Color::Cyan,
             ));
             simulated.set_on_action_complete(
-                super::run::build_broadcast_callback(broadcast_spinner.clone()),
+                super::run::build_broadcast_callback(
+                    broadcast_spinner.clone(),
+                    std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                ),
             );
         }
 
