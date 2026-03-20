@@ -1138,7 +1138,7 @@ pub async fn run(
     // so the in-memory Registry is stale.
     registry = Registry::open(&cwd).context("failed to reload registry")?;
 
-    let simulated = match simulated {
+    let mut simulated = match simulated {
         Ok(s) => s,
         Err((partial_results, failed_name, err)) => {
             for sr in &partial_results {
@@ -1414,9 +1414,19 @@ pub async fn run(
             }
         }
 
-        // Broadcast with spinner
+        // Broadcast with spinner + inline output
         let broadcast_spinner: std::sync::Arc<std::sync::Mutex<Option<spinoff::Spinner>>> =
             std::sync::Arc::new(std::sync::Mutex::new(None));
+        if !json {
+            *broadcast_spinner.lock().unwrap() = Some(spinoff::Spinner::new(
+                spinoff::spinners::Dots2,
+                "Broadcasting",
+                spinoff::Color::Cyan,
+            ));
+            simulated.set_on_action_complete(
+                super::run::build_broadcast_callback(broadcast_spinner.clone()),
+            );
+        }
 
         let broadcast_result = {
             let _foundry_shell = super::run::FoundryShellGuard::suppress();

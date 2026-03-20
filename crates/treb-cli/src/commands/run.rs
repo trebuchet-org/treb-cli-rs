@@ -564,89 +564,7 @@ pub async fn execute_script(
                 spinoff::Color::Cyan,
             ));
 
-            // Wire per-action callback: clear spinner, print result line, restart spinner
-            let cb_spinner = spinner2.clone();
-            let use_color = color::is_color_enabled();
-            let cb: treb_forge::pipeline::OnActionComplete = Box::new(move |run, result| {
-                // Clear spinner
-                if let Some(mut s) = cb_spinner.lock().unwrap().take() {
-                    s.clear();
-                }
-                eprint!("\x1b[2K\r");
-
-                // Print inline result line
-                let indices = if run.tx_indices.len() == 1 {
-                    format!("[{}]", run.tx_indices[0])
-                } else if run.tx_indices.len() > 1 {
-                    format!("[{}-{}]", run.tx_indices[0], run.tx_indices[run.tx_indices.len() - 1])
-                } else {
-                    String::new()
-                };
-
-                match result {
-                    treb_forge::pipeline::RunResult::Broadcast(receipts) => {
-                        for (i, receipt) in receipts.iter().enumerate() {
-                            let idx = run.tx_indices.get(i).copied().unwrap_or(0);
-                            let hash = output::truncate_address(&format!("{:#x}", receipt.hash));
-                            let gas = if receipt.gas_used > 0 { format!(" gas={}", receipt.gas_used) } else { String::new() };
-                            let block = if receipt.block_number > 0 { format!(" block={}", receipt.block_number) } else { String::new() };
-                            if use_color {
-                                eprintln!("  {} {} [{}] {}{}{}",
-                                    emoji::CHECK_MARK.style(color::GREEN),
-                                    run.sender_role.style(color::CYAN),
-                                    idx,
-                                    hash, block, gas,
-                                );
-                            } else {
-                                eprintln!("  {} {} [{}] {}{}{}", emoji::CHECK_MARK, run.sender_role, idx, hash, block, gas);
-                            }
-                        }
-                    }
-                    treb_forge::pipeline::RunResult::GovernorProposed { proposal_id, governor_address, tx_count } => {
-                        let gov = output::truncate_address(&format!("{:#x}", governor_address));
-                        let prop = output::truncate_address(proposal_id);
-                        if use_color {
-                            eprintln!("  {} {} {} {} proposed to Governor {} (proposal={})",
-                                emoji::HOURGLASS.style(color::YELLOW),
-                                "queued".style(color::YELLOW),
-                                run.sender_role.style(color::CYAN),
-                                indices,
-                                gov, prop,
-                            );
-                        } else {
-                            eprintln!("  {} queued {} {} proposed to Governor {} (proposal={})",
-                                emoji::HOURGLASS, run.sender_role, indices, gov, prop);
-                        }
-                    }
-                    treb_forge::pipeline::RunResult::SafeProposed { safe_tx_hash, safe_address, nonce, tx_count } => {
-                        let safe = output::truncate_address(&format!("{:#x}", safe_address));
-                        let hash = output::truncate_address(&format!("{:#x}", safe_tx_hash));
-                        if use_color {
-                            eprintln!("  {} {} {} {} proposed to Safe {} (safeTxHash={}, nonce={})",
-                                emoji::HOURGLASS.style(color::YELLOW),
-                                "queued".style(color::YELLOW),
-                                run.sender_role.style(color::CYAN),
-                                indices,
-                                safe, hash, nonce,
-                            );
-                        } else {
-                            eprintln!("  {} queued {} {} proposed to Safe {} (safeTxHash={}, nonce={})",
-                                emoji::HOURGLASS, run.sender_role, indices, safe, hash, nonce);
-                        }
-                    }
-                }
-
-                // Restart spinner only after executed results, not after queued
-                // (queued results are followed by prompts that the spinner would overwrite)
-                if matches!(result, treb_forge::pipeline::RunResult::Broadcast(_)) {
-                    *cb_spinner.lock().unwrap() = Some(spinoff::Spinner::new(
-                        spinoff::spinners::Dots2,
-                        "Broadcasting",
-                        spinoff::Color::Cyan,
-                    ));
-                }
-            });
-            simulated.set_on_action_complete(cb);
+            simulated.set_on_action_complete(build_broadcast_callback(spinner2.clone()));
         }
 
         let result = {
@@ -1022,6 +940,92 @@ pub async fn run(
 }
 
 // ── Inline queued execution ──────────────────────────────────────────────
+
+/// Create the on_action_complete callback for inline broadcast output.
+///
+/// The callback clears the spinner, prints the result line, and restarts
+/// the spinner (only after Broadcast results, not after queued items).
+/// Used by both `treb run` and `treb compose`.
+pub(super) fn build_broadcast_callback(
+    spinner: std::sync::Arc<std::sync::Mutex<Option<spinoff::Spinner>>>,
+) -> treb_forge::pipeline::OnActionComplete {
+    let use_color = color::is_color_enabled();
+    Box::new(move |run, result| {
+        // Clear spinner
+        if let Some(mut s) = spinner.lock().unwrap().take() {
+            s.clear();
+        }
+        eprint!("\x1b[2K\r");
+
+        // Print inline result line
+        let indices = if run.tx_indices.len() == 1 {
+            format!("[{}]", run.tx_indices[0])
+        } else if run.tx_indices.len() > 1 {
+            format!("[{}-{}]", run.tx_indices[0], run.tx_indices[run.tx_indices.len() - 1])
+        } else {
+            String::new()
+        };
+
+        match result {
+            treb_forge::pipeline::RunResult::Broadcast(receipts) => {
+                for (i, receipt) in receipts.iter().enumerate() {
+                    let idx = run.tx_indices.get(i).copied().unwrap_or(0);
+                    let hash = output::truncate_address(&format!("{:#x}", receipt.hash));
+                    let gas = if receipt.gas_used > 0 { format!(" gas={}", receipt.gas_used) } else { String::new() };
+                    let block = if receipt.block_number > 0 { format!(" block={}", receipt.block_number) } else { String::new() };
+                    if use_color {
+                        eprintln!("  {} {} [{}] {}{}{}",
+                            emoji::CHECK_MARK.style(color::GREEN),
+                            run.sender_role.style(color::CYAN),
+                            idx, hash, block, gas,
+                        );
+                    } else {
+                        eprintln!("  {} {} [{}] {}{}{}", emoji::CHECK_MARK, run.sender_role, idx, hash, block, gas);
+                    }
+                }
+            }
+            treb_forge::pipeline::RunResult::GovernorProposed { proposal_id, governor_address, .. } => {
+                let gov = output::truncate_address(&format!("{:#x}", governor_address));
+                let prop = output::truncate_address(proposal_id);
+                if use_color {
+                    eprintln!("  {} {} {} {} proposed to Governor {} (proposal={})",
+                        emoji::HOURGLASS.style(color::YELLOW),
+                        "queued".style(color::YELLOW),
+                        run.sender_role.style(color::CYAN),
+                        indices, gov, prop,
+                    );
+                } else {
+                    eprintln!("  {} queued {} {} proposed to Governor {} (proposal={})",
+                        emoji::HOURGLASS, run.sender_role, indices, gov, prop);
+                }
+            }
+            treb_forge::pipeline::RunResult::SafeProposed { safe_tx_hash, safe_address, nonce, .. } => {
+                let safe = output::truncate_address(&format!("{:#x}", safe_address));
+                let hash = output::truncate_address(&format!("{:#x}", safe_tx_hash));
+                if use_color {
+                    eprintln!("  {} {} {} {} proposed to Safe {} (safeTxHash={}, nonce={})",
+                        emoji::HOURGLASS.style(color::YELLOW),
+                        "queued".style(color::YELLOW),
+                        run.sender_role.style(color::CYAN),
+                        indices, safe, hash, nonce,
+                    );
+                } else {
+                    eprintln!("  {} queued {} {} proposed to Safe {} (safeTxHash={}, nonce={})",
+                        emoji::HOURGLASS, run.sender_role, indices, safe, hash, nonce);
+                }
+            }
+        }
+
+        // Restart spinner only after executed results, not after queued
+        if matches!(result, treb_forge::pipeline::RunResult::Broadcast(_)) {
+            *spinner.lock().unwrap() = Some(spinoff::Spinner::new(
+                spinoff::spinners::Dots2,
+                "Broadcasting",
+                spinoff::Color::Cyan,
+            ));
+        }
+    })
+}
 
 /// Handle queued executions inline after broadcast.
 ///
