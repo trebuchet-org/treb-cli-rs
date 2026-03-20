@@ -82,11 +82,11 @@ impl BroadcastDisplay {
         let block = if block_number > 0 { format!("  block={block_number}") } else { String::new() };
         let gas = if gas_used > 0 { format!("  gas={gas_used}") } else { String::new() };
         if self.use_color {
-            eprintln!("  {:<9} {:>10} [{:>2}]  tx={}{}{}",
+            eprintln!("  {:<9} {:>10} idx={:<5}  tx={}{}{}",
                 "executed".style(color::GREEN), sender_role.style(color::CYAN),
                 tx_index, hash, block, gas);
         } else {
-            eprintln!("  {:<9} {:>10} [{:>2}]  tx={}{}{}",
+            eprintln!("  {:<9} {:>10} idx={:<5}  tx={}{}{}",
                 "executed", sender_role, tx_index, hash, block, gas);
         }
     }
@@ -95,12 +95,12 @@ impl BroadcastDisplay {
         &self, sender_role: &str, first_idx: usize, last_idx: usize, proposal_id: &str,
     ) {
         if self.quiet { return; }
-        let range = if first_idx == last_idx { format!("[{first_idx}]") } else { format!("[{first_idx}-{last_idx}]") };
+        let range = if first_idx == last_idx { format!("{first_idx}") } else { format!("{first_idx}-{last_idx}") };
         if self.use_color {
-            eprintln!("  {:<9} {:>10} {:>5}  proposal={}",
+            eprintln!("  {:<9} {:>10} idx={:<5}  proposal={}",
                 "queued".style(color::YELLOW), sender_role.style(color::CYAN), range, proposal_id);
         } else {
-            eprintln!("  {:<9} {:>10} {:>5}  proposal={}",
+            eprintln!("  {:<9} {:>10} idx={:<5}  proposal={}",
                 "queued", sender_role, range, proposal_id);
         }
     }
@@ -109,12 +109,12 @@ impl BroadcastDisplay {
         &self, sender_role: &str, first_idx: usize, last_idx: usize, safe_tx_hash: &str, nonce: u64,
     ) {
         if self.quiet { return; }
-        let range = if first_idx == last_idx { format!("[{first_idx}]") } else { format!("[{first_idx}-{last_idx}]") };
+        let range = if first_idx == last_idx { format!("{first_idx}") } else { format!("{first_idx}-{last_idx}") };
         if self.use_color {
-            eprintln!("  {:<9} {:>10} {:>5}  safe-hash={}  nonce={}",
+            eprintln!("  {:<9} {:>10} idx={:<5}  safe-hash={}  nonce={}",
                 "queued".style(color::YELLOW), sender_role.style(color::CYAN), range, safe_tx_hash, nonce);
         } else {
-            eprintln!("  {:<9} {:>10} {:>5}  safe-hash={}  nonce={}",
+            eprintln!("  {:<9} {:>10} idx={:<5}  safe-hash={}  nonce={}",
                 "queued", sender_role, range, safe_tx_hash, nonce);
         }
     }
@@ -131,11 +131,11 @@ impl BroadcastDisplay {
         let block = if block_number > 0 { format!("  block={block_number}") } else { String::new() };
         let gas = if gas_used > 0 { format!("  gas={gas_used}") } else { String::new() };
         if self.use_color {
-            eprintln!("  {:<9} {:>10} [{:>2}]  tx={}{}{}",
+            eprintln!("  {:<9} {:>10} idx={:<5}  tx={}{}{}",
                 "simulated".style(color::GREEN), sender_role.style(color::CYAN),
                 tx_index, hash, block, gas);
         } else {
-            eprintln!("  {:<9} {:>10} [{:>2}]  tx={}{}{}",
+            eprintln!("  {:<9} {:>10} idx={:<5}  tx={}{}{}",
                 "simulated", sender_role, tx_index, hash, block, gas);
         }
     }
@@ -171,11 +171,11 @@ impl BroadcastDisplay {
                         let block = if receipt.block_number > 0 { format!("  block={}", receipt.block_number) } else { String::new() };
                         let gas = if receipt.gas_used > 0 { format!("  gas={}", receipt.gas_used) } else { String::new() };
                         if use_color {
-                            eprintln!("  {:<9} {:>10} [{:>2}]  tx={}{}{}",
+                            eprintln!("  {:<9} {:>10} idx={:<5}  tx={}{}{}",
                                 "executed".style(color::GREEN), run.sender_role.style(color::CYAN),
                                 idx, hash, block, gas);
                         } else {
-                            eprintln!("  {:<9} {:>10} [{:>2}]  tx={}{}{}",
+                            eprintln!("  {:<9} {:>10} idx={:<5}  tx={}{}{}",
                                 "executed", run.sender_role, idx, hash, block, gas);
                         }
                     }
@@ -193,12 +193,12 @@ impl BroadcastDisplay {
                 treb_forge::pipeline::RunResult::GovernorProposed { proposal_id, tx_count, .. } => {
                     let first = offset;
                     let last = offset + tx_count.saturating_sub(1);
-                    let range = if first == last { format!("[{first}]") } else { format!("[{first}-{last}]") };
+                    let range = if first == last { format!("{first}") } else { format!("{first}-{last}") };
                     if use_color {
-                        eprintln!("  {:<9} {:>10} {:>5}  proposal={}",
+                        eprintln!("  {:<9} {:>10} idx={:<5}  proposal={}",
                             "queued".style(color::YELLOW), run.sender_role.style(color::CYAN), range, proposal_id);
                     } else {
-                        eprintln!("  {:<9} {:>10} {:>5}  proposal={}",
+                        eprintln!("  {:<9} {:>10} idx={:<5}  proposal={}",
                             "queued", run.sender_role, range, proposal_id);
                     }
                     global_offset.fetch_add(*tx_count, Ordering::Relaxed);
@@ -207,12 +207,12 @@ impl BroadcastDisplay {
                 treb_forge::pipeline::RunResult::SafeProposed { safe_tx_hash, nonce, tx_count, .. } => {
                     let first = offset;
                     let last = offset + tx_count.saturating_sub(1);
-                    let range = if first == last { format!("[{first}]") } else { format!("[{first}-{last}]") };
+                    let range = if first == last { format!("{first}") } else { format!("{first}-{last}") };
                     if use_color {
-                        eprintln!("  {:<9} {:>10} {:>5}  safe-hash={:#x}  nonce={}",
+                        eprintln!("  {:<9} {:>10} idx={:<5}  safe-hash={:#x}  nonce={}",
                             "queued".style(color::YELLOW), run.sender_role.style(color::CYAN), range, safe_tx_hash, nonce);
                     } else {
-                        eprintln!("  {:<9} {:>10} {:>5}  safe-hash={:#x}  nonce={}",
+                        eprintln!("  {:<9} {:>10} idx={:<5}  safe-hash={:#x}  nonce={}",
                             "queued", run.sender_role, range, safe_tx_hash, nonce);
                     }
                     global_offset.fetch_add(*tx_count, Ordering::Relaxed);
