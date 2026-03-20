@@ -516,7 +516,7 @@ pub async fn execute_script(
     }
 
     // Phase 1: Simulate
-    let simulated = {
+    let mut simulated = {
         let _foundry_shell = FoundryShellGuard::suppress();
         let r = session.simulate_all(registry).await;
         drop(spinner.lock().unwrap().take());
@@ -563,6 +563,86 @@ pub async fn execute_script(
                 "Broadcasting",
                 spinoff::Color::Cyan,
             ));
+
+            // Wire per-action callback: clear spinner, print result line, restart spinner
+            let cb_spinner = spinner2.clone();
+            let use_color = color::is_color_enabled();
+            let cb: treb_forge::pipeline::OnActionComplete = Box::new(move |run, result| {
+                // Clear spinner
+                if let Some(mut s) = cb_spinner.lock().unwrap().take() {
+                    s.clear();
+                }
+                eprint!("\x1b[2K\r");
+
+                // Print inline result line
+                let indices = if run.tx_indices.len() == 1 {
+                    format!("[{}]", run.tx_indices[0])
+                } else if run.tx_indices.len() > 1 {
+                    format!("[{}-{}]", run.tx_indices[0], run.tx_indices[run.tx_indices.len() - 1])
+                } else {
+                    String::new()
+                };
+
+                match result {
+                    treb_forge::pipeline::RunResult::Broadcast(receipts) => {
+                        for (i, receipt) in receipts.iter().enumerate() {
+                            let idx = run.tx_indices.get(i).copied().unwrap_or(0);
+                            let hash = output::truncate_address(&format!("{:#x}", receipt.hash));
+                            let gas = if receipt.gas_used > 0 { format!(" gas={}", receipt.gas_used) } else { String::new() };
+                            let block = if receipt.block_number > 0 { format!(" block={}", receipt.block_number) } else { String::new() };
+                            if use_color {
+                                eprintln!("  {} {} [{}] {}{}{}",
+                                    emoji::CHECK_MARK.style(color::GREEN),
+                                    run.sender_role.style(color::CYAN),
+                                    idx,
+                                    hash, block, gas,
+                                );
+                            } else {
+                                eprintln!("  {} {} [{}] {}{}{}", emoji::CHECK_MARK, run.sender_role, idx, hash, block, gas);
+                            }
+                        }
+                    }
+                    treb_forge::pipeline::RunResult::GovernorProposed { proposal_id, governor_address, tx_count } => {
+                        let gov = output::truncate_address(&format!("{:#x}", governor_address));
+                        let prop = output::truncate_address(proposal_id);
+                        if use_color {
+                            eprintln!("  {} {} {} proposed to Governor {} (proposal={})",
+                                emoji::HOURGLASS.style(color::YELLOW),
+                                "queued".style(color::YELLOW),
+                                run.sender_role.style(color::CYAN),
+                                gov, prop,
+                            );
+                        } else {
+                            eprintln!("  {} queued {} {} proposed to Governor {} (proposal={})",
+                                emoji::HOURGLASS, indices, run.sender_role, gov, prop);
+                        }
+                    }
+                    treb_forge::pipeline::RunResult::SafeProposed { safe_tx_hash, safe_address, nonce, tx_count } => {
+                        let safe = output::truncate_address(&format!("{:#x}", safe_address));
+                        let hash = output::truncate_address(&format!("{:#x}", safe_tx_hash));
+                        if use_color {
+                            eprintln!("  {} {} {} {} proposed to Safe {} (safeTxHash={}, nonce={})",
+                                emoji::HOURGLASS.style(color::YELLOW),
+                                "queued".style(color::YELLOW),
+                                indices,
+                                run.sender_role.style(color::CYAN),
+                                safe, hash, nonce,
+                            );
+                        } else {
+                            eprintln!("  {} queued {} {} proposed to Safe {} (safeTxHash={}, nonce={})",
+                                emoji::HOURGLASS, indices, run.sender_role, safe, hash, nonce);
+                        }
+                    }
+                }
+
+                // Restart spinner
+                *cb_spinner.lock().unwrap() = Some(spinoff::Spinner::new(
+                    spinoff::spinners::Dots2,
+                    "Broadcasting",
+                    spinoff::Color::Cyan,
+                ));
+            });
+            simulated.set_on_action_complete(cb);
         }
 
         let result = {
@@ -917,15 +997,22 @@ pub async fn run(
     }
 
     // ── Display results ──────────────────────────────────────────────────
-    let skip_traces = broadcast_previewed.load(std::sync::atomic::Ordering::Relaxed);
+    let broadcast_happened = broadcast_previewed.load(std::sync::atomic::Ordering::Relaxed);
     let script_name = std::path::Path::new(script)
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| script.to_string());
-    display_result(
-        &result, json, verbose, resolved.network.as_deref(), &resolved.namespace, skip_traces,
-        &script_name,
-    )?;
+
+    if broadcast_happened && !json {
+        // Broadcast output was already shown inline via on_action_complete callback.
+        // Only show deployment summary and console logs — no duplicate tx/proposal lines.
+        display_result_broadcast_inline(&result)?;
+    } else {
+        display_result(
+            &result, json, verbose, resolved.network.as_deref(), &resolved.namespace, false,
+            &script_name,
+        )?;
+    }
 
     Ok(())
 }
@@ -1312,6 +1399,42 @@ fn display_result(
     } else {
         display_result_human(result, verbose, network, namespace, skip_traces, script_name);
     }
+    Ok(())
+}
+
+/// Display results after broadcast with inline output.
+///
+/// The per-transaction lines were already shown by the on_action_complete callback
+/// during broadcast. This function shows only the deployment summary and console logs.
+fn display_result_broadcast_inline(result: &PipelineResult) -> anyhow::Result<()> {
+    let use_color = color::is_color_enabled();
+
+    // Deployment summary
+    if !result.deployments.is_empty() {
+        println!();
+        output::print_section_header(emoji::PACKAGE, "Deployments", 50);
+        for rd in &result.deployments {
+            let dep = &rd.deployment;
+            let addr = output::truncate_address(&dep.address);
+            if use_color {
+                println!("  {} at {}", dep.contract_name.style(color::CYAN), addr);
+            } else {
+                println!("  {} at {}", dep.contract_name, addr);
+            }
+        }
+        println!();
+    }
+
+    // Console logs
+    if !result.console_logs.is_empty() {
+        println!();
+        output::print_section_header(emoji::MEMO, "Console Logs", 50);
+        for log in &result.console_logs {
+            println!("  {log}");
+        }
+        println!();
+    }
+
     Ok(())
 }
 

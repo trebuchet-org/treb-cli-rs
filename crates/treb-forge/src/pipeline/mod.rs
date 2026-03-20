@@ -24,14 +24,15 @@ pub use hydration::{
     hydrate_transactions, hydrate_transactions_from_broadcast, populate_safe_context,
 };
 pub use orchestrator::{
-    BroadcastHook, BroadcastPhase, BroadcastProgressCallback, RoutingOutcome, RunPipeline,
-    SessionPipeline, SimulatedSession, apply_routing_results, apply_routing_results_with_queued,
+    BroadcastHook, BroadcastPhase, BroadcastProgressCallback, OnActionComplete, RoutingOutcome,
+    RunPipeline, SessionPipeline, SimulatedSession, apply_routing_results,
+    apply_routing_results_with_queued,
 };
 pub use simulation::{HydrationOptions, SimulationOutput, hydrate_simulation};
 pub use routing::{
     GovernanceContext, GovernorAction, PlannedAction, QueuedExecution, RoutableTx, RouteContext,
-    RoutingAction, RoutingPlan, RunResult, SafeContext, TransactionRun, flatten_receipts,
-    reduce_queue, route_all, route_all_with_queued, route_all_with_resume,
+    RoutingAction, RoutingPlan, RunResult, SafeContext, TransactionRun, execute_single_action,
+    flatten_receipts, reduce_queue, route_all, route_all_with_queued, route_all_with_resume,
 };
 pub use types::{
     PipelineConfig, PipelineContext, PipelineResult, ProposedResult, RecordedDeployment,

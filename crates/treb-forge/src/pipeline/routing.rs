@@ -809,6 +809,105 @@ async fn reduce_safe_1of1(
 // execute_plan — uniform executor
 // ---------------------------------------------------------------------------
 
+/// Execute a single planned action, returning the result and optional queued item.
+///
+/// This is the per-action building block. The CLI can call this in a loop
+/// to drive execution with inline output (spinner control, prompts, etc.)
+/// between actions.
+pub async fn execute_single_action(
+    planned: &PlannedAction,
+    ctx: &mut RouteContext<'_>,
+    original_btxs: Option<&foundry_cheatcodes::BroadcastableTransactions>,
+) -> Result<(TransactionRun, RunResult, Option<QueuedExecution>), TrebError> {
+    let result = match &planned.action {
+        RoutingAction::Exec { from, transactions, safe, governance: _ } => {
+            if let Some(safe_ctx) = safe {
+                if ctx.is_fork {
+                    let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
+                    let fallback_btxs = build_btxs_from_routable(safe_ctx.safe_address, transactions);
+                    let btxs_to_use = original_btxs.unwrap_or(&fallback_btxs);
+                    let receipts = super::fork_routing::execute_safe_on_fork(
+                        &provider,
+                        &planned.run,
+                        btxs_to_use,
+                        safe_ctx.safe_address,
+                        ctx.chain_id,
+                        ctx.quiet,
+                    ).await?;
+                    RunResult::Broadcast(receipts)
+                } else {
+                    let receipts = broadcast_routable_txs(
+                        ctx.rpc_url, *from, transactions, false,
+                        ctx.resolved_senders,
+                        ctx.sequence.as_deref_mut(),
+                        None,
+                    ).await?;
+                    RunResult::Broadcast(receipts)
+                }
+            } else {
+                let receipts = broadcast_routable_txs(
+                    ctx.rpc_url, *from, transactions, ctx.is_fork,
+                    ctx.resolved_senders,
+                    ctx.sequence.as_deref_mut(),
+                    Some(&planned.run.tx_indices),
+                ).await?;
+                RunResult::Broadcast(receipts)
+            }
+        }
+        RoutingAction::Propose { safe_address, chain_id, operations, inner_transactions, sender_role, nonce, governance: _ } => {
+            if ctx.is_fork {
+                let safe_tx_hash = match &planned.queued {
+                    Some(QueuedExecution::SafeProposal { safe_tx_hash, .. }) => *safe_tx_hash,
+                    _ => compute_safe_tx_hash_for_ops(operations, *safe_address, *nonce, *chain_id),
+                };
+                RunResult::SafeProposed {
+                    safe_tx_hash,
+                    safe_address: *safe_address,
+                    nonce: *nonce,
+                    tx_count: inner_transactions.len(),
+                }
+            } else {
+                propose_to_safe_service(
+                    *safe_address, *chain_id, operations,
+                    inner_transactions.len(), sender_role, ctx,
+                ).await?
+            }
+        }
+    };
+
+    // Governance wrapping
+    let final_result = match &planned.action {
+        RoutingAction::Exec { governance: Some(gov), .. } => {
+            match &result {
+                RunResult::Broadcast(receipts) => {
+                    let proposal_id = receipts.first()
+                        .map(|r| format!("{:#x}", r.hash))
+                        .unwrap_or_default();
+                    RunResult::GovernorProposed {
+                        proposal_id,
+                        governor_address: gov.governor_address,
+                        tx_count: planned.run.tx_indices.len(),
+                    }
+                }
+                _ => result,
+            }
+        }
+        RoutingAction::Propose { governance: Some(_), .. } => result,
+        _ => result,
+    };
+
+    Ok((
+        TransactionRun {
+            sender_role: planned.run.sender_role.clone(),
+            category: planned.run.category,
+            sender_address: planned.run.sender_address,
+            tx_indices: planned.run.tx_indices.clone(),
+        },
+        final_result,
+        planned.queued.clone(),
+    ))
+}
+
 /// Execute a routing plan, producing `(TransactionRun, RunResult)` pairs.
 ///
 /// Sequential loop — for each planned action:
@@ -825,114 +924,14 @@ pub async fn execute_plan(
     let mut results = Vec::with_capacity(plan.actions.len());
 
     for planned in &plan.actions {
-        let result = match &planned.action {
-            RoutingAction::Exec { from, transactions, safe, governance: _ } => {
-                if let Some(safe_ctx) = safe {
-                    if ctx.is_fork {
-                        // Fork: use execute_safe_on_fork for full fidelity.
-                        // Pass original btxs when available so CREATE transactions
-                        // are properly detected and routed through CreateCall.
-                        let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
-                        let fallback_btxs = build_btxs_from_routable(safe_ctx.safe_address, transactions);
-                        let btxs_to_use = original_btxs.unwrap_or(&fallback_btxs);
-                        let receipts = super::fork_routing::execute_safe_on_fork(
-                            &provider,
-                            &planned.run,
-                            btxs_to_use,
-                            safe_ctx.safe_address,
-                            ctx.chain_id,
-                            ctx.quiet,
-                        ).await?;
-                        RunResult::Broadcast(receipts)
-                    } else {
-                        // Live: the exec transactions contain full execTransaction calldata
-                        // Safe exec wrappers don't align 1:1 with btxs indices — no checkpoint
-                        let receipts = broadcast_routable_txs(
-                            ctx.rpc_url, *from, transactions, false,
-                            ctx.resolved_senders,
-                            ctx.sequence.as_deref_mut(),
-                            None,
-                        ).await?;
-                        RunResult::Broadcast(receipts)
-                    }
-                } else {
-                    // Plain wallet broadcast — tx_indices align 1:1 with transactions
-                    let receipts = broadcast_routable_txs(
-                        ctx.rpc_url, *from, transactions, ctx.is_fork,
-                        ctx.resolved_senders,
-                        ctx.sequence.as_deref_mut(),
-                        Some(&planned.run.tx_indices),
-                    ).await?;
-                    RunResult::Broadcast(receipts)
-                }
-            }
-            RoutingAction::Propose { safe_address, chain_id, operations, inner_transactions, sender_role, nonce, governance: _ } => {
-                if ctx.is_fork {
-                    // Fork: noop — record as proposed with the pre-computed EIP-712 hash
-                    let safe_tx_hash = match &planned.queued {
-                        Some(QueuedExecution::SafeProposal { safe_tx_hash, .. }) => *safe_tx_hash,
-                        _ => compute_safe_tx_hash_for_ops(operations, *safe_address, *nonce, *chain_id),
-                    };
-                    RunResult::SafeProposed {
-                        safe_tx_hash,
-                        safe_address: *safe_address,
-                        nonce: *nonce,
-                        tx_count: inner_transactions.len(),
-                    }
-                } else {
-                    // Live: sign and propose to Safe TX Service
-                    let result = propose_to_safe_service(
-                        *safe_address,
-                        *chain_id,
-                        operations,
-                        inner_transactions.len(),
-                        sender_role,
-                        ctx,
-                    ).await?;
-                    result
-                }
-            }
-        };
-
-        // Determine the run result for governance wrapping
-        let final_result = match &planned.action {
-            RoutingAction::Exec { governance: Some(gov), .. } => {
-                match &result {
-                    RunResult::Broadcast(receipts) => {
-                        let proposal_id = receipts.first()
-                            .map(|r| format!("{:#x}", r.hash))
-                            .unwrap_or_default();
-                        RunResult::GovernorProposed {
-                            proposal_id,
-                            governor_address: gov.governor_address,
-                            tx_count: planned.run.tx_indices.len(),
-                        }
-                    }
-                    _ => result,
-                }
-            }
-            RoutingAction::Propose { governance: Some(_), .. } => {
-                // A propose that wraps governance — the result type stays
-                // SafeProposed because the immediate action is a Safe proposal
-                result
-            }
-            _ => result,
-        };
+        let (run, final_result, queued) =
+            execute_single_action(planned, ctx, original_btxs).await?;
 
         if let Some(cb) = &ctx.on_run_complete {
-            cb(&planned.run, &final_result);
+            cb(&run, &final_result);
         }
 
-        results.push((
-            TransactionRun {
-                sender_role: planned.run.sender_role.clone(),
-                category: planned.run.category,
-                sender_address: planned.run.sender_address,
-                tx_indices: planned.run.tx_indices.clone(),
-            },
-            final_result,
-            planned.queued.clone(),
-        ));
+        results.push((run, final_result, queued));
     }
 
     Ok(results)

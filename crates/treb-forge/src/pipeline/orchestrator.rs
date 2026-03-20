@@ -1344,10 +1344,14 @@ use super::types::{
 /// Call [`simulate_all()`] to compile + execute all scripts, then inspect
 /// the returned [`SimulatedSession`] before optionally calling
 /// [`broadcast_all()`] to route transactions and write to the registry.
+/// Callback fired after each routing action completes during broadcast.
+pub type OnActionComplete = Box<dyn Fn(&super::routing::TransactionRun, &super::routing::RunResult) + Send + Sync>;
+
 pub struct SessionPipeline {
     scripts: Vec<ScriptEntry>,
     progress: Option<SessionProgressCallback>,
     resume: bool,
+    on_action_complete: Option<OnActionComplete>,
 }
 
 impl Default for SessionPipeline {
@@ -1362,6 +1366,7 @@ impl SessionPipeline {
             scripts: Vec::new(),
             progress: None,
             resume: false,
+            on_action_complete: None,
         }
     }
 
@@ -1379,6 +1384,15 @@ impl SessionPipeline {
     /// Enable resume mode: skip already-completed scripts/phases.
     pub fn with_resume(mut self, resume: bool) -> Self {
         self.resume = resume;
+        self
+    }
+
+    /// Set a callback fired after each routing action completes during broadcast.
+    ///
+    /// The callback receives the transaction run and its result. Use this to
+    /// print per-action status lines inline (clearing/restarting spinners, etc.)
+    pub fn with_on_action_complete(mut self, cb: OnActionComplete) -> Self {
+        self.on_action_complete = Some(cb);
         self
     }
 
@@ -1707,6 +1721,7 @@ impl SessionPipeline {
             skipped_results,
             resume: self.resume,
             progress: self.progress,
+            on_action_complete: self.on_action_complete,
             treb_dir,
             config_hash,
             state_scripts,
@@ -1723,6 +1738,7 @@ pub struct SimulatedSession {
     skipped_results: Vec<ScriptResult>,
     resume: bool,
     progress: Option<SessionProgressCallback>,
+    on_action_complete: Option<OnActionComplete>,
     treb_dir: PathBuf,
     config_hash: String,
     state_scripts: Vec<ScriptProgress>,
@@ -1739,6 +1755,11 @@ impl SimulatedSession {
     /// Read-only access to simulation results for display/confirmation.
     pub fn results(&self) -> impl Iterator<Item = (&str, &PipelineResult)> {
         self.scripts.iter().map(|s| (s.name.as_str(), &s.result))
+    }
+
+    /// Set a callback fired after each routing action completes during broadcast.
+    pub fn set_on_action_complete(&mut self, cb: OnActionComplete) {
+        self.on_action_complete = Some(cb);
     }
 
     /// Convert to final results without broadcasting (dry-run / user cancelled).
@@ -1803,7 +1824,8 @@ impl SimulatedSession {
                         chain_id: context.config.chain_id,
                         is_fork: context.config.is_fork,
                         quiet: context.config.quiet,
-                        on_run_complete: None,
+                        on_run_complete: self.on_action_complete.as_ref()
+                            .map(|cb| &**cb as &super::routing::OnRunComplete),
                         resolved_senders: &context.resolved_senders,
                         sender_labels: &context.sender_labels,
                         sender_configs: &context.sender_configs,
