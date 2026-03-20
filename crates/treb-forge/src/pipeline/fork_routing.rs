@@ -100,7 +100,7 @@ async fn eth_call_bytes(
 }
 
 /// Impersonate an account, send a transaction, wait for receipt, stop impersonating.
-async fn impersonate_send_tx(
+pub async fn impersonate_send_tx(
     provider: &impl Provider,
     from: Address,
     to: Address,

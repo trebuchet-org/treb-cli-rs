@@ -902,10 +902,10 @@ pub async fn run(
     .await?;
 
     // ── Inline queued execution handling ────────────────────────────────
-    let queued_display = crate::ui::broadcast_display::BroadcastDisplay::new(json);
+    let mut queued_display = crate::ui::broadcast_display::BroadcastDisplay::new(json);
     if !result.queued_executions.is_empty() && !json {
         handle_queued_executions(
-            &mut result, &queued_display, chain_id, prompts_enabled,
+            &mut result, &mut queued_display, chain_id, prompts_enabled,
             active_fork.is_some(), skip_fork_execution, &cwd, &mut registry,
         ).await?;
     } else if !result.proposed_results.is_empty() && prompts_enabled && !json {
@@ -942,7 +942,7 @@ pub async fn run(
 /// prompts the user to simulate execution on fork.
 async fn handle_queued_executions(
     result: &mut PipelineResult,
-    display: &crate::ui::broadcast_display::BroadcastDisplay,
+    display: &mut crate::ui::broadcast_display::BroadcastDisplay,
     chain_id: u64,
     prompts_enabled: bool,
     is_fork: bool,
@@ -983,17 +983,22 @@ async fn handle_queued_executions(
                     let should_simulate = if skip_fork_execution {
                         false
                     } else if prompts_enabled {
-                        crate::ui::prompt::confirm(
+                        let yes = crate::ui::prompt::confirm(
                             "  Simulate Safe execution on fork?", true,
-                        )
+                        );
+                        // Erase the prompt line after answer
+                        use std::io::Write;
+                        let _ = write!(std::io::stdout(), "\x1b[A\x1b[2K\r");
+                        let _ = std::io::stdout().flush();
+                        yes
                     } else {
-                        // Non-interactive fork: auto-simulate (matches Go CLI behavior)
                         true
                     };
 
                     if should_simulate {
+                        display.start_spinner("Simulating...");
                         let fork_rpc = resolve_fork_rpc(cwd, chain_id)?;
-                        match treb_forge::pipeline::fork_routing::exec_safe_from_registry(
+                        let sim_result = treb_forge::pipeline::fork_routing::exec_safe_from_registry(
                             &fork_rpc,
                             &format!("{:#x}", safe_address),
                             chain_id,
@@ -1005,11 +1010,12 @@ async fn handle_queued_executions(
                                     operation: 0,
                                 }
                             }).collect::<Vec<_>>(),
-                        ).await {
+                        ).await;
+                        display.stop();
+                        match sim_result {
                             Ok(receipts) => {
                                 let all_ok = receipts.iter().all(|r| r.status);
                                 if all_ok {
-                                    // Safe executes as batched MultiSend — show per-batch receipt
                                     for receipt in &receipts {
                                         display.on_tx_simulated(
                                             run_sender_role,
@@ -1060,40 +1066,37 @@ async fn handle_queued_executions(
                     let should_simulate = if skip_fork_execution {
                         false
                     } else if prompts_enabled {
-                        crate::ui::prompt::confirm(
+                        let yes = crate::ui::prompt::confirm(
                             "  Simulate governance execution on fork?", true,
-                        )
+                        );
+                        // Erase the prompt line after answer
+                        use std::io::Write;
+                        let _ = write!(std::io::stdout(), "\x1b[A\x1b[2K\r");
+                        let _ = std::io::stdout().flush();
+                        yes
                     } else {
-                        // Non-interactive fork: auto-simulate (matches Go CLI behavior)
                         true
                     };
 
                     if should_simulate {
                         let fork_rpc = resolve_fork_rpc(cwd, chain_id)?;
                         let governance_addr = timelock_address.unwrap_or(*governor_address);
-                        let targets: Vec<_> = actions.iter()
-                            .map(|a| a.target)
-                            .collect();
-                        let values: Vec<_> = actions.iter()
-                            .map(|a| a.value)
-                            .collect();
-                        let calldatas: Vec<Vec<u8>> = actions.iter()
-                            .map(|a| a.calldata.clone())
-                            .collect();
-
                         let governance_provider = treb_forge::provider::build_http_provider(&fork_rpc)?;
-                        match treb_forge::pipeline::fork_routing::simulate_governance_on_fork(
-                            &governance_provider,
-                            &targets,
-                            &values,
-                            &calldatas,
-                            governance_addr,
-                        ).await {
-                            Ok(receipts) => {
-                                let all_ok = receipts.iter().all(|r| r.status);
-                                if all_ok {
-                                    // Per-action simulated lines
-                                    for (i, receipt) in receipts.iter().enumerate() {
+
+                        // Simulate per-action with spinner between each
+                        let mut all_ok = true;
+                        for (i, action) in actions.iter().enumerate() {
+                            display.start_spinner("Simulating...");
+                            match treb_forge::pipeline::fork_routing::impersonate_send_tx(
+                                &governance_provider,
+                                governance_addr,
+                                action.target,
+                                &action.calldata,
+                                action.value,
+                            ).await {
+                                Ok(receipt) => {
+                                    display.stop();
+                                    if receipt.status {
                                         display.on_tx_simulated(
                                             run_sender_role,
                                             first_idx + i,
@@ -1101,20 +1104,27 @@ async fn handle_queued_executions(
                                             receipt.block_number,
                                             receipt.gas_used,
                                         );
+                                    } else {
+                                        all_ok = false;
+                                        eprintln!("  Governance simulation tx {} reverted on fork", first_idx + i);
+                                        break;
                                     }
-                                    // Update fork_executed_at on governor proposals
-                                    for proposal in &mut result.governor_proposals {
-                                        if proposal.governor_address.eq_ignore_ascii_case(&format!("{:#x}", governor_address)) {
-                                            proposal.fork_executed_at = Some(chrono::Utc::now());
-                                            let _ = registry.update_governor_proposal(proposal.clone());
-                                        }
-                                    }
-                                } else {
-                                    eprintln!("  Governance simulation reverted on fork");
+                                }
+                                Err(e) => {
+                                    display.stop();
+                                    all_ok = false;
+                                    eprintln!("  Governance simulation failed: {e}");
+                                    break;
                                 }
                             }
-                            Err(e) => {
-                                eprintln!("  Governance simulation failed: {e}");
+                        }
+
+                        if all_ok {
+                            for proposal in &mut result.governor_proposals {
+                                if proposal.governor_address.eq_ignore_ascii_case(&format!("{:#x}", governor_address)) {
+                                    proposal.fork_executed_at = Some(chrono::Utc::now());
+                                    let _ = registry.update_governor_proposal(proposal.clone());
+                                }
                             }
                         }
                     } else {
