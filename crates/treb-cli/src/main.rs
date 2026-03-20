@@ -419,6 +419,12 @@ enum RegistrySubcommand {
         /// Network name or chain ID
         #[arg(long)]
         network: Option<String>,
+        /// Sync a specific transaction hash (fetches receipt, detects proxy upgrades and new deployments)
+        #[arg(long, value_name = "HASH")]
+        tx_hash: Option<String>,
+        /// Explicit RPC URL (overrides network, required with --tx-hash unless fork is active)
+        #[arg(long)]
+        rpc_url: Option<String>,
         /// Remove invalid entries while syncing
         #[arg(long)]
         clean: bool,
@@ -1157,8 +1163,12 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             .await?
         }
         Commands::Registry { subcommand } => match subcommand {
-            RegistrySubcommand::Sync { network, clean, debug, json } => {
-                commands::sync::run(network, clean, debug, json).await?
+            RegistrySubcommand::Sync { network, tx_hash, rpc_url, clean, debug, json } => {
+                if let Some(hash) = tx_hash {
+                    commands::sync::run_tx_hash(&hash, network, rpc_url, json).await?
+                } else {
+                    commands::sync::run(network, clean, debug, json).await?
+                }
             }
             RegistrySubcommand::Prune(args) => {
                 commands::prune::run(args, non_interactive).await?

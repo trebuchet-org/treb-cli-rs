@@ -10,6 +10,7 @@ pub mod list;
 pub mod networks;
 pub mod prune;
 pub mod queued;
+pub mod receipt;
 pub mod register;
 pub mod reset;
 pub mod resolve;

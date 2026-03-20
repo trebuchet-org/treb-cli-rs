@@ -525,6 +525,258 @@ pub async fn run(
     Ok(())
 }
 
+// ── Sync by tx-hash ─────────────────────────────────────────────────────
+
+/// Sync a specific transaction hash: fetch receipt, detect proxy upgrades and
+/// new contract deployments, and update the registry.
+pub async fn run_tx_hash(
+    tx_hash: &str,
+    network: Option<String>,
+    rpc_url: Option<String>,
+    json: bool,
+) -> anyhow::Result<()> {
+    use crate::commands::receipt;
+    use serde::Serialize;
+
+    let cwd = std::env::current_dir()?;
+
+    if !cwd.join("foundry.toml").exists() {
+        anyhow::bail!(
+            "no foundry.toml found in the current directory.\n\
+             Run this command from a Foundry project root."
+        );
+    }
+    if !cwd.join(".treb").exists() {
+        anyhow::bail!("no .treb/ registry found. Run `treb init` to initialize.");
+    }
+
+    if !tx_hash.starts_with("0x") && !tx_hash.starts_with("0X") {
+        anyhow::bail!("--tx-hash must be a hex string starting with 0x");
+    }
+
+    // Resolve RPC URL: explicit --rpc-url > active fork > network config
+    let effective_rpc_url = resolve_tx_hash_rpc_url(rpc_url, network, &cwd)?;
+
+    let mut registry = Registry::open(&cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    if !json {
+        println!("Syncing transaction {tx_hash}...");
+    }
+
+    // Try to match this tx hash to an existing registry record (safe tx or governor proposal)
+    let matched = match_tx_to_registry(&tx_hash, &registry);
+
+    // Process the receipt for proxy upgrades and new deployments
+    let processed = receipt::process_tx_receipt(&effective_rpc_url, tx_hash).await?;
+    let result = receipt::apply_receipt_to_registry(&processed, &mut registry, tx_hash)?;
+
+    // If the tx matches a known safe transaction or governor proposal, update its status
+    if let Some(matched_record) = &matched {
+        match matched_record {
+            MatchedRecord::SafeTransaction(safe_tx_hash) => {
+                if let Some(stx) = registry.get_safe_transaction(safe_tx_hash).cloned() {
+                    if stx.status != TransactionStatus::Executed {
+                        let mut updated = stx;
+                        updated.status = TransactionStatus::Executed;
+                        updated.executed_at = Some(Utc::now());
+                        updated.execution_tx_hash = tx_hash.to_string();
+
+                        // Update linked Transaction records
+                        for tx_id in &updated.transaction_ids {
+                            if let Some(tx) = registry.get_transaction(tx_id) {
+                                let mut tx = tx.clone();
+                                if tx.status != TransactionStatus::Executed {
+                                    tx.status = TransactionStatus::Executed;
+                                    tx.hash = tx_hash.to_string();
+                                    registry.update_transaction(tx)
+                                        .with_context(|| format!("failed to update transaction {tx_id}"))?;
+                                }
+                            }
+                        }
+
+                        registry.update_safe_transaction(updated)
+                            .with_context(|| format!("failed to update safe transaction {safe_tx_hash}"))?;
+                    }
+                }
+            }
+            MatchedRecord::GovernorProposal(proposal_id) => {
+                if let Some(proposal) = registry.get_governor_proposal(proposal_id).cloned() {
+                    if proposal.status != treb_core::types::ProposalStatus::Executed {
+                        let mut updated = proposal;
+                        updated.status = treb_core::types::ProposalStatus::Executed;
+                        updated.executed_at = Some(Utc::now());
+                        updated.execution_tx_hash = tx_hash.to_string();
+
+                        // Update linked Transaction records
+                        let became_executed = true;
+                        persist_governor_proposal_update(&mut registry, updated, became_executed)?;
+                    }
+                }
+            }
+        }
+    }
+
+    // Output
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct TxHashSyncOutput {
+        tx_hash: String,
+        matched_record: Option<String>,
+        upgraded_deployments: Vec<receipt::UpgradedDeployment>,
+        new_creations: usize,
+        verified_deployments: usize,
+    }
+
+    if json {
+        output::print_json(&TxHashSyncOutput {
+            tx_hash: tx_hash.to_string(),
+            matched_record: matched.as_ref().map(|m| match m {
+                MatchedRecord::SafeTransaction(h) => format!("safe:{h}"),
+                MatchedRecord::GovernorProposal(id) => format!("governor:{id}"),
+            }),
+            upgraded_deployments: result.upgraded_deployments.clone(),
+            new_creations: result.new_creations.len(),
+            verified_deployments: result.verified_deployments.len(),
+        })?;
+    } else {
+        // Print matched record
+        if let Some(matched_record) = &matched {
+            match matched_record {
+                MatchedRecord::SafeTransaction(h) => {
+                    eprintln!(
+                        "  synced  safe tx={}  status=executed  tx={}",
+                        output::truncate_address(h),
+                        output::truncate_address(tx_hash),
+                    );
+                }
+                MatchedRecord::GovernorProposal(id) => {
+                    eprintln!(
+                        "  synced  proposal={}  status=executed  tx={}",
+                        output::truncate_address(id),
+                        output::truncate_address(tx_hash),
+                    );
+                }
+            }
+        }
+
+        for up in &result.upgraded_deployments {
+            eprintln!(
+                "    upgraded  {}  {}  →  impl={}",
+                up.contract_name,
+                output::truncate_address(&up.proxy_address),
+                output::truncate_address(&up.new_implementation),
+            );
+        }
+        for creation in &result.new_creations {
+            eprintln!(
+                "    deployed  {}  ({})",
+                output::truncate_address(&creation.address),
+                creation.create_type,
+            );
+        }
+        for dep_id in &result.verified_deployments {
+            eprintln!("    verified  {dep_id}");
+        }
+
+        let total_changes = result.upgraded_deployments.len()
+            + result.new_creations.len()
+            + result.verified_deployments.len();
+        if total_changes == 0 && matched.is_none() {
+            println!("No changes detected for transaction {}", output::truncate_address(tx_hash));
+        } else {
+            println!(
+                "\nSynced transaction: {} upgrade(s), {} new creation(s), {} verified",
+                result.upgraded_deployments.len(),
+                result.new_creations.len(),
+                result.verified_deployments.len(),
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// A registry record matched to a tx hash.
+enum MatchedRecord {
+    SafeTransaction(String),
+    GovernorProposal(String),
+}
+
+/// Try to match a tx hash to a known safe transaction or governor proposal in the registry.
+fn match_tx_to_registry(tx_hash: &str, registry: &Registry) -> Option<MatchedRecord> {
+    // Check safe transactions — match on execution_tx_hash
+    for stx in registry.list_safe_transactions() {
+        if stx.execution_tx_hash.eq_ignore_ascii_case(tx_hash) {
+            return Some(MatchedRecord::SafeTransaction(stx.safe_tx_hash.clone()));
+        }
+    }
+
+    // Check governor proposals — match on execution_tx_hash
+    for proposal in registry.list_governor_proposals() {
+        if proposal.execution_tx_hash.eq_ignore_ascii_case(tx_hash) {
+            return Some(MatchedRecord::GovernorProposal(proposal.proposal_id.clone()));
+        }
+    }
+
+    None
+}
+
+/// Resolve the RPC URL for `sync --tx-hash`.
+///
+/// Priority: `--rpc-url` flag > active fork > `--network` via config.
+fn resolve_tx_hash_rpc_url(
+    rpc_url: Option<String>,
+    network: Option<String>,
+    cwd: &std::path::Path,
+) -> anyhow::Result<String> {
+    // Explicit --rpc-url wins
+    if let Some(url) = rpc_url {
+        return Ok(url);
+    }
+
+    // Check if a fork is active — use Anvil's URL
+    let treb_dir = cwd.join(".treb");
+    if treb_dir.exists() {
+        let mut fork_store = treb_registry::ForkStateStore::new(&treb_dir);
+        if fork_store.load().is_ok() {
+            let state = fork_store.data();
+            if let Some(fork) = state.forks.values().next() {
+                return Ok(format!("http://127.0.0.1:{}", fork.port));
+            }
+        }
+    }
+
+    // Fall back to network resolution
+    let network_name =
+        network.context("either --rpc-url, --network, or an active fork is required")?;
+
+    if network_name.starts_with("http://") || network_name.starts_with("https://") {
+        return Ok(network_name);
+    }
+
+    let endpoints = treb_config::resolve_rpc_endpoints(cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let url = endpoints.get(&network_name).ok_or_else(|| {
+        anyhow::anyhow!("network '{}' not found in foundry.toml [rpc_endpoints]", network_name)
+    })?;
+
+    if !url.missing_vars.is_empty() {
+        anyhow::bail!(
+            "RPC URL for network '{}' is missing required environment variables: {}",
+            network_name,
+            url.missing_vars.join(", ")
+        );
+    }
+
+    if url.unresolved || url.expanded_url.trim().is_empty() {
+        anyhow::bail!(
+            "RPC URL for network '{}' could not be resolved",
+            network_name
+        );
+    }
+
+    Ok(url.expanded_url.clone())
+}
+
 /// Format sync human-readable output (sections, bullets, footer).
 #[allow(clippy::too_many_arguments)]
 fn format_sync_human_output(

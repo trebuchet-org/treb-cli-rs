@@ -272,6 +272,17 @@ fn build_registry_sync() -> ClapCommand {
         .about("Sync safe transaction state from the Safe Transaction Service")
         .arg(Arg::new("network").long("network").help("Filter sync to a specific network"))
         .arg(
+            Arg::new("tx-hash")
+                .long("tx-hash")
+                .value_name("HASH")
+                .help("Sync a specific transaction hash (fetches receipt, detects proxy upgrades and new deployments)"),
+        )
+        .arg(
+            Arg::new("rpc-url")
+                .long("rpc-url")
+                .help("Explicit RPC URL (overrides network, required with --tx-hash unless fork is active)"),
+        )
+        .arg(
             Arg::new("clean")
                 .long("clean")
                 .action(ArgAction::SetTrue)

@@ -31,6 +31,8 @@ use treb_forge::{
 };
 use treb_registry::{ForkStateStore, remove_snapshot, restore_registry, snapshot_registry};
 
+use crate::commands::receipt;
+
 const TREB_DIR: &str = ".treb";
 const SNAPSHOT_BASE: &str = "priv/snapshots";
 
@@ -1472,7 +1474,7 @@ async fn run_exec(
         .await;
 
         match result {
-            Ok(_receipts) => {
+            Ok(receipts) => {
                 // Update fork_executed_at in registry
                 let mut updated = stx.clone();
                 updated.fork_executed_at = Some(now);
@@ -1483,6 +1485,36 @@ async fn run_exec(
                         "  executed safe tx {}",
                         &stx.safe_tx_hash[..10.min(stx.safe_tx_hash.len())],
                     );
+                }
+
+                // Process receipts for proxy upgrades and new deployments
+                for r in &receipts {
+                    let tx_hash_str = format!("{:#x}", r.hash);
+                    match receipt::process_tx_receipt(&rpc_url, &tx_hash_str).await {
+                        Ok(processed) => {
+                            match receipt::apply_receipt_to_registry(
+                                &processed,
+                                &mut registry,
+                                &tx_hash_str,
+                            ) {
+                                Ok(result) => {
+                                    if !json {
+                                        print_receipt_results(&result, &tx_hash_str);
+                                    }
+                                }
+                                Err(e) => {
+                                    if !json {
+                                        eprintln!("    warning: failed to apply receipt: {e}");
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            if !json {
+                                eprintln!("    warning: failed to process receipt: {e}");
+                            }
+                        }
+                    }
                 }
             }
             Err(e) => {
@@ -1530,7 +1562,7 @@ async fn run_exec(
         .await;
 
         match result {
-            Ok(_receipts) => {
+            Ok(receipts) => {
                 let mut updated = p.clone();
                 updated.fork_executed_at = Some(now);
                 registry.update_governor_proposal(updated)?;
@@ -1540,6 +1572,36 @@ async fn run_exec(
                         "  simulated proposal {}",
                         &p.proposal_id[..10.min(p.proposal_id.len())],
                     );
+                }
+
+                // Process receipts for proxy upgrades and new deployments
+                for r in &receipts {
+                    let tx_hash_str = format!("{:#x}", r.hash);
+                    match receipt::process_tx_receipt(&rpc_url, &tx_hash_str).await {
+                        Ok(processed) => {
+                            match receipt::apply_receipt_to_registry(
+                                &processed,
+                                &mut registry,
+                                &tx_hash_str,
+                            ) {
+                                Ok(result) => {
+                                    if !json {
+                                        print_receipt_results(&result, &tx_hash_str);
+                                    }
+                                }
+                                Err(e) => {
+                                    if !json {
+                                        eprintln!("    warning: failed to apply receipt: {e}");
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            if !json {
+                                eprintln!("    warning: failed to process receipt: {e}");
+                            }
+                        }
+                    }
                 }
             }
             Err(e) => {
@@ -1560,6 +1622,30 @@ async fn run_exec(
     }
 
     Ok(())
+}
+
+/// Print receipt processing results (proxy upgrades and new creations) under the exec output.
+fn print_receipt_results(result: &receipt::ReceiptApplicationResult, _tx_hash: &str) {
+    use crate::output;
+
+    for up in &result.upgraded_deployments {
+        eprintln!(
+            "    upgraded  {}  {}  →  impl={}",
+            up.contract_name,
+            output::truncate_address(&up.proxy_address),
+            output::truncate_address(&up.new_implementation),
+        );
+    }
+    for creation in &result.new_creations {
+        eprintln!(
+            "    deployed  {}  ({})",
+            output::truncate_address(&creation.address),
+            creation.create_type,
+        );
+    }
+    for dep_id in &result.verified_deployments {
+        eprintln!("    verified  {dep_id}");
+    }
 }
 
 /// Load a JSON file as an object map.  Returns `None` if the file is missing or not an object.

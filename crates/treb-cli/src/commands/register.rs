@@ -4,7 +4,7 @@
 //! and records deployments in the registry. Falls back to receipt-only
 //! mode when `debug_traceTransaction` is unsupported by the RPC.
 
-use std::{collections::HashMap, env, time::Duration};
+use std::{collections::HashMap, env};
 
 use anyhow::{Context, bail};
 use chrono::Utc;
@@ -18,6 +18,10 @@ use treb_core::types::{
 use treb_registry::Registry;
 
 use crate::{
+    commands::receipt::{
+        DetectedProxy, TracedCreation, detect_proxy_patterns, extract_creations_from_trace,
+        parse_hex_u64, receipt_contract_address, rpc_call, rpc_client,
+    },
     output,
     ui::{color, emoji},
 };
@@ -26,54 +30,6 @@ use owo_colors::{OwoColorize, Style};
 const FOUNDRY_TOML: &str = "foundry.toml";
 const TREB_DIR: &str = ".treb";
 
-// ── JSON-RPC helpers ────────────────────────────────────────────────────
-
-/// Build a reqwest client with timeouts for RPC calls.
-fn rpc_client() -> anyhow::Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .context("failed to build HTTP client")
-}
-
-/// Make a JSON-RPC call and return the "result" field.
-async fn rpc_call(
-    client: &reqwest::Client,
-    url: &str,
-    method: &str,
-    params: serde_json::Value,
-) -> anyhow::Result<serde_json::Value> {
-    let body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": method,
-        "params": params,
-        "id": 1
-    });
-
-    let resp = client
-        .post(url)
-        .json(&body)
-        .send()
-        .await
-        .with_context(|| format!("RPC request failed for {method}"))?;
-
-    let json: serde_json::Value =
-        resp.json().await.with_context(|| format!("invalid JSON response for {method}"))?;
-
-    if let Some(error) = json.get("error") {
-        bail!("RPC error for {method}: {error}");
-    }
-
-    json.get("result")
-        .cloned()
-        .ok_or_else(|| anyhow::anyhow!("no result field in {method} response"))
-}
-
-/// Parse a hex string (with or without 0x prefix) to u64.
-fn parse_hex_u64(hex: &str) -> u64 {
-    let stripped = hex.strip_prefix("0x").or_else(|| hex.strip_prefix("0X")).unwrap_or(hex);
-    u64::from_str_radix(stripped, 16).unwrap_or(0)
-}
 
 // ── RPC URL resolution ──────────────────────────────────────────────────
 
@@ -178,110 +134,6 @@ fn resolve_effective_namespace(
     })
 }
 
-// ── Trace parsing ───────────────────────────────────────────────────────
-
-/// A contract creation found in a transaction trace or receipt.
-struct TracedCreation {
-    address: String,
-    from: String,
-    create_type: String,
-}
-
-/// Parse debug_traceTransaction callTracer output for contract creations.
-fn extract_creations_from_trace(trace: &serde_json::Value) -> Vec<TracedCreation> {
-    let mut creations = Vec::new();
-    walk_trace_calls(trace, &mut creations);
-    creations
-}
-
-fn walk_trace_calls(call: &serde_json::Value, creations: &mut Vec<TracedCreation>) {
-    let call_type = call.get("type").and_then(|v| v.as_str()).unwrap_or("");
-
-    if call_type.eq_ignore_ascii_case("CREATE") || call_type.eq_ignore_ascii_case("CREATE2") {
-        if let Some(to) = call.get("to").and_then(|v| v.as_str()) {
-            let from = call.get("from").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            creations.push(TracedCreation {
-                address: to.to_string(),
-                from,
-                create_type: call_type.to_uppercase(),
-            });
-        }
-    }
-
-    // Recurse into sub-calls.
-    if let Some(calls) = call.get("calls").and_then(|v| v.as_array()) {
-        for subcall in calls {
-            walk_trace_calls(subcall, creations);
-        }
-    }
-}
-
-// ── Proxy detection ─────────────────────────────────────────────────────
-
-/// A detected proxy+implementation pair from trace analysis.
-struct DetectedProxy {
-    proxy_address: String,
-    implementation_address: String,
-}
-
-/// Detect proxy patterns from a callTracer trace.
-///
-/// A proxy pattern is detected when a CREATE/CREATE2 call contains a
-/// DELEGATECALL subcall from the newly created address to another address
-/// (the implementation).
-fn detect_proxy_patterns(trace: &serde_json::Value) -> Vec<DetectedProxy> {
-    let mut results = Vec::new();
-    find_proxy_creates(trace, &mut results);
-    results
-}
-
-/// Walk the trace tree looking for CREATE nodes whose subcalls contain
-/// a DELEGATECALL from the created address (proxy → implementation).
-fn find_proxy_creates(call: &serde_json::Value, results: &mut Vec<DetectedProxy>) {
-    let call_type = call.get("type").and_then(|v| v.as_str()).unwrap_or("");
-
-    if call_type.eq_ignore_ascii_case("CREATE") || call_type.eq_ignore_ascii_case("CREATE2") {
-        if let Some(created_addr) = call.get("to").and_then(|v| v.as_str()) {
-            // Look for DELEGATECALL from the created address within subcalls.
-            if let Some(impl_addr) = find_delegatecall_target(call, created_addr) {
-                results.push(DetectedProxy {
-                    proxy_address: created_addr.to_string(),
-                    implementation_address: impl_addr,
-                });
-            }
-        }
-    }
-
-    // Recurse into sub-calls.
-    if let Some(calls) = call.get("calls").and_then(|v| v.as_array()) {
-        for subcall in calls {
-            find_proxy_creates(subcall, results);
-        }
-    }
-}
-
-/// Search subcalls of a node for a DELEGATECALL originating from `from_addr`.
-/// Returns the target address of the first match.
-fn find_delegatecall_target(call: &serde_json::Value, from_addr: &str) -> Option<String> {
-    if let Some(calls) = call.get("calls").and_then(|v| v.as_array()) {
-        for subcall in calls {
-            let sub_type = subcall.get("type").and_then(|v| v.as_str()).unwrap_or("");
-            if sub_type.eq_ignore_ascii_case("DELEGATECALL") {
-                let sub_from = subcall.get("from").and_then(|v| v.as_str()).unwrap_or("");
-                if sub_from.eq_ignore_ascii_case(from_addr) {
-                    if let Some(target) = subcall.get("to").and_then(|v| v.as_str()) {
-                        return Some(target.to_string());
-                    }
-                }
-            }
-            // Recurse deeper.
-            if let Some(found) = find_delegatecall_target(subcall, from_addr) {
-                return Some(found);
-            }
-        }
-    }
-    None
-}
 
 // ── Contract name resolution ────────────────────────────────────────────
 
@@ -684,14 +536,6 @@ pub async fn run(
     Ok(())
 }
 
-/// Extract a non-zero contractAddress from a transaction receipt.
-fn receipt_contract_address(receipt: &serde_json::Value) -> Option<String> {
-    let addr = receipt.get("contractAddress").and_then(|v| v.as_str())?;
-    if addr.is_empty() || addr == "0x0000000000000000000000000000000000000000" {
-        return None;
-    }
-    Some(addr.to_string())
-}
 
 // ── Tests ───────────────────────────────────────────────────────────────
 
