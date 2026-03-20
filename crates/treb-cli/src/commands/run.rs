@@ -606,15 +606,16 @@ pub async fn execute_script(
                         let gov = output::truncate_address(&format!("{:#x}", governor_address));
                         let prop = output::truncate_address(proposal_id);
                         if use_color {
-                            eprintln!("  {} {} {} proposed to Governor {} (proposal={})",
+                            eprintln!("  {} {} {} {} proposed to Governor {} (proposal={})",
                                 emoji::HOURGLASS.style(color::YELLOW),
                                 "queued".style(color::YELLOW),
                                 run.sender_role.style(color::CYAN),
+                                indices,
                                 gov, prop,
                             );
                         } else {
                             eprintln!("  {} queued {} {} proposed to Governor {} (proposal={})",
-                                emoji::HOURGLASS, indices, run.sender_role, gov, prop);
+                                emoji::HOURGLASS, run.sender_role, indices, gov, prop);
                         }
                     }
                     treb_forge::pipeline::RunResult::SafeProposed { safe_tx_hash, safe_address, nonce, tx_count } => {
@@ -624,23 +625,26 @@ pub async fn execute_script(
                             eprintln!("  {} {} {} {} proposed to Safe {} (safeTxHash={}, nonce={})",
                                 emoji::HOURGLASS.style(color::YELLOW),
                                 "queued".style(color::YELLOW),
-                                indices,
                                 run.sender_role.style(color::CYAN),
+                                indices,
                                 safe, hash, nonce,
                             );
                         } else {
                             eprintln!("  {} queued {} {} proposed to Safe {} (safeTxHash={}, nonce={})",
-                                emoji::HOURGLASS, indices, run.sender_role, safe, hash, nonce);
+                                emoji::HOURGLASS, run.sender_role, indices, safe, hash, nonce);
                         }
                     }
                 }
 
-                // Restart spinner
-                *cb_spinner.lock().unwrap() = Some(spinoff::Spinner::new(
-                    spinoff::spinners::Dots2,
-                    "Broadcasting",
-                    spinoff::Color::Cyan,
-                ));
+                // Restart spinner only after executed results, not after queued
+                // (queued results are followed by prompts that the spinner would overwrite)
+                if matches!(result, treb_forge::pipeline::RunResult::Broadcast(_)) {
+                    *cb_spinner.lock().unwrap() = Some(spinoff::Spinner::new(
+                        spinoff::spinners::Dots2,
+                        "Broadcasting",
+                        spinoff::Color::Cyan,
+                    ));
+                }
             });
             simulated.set_on_action_complete(cb);
         }
@@ -1040,24 +1044,9 @@ async fn handle_queued_executions(
         match item {
             QueuedExecution::SafeProposal { safe_address, safe_tx_hash, nonce, inner_txs } => {
                 let safe_display = output::truncate_address(&format!("{:#x}", safe_address));
-                let hash_display = output::truncate_address(&format!("{:#x}", safe_tx_hash));
 
-                if color::is_color_enabled() {
-                    eprintln!(
-                        "  {} queued  Safe {} (safeTxHash={}, nonce={}, {} tx)",
-                        emoji::HOURGLASS,
-                        safe_display,
-                        hash_display.style(color::YELLOW),
-                        nonce,
-                        inner_txs.len(),
-                    );
-                } else {
-                    eprintln!(
-                        "  {} queued  Safe {} (safeTxHash={}, nonce={}, {} tx)",
-                        emoji::HOURGLASS, safe_display, hash_display, nonce, inner_txs.len(),
-                    );
-                }
-
+                // The "queued" line was already printed by the on_action_complete callback.
+                // Here we just handle the simulation prompt and execution.
                 if is_fork {
                     let should_simulate = if skip_fork_execution {
                         false
@@ -1128,29 +1117,12 @@ async fn handle_queued_executions(
             QueuedExecution::GovernanceProposal {
                 governor_address, timelock_address, actions, proposal_description: _,
             } => {
-                let gov_display = output::truncate_address(&format!("{:#x}", governor_address));
                 let tl_display = timelock_address
                     .map(|tl| format!(" via Timelock {}", output::truncate_address(&format!("{:#x}", tl))))
                     .unwrap_or_default();
 
-                if color::is_color_enabled() {
-                    eprintln!(
-                        "  {} queued  Governor {}{} ({} action{})",
-                        emoji::HOURGLASS,
-                        gov_display.style(color::YELLOW),
-                        tl_display,
-                        actions.len(),
-                        if actions.len() == 1 { "" } else { "s" },
-                    );
-                } else {
-                    eprintln!(
-                        "  {} queued  Governor {}{} ({} action{})",
-                        emoji::HOURGLASS, gov_display, tl_display,
-                        actions.len(),
-                        if actions.len() == 1 { "" } else { "s" },
-                    );
-                }
-
+                // The "queued" line was already printed by the on_action_complete callback.
+                // Here we just handle the simulation prompt and execution.
                 if is_fork {
                     let should_simulate = if skip_fork_execution {
                         false
