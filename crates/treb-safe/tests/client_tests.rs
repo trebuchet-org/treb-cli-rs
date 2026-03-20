@@ -14,50 +14,50 @@ use treb_safe::{
 #[test]
 fn client_creation_mainnet() {
     let client = SafeServiceClient::new(1).expect("mainnet should be supported");
-    assert_eq!(client.base_url(), "https://safe-transaction-mainnet.safe.global/api/v1");
+    assert_eq!(client.base_url(), "https://api.safe.global/tx-service/eth/api/v1");
 }
 
 #[test]
 fn client_creation_polygon() {
     let client = SafeServiceClient::new(137).expect("polygon should be supported");
-    assert_eq!(client.base_url(), "https://safe-transaction-polygon.safe.global/api/v1");
+    assert_eq!(client.base_url(), "https://api.safe.global/tx-service/pol/api/v1");
 }
 
 #[test]
 fn client_creation_base() {
     let client = SafeServiceClient::new(8453).expect("base should be supported");
-    assert_eq!(client.base_url(), "https://safe-transaction-base.safe.global/api/v1");
+    assert_eq!(client.base_url(), "https://api.safe.global/tx-service/base/api/v1");
 }
 
 #[test]
 fn client_creation_sepolia() {
     let client = SafeServiceClient::new(11155111).expect("sepolia should be supported");
-    assert_eq!(client.base_url(), "https://safe-transaction-sepolia.safe.global/api/v1");
+    assert_eq!(client.base_url(), "https://api.safe.global/tx-service/sep/api/v1");
 }
 
 #[test]
 fn client_creation_all_supported_chains() {
     let supported_chains = [
-        (1, "mainnet"),
-        (10, "optimism"),
-        (56, "bsc"),
-        (100, "gnosis-chain"),
-        (137, "polygon"),
+        (1, "eth"),
+        (10, "oeth"),
+        (56, "bnb"),
+        (100, "gno"),
+        (137, "pol"),
         (324, "zksync"),
         (8453, "base"),
-        (42161, "arbitrum"),
+        (42161, "arb1"),
         (42220, "celo"),
-        (43114, "avalanche"),
+        (43114, "avax"),
         (59144, "linea"),
-        (534352, "scroll"),
-        (11155111, "sepolia"),
-        (84532, "base-sepolia"),
+        (534352, "scr"),
+        (11155111, "sep"),
+        (84532, "basesep"),
     ];
 
     for (chain_id, expected_name) in supported_chains {
         let client = SafeServiceClient::new(chain_id)
             .unwrap_or_else(|| panic!("chain {chain_id} ({expected_name}) should be supported"));
-        let expected_url = format!("https://safe-transaction-{expected_name}.safe.global/api/v1");
+        let expected_url = format!("https://api.safe.global/tx-service/{expected_name}/api/v1");
         assert_eq!(client.base_url(), expected_url, "wrong URL for chain {chain_id}");
     }
 }

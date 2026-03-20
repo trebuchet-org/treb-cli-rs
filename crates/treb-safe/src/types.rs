@@ -111,24 +111,25 @@ pub struct ProposeRequest {
 
 /// Map a chain ID to the Safe Transaction Service chain name segment.
 ///
-/// The Safe Transaction Service uses chain-specific subdomains:
-/// `https://safe-transaction-{chain_name}.safe.global/api/v1/...`
+/// The Safe Transaction Service API lives at:
+/// `https://api.safe.global/tx-service/{chain_name}/api/v1/...`
 fn service_chain_name(chain_id: u64) -> Option<&'static str> {
+    // Slugs from https://safe-config.safe.global/api/v1/chains/
     match chain_id {
-        1 => Some("mainnet"),
-        10 => Some("optimism"),
-        56 => Some("bsc"),
-        100 => Some("gnosis-chain"),
-        137 => Some("polygon"),
+        1 => Some("eth"),
+        10 => Some("oeth"),
+        56 => Some("bnb"),
+        100 => Some("gno"),
+        137 => Some("pol"),
         324 => Some("zksync"),
         8453 => Some("base"),
-        42161 => Some("arbitrum"),
+        42161 => Some("arb1"),
         42220 => Some("celo"),
-        43114 => Some("avalanche"),
+        43114 => Some("avax"),
         59144 => Some("linea"),
-        534352 => Some("scroll"),
-        11155111 => Some("sepolia"),
-        84532 => Some("base-sepolia"),
+        534352 => Some("scr"),
+        11155111 => Some("sep"),
+        84532 => Some("basesep"),
         _ => None,
     }
 }
@@ -140,12 +141,12 @@ fn service_chain_name(chain_id: u64) -> Option<&'static str> {
 ///
 /// ```
 /// use treb_safe::service_url;
-/// assert_eq!(service_url(1), Some("https://safe-transaction-mainnet.safe.global/api/v1".into()),);
+/// assert_eq!(service_url(1), Some("https://api.safe.global/tx-service/eth/api/v1".into()),);
 /// assert_eq!(service_url(999999), None);
 /// ```
 pub fn service_url(chain_id: u64) -> Option<String> {
     service_chain_name(chain_id)
-        .map(|name| format!("https://safe-transaction-{name}.safe.global/api/v1"))
+        .map(|name| format!("https://api.safe.global/tx-service/{name}/api/v1"))
 }
 
 // ---------------------------------------------------------------------------
@@ -340,28 +341,22 @@ mod tests {
 
     #[test]
     fn service_url_mainnet() {
-        assert_eq!(service_url(1).unwrap(), "https://safe-transaction-mainnet.safe.global/api/v1");
+        assert_eq!(service_url(1).unwrap(), "https://api.safe.global/tx-service/eth/api/v1");
     }
 
     #[test]
     fn service_url_polygon() {
-        assert_eq!(
-            service_url(137).unwrap(),
-            "https://safe-transaction-polygon.safe.global/api/v1"
-        );
+        assert_eq!(service_url(137).unwrap(), "https://api.safe.global/tx-service/pol/api/v1");
     }
 
     #[test]
     fn service_url_base() {
-        assert_eq!(service_url(8453).unwrap(), "https://safe-transaction-base.safe.global/api/v1");
+        assert_eq!(service_url(8453).unwrap(), "https://api.safe.global/tx-service/base/api/v1");
     }
 
     #[test]
     fn service_url_sepolia() {
-        assert_eq!(
-            service_url(11155111).unwrap(),
-            "https://safe-transaction-sepolia.safe.global/api/v1"
-        );
+        assert_eq!(service_url(11155111).unwrap(), "https://api.safe.global/tx-service/sep/api/v1");
     }
 
     #[test]
@@ -372,26 +367,26 @@ mod tests {
     #[test]
     fn service_url_all_supported_chains() {
         let supported = [
-            (1, "mainnet"),
-            (10, "optimism"),
-            (56, "bsc"),
-            (100, "gnosis-chain"),
-            (137, "polygon"),
+            (1, "eth"),
+            (10, "oeth"),
+            (56, "bnb"),
+            (100, "gno"),
+            (137, "pol"),
             (324, "zksync"),
             (8453, "base"),
-            (42161, "arbitrum"),
+            (42161, "arb1"),
             (42220, "celo"),
-            (43114, "avalanche"),
+            (43114, "avax"),
             (59144, "linea"),
-            (534352, "scroll"),
-            (11155111, "sepolia"),
-            (84532, "base-sepolia"),
+            (534352, "scr"),
+            (11155111, "sep"),
+            (84532, "basesep"),
         ];
 
         for (chain_id, expected_name) in supported {
             let url = service_url(chain_id)
                 .unwrap_or_else(|| panic!("service_url({chain_id}) should return Some"));
-            let expected = format!("https://safe-transaction-{expected_name}.safe.global/api/v1");
+            let expected = format!("https://api.safe.global/tx-service/{expected_name}/api/v1");
             assert_eq!(url, expected, "chain_id={chain_id}");
         }
     }

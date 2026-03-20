@@ -1330,7 +1330,7 @@ mainnet = "${TREB_SYNC_RPC_URL}"
     #[test]
     fn safe_service_client_base_url_format() {
         let client = SafeServiceClient::new(1).unwrap();
-        assert_eq!(client.base_url(), "https://safe-transaction-mainnet.safe.global/api/v1");
+        assert_eq!(client.base_url(), "https://api.safe.global/tx-service/eth/api/v1");
     }
 
     // ── Registry integration tests ──────────────────────────────────────

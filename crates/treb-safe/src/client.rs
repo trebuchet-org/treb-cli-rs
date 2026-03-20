@@ -203,7 +203,7 @@ mod tests {
     #[test]
     fn new_supported_chain() {
         let client = SafeServiceClient::new(1).expect("mainnet should be supported");
-        assert_eq!(client.base_url(), "https://safe-transaction-mainnet.safe.global/api/v1");
+        assert_eq!(client.base_url(), "https://api.safe.global/tx-service/eth/api/v1");
     }
 
     #[test]
