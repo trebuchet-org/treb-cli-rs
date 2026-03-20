@@ -1039,11 +1039,8 @@ async fn handle_queued_executions(
                                 eprintln!("  Safe simulation failed: {e}");
                             }
                         }
-                    } else {
-                        eprintln!("  Saved as queued — execute later via `treb fork exec`");
                     }
                 }
-                // Live mode: already proposed to Safe TX Service
             }
 
             QueuedExecution::GovernanceProposal {
@@ -1127,11 +1124,8 @@ async fn handle_queued_executions(
                                 }
                             }
                         }
-                    } else {
-                        eprintln!("  Saved as queued — execute later via `treb fork exec`");
                     }
                 }
-                // Live mode: governance takes time, just record
             }
         }
     }

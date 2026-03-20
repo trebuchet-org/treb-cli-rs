@@ -675,6 +675,7 @@ fn build_grouped_help(cmd: &clap::Command) -> String {
         "Management Commands:",
         &[
             "registry",
+            "queued",
             "addressbook",
             "dev",
             "networks",
