@@ -73,11 +73,35 @@ pub struct SafeServiceConfirmation {
 #[serde(rename_all = "camelCase")]
 pub struct SafeInfoResponse {
     pub address: String,
+    #[serde(deserialize_with = "deserialize_u64_or_string")]
     pub nonce: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_u64_or_string_default")]
     pub threshold: u64,
     #[serde(default)]
     pub owners: Vec<String>,
+}
+
+fn deserialize_u64_or_string<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+    use serde::de;
+    struct Visitor;
+    impl de::Visitor<'_> for Visitor {
+        type Value = u64;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("u64 or string-encoded u64")
+        }
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<u64, E> { Ok(v) }
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<u64, E> {
+            u64::try_from(v).map_err(de::Error::custom)
+        }
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<u64, E> {
+            v.parse().map_err(de::Error::custom)
+        }
+    }
+    d.deserialize_any(Visitor)
+}
+
+fn deserialize_u64_or_string_default<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+    deserialize_u64_or_string(d)
 }
 
 // ---------------------------------------------------------------------------
