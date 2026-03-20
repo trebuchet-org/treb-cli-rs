@@ -970,7 +970,7 @@ pub(super) fn build_broadcast_callback(
             treb_forge::pipeline::RunResult::Broadcast(receipts) => {
                 for (i, receipt) in receipts.iter().enumerate() {
                     let idx = run.tx_indices.get(i).copied().unwrap_or(0);
-                    let hash = output::truncate_address(&format!("{:#x}", receipt.hash));
+                    let hash = format!("{:#x}", receipt.hash);
                     let gas = if receipt.gas_used > 0 { format!(" gas={}", receipt.gas_used) } else { String::new() };
                     let block = if receipt.block_number > 0 { format!(" block={}", receipt.block_number) } else { String::new() };
                     if use_color {

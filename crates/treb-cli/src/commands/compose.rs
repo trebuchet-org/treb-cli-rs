@@ -1523,12 +1523,8 @@ pub async fn run(
         }
         save_compose_state(&state)?;
 
-        // Display per-component broadcast results
-        if should_broadcast && !json {
-            for sr in &script_results {
-                super::run::display_script_broadcast_summary(&sr.name, &sr.result);
-            }
-        }
+        // Per-component broadcast results were already shown inline
+        // by the on_action_complete callback. No duplicate summary needed.
     }
 
     // ── Display results ──────────────────────────────────────────────
