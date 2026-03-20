@@ -955,11 +955,18 @@ pub(super) fn build_broadcast_callback(
 ) -> treb_forge::pipeline::OnActionComplete {
     let use_color = color::is_color_enabled();
     Box::new(move |run, result| {
-        // Clear spinner
-        if let Some(mut s) = spinner.lock().unwrap().take() {
-            s.clear();
+        // Clear spinner — clear() joins the thread so no more writes after it returns.
+        // Then erase the line the spinner left and flush before printing our output.
+        {
+            let mut guard = spinner.lock().unwrap();
+            if let Some(mut s) = guard.take() {
+                s.clear();
+            }
         }
+        // Erase line + carriage return + flush — ensures clean line before output
+        use std::io::Write;
         eprint!("\x1b[2K\r");
+        let _ = std::io::stderr().flush();
 
         let offset = global_offset.load(std::sync::atomic::Ordering::Relaxed);
 
