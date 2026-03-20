@@ -944,9 +944,9 @@ pub async fn run(
 
 /// Create the on_action_complete callback for inline broadcast output.
 ///
-/// The callback clears the spinner, prints the result line, and restarts
-/// the spinner (only after Broadcast results, not after queued items).
-/// Used by both `treb run` and `treb compose`.
+/// Format:
+///   executed  deployer [0]  tx=0xd8bc...  block=61854569  gas=243904
+///   queued    governor [2-5]  proposal=0x5cd5...
 ///
 /// `global_offset` tracks a running tx counter across scripts (for compose).
 pub(super) fn build_broadcast_callback(
@@ -968,63 +968,53 @@ pub(super) fn build_broadcast_callback(
                 for (i, receipt) in receipts.iter().enumerate() {
                     let global_idx = offset + run.tx_indices.get(i).copied().unwrap_or(i);
                     let hash = format!("{:#x}", receipt.hash);
-                    let block = if receipt.block_number > 0 { format!("{}", receipt.block_number) } else { String::new() };
-                    let gas = if receipt.gas_used > 0 { format!("{}", receipt.gas_used) } else { String::new() };
+                    let block = if receipt.block_number > 0 { format!("  block={}", receipt.block_number) } else { String::new() };
+                    let gas = if receipt.gas_used > 0 { format!("  gas={}", receipt.gas_used) } else { String::new() };
                     if use_color {
-                        eprintln!("  {} {:>10} {:>4}  {}  {}  {}",
-                            emoji::CHECK_MARK.style(color::GREEN),
+                        eprintln!("  {:<9} {:>10} [{:>2}]  tx={}{}{}",
+                            "executed".style(color::GREEN),
                             run.sender_role.style(color::CYAN),
-                            format!("[{}]", global_idx).style(color::GRAY),
-                            hash,
-                            if block.is_empty() { String::new() } else { format!("block={}", block) },
-                            if gas.is_empty() { String::new() } else { format!("gas={}", gas) },
+                            global_idx,
+                            hash, block, gas,
                         );
                     } else {
-                        eprintln!("  {} {:>10} [{:>2}]  {}  {}  {}",
-                            emoji::CHECK_MARK, run.sender_role, global_idx, hash,
-                            if block.is_empty() { String::new() } else { format!("block={}", block) },
-                            if gas.is_empty() { String::new() } else { format!("gas={}", gas) },
-                        );
+                        eprintln!("  {:<9} {:>10} [{:>2}]  tx={}{}{}",
+                            "executed", run.sender_role, global_idx, hash, block, gas);
                     }
                 }
-                // Advance global counter
                 global_offset.fetch_add(receipts.len(), std::sync::atomic::Ordering::Relaxed);
             }
-            treb_forge::pipeline::RunResult::GovernorProposed { proposal_id, governor_address, tx_count, .. } => {
+            treb_forge::pipeline::RunResult::GovernorProposed { proposal_id, tx_count, .. } => {
                 let first = offset;
                 let last = offset + tx_count.saturating_sub(1);
-                let range = if first == last { format!("[{}]", first) } else { format!("[{}-{}]", first, last) };
-                let gov = output::truncate_address(&format!("{:#x}", governor_address));
-                let prop = output::truncate_address(proposal_id);
+                let range = if first == last { format!("[{first}]") } else { format!("[{first}-{last}]") };
                 if use_color {
-                    eprintln!("  {} {:>10} {:>4}  proposed to Governor {} (proposal={})",
-                        emoji::HOURGLASS.style(color::YELLOW),
+                    eprintln!("  {:<9} {:>10} {:>5}  proposal={}",
+                        "queued".style(color::YELLOW),
                         run.sender_role.style(color::CYAN),
-                        range.style(color::GRAY),
-                        gov, prop,
+                        range,
+                        proposal_id,
                     );
                 } else {
-                    eprintln!("  {} {:>10} {:>4}  proposed to Governor {} (proposal={})",
-                        emoji::HOURGLASS, run.sender_role, range, gov, prop);
+                    eprintln!("  {:<9} {:>10} {:>5}  proposal={}",
+                        "queued", run.sender_role, range, proposal_id);
                 }
                 global_offset.fetch_add(*tx_count, std::sync::atomic::Ordering::Relaxed);
             }
-            treb_forge::pipeline::RunResult::SafeProposed { safe_tx_hash, safe_address, nonce, tx_count, .. } => {
+            treb_forge::pipeline::RunResult::SafeProposed { safe_tx_hash, nonce, tx_count, .. } => {
                 let first = offset;
                 let last = offset + tx_count.saturating_sub(1);
-                let range = if first == last { format!("[{}]", first) } else { format!("[{}-{}]", first, last) };
-                let safe = output::truncate_address(&format!("{:#x}", safe_address));
-                let hash = output::truncate_address(&format!("{:#x}", safe_tx_hash));
+                let range = if first == last { format!("[{first}]") } else { format!("[{first}-{last}]") };
                 if use_color {
-                    eprintln!("  {} {:>10} {:>4}  proposed to Safe {} (safeTxHash={}, nonce={})",
-                        emoji::HOURGLASS.style(color::YELLOW),
+                    eprintln!("  {:<9} {:>10} {:>5}  safe-hash={:#x}  nonce={}",
+                        "queued".style(color::YELLOW),
                         run.sender_role.style(color::CYAN),
-                        range.style(color::GRAY),
-                        safe, hash, nonce,
+                        range,
+                        safe_tx_hash, nonce,
                     );
                 } else {
-                    eprintln!("  {} {:>10} {:>4}  proposed to Safe {} (safeTxHash={}, nonce={})",
-                        emoji::HOURGLASS, run.sender_role, range, safe, hash, nonce);
+                    eprintln!("  {:<9} {:>10} {:>5}  safe-hash={:#x}  nonce={}",
+                        "queued", run.sender_role, range, safe_tx_hash, nonce);
                 }
                 global_offset.fetch_add(*tx_count, std::sync::atomic::Ordering::Relaxed);
             }
@@ -1056,15 +1046,34 @@ async fn handle_queued_executions(
 ) -> anyhow::Result<()> {
     use treb_forge::pipeline::QueuedExecution;
 
+    let use_color = color::is_color_enabled();
     let queued = std::mem::take(&mut result.queued_executions);
+
+    // Compute the global start index for queued items:
+    // wallet txs were already counted, queued items follow.
+    let wallet_tx_count = result.transactions.iter()
+        .filter(|rt| !matches!(rt.sender_category,
+            Some(treb_forge::SenderCategory::Governor) | Some(treb_forge::SenderCategory::Safe)))
+        .count();
+    let mut queued_offset = wallet_tx_count;
 
     for item in &queued {
         match item {
             QueuedExecution::SafeProposal { safe_address, safe_tx_hash, nonce, inner_txs } => {
-                let safe_display = output::truncate_address(&format!("{:#x}", safe_address));
+                let tx_count = inner_txs.len();
+                let first_idx = queued_offset;
+                let last_idx = queued_offset + tx_count.saturating_sub(1);
+                let range = if first_idx == last_idx { format!("[{first_idx}]") } else { format!("[{first_idx}-{last_idx}]") };
+                queued_offset += tx_count;
 
-                // The "queued" line was already printed by the on_action_complete callback.
-                // Here we just handle the simulation prompt and execution.
+                // Find sender role from proposed results
+                let run_sender_role = result.proposed_results.iter()
+                    .find(|pr| matches!(&pr.run_result,
+                        treb_forge::pipeline::RunResult::SafeProposed { safe_tx_hash: h, .. }
+                        if format!("{:#x}", h) == format!("{:#x}", safe_tx_hash)))
+                    .map(|pr| pr.sender_role.as_str())
+                    .unwrap_or("safe");
+
                 if is_fork {
                     let should_simulate = if skip_fork_execution {
                         false
@@ -1095,22 +1104,24 @@ async fn handle_queued_executions(
                             Ok(receipts) => {
                                 let all_ok = receipts.iter().all(|r| r.status);
                                 if all_ok {
-                                    if color::is_color_enabled() {
-                                        eprintln!(
-                                            "  {} {}  executed Safe {} ({} tx, {} batch)",
-                                            emoji::CHECK_MARK.style(color::GREEN),
-                                            "simulated".style(color::GREEN),
-                                            safe_display,
-                                            inner_txs.len(),
-                                            receipts.len(),
-                                        );
-                                    } else {
-                                        eprintln!(
-                                            "  {} simulated  executed Safe {} ({} tx, {} batch)",
-                                            emoji::CHECK_MARK, safe_display, inner_txs.len(), receipts.len(),
-                                        );
+                                    // Safe executes as batched MultiSend — show one line per batch receipt
+                                    for receipt in &receipts {
+                                        let tx_hash = format!("{:#x}", receipt.hash);
+                                        let block = if receipt.block_number > 0 { format!("  block={}", receipt.block_number) } else { String::new() };
+                                        let gas = if receipt.gas_used > 0 { format!("  gas={}", receipt.gas_used) } else { String::new() };
+                                        if use_color {
+                                            eprintln!("  {:<9} {:>10} {:>5}  safe-hash={:#x}  tx={}{}{}",
+                                                "simulated".style(color::GREEN),
+                                                run_sender_role.style(color::CYAN),
+                                                range,
+                                                safe_tx_hash,
+                                                tx_hash, block, gas,
+                                            );
+                                        } else {
+                                            eprintln!("  {:<9} {:>10} {:>5}  safe-hash={:#x}  tx={}{}{}",
+                                                "simulated", run_sender_role, range, safe_tx_hash, tx_hash, block, gas);
+                                        }
                                     }
-                                    // Update fork_executed_at in registry
                                     for safe_tx in &mut result.safe_transactions {
                                         if safe_tx.safe_tx_hash == format!("{:#x}", safe_tx_hash) {
                                             safe_tx.fork_executed_at = Some(chrono::Utc::now());
@@ -1135,12 +1146,19 @@ async fn handle_queued_executions(
             QueuedExecution::GovernanceProposal {
                 governor_address, timelock_address, actions, proposal_description: _,
             } => {
-                let tl_display = timelock_address
-                    .map(|tl| format!(" via Timelock {}", output::truncate_address(&format!("{:#x}", tl))))
-                    .unwrap_or_default();
+                let tx_count = actions.len();
+                let first_idx = queued_offset;
+                let last_idx = queued_offset + tx_count.saturating_sub(1);
+                queued_offset += tx_count;
 
-                // The "queued" line was already printed by the on_action_complete callback.
-                // Here we just handle the simulation prompt and execution.
+                // Find sender role from proposed results
+                let run_sender_role = result.proposed_results.iter()
+                    .find(|pr| matches!(&pr.run_result,
+                        treb_forge::pipeline::RunResult::GovernorProposed { governor_address: g, .. }
+                        if format!("{:#x}", g) == format!("{:#x}", governor_address)))
+                    .map(|pr| pr.sender_role.as_str())
+                    .unwrap_or("governor");
+
                 if is_fork {
                     let should_simulate = if skip_fork_execution {
                         false
@@ -1177,22 +1195,22 @@ async fn handle_queued_executions(
                             Ok(receipts) => {
                                 let all_ok = receipts.iter().all(|r| r.status);
                                 if all_ok {
-                                    if color::is_color_enabled() {
-                                        eprintln!(
-                                            "  {} {}  executed Governor{} ({} action{})",
-                                            emoji::CHECK_MARK.style(color::GREEN),
-                                            "simulated".style(color::GREEN),
-                                            tl_display,
-                                            actions.len(),
-                                            if actions.len() == 1 { "" } else { "s" },
-                                        );
-                                    } else {
-                                        eprintln!(
-                                            "  {} simulated  executed Governor{} ({} action{})",
-                                            emoji::CHECK_MARK, tl_display,
-                                            actions.len(),
-                                            if actions.len() == 1 { "" } else { "s" },
-                                        );
+                                    // Per-action simulated lines
+                                    for (i, receipt) in receipts.iter().enumerate() {
+                                        let idx = first_idx + i;
+                                        let tx_hash = format!("{:#x}", receipt.hash);
+                                        let block = if receipt.block_number > 0 { format!("  block={}", receipt.block_number) } else { String::new() };
+                                        let gas = if receipt.gas_used > 0 { format!("  gas={}", receipt.gas_used) } else { String::new() };
+                                        if use_color {
+                                            eprintln!("  {:<9} {:>10} [{:>2}]  tx={}{}{}",
+                                                "simulated".style(color::GREEN),
+                                                run_sender_role.style(color::CYAN),
+                                                idx, tx_hash, block, gas,
+                                            );
+                                        } else {
+                                            eprintln!("  {:<9} {:>10} [{:>2}]  tx={}{}{}",
+                                                "simulated", run_sender_role, idx, tx_hash, block, gas);
+                                        }
                                     }
                                     // Update fork_executed_at on governor proposals
                                     for proposal in &mut result.governor_proposals {
