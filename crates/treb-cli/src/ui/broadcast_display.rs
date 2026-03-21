@@ -3,58 +3,99 @@
 //! Manages the interplay between status messages, result updates, and prompts.
 //! All terminal writes go through this module to avoid races.
 //!
-//! Uses static status lines (no background spinner thread) to eliminate
-//! ANSI escape race conditions between the spinner and output lines.
+//! Uses a background spinner thread with a shared output lock so the callback
+//! can pause the animation, print result lines, and resume cleanly.
 
 use std::io::Write;
-use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+use std::sync::{Arc, Mutex, atomic::{AtomicBool, AtomicUsize, Ordering}};
+use std::time::Duration;
 
 use owo_colors::OwoColorize;
 
 use crate::ui::color;
 
-/// Whether a status line is currently displayed.
-enum DisplayState {
-    /// No status line on screen.
-    Idle,
-    /// A static status message is on the current line (no newline).
-    Status,
-}
+const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const SPINNER_INTERVAL: Duration = Duration::from_millis(80);
 
 /// Manages terminal output during broadcast.
 pub struct BroadcastDisplay {
-    state: DisplayState,
     use_color: bool,
     quiet: bool,
+    /// Shared flag: when true the spinner thread animates.
+    spinner_active: Arc<AtomicBool>,
+    /// Shared flag: when true the spinner thread exits.
+    spinner_stop: Arc<AtomicBool>,
+    /// Background spinner thread handle.
+    spinner_thread: Option<std::thread::JoinHandle<()>>,
+    /// Mutex held by both the spinner and the callback for stderr writes.
+    output_lock: Arc<Mutex<()>>,
 }
 
 impl BroadcastDisplay {
     pub fn new(quiet: bool) -> Self {
         Self {
-            state: DisplayState::Idle,
             use_color: color::is_color_enabled(),
             quiet,
+            spinner_active: Arc::new(AtomicBool::new(false)),
+            spinner_stop: Arc::new(AtomicBool::new(false)),
+            spinner_thread: None,
+            output_lock: Arc::new(Mutex::new(())),
         }
     }
 
-    /// Show a static status message (e.g. "Broadcasting...", "Simulating...").
-    /// Overwrites any previous status line. No background thread.
+    /// Start an animated spinner with the given message on a background thread.
+    /// If already spinning, stops the old spinner and starts a new one.
     pub fn start_spinner(&mut self, msg: &str) {
         if self.quiet { return; }
-        self.clear_line();
-        if self.use_color {
-            let _ = write!(std::io::stderr(), "  {}", msg.style(color::GRAY));
-        } else {
-            let _ = write!(std::io::stderr(), "  {msg}");
-        }
-        let _ = std::io::stderr().flush();
-        self.state = DisplayState::Status;
+
+        // Stop any existing spinner
+        self.stop_spinner_thread();
+
+        let msg = msg.to_string();
+        let active = self.spinner_active.clone();
+        let stop = self.spinner_stop.clone();
+        let lock = self.output_lock.clone();
+        let use_color = self.use_color;
+
+        active.store(true, Ordering::Relaxed);
+        stop.store(false, Ordering::Relaxed);
+
+        self.spinner_thread = Some(std::thread::spawn(move || {
+            let mut i = 0usize;
+            while !stop.load(Ordering::Relaxed) {
+                if active.load(Ordering::Relaxed) {
+                    if let Ok(_guard) = lock.lock() {
+                        // Re-check after acquiring lock
+                        if active.load(Ordering::Relaxed) && !stop.load(Ordering::Relaxed) {
+                            let frame = SPINNER_FRAMES[i % SPINNER_FRAMES.len()];
+                            if use_color {
+                                let _ = write!(
+                                    std::io::stderr(),
+                                    "\r\x1b[2K  {} {}",
+                                    frame.style(color::CYAN),
+                                    msg.style(color::GRAY),
+                                );
+                            } else {
+                                let _ = write!(std::io::stderr(), "\r\x1b[2K  {frame} {msg}");
+                            }
+                            let _ = std::io::stderr().flush();
+                        }
+                    }
+                }
+                i = i.wrapping_add(1);
+                std::thread::sleep(SPINNER_INTERVAL);
+            }
+            // Clear on exit
+            if let Ok(_guard) = lock.lock() {
+                let _ = write!(std::io::stderr(), "\r\x1b[2K");
+                let _ = std::io::stderr().flush();
+            }
+        }));
     }
 
-    /// Clear any status line and return to idle.
+    /// Clear spinner and return to idle.
     pub fn stop(&mut self) {
-        self.clear_line();
-        self.state = DisplayState::Idle;
+        self.stop_spinner_thread();
     }
 
     /// Alias for stop — clean terminal before a prompt.
@@ -65,6 +106,14 @@ impl BroadcastDisplay {
     /// Final cleanup.
     pub fn finish(&mut self) {
         self.stop();
+    }
+
+    fn stop_spinner_thread(&mut self) {
+        self.spinner_active.store(false, Ordering::Relaxed);
+        self.spinner_stop.store(true, Ordering::Relaxed);
+        if let Some(t) = self.spinner_thread.take() {
+            let _ = t.join();
+        }
     }
 
     // ── Events ──────────────────────────────────────────────────────────
@@ -155,22 +204,22 @@ impl BroadcastDisplay {
 
     /// Build an `OnActionComplete` callback for use during broadcast.
     ///
-    /// The callback clears the status line, prints the result, then
-    /// shows a new status line for Broadcast results (not for queued,
-    /// since those are followed by prompts).
+    /// The callback pauses the spinner, prints the result, then resumes
+    /// the spinner for Broadcast results (not for queued, since prompts follow).
     pub fn build_callback(&self) -> treb_forge::pipeline::OnActionComplete {
         let use_color = self.use_color;
         let global_offset = Arc::new(AtomicUsize::new(0));
-        // Track whether a status line is showing so we know to clear it
-        let has_status = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let spinner_active = self.spinner_active.clone();
+        let output_lock = self.output_lock.clone();
 
         Box::new(move |run, result| {
-            // Clear status line if present
-            if has_status.load(Ordering::Relaxed) {
-                let _ = write!(std::io::stderr(), "\r\x1b[2K");
-                let _ = std::io::stderr().flush();
-                has_status.store(false, Ordering::Relaxed);
-            }
+            // Pause spinner and take output lock
+            spinner_active.store(false, Ordering::Relaxed);
+            let _guard = output_lock.lock().unwrap();
+
+            // Clear spinner line
+            let _ = write!(std::io::stderr(), "\r\x1b[2K");
+            let _ = std::io::stderr().flush();
 
             let offset = global_offset.load(Ordering::Relaxed);
 
@@ -193,14 +242,8 @@ impl BroadcastDisplay {
                     }
                     global_offset.fetch_add(receipts.len(), Ordering::Relaxed);
 
-                    // Show static status for next action
-                    if use_color {
-                        let _ = write!(std::io::stderr(), "  {}", "Broadcasting...".style(color::GRAY));
-                    } else {
-                        let _ = write!(std::io::stderr(), "  Broadcasting...");
-                    }
-                    let _ = std::io::stderr().flush();
-                    has_status.store(true, Ordering::Relaxed);
+                    // Resume spinner for next action
+                    spinner_active.store(true, Ordering::Relaxed);
                 }
                 treb_forge::pipeline::RunResult::GovernorProposed { proposal_id, tx_count, .. } => {
                     let first = offset;
@@ -216,7 +259,7 @@ impl BroadcastDisplay {
                             "queued", run.sender_role, range, proposal_id);
                     }
                     global_offset.fetch_add(*tx_count, Ordering::Relaxed);
-                    // No status line — prompt follows
+                    // Keep spinner paused — prompt may follow
                 }
                 treb_forge::pipeline::RunResult::SafeProposed { safe_tx_hash, nonce, tx_count, .. } => {
                     let first = offset;
@@ -233,24 +276,15 @@ impl BroadcastDisplay {
                             "queued", run.sender_role, range, safe_tx_hash, nonce);
                     }
                     global_offset.fetch_add(*tx_count, Ordering::Relaxed);
-                    // No status line — prompt follows
+                    // Keep spinner paused — prompt may follow
                 }
             }
         })
-    }
-
-    // ── Internal ────────────────────────────────────────────────────────
-
-    fn clear_line(&self) {
-        let _ = write!(std::io::stderr(), "\r\x1b[2K");
-        let _ = std::io::stderr().flush();
     }
 }
 
 impl Drop for BroadcastDisplay {
     fn drop(&mut self) {
-        if matches!(self.state, DisplayState::Status) {
-            self.clear_line();
-        }
+        self.stop_spinner_thread();
     }
 }
