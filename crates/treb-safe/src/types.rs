@@ -24,7 +24,7 @@ pub struct SafeServiceTx {
     pub safe_tx_hash: String,
     #[serde(default)]
     pub to: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_string_or_number")]
     pub value: String,
     #[serde(default)]
     pub data: Option<String>,
@@ -32,11 +32,11 @@ pub struct SafeServiceTx {
     pub operation: u8,
     #[serde(default)]
     pub nonce: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_string_or_number")]
     pub safe_tx_gas: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_string_or_number")]
     pub base_gas: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_string_or_number")]
     pub gas_price: String,
     #[serde(default)]
     pub gas_token: String,
@@ -79,6 +79,26 @@ pub struct SafeInfoResponse {
     pub threshold: u64,
     #[serde(default)]
     pub owners: Vec<String>,
+}
+
+/// Accept both `"0"` (string) and `0` (integer) from the Safe TX Service,
+/// converting either to a `String`. Several gas/value fields come back as
+/// integers on some chains.
+fn deserialize_string_or_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    use serde::de;
+    struct Visitor;
+    impl de::Visitor<'_> for Visitor {
+        type Value = String;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("string or number")
+        }
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<String, E> { Ok(v.to_string()) }
+        fn visit_string<E: de::Error>(self, v: String) -> Result<String, E> { Ok(v) }
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<String, E> { Ok(v.to_string()) }
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<String, E> { Ok(v.to_string()) }
+        fn visit_f64<E: de::Error>(self, v: f64) -> Result<String, E> { Ok(v.to_string()) }
+    }
+    d.deserialize_any(Visitor)
 }
 
 fn deserialize_u64_or_string<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
