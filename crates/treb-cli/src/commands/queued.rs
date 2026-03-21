@@ -126,14 +126,6 @@ pub async fn queued_command(
     Ok(())
 }
 
-fn truncate_hash(s: &str) -> String {
-    if s.len() >= 10 {
-        format!("{}...{}", &s[..6], &s[s.len() - 4..])
-    } else {
-        s.to_string()
-    }
-}
-
 fn format_age(dt: &chrono::DateTime<chrono::Utc>) -> String {
     let now = chrono::Utc::now();
     let dur = now.signed_duration_since(*dt);

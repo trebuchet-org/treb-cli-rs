@@ -4,7 +4,7 @@
 //! deployment extraction, proxy detection, hydration, duplicate detection,
 //! and registry recording into a single `execute` call.
 
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, path::{Path, PathBuf}};
 
 use alloy_primitives::{Address, B256, U256};
 use alloy_signer::Signer;
@@ -258,6 +258,7 @@ impl RunPipeline {
                         sender_configs: &self.context.sender_configs,
                         sequence: Some(&mut pre_sequence),
                         safe_nonce_offsets: std::collections::HashMap::new(),
+                        defer_safe_proposals: false,
                     };
                     let run_results = if let Some(ref resume) = self.resume_state {
                         super::routing::route_all_with_resume(btxs, &mut ctx, resume).await?
@@ -552,6 +553,7 @@ pub struct RoutingOutcome {
 /// When `pre_built_sequence` is `Some`, skips `build_script_sequence()` and
 /// uses the pre-built (and already checkpointed) sequence for the final
 /// broadcast artifact write.
+#[allow(clippy::too_many_arguments)]
 pub fn apply_routing_results(
     run_results: &[(TransactionRun, RunResult)],
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
@@ -619,6 +621,7 @@ pub fn apply_routing_results(
 /// Same as [`apply_routing_results`] but accepts the full
 /// `(TransactionRun, RunResult, Option<QueuedExecution>)` triples from
 /// `route_all_with_queued` and passes the queued items through.
+#[allow(clippy::too_many_arguments)]
 pub fn apply_routing_results_with_queued(
     run_results_with_queued: &[(TransactionRun, RunResult, Option<super::routing::QueuedExecution>)],
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
@@ -1332,8 +1335,6 @@ async fn propose_safe_transactions(
 // SessionPipeline — unified orchestrator for run (1 script) and compose (N)
 // ===========================================================================
 
-use std::path::PathBuf;
-
 use super::types::{
     ScriptEntry, ScriptPhase, ScriptProgress, ScriptResult,
     SessionPhase, SessionProgressCallback, SessionState,
@@ -1794,6 +1795,12 @@ impl SimulatedSession {
         // Persists across components so sequential Safe proposals get incrementing nonces
         let mut safe_nonce_offsets: std::collections::HashMap<alloy_primitives::Address, u64> = std::collections::HashMap::new();
 
+        // Merge mode: defer Safe proposals across components and combine
+        // adjacent proposals targeting the same Safe address.
+        let should_merge = !self.resume && self.scripts.len() > 1;
+        let mut pending_proposals: Vec<PendingSafeProposal> = Vec::new();
+        let mut merge_sender_info: Option<MergeSenderInfo> = None;
+
         for sim_script in self.scripts {
             let SimulatedScript { name, mut result, btxs, context } = sim_script;
 
@@ -1822,6 +1829,29 @@ impl SimulatedSession {
                     };
 
                     report(&SessionPhase::Broadcasting(name.clone()));
+                    // Capture sender info for Phase C merge submission
+                    if should_merge && merge_sender_info.is_none() {
+                        let mut sender_signing = HashMap::new();
+                        for (role, sender) in &context.resolved_senders {
+                            if sender.is_safe() {
+                                let key = crate::sender::extract_signing_key(
+                                    role, sender, &context.sender_configs,
+                                ).map(|s| s.to_string());
+                                let proposed_by = sender.sub_signer().wallet_signer()
+                                    .map(|ws| Signer::address(ws).to_checksum(None))
+                                    .unwrap_or_default();
+                                if let Some(key) = key {
+                                    sender_signing.insert(role.clone(), (key, proposed_by));
+                                }
+                            }
+                        }
+                        merge_sender_info = Some(MergeSenderInfo {
+                            sender_signing,
+                            is_fork: context.config.is_fork,
+                            rpc_url: context.config.rpc_url.clone(),
+                        });
+                    }
+
                     let mut route_ctx = super::routing::RouteContext {
                         rpc_url,
                         chain_id: context.config.chain_id,
@@ -1834,6 +1864,7 @@ impl SimulatedSession {
                         sender_configs: &context.sender_configs,
                         sequence: None,
                         safe_nonce_offsets: safe_nonce_offsets.clone(),
+                        defer_safe_proposals: should_merge,
                     };
 
                     let run_results = if self.resume {
@@ -1851,6 +1882,17 @@ impl SimulatedSession {
                         } else {
                             super::routing::route_all_with_queued(btxs, &mut route_ctx).await
                         }
+                    } else if should_merge {
+                        route_with_deferred_proposals(
+                            btxs, &mut route_ctx,
+                            &result.transactions,
+                            &mut pending_proposals,
+                            &name,
+                            &context.project_root,
+                            &context.config.script_path,
+                            context.config.chain_id,
+                            &context.config.script_sig,
+                        ).await
                     } else {
                         super::routing::route_all_with_queued(btxs, &mut route_ctx).await
                     };
@@ -1928,8 +1970,11 @@ impl SimulatedSession {
                             for rt in &result.transactions {
                                 let _ = registry.insert_transaction(rt.transaction.clone());
                             }
-                            for safe_tx in &result.safe_transactions {
-                                let _ = registry.insert_safe_transaction(safe_tx.clone());
+                            // When merging, safe_tx registry writes are deferred to Phase C
+                            if !should_merge {
+                                for safe_tx in &result.safe_transactions {
+                                    let _ = registry.insert_safe_transaction(safe_tx.clone());
+                                }
                             }
                             for proposal in &result.governor_proposals {
                                 let _ = registry.insert_governor_proposal(proposal.clone());
@@ -1974,11 +2019,353 @@ impl SimulatedSession {
             });
         }
 
+        // Phase B+C: Merge adjacent Safe proposals and submit
+        if !pending_proposals.is_empty() {
+            let merged = merge_adjacent_safe_proposals(pending_proposals);
+            if let Some(ref sender_info) = merge_sender_info {
+                if let Err(e) = submit_merged_proposals(&merged, registry, sender_info).await {
+                    eprintln!("warning: failed to submit merged Safe proposals: {e}");
+                }
+            }
+        }
+
         report(&SessionPhase::BroadcastComplete);
         super::broadcast_writer::delete_session_state(&self.treb_dir);
 
         Ok(results)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Compose Safe proposal merging
+// ---------------------------------------------------------------------------
+
+/// Collected from per-component routing, deferred for merge.
+struct PendingSafeProposal {
+    safe_address: Address,
+    chain_id: u64,
+    operations: Vec<treb_safe::MultiSendOperation>,
+    transaction_ids: Vec<String>,
+    safe_tx_data: Vec<SafeTxData>,
+    sender_role: String,
+    component_name: String,
+    original_safe_tx_hash: B256,
+    broadcast_path: PathBuf,
+}
+
+/// Result of merging adjacent PendingSafeProposals.
+struct MergedSafeProposal {
+    safe_address: Address,
+    chain_id: u64,
+    operations: Vec<treb_safe::MultiSendOperation>,
+    transaction_ids: Vec<String>,
+    safe_tx_data: Vec<SafeTxData>,
+    sender_role: String,
+    component_names: Vec<String>,
+    original_safe_tx_hashes: Vec<B256>,
+    broadcast_paths: Vec<PathBuf>,
+}
+
+/// Sender info captured from the first component for Phase C signing.
+///
+/// We extract the signing key and proposed_by address at capture time
+/// because `ResolvedSender` does not implement Clone.
+struct MergeSenderInfo {
+    /// sender_role → (private_key_hex, proposed_by_checksum)
+    sender_signing: HashMap<String, (String, String)>,
+    is_fork: bool,
+    rpc_url: Option<String>,
+}
+
+/// Merge adjacent Safe proposals that target the same Safe address.
+///
+/// Walks `pending` linearly. If the current proposal targets the same
+/// Safe address as the previous merged entry, the operations, tx IDs,
+/// and metadata are combined. Non-adjacent proposals to the same Safe
+/// (e.g. A=Safe1, B=Safe2, C=Safe1) do NOT merge — only consecutive
+/// same-address proposals combine.
+fn merge_adjacent_safe_proposals(pending: Vec<PendingSafeProposal>) -> Vec<MergedSafeProposal> {
+    let mut merged: Vec<MergedSafeProposal> = Vec::new();
+
+    for p in pending {
+        let should_extend = merged
+            .last()
+            .is_some_and(|last| last.safe_address == p.safe_address);
+
+        if should_extend {
+            let last = merged.last_mut().unwrap();
+            last.operations.extend(p.operations);
+            last.transaction_ids.extend(p.transaction_ids);
+            last.safe_tx_data.extend(p.safe_tx_data);
+            last.component_names.push(p.component_name);
+            last.original_safe_tx_hashes.push(p.original_safe_tx_hash);
+            last.broadcast_paths.push(p.broadcast_path);
+        } else {
+            merged.push(MergedSafeProposal {
+                safe_address: p.safe_address,
+                chain_id: p.chain_id,
+                operations: p.operations,
+                transaction_ids: p.transaction_ids,
+                safe_tx_data: p.safe_tx_data,
+                sender_role: p.sender_role,
+                component_names: vec![p.component_name],
+                original_safe_tx_hashes: vec![p.original_safe_tx_hash],
+                broadcast_paths: vec![p.broadcast_path],
+            });
+        }
+    }
+
+    merged
+}
+
+/// Route a component's transactions with deferred Safe proposals.
+///
+/// Uses `reduce_queue` + selective execution: Exec actions are executed
+/// normally, while Propose actions are collected into `pending` without
+/// submitting to the Safe Transaction Service.
+#[allow(clippy::too_many_arguments)]
+async fn route_with_deferred_proposals(
+    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    route_ctx: &mut super::routing::RouteContext<'_>,
+    recorded_txs: &[RecordedTransaction],
+    pending: &mut Vec<PendingSafeProposal>,
+    component_name: &str,
+    project_root: &Path,
+    script_path: &str,
+    chain_id: u64,
+    script_sig: &str,
+) -> Result<Vec<(TransactionRun, RunResult, Option<super::routing::QueuedExecution>)>, TrebError> {
+    let plan = super::routing::reduce_queue(btxs, route_ctx).await?;
+    let mut results = Vec::new();
+
+    for planned in &plan.actions {
+        match &planned.action {
+            super::routing::RoutingAction::Propose {
+                safe_address,
+                chain_id: proposal_chain_id,
+                operations,
+                inner_transactions,
+                sender_role,
+                nonce,
+                ..
+            } => {
+                let safe_tx_hash = super::routing::compute_safe_tx_hash_for_ops(
+                    operations, *safe_address, *nonce, *proposal_chain_id,
+                );
+
+                let tx_ids: Vec<String> = planned.run.tx_indices.iter()
+                    .filter_map(|&i| recorded_txs.get(i))
+                    .map(|rt| rt.transaction.id.clone())
+                    .collect();
+                let safe_tx_data_items: Vec<SafeTxData> = planned.run.tx_indices.iter()
+                    .filter_map(|&i| recorded_txs.get(i))
+                    .map(|rt| {
+                        let op = rt.transaction.operations.first();
+                        SafeTxData {
+                            to: op.map(|o| o.target.clone()).unwrap_or_default(),
+                            value: "0".into(),
+                            data: op.map(|o| o.method.clone()).unwrap_or_default(),
+                            operation: 0,
+                        }
+                    })
+                    .collect();
+
+                let (_, bp, _) = super::broadcast_writer::compute_broadcast_paths(
+                    project_root, script_path, chain_id, script_sig,
+                );
+
+                pending.push(PendingSafeProposal {
+                    safe_address: *safe_address,
+                    chain_id: *proposal_chain_id,
+                    operations: operations.clone(),
+                    transaction_ids: tx_ids,
+                    safe_tx_data: safe_tx_data_items,
+                    sender_role: sender_role.clone(),
+                    component_name: component_name.to_string(),
+                    original_safe_tx_hash: safe_tx_hash,
+                    broadcast_path: bp,
+                });
+
+                let run = TransactionRun {
+                    sender_role: planned.run.sender_role.clone(),
+                    category: planned.run.category,
+                    sender_address: planned.run.sender_address,
+                    tx_indices: planned.run.tx_indices.clone(),
+                };
+                let run_result = RunResult::SafeProposed {
+                    safe_tx_hash,
+                    safe_address: *safe_address,
+                    nonce: *nonce,
+                    tx_count: inner_transactions.len(),
+                };
+
+                if let Some(cb) = &route_ctx.on_run_complete {
+                    cb(&run, &run_result);
+                }
+                results.push((run, run_result, planned.queued.clone()));
+            }
+            _ => {
+                let (run, run_result, queued) = super::routing::execute_single_action(
+                    planned, route_ctx, Some(btxs),
+                ).await?;
+                if let Some(cb) = &route_ctx.on_run_complete {
+                    cb(&run, &run_result);
+                }
+                results.push((run, run_result, queued));
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+/// Sign and submit a merged Safe proposal to the Safe Transaction Service.
+async fn submit_merged_to_safe_service(
+    merged: &MergedSafeProposal,
+    nonce: u64,
+    safe_tx_hash: B256,
+    signing_key_hex: &str,
+) -> Result<(), TrebError> {
+    let operations = &merged.operations;
+    let (to, data, operation) = if operations.len() == 1 {
+        let op = &operations[0];
+        (op.to, op.data.clone(), 0u8)
+    } else {
+        let multi_send_data = treb_safe::encode_multi_send_call(operations);
+        (treb_safe::MULTI_SEND_ADDRESS, multi_send_data, 1u8)
+    };
+
+    let key_bytes: B256 = signing_key_hex.parse()
+        .map_err(|e| TrebError::Safe(format!("invalid signer key: {e}")))?;
+    let wallet_signer = foundry_wallets::WalletSigner::from_private_key(&key_bytes)
+        .map_err(|e| TrebError::Safe(format!("failed to create signer: {e}")))?;
+    let signature = sign_safe_tx(&wallet_signer, safe_tx_hash).await?;
+
+    let signer_addr = Signer::address(&wallet_signer);
+    let request = ProposeRequest {
+        to: format!("{}", to),
+        value: "0".into(),
+        data: Some(format!("0x{}", alloy_primitives::hex::encode(&data))),
+        operation,
+        safe_tx_gas: "0".into(),
+        base_gas: "0".into(),
+        gas_price: "0".into(),
+        gas_token: format!("{}", Address::ZERO),
+        refund_receiver: format!("{}", Address::ZERO),
+        nonce,
+        contract_transaction_hash: format!("{:#x}", safe_tx_hash),
+        sender: format!("{}", signer_addr),
+        signature: format!("0x{}", alloy_primitives::hex::encode(&signature)),
+        origin: Some("treb".into()),
+    };
+
+    let safe_client = SafeServiceClient::new(merged.chain_id)
+        .ok_or_else(|| TrebError::Safe(format!(
+            "Safe Transaction Service not available for chain {}", merged.chain_id,
+        )))?;
+    safe_client
+        .propose_transaction(&format!("{}", merged.safe_address), &request)
+        .await?;
+
+    Ok(())
+}
+
+/// Submit merged Safe proposals: assign nonces, compute hashes, submit
+/// to Safe TX Service (live mode), write registry records, and back-patch
+/// per-component deferred files.
+async fn submit_merged_proposals(
+    merged: &[MergedSafeProposal],
+    registry: &mut Registry,
+    sender_info: &MergeSenderInfo,
+) -> Result<usize, TrebError> {
+    if merged.is_empty() {
+        return Ok(0);
+    }
+
+    // Pre-query base nonces for each unique Safe address
+    let mut base_nonces: HashMap<Address, u64> = HashMap::new();
+    for proposal in merged {
+        if base_nonces.contains_key(&proposal.safe_address) {
+            continue;
+        }
+        let nonce = if sender_info.is_fork {
+            let rpc = sender_info.rpc_url.as_deref().ok_or_else(|| {
+                TrebError::Forge("RPC URL required for fork Safe nonce query".into())
+            })?;
+            let provider = crate::provider::build_http_provider(rpc)?;
+            super::fork_routing::query_safe_nonce(&provider, proposal.safe_address).await?
+        } else {
+            let client = SafeServiceClient::new(proposal.chain_id)
+                .ok_or_else(|| TrebError::Safe(format!(
+                    "Safe Transaction Service not available for chain {}", proposal.chain_id,
+                )))?;
+            client
+                .get_next_nonce(&format!("{}", proposal.safe_address))
+                .await?
+        };
+        base_nonces.insert(proposal.safe_address, nonce);
+    }
+
+    let mut nonce_offsets: HashMap<Address, u64> = HashMap::new();
+    let now = chrono::Utc::now();
+    let mut submitted_count = 0;
+
+    for proposal in merged {
+        let base = base_nonces[&proposal.safe_address];
+        let offset = nonce_offsets.entry(proposal.safe_address).or_insert(0);
+        let nonce = base + *offset;
+        *offset += 1;
+
+        // Compute merged hash
+        let safe_tx_hash = super::routing::compute_safe_tx_hash_for_ops(
+            &proposal.operations, proposal.safe_address, nonce, proposal.chain_id,
+        );
+
+        // Look up signing key and proposed_by for this sender role
+        let (signing_key, proposed_by) = sender_info.sender_signing
+            .get(&proposal.sender_role)
+            .cloned()
+            .unwrap_or_default();
+
+        // Submit to Safe TX Service (live mode only)
+        if !sender_info.is_fork && !signing_key.is_empty() {
+            submit_merged_to_safe_service(
+                proposal, nonce, safe_tx_hash,
+                &signing_key,
+            ).await?;
+        }
+
+        // Write merged SafeTransaction to registry
+        let safe_transaction = treb_core::types::SafeTransaction {
+            safe_tx_hash: format!("{:#x}", safe_tx_hash),
+            safe_address: proposal.safe_address.to_checksum(None),
+            chain_id: proposal.chain_id,
+            status: TransactionStatus::Queued,
+            nonce,
+            transactions: proposal.safe_tx_data.clone(),
+            transaction_ids: proposal.transaction_ids.clone(),
+            proposed_by,
+            proposed_at: now,
+            confirmations: Vec::new(),
+            executed_at: None,
+            fork_executed_at: None,
+            execution_tx_hash: String::new(),
+        };
+        let _ = registry.insert_safe_transaction(safe_transaction);
+
+        // Back-patch each component's deferred file with the merged hash/nonce
+        let new_hash_str = format!("{:#x}", safe_tx_hash);
+        for (orig_hash, bp) in proposal.original_safe_tx_hashes.iter().zip(&proposal.broadcast_paths) {
+            let old_hash_str = format!("{:#x}", orig_hash);
+            let _ = super::broadcast_writer::update_deferred_safe_proposal(
+                bp, &old_hash_str, &new_hash_str, nonce,
+            );
+        }
+
+        submitted_count += 1;
+    }
+
+    Ok(submitted_count)
 }
 
 // ---------------------------------------------------------------------------
@@ -2361,5 +2748,102 @@ mod tests {
             .expect("metadata should exist");
 
         assert_eq!(tx_meta.gas_used, Some(987_654));
+    }
+
+    // ── merge_adjacent_safe_proposals tests ────────────────────────────
+
+    fn make_pending(safe_addr: Address, component: &str, tx_id: &str) -> PendingSafeProposal {
+        PendingSafeProposal {
+            safe_address: safe_addr,
+            chain_id: 1,
+            operations: vec![treb_safe::MultiSendOperation {
+                operation: 0,
+                to: Address::ZERO,
+                value: U256::ZERO,
+                data: alloy_primitives::Bytes::new(),
+            }],
+            transaction_ids: vec![tx_id.to_string()],
+            safe_tx_data: vec![treb_core::types::safe_transaction::SafeTxData {
+                to: String::new(),
+                value: "0".into(),
+                data: String::new(),
+                operation: 0,
+            }],
+            sender_role: "deployer".into(),
+            component_name: component.into(),
+            original_safe_tx_hash: B256::ZERO,
+            broadcast_path: PathBuf::from(format!("broadcast/{component}/1/run-latest.json")),
+        }
+    }
+
+    #[test]
+    fn merge_three_same_safe_into_one() {
+        let safe1 = address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let pending = vec![
+            make_pending(safe1, "a", "tx-1"),
+            make_pending(safe1, "b", "tx-2"),
+            make_pending(safe1, "c", "tx-3"),
+        ];
+        let merged = merge_adjacent_safe_proposals(pending);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].operations.len(), 3);
+        assert_eq!(merged[0].transaction_ids, vec!["tx-1", "tx-2", "tx-3"]);
+        assert_eq!(merged[0].component_names, vec!["a", "b", "c"]);
+        assert_eq!(merged[0].broadcast_paths.len(), 3);
+    }
+
+    #[test]
+    fn merge_mixed_addresses_groups_correctly() {
+        let safe1 = address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let safe2 = address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        let pending = vec![
+            make_pending(safe1, "a", "tx-1"),
+            make_pending(safe2, "b", "tx-2"),
+            make_pending(safe1, "c", "tx-3"),
+        ];
+        let merged = merge_adjacent_safe_proposals(pending);
+        assert_eq!(merged.len(), 3, "non-adjacent same-Safe should not merge");
+        assert_eq!(merged[0].safe_address, safe1);
+        assert_eq!(merged[1].safe_address, safe2);
+        assert_eq!(merged[2].safe_address, safe1);
+    }
+
+    #[test]
+    fn merge_adjacent_same_safe_with_different_between() {
+        let safe1 = address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let safe2 = address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        let pending = vec![
+            make_pending(safe1, "a", "tx-1"),
+            make_pending(safe1, "b", "tx-2"),
+            make_pending(safe2, "c", "tx-3"),
+            make_pending(safe1, "d", "tx-4"),
+            make_pending(safe1, "e", "tx-5"),
+        ];
+        let merged = merge_adjacent_safe_proposals(pending);
+        assert_eq!(merged.len(), 3);
+        // Group 1: a+b → safe1
+        assert_eq!(merged[0].component_names, vec!["a", "b"]);
+        assert_eq!(merged[0].operations.len(), 2);
+        // Group 2: c → safe2
+        assert_eq!(merged[1].component_names, vec!["c"]);
+        // Group 3: d+e → safe1
+        assert_eq!(merged[2].component_names, vec!["d", "e"]);
+        assert_eq!(merged[2].operations.len(), 2);
+    }
+
+    #[test]
+    fn merge_single_proposal_passthrough() {
+        let safe1 = address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let pending = vec![make_pending(safe1, "a", "tx-1")];
+        let merged = merge_adjacent_safe_proposals(pending);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].component_names, vec!["a"]);
+        assert_eq!(merged[0].operations.len(), 1);
+    }
+
+    #[test]
+    fn merge_empty_input() {
+        let merged = merge_adjacent_safe_proposals(Vec::new());
+        assert!(merged.is_empty());
     }
 }

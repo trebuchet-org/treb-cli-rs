@@ -11,7 +11,6 @@ use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
 use owo_colors::OwoColorize;
 
-use crate::output;
 use crate::ui::color;
 
 /// Whether a status line is currently displayed.
@@ -127,6 +126,7 @@ impl BroadcastDisplay {
         self.print_result_line("simulated", color::GREEN, sender_role, idx_range, hash, block_number, gas_used);
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn print_result_line(
         &self,
         label: &str,

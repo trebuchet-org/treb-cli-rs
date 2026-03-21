@@ -582,6 +582,64 @@ pub fn write_broadcast_artifacts(
 }
 
 // ---------------------------------------------------------------------------
+// Deferred file back-patching (compose merge)
+// ---------------------------------------------------------------------------
+
+/// Update a Safe proposal in an existing deferred file with a new hash and nonce.
+///
+/// Used by compose's merge flow: after adjacent Safe proposals are merged,
+/// each component's `run-latest.deferred.json` must reference the merged
+/// hash/nonce instead of the per-component values.
+pub fn update_deferred_safe_proposal(
+    broadcast_path: &Path,
+    old_hash: &str,
+    new_hash: &str,
+    new_nonce: u64,
+) -> Result<(), TrebError> {
+    let deferred_file = deferred_path_from(broadcast_path);
+    if !deferred_file.exists() {
+        return Ok(());
+    }
+
+    let contents = fs::read_to_string(&deferred_file).map_err(|e| {
+        TrebError::Forge(format!(
+            "failed to read deferred file {}: {e}",
+            deferred_file.display()
+        ))
+    })?;
+
+    let mut deferred: DeferredOperations = serde_json::from_str(&contents).map_err(|e| {
+        TrebError::Forge(format!(
+            "failed to parse deferred file {}: {e}",
+            deferred_file.display()
+        ))
+    })?;
+
+    for proposal in &mut deferred.safe_proposals {
+        if proposal.safe_tx_hash == old_hash {
+            proposal.safe_tx_hash = new_hash.to_string();
+            proposal.nonce = new_nonce;
+        }
+    }
+
+    let file = fs::File::create(&deferred_file).map_err(|e| {
+        TrebError::Forge(format!(
+            "failed to write deferred file {}: {e}",
+            deferred_file.display()
+        ))
+    })?;
+    let mut writer = BufWriter::new(file);
+    serde_json::to_writer_pretty(&mut writer, &deferred).map_err(|e| {
+        TrebError::Forge(format!("failed to serialize deferred operations: {e}"))
+    })?;
+    writer.flush().map_err(|e| {
+        TrebError::Forge(format!("failed to flush deferred file: {e}"))
+    })?;
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Load resume state
 // ---------------------------------------------------------------------------
 
@@ -1310,5 +1368,103 @@ mod tests {
         assert!(state.pending_tx_hashes.contains(&pending_hash));
 
         handle.abort();
+    }
+
+    #[test]
+    fn update_deferred_safe_proposal_patches_hash_and_nonce() {
+        let dir = tempfile::tempdir().unwrap();
+        let broadcast_path = dir.path().join("run-latest.json");
+        let deferred_path = dir.path().join("run-latest.deferred.json");
+
+        // Write a deferred file with one safe proposal
+        let deferred = DeferredOperations {
+            timestamp: 1234567890,
+            chain: 1,
+            commit: None,
+            safe_proposals: vec![DeferredSafeProposal {
+                safe_tx_hash: "0xaaaa".into(),
+                safe_address: "0x1111".into(),
+                nonce: 5,
+                chain_id: 1,
+                sender_role: "deployer".into(),
+                transaction_ids: vec!["tx-1".into()],
+                status: "proposed".into(),
+                execution_tx_hash: None,
+            }],
+            governor_proposals: Vec::new(),
+        };
+        let contents = serde_json::to_string_pretty(&deferred).unwrap();
+        std::fs::write(&deferred_path, contents).unwrap();
+
+        // Patch it
+        update_deferred_safe_proposal(
+            &broadcast_path,
+            "0xaaaa",
+            "0xbbbb",
+            10,
+        ).unwrap();
+
+        // Read back and verify
+        let updated: DeferredOperations =
+            serde_json::from_str(&std::fs::read_to_string(&deferred_path).unwrap()).unwrap();
+        assert_eq!(updated.safe_proposals.len(), 1);
+        assert_eq!(updated.safe_proposals[0].safe_tx_hash, "0xbbbb");
+        assert_eq!(updated.safe_proposals[0].nonce, 10);
+        // Unchanged fields
+        assert_eq!(updated.safe_proposals[0].safe_address, "0x1111");
+        assert_eq!(updated.safe_proposals[0].sender_role, "deployer");
+    }
+
+    #[test]
+    fn update_deferred_safe_proposal_no_match_is_noop() {
+        let dir = tempfile::tempdir().unwrap();
+        let broadcast_path = dir.path().join("run-latest.json");
+        let deferred_path = dir.path().join("run-latest.deferred.json");
+
+        let deferred = DeferredOperations {
+            timestamp: 1234567890,
+            chain: 1,
+            commit: None,
+            safe_proposals: vec![DeferredSafeProposal {
+                safe_tx_hash: "0xaaaa".into(),
+                safe_address: "0x1111".into(),
+                nonce: 5,
+                chain_id: 1,
+                sender_role: "deployer".into(),
+                transaction_ids: vec!["tx-1".into()],
+                status: "proposed".into(),
+                execution_tx_hash: None,
+            }],
+            governor_proposals: Vec::new(),
+        };
+        std::fs::write(&deferred_path, serde_json::to_string_pretty(&deferred).unwrap()).unwrap();
+
+        // Try to patch with non-matching hash
+        update_deferred_safe_proposal(
+            &broadcast_path,
+            "0xcccc",
+            "0xbbbb",
+            10,
+        ).unwrap();
+
+        let updated: DeferredOperations =
+            serde_json::from_str(&std::fs::read_to_string(&deferred_path).unwrap()).unwrap();
+        // Should be unchanged
+        assert_eq!(updated.safe_proposals[0].safe_tx_hash, "0xaaaa");
+        assert_eq!(updated.safe_proposals[0].nonce, 5);
+    }
+
+    #[test]
+    fn update_deferred_safe_proposal_missing_file_is_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let broadcast_path = dir.path().join("run-latest.json");
+        // No deferred file exists — should return Ok without error
+        let result = update_deferred_safe_proposal(
+            &broadcast_path,
+            "0xaaaa",
+            "0xbbbb",
+            10,
+        );
+        assert!(result.is_ok());
     }
 }

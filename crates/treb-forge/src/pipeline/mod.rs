@@ -32,8 +32,9 @@ pub use orchestrator::{
 pub use simulation::{HydrationOptions, SimulationOutput, hydrate_simulation};
 pub use routing::{
     GovernanceContext, GovernorAction, PlannedAction, QueuedExecution, RoutableTx, RouteContext,
-    RoutingAction, RoutingPlan, RunResult, SafeContext, TransactionRun, execute_single_action,
-    flatten_receipts, reduce_queue, route_all, route_all_with_queued, route_all_with_resume,
+    RoutingAction, RoutingPlan, RunResult, SafeContext, TransactionRun,
+    compute_safe_tx_hash_for_ops, execute_single_action, flatten_receipts, reduce_queue,
+    route_all, route_all_with_queued, route_all_with_resume,
 };
 pub use types::{
     PipelineConfig, PipelineContext, PipelineResult, ProposedResult, RecordedDeployment,

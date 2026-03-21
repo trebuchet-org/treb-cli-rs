@@ -264,6 +264,10 @@ pub struct RouteContext<'a> {
     /// Tracks nonce offsets per Safe address across multiple `reduce_queue` calls.
     /// Each proposal increments the offset so sequential proposals get unique nonces.
     pub safe_nonce_offsets: HashMap<Address, u64>,
+    /// When true, `execute_single_action` returns `SafeProposed` without submitting
+    /// to the Safe Transaction Service (live mode acts like fork mode for proposals).
+    /// Used by compose's merge flow to defer submission until proposals are merged.
+    pub defer_safe_proposals: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -369,10 +373,9 @@ pub async fn reduce_queue(
                             .ok_or_else(|| TrebError::Safe(format!(
                                 "Safe Transaction Service not available for chain {}", ctx.chain_id
                             )))?;
-                        let info = safe_client
-                            .get_safe_info(&format!("{}", safe_address))
-                            .await?;
-                        info.nonce
+                        safe_client
+                            .get_next_nonce(&format!("{}", safe_address))
+                            .await?
                     };
                     let offset = ctx.safe_nonce_offsets.entry(safe_address).or_insert(0);
                     let nonce = base_nonce + *offset;
@@ -599,10 +602,9 @@ pub async fn reduce_queue(
                                     .ok_or_else(|| TrebError::Safe(format!(
                                         "Safe Transaction Service not available for chain {}", ctx.chain_id
                                     )))?;
-                                let info = safe_client
-                                    .get_safe_info(&format!("{}", proposer_safe))
-                                    .await?;
-                                info.nonce
+                                safe_client
+                                    .get_next_nonce(&format!("{}", proposer_safe))
+                                    .await?
                             };
                             let offset = ctx.safe_nonce_offsets.entry(proposer_safe).or_insert(0);
                             let nonce = base_nonce + *offset;
@@ -891,7 +893,7 @@ pub async fn execute_single_action(
             }
         }
         RoutingAction::Propose { safe_address, chain_id, operations, inner_transactions, sender_role, nonce, governance: _ } => {
-            if ctx.is_fork {
+            if ctx.is_fork || ctx.defer_safe_proposals {
                 let safe_tx_hash = match &planned.queued {
                     Some(QueuedExecution::SafeProposal { safe_tx_hash, .. }) => *safe_tx_hash,
                     _ => compute_safe_tx_hash_for_ops(operations, *safe_address, *nonce, *chain_id),
@@ -1038,6 +1040,7 @@ pub async fn route_all_with_resume(
                     sender_configs: ctx.sender_configs,
                     sequence: None,
                     safe_nonce_offsets: ctx.safe_nonce_offsets.clone(),
+                    defer_safe_proposals: ctx.defer_safe_proposals,
                 };
                 let plan = reduce_queue(&single_btxs, &mut temp_ctx).await?;
                 let plan_results = execute_plan(&plan, &mut temp_ctx, Some(&single_btxs)).await?;
@@ -1412,10 +1415,8 @@ async fn broadcast_wallet_run_live(
             tx_req = tx_req.from(from);
         }
 
-        if let Some(to) = btx.transaction.to() {
-            if let alloy_primitives::TxKind::Call(addr) = to {
-                tx_req = tx_req.to(addr);
-            }
+        if let Some(alloy_primitives::TxKind::Call(addr)) = btx.transaction.to() {
+            tx_req = tx_req.to(addr);
         }
 
         if let Some(input) = btx.transaction.input() {
@@ -1578,6 +1579,7 @@ pub async fn poll_safe_execution(
 // ---------------------------------------------------------------------------
 
 /// Extract (targets, values, calldatas) from a governor run's transactions.
+#[allow(clippy::type_complexity)]
 pub fn extract_governor_tx_data(
     run: &TransactionRun,
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
@@ -1717,7 +1719,7 @@ fn build_multisend_operations(
 }
 
 /// Compute the safeTxHash for a set of MultiSend operations.
-fn compute_safe_tx_hash_for_ops(
+pub fn compute_safe_tx_hash_for_ops(
     operations: &[treb_safe::MultiSendOperation],
     safe_address: Address,
     nonce: u64,

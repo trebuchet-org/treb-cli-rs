@@ -247,6 +247,7 @@ fn sender_details(sender: &SenderConfig) -> Vec<(&'static str, String)> {
     details
 }
 
+#[allow(clippy::type_complexity)]
 fn format_sender_rows(senders: &HashMap<String, SenderConfig>) -> String {
     let mut entries: Vec<(&str, String, Vec<(&'static str, String)>)> = senders
         .iter()

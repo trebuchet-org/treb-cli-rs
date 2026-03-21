@@ -68,6 +68,7 @@ pub struct ExecutionResult {
 /// The optional `confirm` callback is called after execute but before
 /// broadcast. It receives the simulation result so callers can preview
 /// transactions. If it returns `false`, broadcast is skipped.
+#[allow(clippy::type_complexity)]
 pub async fn execute_script(
     args: ScriptArgs,
     confirm: Option<Box<dyn FnOnce(&ExecutionResult) -> bool + Send>>,
@@ -118,7 +119,7 @@ pub async fn execute_script(
     };
 
     let confirmed = if should_broadcast {
-        confirm.map_or(true, |f| f(&sim_result))
+        confirm.is_none_or(|f| f(&sim_result))
     } else {
         false
     };

@@ -261,10 +261,7 @@ pub fn match_governance_logs(
     pending_proposals: &[&treb_core::types::GovernorProposal],
     pending_safe_txs: &[&treb_core::types::SafeTransaction],
 ) -> Option<GovernanceMatch> {
-    let logs = match receipt.get("logs").and_then(|v| v.as_array()) {
-        Some(logs) => logs,
-        None => return None,
-    };
+    let logs = receipt.get("logs").and_then(|v| v.as_array())?;
 
     for log in logs {
         let log_topics = match log.get("topics").and_then(|v| v.as_array()) {

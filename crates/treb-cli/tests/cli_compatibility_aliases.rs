@@ -449,7 +449,7 @@ fn fork_status_json_includes_active_field() {
     assert!(output.status.success());
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert!(json["active"].as_bool().unwrap(), "status should show active=true");
-    assert!(json["forks"].as_array().unwrap().len() >= 1);
+    assert!(!json["forks"].as_array().unwrap().is_empty());
 }
 
 #[test]

@@ -940,6 +940,7 @@ pub async fn run(
 ///
 /// For each `QueuedExecution` item, prints a status line and optionally
 /// prompts the user to simulate execution on fork.
+#[allow(clippy::too_many_arguments)]
 async fn handle_queued_executions(
     result: &mut PipelineResult,
     display: &mut crate::ui::broadcast_display::BroadcastDisplay,
@@ -964,11 +965,10 @@ async fn handle_queued_executions(
 
     for item in &queued {
         match item {
-            QueuedExecution::SafeProposal { safe_address, safe_tx_hash, nonce, inner_txs } => {
+            QueuedExecution::SafeProposal { safe_address, safe_tx_hash, nonce: _, inner_txs } => {
                 let tx_count = inner_txs.len();
                 let first_idx = queued_offset;
                 let last_idx = queued_offset + tx_count.saturating_sub(1);
-                let range = if first_idx == last_idx { format!("[{first_idx}]") } else { format!("[{first_idx}-{last_idx}]") };
                 queued_offset += tx_count;
 
                 // Find sender role from proposed results
@@ -1053,7 +1053,7 @@ async fn handle_queued_executions(
             } => {
                 let tx_count = actions.len();
                 let first_idx = queued_offset;
-                let last_idx = queued_offset + tx_count.saturating_sub(1);
+                let _last_idx = queued_offset + tx_count.saturating_sub(1);
                 queued_offset += tx_count;
 
                 // Find sender role from proposed results

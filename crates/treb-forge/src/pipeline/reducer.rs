@@ -48,6 +48,7 @@ impl Drop for ScopedEnvVars {
 }
 
 /// Build the `TREB_REDUCER_*` environment variables for a reducer invocation.
+#[allow(clippy::too_many_arguments)]
 pub fn build_reducer_env_vars(
     governor_address: Address,
     proposer_address: Address,

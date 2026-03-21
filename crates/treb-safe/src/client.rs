@@ -184,9 +184,25 @@ impl SafeServiceClient {
             .map_err(|e| TrebError::Safe(format!("failed to parse safe info response: {e}")))
     }
 
-    /// Retrieve the current nonce for a Safe.
+    /// Retrieve the current on-chain nonce for a Safe.
     pub async fn get_nonce(&self, safe_address: &str) -> Result<u64, TrebError> {
         Ok(self.get_safe_info(safe_address).await?.nonce)
+    }
+
+    /// Get the next available nonce, accounting for pending (queued) proposals.
+    ///
+    /// Returns `max(on_chain_nonce, max_pending_nonce + 1)` so new proposals
+    /// don't collide with existing pending proposals in the Safe TX Service.
+    pub async fn get_next_nonce(&self, safe_address: &str) -> Result<u64, TrebError> {
+        let on_chain_nonce = self.get_nonce(safe_address).await?;
+
+        let pending = self.get_pending_transactions(safe_address).await?;
+        let max_pending = pending.results.iter().map(|tx| tx.nonce).max();
+
+        match max_pending {
+            Some(n) => Ok(std::cmp::max(on_chain_nonce, n + 1)),
+            None => Ok(on_chain_nonce),
+        }
     }
 }
 
