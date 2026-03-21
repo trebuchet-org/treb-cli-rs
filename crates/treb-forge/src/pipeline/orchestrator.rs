@@ -2021,19 +2021,29 @@ impl SimulatedSession {
 
         // Phase B+C: Merge adjacent Safe proposals and submit
         if !pending_proposals.is_empty() {
-            let pending_count = pending_proposals.len();
             let merged = merge_adjacent_safe_proposals(pending_proposals);
             if let Some(ref sender_info) = merge_sender_info {
-                if merged.len() < pending_count {
-                    eprintln!(
-                        "  Merged {} Safe proposals into {} batch{}",
-                        pending_count,
-                        merged.len(),
-                        if merged.len() == 1 { "" } else { "es" },
-                    );
-                }
                 match submit_merged_proposals(&merged, registry, sender_info).await {
-                    Ok(_) => {}
+                    Ok(submitted) => {
+                        // Display merged results via the on_action_complete callback
+                        for sub in &submitted {
+                            if let Some(ref cb) = self.on_action_complete {
+                                let run = TransactionRun {
+                                    sender_role: sub.sender_role.clone(),
+                                    category: crate::sender::SenderCategory::Safe,
+                                    sender_address: Address::ZERO,
+                                    tx_indices: (0..sub.tx_count).collect(),
+                                };
+                                let run_result = RunResult::SafeProposed {
+                                    safe_tx_hash: sub.safe_tx_hash,
+                                    safe_address: Address::ZERO,
+                                    nonce: sub.nonce,
+                                    tx_count: sub.tx_count,
+                                };
+                                cb(&run, &run_result);
+                            }
+                        }
+                    }
                     Err(e) => {
                         eprintln!("warning: failed to submit merged Safe proposals: {e}");
                     }
@@ -2211,9 +2221,8 @@ async fn route_with_deferred_proposals(
                     tx_count: inner_transactions.len(),
                 };
 
-                if let Some(cb) = &route_ctx.on_run_complete {
-                    cb(&run, &run_result);
-                }
+                // Don't fire on_run_complete — these are intermediate results
+                // that will be replaced by the merged proposal in Phase C.
                 results.push((run, run_result, planned.queued.clone()));
             }
             _ => {
@@ -2282,6 +2291,14 @@ async fn submit_merged_to_safe_service(
     Ok(())
 }
 
+/// Info about a submitted merged proposal, for display.
+struct SubmittedMergedProposal {
+    sender_role: String,
+    safe_tx_hash: B256,
+    nonce: u64,
+    tx_count: usize,
+}
+
 /// Submit merged Safe proposals: assign nonces, compute hashes, submit
 /// to Safe TX Service (live mode), write registry records, and back-patch
 /// per-component deferred files.
@@ -2289,9 +2306,9 @@ async fn submit_merged_proposals(
     merged: &[MergedSafeProposal],
     registry: &mut Registry,
     sender_info: &MergeSenderInfo,
-) -> Result<usize, TrebError> {
+) -> Result<Vec<SubmittedMergedProposal>, TrebError> {
     if merged.is_empty() {
-        return Ok(0);
+        return Ok(Vec::new());
     }
 
     // Pre-query base nonces for each unique Safe address
@@ -2320,7 +2337,7 @@ async fn submit_merged_proposals(
 
     let mut nonce_offsets: HashMap<Address, u64> = HashMap::new();
     let now = chrono::Utc::now();
-    let mut submitted_count = 0;
+    let mut submitted = Vec::new();
 
     for proposal in merged {
         let base = base_nonces[&proposal.safe_address];
@@ -2374,10 +2391,15 @@ async fn submit_merged_proposals(
             );
         }
 
-        submitted_count += 1;
+        submitted.push(SubmittedMergedProposal {
+            sender_role: proposal.sender_role.clone(),
+            safe_tx_hash,
+            nonce,
+            tx_count: proposal.transaction_ids.len(),
+        });
     }
 
-    Ok(submitted_count)
+    Ok(submitted)
 }
 
 // ---------------------------------------------------------------------------
