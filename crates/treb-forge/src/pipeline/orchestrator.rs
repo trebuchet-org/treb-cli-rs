@@ -2021,10 +2021,22 @@ impl SimulatedSession {
 
         // Phase B+C: Merge adjacent Safe proposals and submit
         if !pending_proposals.is_empty() {
+            let pending_count = pending_proposals.len();
             let merged = merge_adjacent_safe_proposals(pending_proposals);
             if let Some(ref sender_info) = merge_sender_info {
-                if let Err(e) = submit_merged_proposals(&merged, registry, sender_info).await {
-                    eprintln!("warning: failed to submit merged Safe proposals: {e}");
+                if merged.len() < pending_count {
+                    eprintln!(
+                        "  Merged {} Safe proposals into {} batch{}",
+                        pending_count,
+                        merged.len(),
+                        if merged.len() == 1 { "" } else { "es" },
+                    );
+                }
+                match submit_merged_proposals(&merged, registry, sender_info).await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        eprintln!("warning: failed to submit merged Safe proposals: {e}");
+                    }
                 }
             }
         }
