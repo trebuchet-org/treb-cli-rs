@@ -365,7 +365,11 @@ pub async fn reduce_queue(
                 } else {
                     // Safe(n/m) — reduce to proposal
                     let operations = build_multisend_operations(&item.run, &item.btxs)?;
-                    let base_nonce = if ctx.is_fork {
+                    // When deferring proposals (compose merge), skip the API call —
+                    // Phase C assigns real nonces. Use placeholder 0 + offset.
+                    let base_nonce = if ctx.defer_safe_proposals {
+                        0
+                    } else if ctx.is_fork {
                         let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
                         super::fork_routing::query_safe_nonce(&provider, safe_address).await?
                     } else {
@@ -594,7 +598,9 @@ pub async fn reduce_queue(
                         } else {
                             let ops = build_multisend_operations(&front.run, &front.btxs)?;
                             let inner = extract_routable_txs(&front.run, &front.btxs)?;
-                            let base_nonce = if ctx.is_fork {
+                            let base_nonce = if ctx.defer_safe_proposals {
+                                0
+                            } else if ctx.is_fork {
                                 let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
                                 super::fork_routing::query_safe_nonce(&provider, proposer_safe).await?
                             } else {
