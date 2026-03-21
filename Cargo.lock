@@ -2172,16 +2172,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
-name = "colored"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
-dependencies = [
- "lazy_static",
- "windows-sys 0.59.0",
-]
-
-[[package]]
 name = "combine"
 version = "4.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3132,7 +3122,7 @@ dependencies = [
  "foundry-linking",
  "foundry-wallets",
  "futures",
- "indicatif",
+ "indicatif 0.18.4",
  "itertools 0.14.0",
  "parking_lot",
  "revm-inspectors",
@@ -3312,7 +3302,7 @@ dependencies = [
  "foundry-evm",
  "foundry-wallets",
  "futures",
- "indicatif",
+ "indicatif 0.18.4",
  "itertools 0.14.0",
  "path-slash",
  "rayon",
@@ -3580,7 +3570,7 @@ dependencies = [
  "foundry-evm-fuzz",
  "foundry-evm-networks",
  "foundry-evm-traces",
- "indicatif",
+ "indicatif 0.18.4",
  "parking_lot",
  "proptest",
  "revm",
@@ -4489,6 +4479,19 @@ dependencies = [
  "hashbrown 0.16.1",
  "serde",
  "serde_core",
+]
+
+[[package]]
+name = "indicatif"
+version = "0.17.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "183b3088984b400f4cfac3620d5e076c84da5364016b4f49473de574b2586235"
+dependencies = [
+ "console 0.15.11",
+ "number_prefix",
+ "portable-atomic",
+ "unicode-width 0.2.0",
+ "web-time",
 ]
 
 [[package]]
@@ -7441,17 +7444,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "spinoff"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20aa2ed67fbb202e7b716ff8bfc6571dd9301617767380197d701c31124e88f6"
-dependencies = [
- "colored",
- "once_cell",
- "paste",
-]
-
-[[package]]
 name = "spki"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8280,6 +8272,7 @@ dependencies = [
  "console 0.15.11",
  "dialoguer 0.11.0",
  "foundry-common",
+ "indicatif 0.17.11",
  "nucleo-matcher",
  "num_cpus",
  "owo-colors",
@@ -8290,7 +8283,6 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "similar",
- "spinoff",
  "tempfile",
  "tokio",
  "toml 0.8.23",
