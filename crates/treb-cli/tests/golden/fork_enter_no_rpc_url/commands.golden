@@ -1,5 +1,4 @@
 === cmd 0: [fork enter --network mainnet] ===
-Starting forks...
 Error: failed to start any forks:
   mainnet: no RPC URL configured for network 'mainnet' in foundry.toml
 

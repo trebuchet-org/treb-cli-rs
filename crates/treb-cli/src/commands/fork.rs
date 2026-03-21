@@ -298,7 +298,7 @@ pub async fn run_enter(
     }
 
     // Spawn all Anvil nodes and run post-spawn setup in parallel
-    let mut spinner = spinoff::Spinner::new(spinoff::spinners::Dots2, "Starting forks...", spinoff::Color::Cyan);
+    let spinner = crate::ui::spinner::create_spinner("Starting forks...");
     let mut spawn_set = tokio::task::JoinSet::new();
     for setup in setups {
         spawn_set.spawn(async move {
@@ -359,7 +359,7 @@ pub async fn run_enter(
         }
     }
 
-    spinner.stop();
+    spinner.finish_and_clear();
 
     // Write results to store sequentially
     let mut started = Vec::new();
@@ -736,7 +736,7 @@ pub async fn run_restart(
     } else {
         "Restarting forks..."
     };
-    let mut spinner = spinoff::Spinner::new(spinoff::spinners::Dots2, spinner_msg, spinoff::Color::Cyan);
+    let spinner = crate::ui::spinner::create_spinner(spinner_msg.to_string());
 
     // Spawn all Anvil nodes in parallel
     let mut spawn_set = tokio::task::JoinSet::new();
@@ -809,7 +809,7 @@ pub async fn run_restart(
         }
     }
 
-    spinner.stop();
+    spinner.finish_and_clear();
 
     for (entry, port, rpc_url, anvil_pid, pid_file, log_file, snapshot_id, blk) in &results {
         let mut updated = entry.clone();

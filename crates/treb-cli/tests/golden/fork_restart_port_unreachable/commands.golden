@@ -1,5 +1,3 @@
 === cmd 0: [fork restart --network mainnet] ===
-[spinner]
-
 
 Failed to restart 'mainnet': anvil not ready: fork error: anvil not ready after 30s: io: Connection refused

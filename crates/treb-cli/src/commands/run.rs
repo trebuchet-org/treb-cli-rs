@@ -4,7 +4,6 @@ use std::{
     collections::HashMap,
     env,
     path::PathBuf,
-    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -489,27 +488,24 @@ pub async fn execute_script(
     // ScriptConfig already has broadcast=false to prevent forge's direct
     // broadcast, so the routing layer handles Safe execution.
     let wants_broadcast = opts.broadcast && !opts.dry_run;
-    let spinner: Arc<Mutex<Option<spinoff::Spinner>>> = Arc::new(Mutex::new(None));
+    let progress_spinner = crate::ui::spinner::create_spinner("");
+    progress_spinner.disable_steady_tick(); // start hidden
     if !opts.json {
         let is_broadcast = wants_broadcast;
-        let spinner_ref = spinner.clone();
+        let sp = progress_spinner.clone();
         let progress_cb: SessionProgressCallback = Box::new(move |phase| {
-            let mut guard = spinner_ref.lock().unwrap();
-            if let Some(mut s) = guard.take() {
-                s.clear();
-            }
             let msg = match phase {
-                SessionPhase::Compiling => Some("Compiling".to_string()),
-                SessionPhase::Simulating(_) if is_broadcast => Some("Simulating".to_string()),
-                SessionPhase::Broadcasting(_) => Some("Broadcasting".to_string()),
+                SessionPhase::Compiling => Some("Compiling"),
+                SessionPhase::Simulating(_) if is_broadcast => Some("Simulating"),
+                SessionPhase::Broadcasting(_) => Some("Broadcasting"),
                 _ => None,
             };
             if let Some(msg) = msg {
-                *guard = Some(spinoff::Spinner::new(
-                    spinoff::spinners::Dots2,
-                    msg,
-                    spinoff::Color::Cyan,
-                ));
+                sp.set_message(msg.to_string());
+                sp.enable_steady_tick(std::time::Duration::from_millis(80));
+            } else {
+                sp.set_message(String::new());
+                sp.disable_steady_tick();
             }
         });
         session = session.with_progress(progress_cb);
@@ -519,8 +515,7 @@ pub async fn execute_script(
     let mut simulated = {
         let _foundry_shell = FoundryShellGuard::suppress();
         let r = session.simulate_all(registry).await;
-        drop(spinner.lock().unwrap().take());
-        eprint!("\x1b[2K\r");
+        progress_spinner.finish_and_clear();
         match r {
             Ok(s) => s,
             Err((_partial, _name, e)) => return Err(anyhow::anyhow!(e)),
@@ -539,7 +534,7 @@ pub async fn execute_script(
         false
     };
 
-    let mut broadcast_display = crate::ui::broadcast_display::BroadcastDisplay::new(opts.json);
+    let broadcast_display = crate::ui::broadcast_display::BroadcastDisplay::new(opts.json);
 
     if should_broadcast {
         // Pre-broadcast fork snapshot (if in fork mode)
@@ -902,10 +897,10 @@ pub async fn run(
     .await?;
 
     // ── Inline queued execution handling ────────────────────────────────
-    let mut queued_display = crate::ui::broadcast_display::BroadcastDisplay::new(json);
+    let queued_display = crate::ui::broadcast_display::BroadcastDisplay::new(json);
     if !result.queued_executions.is_empty() && !json {
         handle_queued_executions(
-            &mut result, &mut queued_display, chain_id, prompts_enabled,
+            &mut result, &queued_display, chain_id, prompts_enabled,
             active_fork.is_some(), skip_fork_execution, &cwd, &mut registry,
         ).await?;
     } else if !result.proposed_results.is_empty() && prompts_enabled && !json {
@@ -943,7 +938,7 @@ pub async fn run(
 #[allow(clippy::too_many_arguments)]
 async fn handle_queued_executions(
     result: &mut PipelineResult,
-    display: &mut crate::ui::broadcast_display::BroadcastDisplay,
+    display: &crate::ui::broadcast_display::BroadcastDisplay,
     chain_id: u64,
     prompts_enabled: bool,
     is_fork: bool,
@@ -1183,10 +1178,8 @@ async fn poll_proposed_results(
             }
 
             // Start spinner + poll
-            let mut spinner = spinoff::Spinner::new(
-                spinoff::spinners::Dots2,
-                "  Waiting for Safe execution (polling every 5s)...".to_string(),
-                spinoff::Color::Cyan,
+            let poll_spinner = crate::ui::spinner::create_spinner(
+                "Waiting for Safe execution (polling every 5s)...",
             );
 
             let poll_result = treb_forge::pipeline::routing::poll_safe_execution(
@@ -1196,8 +1189,7 @@ async fn poll_proposed_results(
             )
             .await;
 
-            spinner.clear();
-            eprint!("\x1b[2K\r");
+            poll_spinner.finish_and_clear();
 
             match poll_result {
                 Ok(Some(tx_hash)) => {

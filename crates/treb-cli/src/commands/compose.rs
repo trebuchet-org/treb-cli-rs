@@ -1098,26 +1098,22 @@ pub async fn run(
     }
 
     // Simulation progress spinner
-    let spinner: std::sync::Arc<std::sync::Mutex<Option<spinoff::Spinner>>> =
-        std::sync::Arc::new(std::sync::Mutex::new(None));
+    let progress_spinner = crate::ui::spinner::create_spinner("");
+    progress_spinner.disable_steady_tick(); // start hidden
     if !json {
-        let spinner_ref = spinner.clone();
+        let sp = progress_spinner.clone();
         let progress_cb: SessionProgressCallback = Box::new(move |phase| {
-            let mut guard = spinner_ref.lock().unwrap();
-            if let Some(mut s) = guard.take() {
-                s.clear();
-            }
-            let msg = match phase {
-                SessionPhase::Compiling => Some("Compiling".to_string()),
+            let msg: Option<String> = match phase {
+                SessionPhase::Compiling => Some("Compiling".into()),
                 SessionPhase::Simulating(ref name) => Some(format!("Executing {name}")),
                 _ => None,
             };
             if let Some(msg) = msg {
-                *guard = Some(spinoff::Spinner::new(
-                    spinoff::spinners::Dots2,
-                    msg,
-                    spinoff::Color::Cyan,
-                ));
+                sp.set_message(msg);
+                sp.enable_steady_tick(std::time::Duration::from_millis(80));
+            } else {
+                sp.set_message(String::new());
+                sp.disable_steady_tick();
             }
         });
         session = session.with_progress(progress_cb);
@@ -1127,10 +1123,7 @@ pub async fn run(
     let simulated = {
         let _foundry_shell = super::run::FoundryShellGuard::suppress();
         let r = session.simulate_all(&mut registry).await;
-        drop(spinner.lock().unwrap().take());
-        if !json {
-            eprint!("\x1b[2K\r");
-        }
+        progress_spinner.finish_and_clear();
         r
     };
 
@@ -1415,7 +1408,7 @@ pub async fn run(
         }
 
         // Broadcast with inline output via BroadcastDisplay
-        let mut broadcast_display = crate::ui::broadcast_display::BroadcastDisplay::new(json);
+        let broadcast_display = crate::ui::broadcast_display::BroadcastDisplay::new(json);
         if !json {
             broadcast_display.start_spinner("Broadcasting");
             simulated.set_on_action_complete(broadcast_display.build_callback());
@@ -1425,9 +1418,6 @@ pub async fn run(
             let _foundry_shell = super::run::FoundryShellGuard::suppress();
             let r = simulated.broadcast_all(&mut registry).await;
             broadcast_display.stop();
-            if !json {
-                eprint!("\x1b[2K\r");
-            }
             r
         };
 

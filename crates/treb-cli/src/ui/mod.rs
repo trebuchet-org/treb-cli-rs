@@ -7,6 +7,7 @@ pub mod emoji;
 pub mod interactive;
 pub mod prompt;
 pub mod selector;
+pub mod spinner;
 pub mod terminal;
 pub mod tree;
 
