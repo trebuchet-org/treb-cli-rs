@@ -268,6 +268,8 @@ pub struct RouteContext<'a> {
     /// to the Safe Transaction Service (live mode acts like fork mode for proposals).
     /// Used by compose's merge flow to defer submission until proposals are merged.
     pub defer_safe_proposals: bool,
+    /// Cache of Safe thresholds to avoid re-querying the same Safe across components.
+    pub safe_threshold_cache: HashMap<Address, u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -339,9 +341,13 @@ pub async fn reduce_queue(
                     _ => return Err(TrebError::Safe("expected Safe sender".into())),
                 };
 
-                let threshold = if ctx.is_fork {
+                let threshold = if let Some(&cached) = ctx.safe_threshold_cache.get(&safe_address) {
+                    cached
+                } else if ctx.is_fork {
                     let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
-                    super::fork_routing::query_safe_threshold(&provider, safe_address).await?
+                    let t = super::fork_routing::query_safe_threshold(&provider, safe_address).await?;
+                    ctx.safe_threshold_cache.insert(safe_address, t);
+                    t
                 } else {
                     let safe_client = treb_safe::SafeServiceClient::new(ctx.chain_id)
                         .ok_or_else(|| TrebError::Safe(format!(
@@ -350,6 +356,7 @@ pub async fn reduce_queue(
                     let info = safe_client
                         .get_safe_info(&format!("{}", safe_address))
                         .await?;
+                    ctx.safe_threshold_cache.insert(safe_address, info.threshold);
                     info.threshold
                 };
 
@@ -570,9 +577,13 @@ pub async fn reduce_queue(
                             _ => return Err(TrebError::Safe("expected Safe sender for proposer".into())),
                         };
 
-                        let proposer_threshold = if ctx.is_fork {
+                        let proposer_threshold = if let Some(&cached) = ctx.safe_threshold_cache.get(&proposer_safe) {
+                            cached
+                        } else if ctx.is_fork {
                             let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
-                            super::fork_routing::query_safe_threshold(&provider, proposer_safe).await?
+                            let t = super::fork_routing::query_safe_threshold(&provider, proposer_safe).await?;
+                            ctx.safe_threshold_cache.insert(proposer_safe, t);
+                            t
                         } else {
                             let safe_client = treb_safe::SafeServiceClient::new(ctx.chain_id)
                                 .ok_or_else(|| TrebError::Safe(format!(
@@ -581,6 +592,7 @@ pub async fn reduce_queue(
                             let info = safe_client
                                 .get_safe_info(&format!("{}", proposer_safe))
                                 .await?;
+                            ctx.safe_threshold_cache.insert(proposer_safe, info.threshold);
                             info.threshold
                         };
 
@@ -1047,6 +1059,7 @@ pub async fn route_all_with_resume(
                     sequence: None,
                     safe_nonce_offsets: ctx.safe_nonce_offsets.clone(),
                     defer_safe_proposals: ctx.defer_safe_proposals,
+                    safe_threshold_cache: ctx.safe_threshold_cache.clone(),
                 };
                 let plan = reduce_queue(&single_btxs, &mut temp_ctx).await?;
                 let plan_results = execute_plan(&plan, &mut temp_ctx, Some(&single_btxs)).await?;
