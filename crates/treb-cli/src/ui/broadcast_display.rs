@@ -1,10 +1,12 @@
 //! Terminal display state machine for broadcast output.
 //!
-//! Manages the interplay between status messages, result updates, and prompts.
-//! All terminal writes go through this module to avoid races.
-//!
+//! Manages the interplay between spinner animation, result updates, and prompts.
 //! Uses a background spinner thread with a shared output lock so the callback
 //! can pause the animation, print result lines, and resume cleanly.
+//!
+//! The spinner uses the same Dots2 style and cyan color as `spinoff::Spinner`
+//! elsewhere in the CLI, but adds pause/resume support needed by the broadcast
+//! callback.
 
 use std::io::Write;
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, AtomicUsize, Ordering}};
@@ -14,10 +16,15 @@ use owo_colors::OwoColorize;
 
 use crate::ui::color;
 
-const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+/// Dots2 frames — matches `spinoff::spinners::Dots2` used elsewhere in the CLI.
+const SPINNER_FRAMES: &[&str] = &["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
 const SPINNER_INTERVAL: Duration = Duration::from_millis(80);
 
 /// Manages terminal output during broadcast.
+///
+/// Wraps a pausable background spinner that coordinates with the broadcast
+/// callback via a shared output lock. We can't use `spinoff::Spinner` directly
+/// because it doesn't support pause/resume — every `stop()` kills the thread.
 pub struct BroadcastDisplay {
     use_color: bool,
     quiet: bool,
@@ -44,11 +51,9 @@ impl BroadcastDisplay {
     }
 
     /// Start an animated spinner with the given message on a background thread.
-    /// If already spinning, stops the old spinner and starts a new one.
+    /// Uses the same Dots2 frames and cyan color as `spinoff::Spinner`.
     pub fn start_spinner(&mut self, msg: &str) {
         if self.quiet { return; }
-
-        // Stop any existing spinner
         self.stop_spinner_thread();
 
         let msg = msg.to_string();
@@ -65,18 +70,17 @@ impl BroadcastDisplay {
             while !stop.load(Ordering::Relaxed) {
                 if active.load(Ordering::Relaxed) {
                     if let Ok(_guard) = lock.lock() {
-                        // Re-check after acquiring lock
                         if active.load(Ordering::Relaxed) && !stop.load(Ordering::Relaxed) {
                             let frame = SPINNER_FRAMES[i % SPINNER_FRAMES.len()];
                             if use_color {
                                 let _ = write!(
                                     std::io::stderr(),
-                                    "\r\x1b[2K  {} {}",
+                                    "\r\x1b[2K{} {}",
                                     frame.style(color::CYAN),
                                     msg.style(color::GRAY),
                                 );
                             } else {
-                                let _ = write!(std::io::stderr(), "\r\x1b[2K  {frame} {msg}");
+                                let _ = write!(std::io::stderr(), "\r\x1b[2K{frame} {msg}");
                             }
                             let _ = std::io::stderr().flush();
                         }
@@ -85,7 +89,6 @@ impl BroadcastDisplay {
                 i = i.wrapping_add(1);
                 std::thread::sleep(SPINNER_INTERVAL);
             }
-            // Clear on exit
             if let Ok(_guard) = lock.lock() {
                 let _ = write!(std::io::stderr(), "\r\x1b[2K");
                 let _ = std::io::stderr().flush();
