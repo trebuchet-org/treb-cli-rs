@@ -472,16 +472,23 @@ check_path() {
 }
 
 # ---------------------------------------------------------------------------
-# Self-install (when piped from curl)
+# Self-install
 # ---------------------------------------------------------------------------
 
 install_trebup() {
   ensure mkdir -p "$TREB_BIN_DIR"
-  # Copy this script to ~/.treb/bin/trebup
+
+  # If running from a real file (not piped), just copy it
   if [ -f "$0" ] && [ "$0" != "bash" ] && [ "$0" != "/dev/stdin" ]; then
     cp "$0" "$TREB_BIN_DIR/trebup"
     chmod +x "$TREB_BIN_DIR/trebup"
+    return
   fi
+
+  # Piped from curl — download trebup to ~/.treb/bin/
+  local url="https://raw.githubusercontent.com/${RUST_REPO}/main/scripts/trebup"
+  curl -fsSL "$url" -o "$TREB_BIN_DIR/trebup"
+  chmod +x "$TREB_BIN_DIR/trebup"
 }
 
 # ---------------------------------------------------------------------------
