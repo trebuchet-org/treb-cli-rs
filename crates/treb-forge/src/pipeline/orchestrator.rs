@@ -465,8 +465,7 @@ fn build_proposed_records_from_routing(
                     .filter_map(|&idx| btxs.get(idx))
                     .map(|btx| {
                         let to = btx
-                            .transaction
-                            .to()
+                            .to
                             .and_then(|kind| match kind {
                                 alloy_primitives::TxKind::Call(addr) => {
                                     Some(format!("{:#x}", addr))
@@ -474,12 +473,12 @@ fn build_proposed_records_from_routing(
                                 alloy_primitives::TxKind::Create => None,
                             })
                             .unwrap_or_default();
-                        let value = format!("{}", btx.transaction.value().unwrap_or_default());
-                        let calldata = btx
-                            .transaction
-                            .input()
-                            .map(|b| format!("0x{}", alloy_primitives::hex::encode(b)))
-                            .unwrap_or_default();
+                        let value = format!("{}", btx.value);
+                        let calldata = if btx.input.is_empty() {
+                            String::new()
+                        } else {
+                            format!("0x{}", alloy_primitives::hex::encode(&btx.input))
+                        };
                         treb_core::types::GovernorAction { target: to, value, calldata }
                     })
                     .collect();
@@ -586,7 +585,7 @@ pub fn apply_routing_results(
     script_path: &str,
     chain_id: u64,
     script_sig: &str,
-    pre_built_sequence: Option<forge_script_sequence::ScriptSequence>,
+    pre_built_sequence: Option<forge_script_sequence::ScriptSequence<alloy_network::Ethereum>>,
 ) -> Result<RoutingOutcome, TrebError> {
     // Build Safe/Governor records from routing results
     let (proposed_results, safe_transactions, governor_proposals) =
@@ -663,7 +662,7 @@ pub fn apply_routing_results_with_queued(
     script_path: &str,
     chain_id: u64,
     script_sig: &str,
-    pre_built_sequence: Option<forge_script_sequence::ScriptSequence>,
+    pre_built_sequence: Option<forge_script_sequence::ScriptSequence<alloy_network::Ethereum>>,
 ) -> Result<RoutingOutcome, TrebError> {
     // Extract (run, result) pairs for the existing functions
     let run_results: Vec<(TransactionRun, RunResult)> = run_results_with_queued
@@ -965,10 +964,10 @@ pub(super) fn build_v2_recorded_transaction_metadata(
         .enumerate()
         .map(|(idx, btx)| {
             let tx_id = super::hydration::broadcast_tx_id(&context.config.script_path, idx);
-            let from_addr = btx.transaction.from().unwrap_or_default();
-            let to_kind = btx.transaction.to();
-            let input = btx.transaction.input().cloned().unwrap_or_default();
-            let value = btx.transaction.value().unwrap_or_default();
+            let from_addr = btx.from;
+            let to_kind = btx.to;
+            let input = btx.input.clone();
+            let value = btx.value;
 
             let deployment_targets = transaction_deployments.get(&tx_id).map(Vec::as_slice);
 
@@ -1144,7 +1143,7 @@ pub(super) fn collapse_decoded_bytecode_args(
     fn try_collapse_raw_data(
         data: &[u8],
         artifact_index: &ArtifactIndex,
-    ) -> Option<revm_inspectors::tracing::types::DecodedCallData> {
+    ) -> Option<foundry_evm::traces::DecodedCallData> {
         build_create_call_data(data, artifact_index)
     }
 
@@ -1152,9 +1151,9 @@ pub(super) fn collapse_decoded_bytecode_args(
     /// into a `create(new ContractName(...))` form by matching the full
     /// calldata against the artifact index as creation code.
     fn try_collapse_raw_create(
-        call_data: &revm_inspectors::tracing::types::DecodedCallData,
+        call_data: &foundry_evm::traces::DecodedCallData,
         artifact_index: &ArtifactIndex,
-    ) -> Option<revm_inspectors::tracing::types::DecodedCallData> {
+    ) -> Option<foundry_evm::traces::DecodedCallData> {
         let sig_hex = &call_data.signature;
         let arg_hex = call_data.args.first()?;
         let arg_hex_clean = arg_hex.strip_prefix("0x").unwrap_or(arg_hex);
@@ -1178,7 +1177,7 @@ pub(super) fn collapse_decoded_bytecode_args(
     fn build_create_call_data(
         code: &[u8],
         artifact_index: &ArtifactIndex,
-    ) -> Option<revm_inspectors::tracing::types::DecodedCallData> {
+    ) -> Option<foundry_evm::traces::DecodedCallData> {
         let (matched, ctor_args) = artifact_index.decode_creation_code(code)?;
 
         let inner = if ctor_args.is_empty() {
@@ -1187,7 +1186,7 @@ pub(super) fn collapse_decoded_bytecode_args(
             format!("new {}({})", matched.name, ctor_args.join(", "))
         };
 
-        Some(revm_inspectors::tracing::types::DecodedCallData {
+        Some(foundry_evm::traces::DecodedCallData {
             signature: "create".to_string(),
             args: vec![inner],
         })
@@ -2819,6 +2818,7 @@ mod tests {
                 output: Bytes::new(),
                 gas_used: 987_654,
                 gas_limit: 1_000_000,
+                gas_refund_counter: 0,
                 status: None,
                 steps: Vec::new(),
                 decoded: None,

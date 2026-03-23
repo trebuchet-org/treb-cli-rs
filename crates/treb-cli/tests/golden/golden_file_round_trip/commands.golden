@@ -1,4 +1,4 @@
-treb <SHORT_HASH>
+treb v<VERSION>
 
 commit: <COMMIT>
 built:  <DATE>

@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use alloy_primitives::{Address, Bytes, U256};
-use anvil::{AccountGenerator, NodeConfig, NodeHandle, eth::EthApi};
+use anvil::{AccountGenerator, NodeConfig, NodeHandle};
 use tokio::task::AbortHandle;
 use treb_core::error::TrebError;
 
@@ -133,6 +133,9 @@ impl AnvilConfig {
         let rpc_url = handle.http_endpoint();
         let port = handle.socket_address().port();
         let chain_id = api.chain_id();
+        // Drop the EthApi — we use HTTP provider calls instead to avoid
+        // naming the concrete `FoundryNetwork` type from `foundry-primitives`.
+        drop(api);
 
         // Collect abort handles from the public task fields so we can cancel them on drop.
         let node_abort = handle.node_service.abort_handle();
@@ -142,7 +145,6 @@ impl AnvilConfig {
         abort_handles.extend(server_aborts);
 
         Ok(AnvilInstance {
-            api,
             _handle: handle,
             _abort_handles: abort_handles,
             rpc_url,
@@ -164,7 +166,6 @@ impl AnvilConfig {
 /// 1. Fires the graceful shutdown signal (via [`NodeHandle`]'s `Drop` impl).
 /// 2. Aborts the underlying tokio tasks, releasing the listening port immediately.
 pub struct AnvilInstance {
-    api: EthApi,
     /// Held for its `Drop` impl which fires the graceful shutdown signal.
     _handle: NodeHandle,
     /// Abort handles for the server tasks — aborted before the handle is dropped.
@@ -218,31 +219,73 @@ impl AnvilInstance {
     ///
     /// The ID can later be passed to [`revert`](Self::revert) to restore this state.
     pub async fn snapshot(&self) -> Result<U256, TrebError> {
-        self.api.evm_snapshot().await.map_err(|e| TrebError::Fork(e.to_string()))
-    }
-
-    /// Revert EVM state to a previously created snapshot.
-    ///
-    /// Returns `true` if the snapshot was found and applied.
-    pub async fn revert(&self, snapshot_id: U256) -> Result<bool, TrebError> {
-        self.api.evm_revert(snapshot_id).await.map_err(|e| TrebError::Fork(e.to_string()))
+        let provider = crate::provider::build_http_provider(&self.rpc_url)?;
+        use alloy_provider::Provider;
+        let snap_id: U256 = provider
+            .raw_request("evm_snapshot".into(), ())
+            .await
+            .map_err(|e| TrebError::Fork(format!("evm_snapshot failed: {e}")))?;
+        Ok(snap_id)
     }
 
     /// Set the bytecode stored at an address.
     ///
     /// Useful for injecting factory contracts (e.g. CreateX) at their canonical addresses.
     pub async fn set_code(&self, address: Address, code: Bytes) -> Result<(), TrebError> {
-        self.api.anvil_set_code(address, code).await.map_err(|e| TrebError::Fork(e.to_string()))
+        let provider = crate::provider::build_http_provider(&self.rpc_url)?;
+        use alloy_provider::Provider;
+        provider
+            .raw_request::<_, serde_json::Value>("anvil_setCode".into(), (address, code))
+            .await
+            .map_err(|e| TrebError::Fork(format!("anvil_setCode failed: {e}")))?;
+        Ok(())
+    }
+
+    /// Set the ETH balance of an address on this Anvil instance.
+    pub async fn set_balance(&self, address: Address, balance: U256) -> Result<(), TrebError> {
+        let provider = crate::provider::build_http_provider(&self.rpc_url)?;
+        use alloy_provider::Provider;
+        provider
+            .raw_request::<_, serde_json::Value>("anvil_setBalance".into(), (address, balance))
+            .await
+            .map_err(|e| TrebError::Fork(format!("anvil_setBalance failed: {e}")))?;
+        Ok(())
+    }
+
+    /// Query the ETH balance of an address on this Anvil instance.
+    pub async fn balance(&self, address: Address) -> Result<U256, TrebError> {
+        let provider = crate::provider::build_http_provider(&self.rpc_url)?;
+        use alloy_provider::Provider;
+        provider
+            .get_balance(address)
+            .await
+            .map_err(|e| TrebError::Fork(format!("get_balance failed: {e}")))
+    }
+
+    /// Revert EVM state to a previously created snapshot.
+    ///
+    /// Returns `true` if the snapshot was found and applied.
+    /// Uses the HTTP RPC endpoint to call `evm_revert`.
+    pub async fn revert(&self, snapshot_id: U256) -> Result<bool, TrebError> {
+        let provider = crate::provider::build_http_provider(&self.rpc_url)?;
+        use alloy_provider::Provider;
+        let result: bool = provider
+            .raw_request("evm_revert".into(), (snapshot_id,))
+            .await
+            .map_err(|e| TrebError::Fork(format!("evm_revert failed: {e}")))?;
+        Ok(result)
     }
 
     /// Get the bytecode stored at an address.
+    /// Uses the HTTP RPC endpoint to call `eth_getCode`.
     pub async fn get_code(&self, address: Address) -> Result<Bytes, TrebError> {
-        self.api.get_code(address, None).await.map_err(|e| TrebError::Fork(e.to_string()))
-    }
-
-    /// Access the underlying [`EthApi`] for advanced operations not covered by this wrapper.
-    pub fn api(&self) -> &EthApi {
-        &self.api
+        let provider = crate::provider::build_http_provider(&self.rpc_url)?;
+        use alloy_provider::Provider;
+        let code = provider
+            .get_code_at(address)
+            .await
+            .map_err(|e| TrebError::Fork(format!("get_code failed: {e}")))?;
+        Ok(code)
     }
 }
 
@@ -546,14 +589,9 @@ mod tests {
         let snap_id = instance.snapshot().await.expect("snapshot");
 
         // Modify state: give the test address some ETH.
-        instance
-            .api()
-            .anvil_set_balance(test_addr, U256::from(1_000_000u64))
-            .await
-            .expect("set_balance");
+        instance.set_balance(test_addr, U256::from(1_000_000u64)).await.expect("set_balance");
 
-        let balance_after_set =
-            instance.api().balance(test_addr, None).await.expect("balance after set");
+        let balance_after_set = instance.balance(test_addr).await.expect("balance after set");
         assert_eq!(balance_after_set, U256::from(1_000_000u64));
 
         // Revert to the snapshot.
@@ -561,8 +599,7 @@ mod tests {
         assert!(reverted, "revert should return true");
 
         // Balance should be zero again (address never had ETH before snapshot).
-        let balance_after_revert =
-            instance.api().balance(test_addr, None).await.expect("balance after revert");
+        let balance_after_revert = instance.balance(test_addr).await.expect("balance after revert");
         assert_eq!(balance_after_revert, U256::ZERO, "balance should be zero after revert");
     }
 

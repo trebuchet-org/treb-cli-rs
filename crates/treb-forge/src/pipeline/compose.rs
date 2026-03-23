@@ -319,7 +319,7 @@ pub async fn replay_transactions_on_fork(
     // Collect unique senders and fund them on the fork
     let mut funded = std::collections::HashSet::new();
     for btx in txs.iter() {
-        let from = btx.transaction.from().unwrap_or_default();
+        let from = btx.from;
         if funded.insert(from) {
             // 100 ETH — enough for any gas cost on the fork
             provider
@@ -335,7 +335,7 @@ pub async fn replay_transactions_on_fork(
     }
 
     for (i, btx) in txs.iter().enumerate() {
-        let from = btx.transaction.from().unwrap_or_default();
+        let from = btx.from;
 
         // Impersonate the sender so Anvil accepts the tx without a signature
         anvil_impersonate(&provider, from)
@@ -346,7 +346,7 @@ pub async fn replay_transactions_on_fork(
         let mut tx = TransactionRequest::default().from(from);
         tx.gas = Some(30_000_000);
 
-        if let Some(to) = btx.transaction.to() {
+        if let Some(to) = btx.to {
             match to {
                 alloy_primitives::TxKind::Call(addr) => {
                     tx = tx.to(addr);
@@ -355,13 +355,11 @@ pub async fn replay_transactions_on_fork(
             }
         }
 
-        if let Some(input) = btx.transaction.input() {
-            if !input.is_empty() {
-                tx = tx.input(TransactionInput::new(input.clone()));
-            }
+        if !btx.input.is_empty() {
+            tx = tx.input(TransactionInput::new(btx.input.clone()));
         }
 
-        let value = btx.transaction.value().unwrap_or_default();
+        let value = btx.value;
         if !value.is_zero() {
             tx = tx.value(value);
         }

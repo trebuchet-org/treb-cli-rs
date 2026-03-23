@@ -1,5 +1,5 @@
 === cmd 0: [fork status] ===
-Fork mode active since <TIMESTAMP> UTC (0s ago)
+Fork mode active since <TIMESTAMP> UTC (<UPTIME> ago)
 
   mainnet
     Chain ID:     1

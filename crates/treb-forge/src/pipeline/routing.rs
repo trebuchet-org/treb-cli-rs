@@ -25,6 +25,8 @@ use treb_core::error::TrebError;
 
 use forge_script_sequence::ScriptSequence;
 
+use alloy_network::Ethereum;
+
 use crate::{
     script::BroadcastReceipt,
     sender::{ResolvedSender, SenderCategory},
@@ -180,7 +182,7 @@ pub fn partition_into_runs(
     let mut runs: Vec<TransactionRun> = Vec::new();
 
     for (idx, btx) in btxs.iter().enumerate() {
-        let from = btx.transaction.from().unwrap_or_default();
+        let from = btx.from;
 
         // Check if this tx extends the current run (same sender)
         if let Some(current) = runs.last_mut() {
@@ -244,7 +246,7 @@ pub struct RouteContext<'a> {
     pub sender_configs: &'a HashMap<String, treb_config::SenderConfig>,
     /// Optional mutable reference to a pre-built ScriptSequence for in-place
     /// checkpoint updates during broadcast.
-    pub sequence: Option<&'a mut ScriptSequence>,
+    pub sequence: Option<&'a mut ScriptSequence<Ethereum>>,
     /// Tracks nonce offsets per Safe address across multiple `reduce_queue` calls.
     /// Each proposal increments the offset so sequential proposals get unique nonces.
     pub safe_nonce_offsets: HashMap<Address, u64>,
@@ -1351,7 +1353,7 @@ pub async fn broadcast_wallet_run(
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
     is_fork: bool,
     resolved_senders: &HashMap<String, ResolvedSender>,
-    sequence: Option<&mut ScriptSequence>,
+    sequence: Option<&mut ScriptSequence<Ethereum>>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     if is_fork {
         broadcast_wallet_run_fork(rpc_url, run, btxs, sequence).await
@@ -1365,7 +1367,7 @@ async fn broadcast_wallet_run_fork(
     rpc_url: &str,
     run: &TransactionRun,
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
-    sequence: Option<&mut ScriptSequence>,
+    sequence: Option<&mut ScriptSequence<Ethereum>>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     use alloy_rpc_types::TransactionRequest;
 
@@ -1378,12 +1380,12 @@ async fn broadcast_wallet_run_fork(
             .get(tx_idx)
             .ok_or_else(|| TrebError::Forge(format!("transaction index {tx_idx} out of range")))?;
 
-        let from = btx.transaction.from().unwrap_or_default();
+        let from = btx.from;
 
         // Build the transaction request
         let mut tx_req = TransactionRequest::default().from(from);
 
-        if let Some(to) = btx.transaction.to() {
+        if let Some(to) = btx.to {
             match to {
                 alloy_primitives::TxKind::Call(addr) => {
                     tx_req = tx_req.to(addr);
@@ -1392,13 +1394,11 @@ async fn broadcast_wallet_run_fork(
             }
         }
 
-        if let Some(input) = btx.transaction.input() {
-            if !input.is_empty() {
-                tx_req.input = alloy_rpc_types::TransactionInput::new(input.clone());
-            }
+        if !btx.input.is_empty() {
+            tx_req.input = alloy_rpc_types::TransactionInput::new(btx.input.clone());
         }
 
-        let value = btx.transaction.value().unwrap_or_default();
+        let value = btx.value;
         if !value.is_zero() {
             tx_req = tx_req.value(value);
         }
@@ -1437,7 +1437,7 @@ async fn broadcast_wallet_run_live(
     run: &TransactionRun,
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
     resolved_senders: &HashMap<String, ResolvedSender>,
-    sequence: Option<&mut ScriptSequence>,
+    sequence: Option<&mut ScriptSequence<Ethereum>>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     use alloy_rpc_types::TransactionRequest;
 
@@ -1455,21 +1455,17 @@ async fn broadcast_wallet_run_live(
 
         let mut tx_req = TransactionRequest::default();
 
-        if let Some(from) = btx.transaction.from() {
-            tx_req = tx_req.from(from);
-        }
+        tx_req = tx_req.from(btx.from);
 
-        if let Some(alloy_primitives::TxKind::Call(addr)) = btx.transaction.to() {
+        if let Some(alloy_primitives::TxKind::Call(addr)) = btx.to {
             tx_req = tx_req.to(addr);
         }
 
-        if let Some(input) = btx.transaction.input() {
-            if !input.is_empty() {
-                tx_req.input = alloy_rpc_types::TransactionInput::new(input.clone());
-            }
+        if !btx.input.is_empty() {
+            tx_req.input = alloy_rpc_types::TransactionInput::new(btx.input.clone());
         }
 
-        let value = btx.transaction.value().unwrap_or_default();
+        let value = btx.value;
         if !value.is_zero() {
             tx_req = tx_req.value(value);
         }
@@ -1631,16 +1627,15 @@ pub fn extract_governor_tx_data(
             .ok_or_else(|| TrebError::Forge(format!("transaction index {idx} out of range")))?;
 
         let to = btx
-            .transaction
-            .to()
+            .to
             .and_then(|kind| match kind {
                 alloy_primitives::TxKind::Call(addr) => Some(addr),
                 alloy_primitives::TxKind::Create => None,
             })
             .unwrap_or(Address::ZERO);
 
-        let value = btx.transaction.value().unwrap_or_default();
-        let data = btx.transaction.input().map(|b| b.to_vec()).unwrap_or_default();
+        let value = btx.value;
+        let data = btx.input.to_vec();
 
         targets.push(to);
         values.push(U256::from(value));
@@ -1683,19 +1678,22 @@ fn build_single_tx_broadcast(
     to: Address,
     calldata: Vec<u8>,
 ) -> foundry_cheatcodes::BroadcastableTransactions {
-    use foundry_cheatcodes::BroadcastableTransaction;
-    use foundry_common::TransactionMaybeSigned;
+    use foundry_cheatcodes::{BroadcastKind, BroadcastableTransaction};
 
-    let tx_json = serde_json::json!({
-        "from": format!("{:#x}", from),
-        "to": format!("{:#x}", to),
-        "data": format!("0x{}", alloy_primitives::hex::encode(&calldata)),
-    });
-
-    let tx_maybe_signed: TransactionMaybeSigned =
-        serde_json::from_value(tx_json).expect("failed to build synthetic transaction");
-
-    let btx = BroadcastableTransaction { rpc: None, transaction: tx_maybe_signed };
+    let btx = BroadcastableTransaction {
+        rpc: None,
+        from,
+        to: Some(alloy_primitives::TxKind::Call(to)),
+        value: U256::ZERO,
+        input: alloy_primitives::Bytes::from(calldata),
+        nonce: 0,
+        gas: None,
+        kind: BroadcastKind::Unsigned {
+            chain_id: None,
+            blob_sidecar: None,
+            authorization_list: None,
+        },
+    };
     let mut btxs = foundry_cheatcodes::BroadcastableTransactions::default();
     btxs.push_back(btx);
     btxs
@@ -1716,15 +1714,14 @@ fn extract_routable_txs(
             .get(idx)
             .ok_or_else(|| TrebError::Forge(format!("transaction index {idx} out of range")))?;
         let to = btx
-            .transaction
-            .to()
+            .to
             .and_then(|kind| match kind {
                 alloy_primitives::TxKind::Call(addr) => Some(addr),
                 alloy_primitives::TxKind::Create => None,
             })
             .unwrap_or(Address::ZERO);
-        let value = btx.transaction.value().unwrap_or_default();
-        let data = btx.transaction.input().map(|b| b.to_vec()).unwrap_or_default();
+        let value = btx.value;
+        let data = btx.input.to_vec();
         txs.push(RoutableTx { to, value: U256::from(value), data });
     }
     Ok(txs)
@@ -1741,15 +1738,14 @@ fn build_multisend_operations(
             .get(idx)
             .ok_or_else(|| TrebError::Forge(format!("transaction index {idx} out of range")))?;
         let to = btx
-            .transaction
-            .to()
+            .to
             .and_then(|kind| match kind {
                 alloy_primitives::TxKind::Call(addr) => Some(addr),
                 alloy_primitives::TxKind::Create => None,
             })
             .unwrap_or(Address::ZERO);
-        let value = btx.transaction.value().unwrap_or_default();
-        let data = btx.transaction.input().cloned().unwrap_or_default();
+        let value = btx.value;
+        let data = btx.input.clone();
         ops.push(treb_safe::MultiSendOperation {
             operation: 0, // Call
             to,
@@ -1800,7 +1796,7 @@ async fn broadcast_routable_txs(
     transactions: &[RoutableTx],
     is_fork: bool,
     resolved_senders: &HashMap<String, ResolvedSender>,
-    sequence: Option<&mut ScriptSequence>,
+    sequence: Option<&mut ScriptSequence<Ethereum>>,
     tx_indices: Option<&[usize]>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     if is_fork {
@@ -1823,7 +1819,7 @@ async fn broadcast_routable_txs_fork(
     rpc_url: &str,
     from: Address,
     transactions: &[RoutableTx],
-    sequence: Option<&mut ScriptSequence>,
+    sequence: Option<&mut ScriptSequence<Ethereum>>,
     tx_indices: Option<&[usize]>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     use alloy_rpc_types::TransactionRequest;
@@ -1881,7 +1877,7 @@ async fn broadcast_routable_txs_live(
     from: Address,
     transactions: &[RoutableTx],
     resolved_senders: &HashMap<String, ResolvedSender>,
-    sequence: Option<&mut ScriptSequence>,
+    sequence: Option<&mut ScriptSequence<Ethereum>>,
     tx_indices: Option<&[usize]>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     use alloy_rpc_types::TransactionRequest;
@@ -1941,16 +1937,19 @@ fn build_btxs_from_routable(
 ) -> foundry_cheatcodes::BroadcastableTransactions {
     let mut btxs = foundry_cheatcodes::BroadcastableTransactions::default();
     for tx in transactions {
-        let tx_json = serde_json::json!({
-            "from": format!("{:#x}", from),
-            "to": format!("{:#x}", tx.to),
-            "data": format!("0x{}", alloy_primitives::hex::encode(&tx.data)),
-        });
-        let tx_maybe_signed: foundry_common::TransactionMaybeSigned =
-            serde_json::from_value(tx_json).expect("failed to build synthetic tx");
         btxs.push_back(foundry_cheatcodes::BroadcastableTransaction {
             rpc: None,
-            transaction: tx_maybe_signed,
+            from,
+            to: Some(alloy_primitives::TxKind::Call(tx.to)),
+            value: tx.value,
+            input: alloy_primitives::Bytes::from(tx.data.clone()),
+            nonce: 0,
+            gas: None,
+            kind: foundry_cheatcodes::BroadcastKind::Unsigned {
+                chain_id: None,
+                blob_sidecar: None,
+                authorization_list: None,
+            },
         });
     }
     btxs
@@ -2036,7 +2035,7 @@ mod tests {
     use std::collections::VecDeque;
 
     /// Build a minimal ScriptSequence with transactions having the given hashes.
-    fn make_resume_sequence(tx_hashes: &[Option<B256>]) -> ScriptSequence {
+    fn make_resume_sequence(tx_hashes: &[Option<B256>]) -> ScriptSequence<Ethereum> {
         let from = Address::repeat_byte(0x01);
         let to = Address::repeat_byte(0x02);
         let mut transactions = VecDeque::new();
@@ -2046,7 +2045,7 @@ mod tests {
                 "to": format!("{:#x}", to),
                 "data": "0x01",
             });
-            let tx: TransactionMaybeSigned =
+            let tx: TransactionMaybeSigned<Ethereum> =
                 serde_json::from_value(tx_json).expect("build test tx");
             let mut tx_meta = TransactionWithMetadata::from_tx_request(tx);
             tx_meta.hash = *hash;

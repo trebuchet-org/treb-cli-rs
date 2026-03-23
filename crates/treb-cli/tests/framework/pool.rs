@@ -169,13 +169,9 @@ mod tests {
         {
             let guard = pool.acquire().await;
             let node = guard.anvil("local").expect("local node");
-            node.instance()
-                .api()
-                .anvil_set_balance(test_addr, U256::from(999u64))
-                .await
-                .expect("set_balance");
+            node.instance().set_balance(test_addr, U256::from(999u64)).await.expect("set_balance");
 
-            let balance = node.instance().api().balance(test_addr, None).await.expect("balance");
+            let balance = node.instance().balance(test_addr).await.expect("balance");
             assert_eq!(balance, U256::from(999u64));
             // guard dropped here — cleanup runs
         }
@@ -185,12 +181,8 @@ mod tests {
             let guard = pool.acquire().await;
             let node = guard.anvil("local").expect("local node");
 
-            let balance = node
-                .instance()
-                .api()
-                .balance(test_addr, None)
-                .await
-                .expect("balance after re-acquire");
+            let balance =
+                node.instance().balance(test_addr).await.expect("balance after re-acquire");
             assert_eq!(balance, U256::ZERO, "balance should be zero after pool cleanup");
         }
     }

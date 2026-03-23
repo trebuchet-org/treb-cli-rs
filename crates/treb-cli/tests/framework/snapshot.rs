@@ -82,21 +82,16 @@ mod tests {
         let snap_id = take_snapshot(&node).await.expect("take_snapshot");
 
         // Modify state: give the test address some ETH.
-        node.instance()
-            .api()
-            .anvil_set_balance(test_addr, U256::from(999u64))
-            .await
-            .expect("set_balance");
+        node.instance().set_balance(test_addr, U256::from(999u64)).await.expect("set_balance");
 
-        let balance = node.instance().api().balance(test_addr, None).await.expect("balance");
+        let balance = node.instance().balance(test_addr).await.expect("balance");
         assert_eq!(balance, U256::from(999u64));
 
         // Revert to the snapshot.
         revert_snapshot(&node, snap_id).await.expect("revert_snapshot");
 
         // Balance should be zero again.
-        let balance_after =
-            node.instance().api().balance(test_addr, None).await.expect("balance after revert");
+        let balance_after = node.instance().balance(test_addr).await.expect("balance after revert");
         assert_eq!(balance_after, U256::ZERO, "balance should be zero after revert");
     }
 
@@ -120,11 +115,7 @@ mod tests {
 
         // Modify state on both nodes.
         for node in nodes.values() {
-            node.instance()
-                .api()
-                .anvil_set_balance(test_addr, U256::from(42u64))
-                .await
-                .expect("set_balance");
+            node.instance().set_balance(test_addr, U256::from(42u64)).await.expect("set_balance");
         }
 
         // Revert all nodes.
@@ -132,8 +123,7 @@ mod tests {
 
         // Verify state restored on both.
         for node in nodes.values() {
-            let balance =
-                node.instance().api().balance(test_addr, None).await.expect("balance after revert");
+            let balance = node.instance().balance(test_addr).await.expect("balance after revert");
             assert_eq!(balance, U256::ZERO, "balance should be zero after revert");
         }
     }

@@ -1,4 +1,4 @@
-=== cmd 0: [registry add --tx-hash 0x4674c314019d10397b9275c83fdeca4351175467140b1da7443f5a483a7585cb --network anvil-31337] ===
+=== cmd 0: [registry add --tx-hash 0x89b704af71a50e645fe6b348731ed229cafccd8441295bf8d6391dd2ff5f0cc6 --network anvil-31337] ===
 ✓ Successfully registered 1 deployment(s)
 
   Deployment 1:

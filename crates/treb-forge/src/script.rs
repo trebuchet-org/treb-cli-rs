@@ -148,14 +148,15 @@ pub async fn execute_script(
             let mut receipts = Vec::new();
             for seq in broadcasted.sequence.sequences() {
                 for (tx_meta, receipt) in seq.transactions.iter().zip(seq.receipts.iter()) {
+                    use alloy_network::ReceiptResponse;
                     let raw = serde_json::to_value(receipt).ok();
                     receipts.push(BroadcastReceipt {
-                        hash: receipt.transaction_hash,
-                        block_number: receipt.block_number.unwrap_or_default(),
-                        gas_used: receipt.gas_used,
-                        status: receipt.inner.inner.inner.receipt.status.coerce_status(),
+                        hash: receipt.transaction_hash(),
+                        block_number: receipt.block_number().unwrap_or_default(),
+                        gas_used: receipt.gas_used(),
+                        status: receipt.status(),
                         contract_name: tx_meta.contract_name.clone().filter(|s| !s.is_empty()),
-                        contract_address: receipt.contract_address,
+                        contract_address: receipt.contract_address(),
                         raw_receipt: raw,
                     });
                 }

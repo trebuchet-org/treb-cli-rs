@@ -399,12 +399,12 @@ pub fn hydrate_transactions_from_broadcast(
         .iter()
         .enumerate()
         .map(|(idx, btx)| {
-            let from_addr = btx.transaction.from().unwrap_or_default();
-            let to_addr = btx.transaction.to().and_then(|kind| match kind {
+            let from_addr = btx.from;
+            let to_addr = btx.to.and_then(|kind| match kind {
                 alloy_primitives::TxKind::Call(addr) => Some(addr),
                 alloy_primitives::TxKind::Create => None,
             });
-            let input = btx.transaction.input().cloned().unwrap_or_default();
+            let input = btx.input.clone();
 
             let tx_id = broadcast_tx_id(&context.config.script_path, idx);
 
@@ -457,7 +457,7 @@ pub fn hydrate_transactions_from_broadcast(
                 status: TransactionStatus::Simulated,
                 block_number: 0,
                 sender: from_addr.to_checksum(None),
-                nonce: btx.transaction.nonce().unwrap_or(0),
+                nonce: btx.nonce,
                 deployments: linked_deployment_ids,
                 operations,
                 safe_context: None,
@@ -489,10 +489,10 @@ pub fn build_v2_transaction_metadata(
         .iter()
         .enumerate()
         .map(|(idx, btx)| {
-            let from_addr = btx.transaction.from().unwrap_or_default();
+            let from_addr = btx.from;
             let tx_id = broadcast_tx_id(&context.config.script_path, idx);
             let sender_name = addr_to_role.get(&from_addr).cloned();
-            let gas_used = btx.transaction.gas().map(|g| g as u64);
+            let gas_used = btx.gas.map(|g| g as u64);
             (tx_id, V2TransactionMetadata { sender_name, gas_used })
         })
         .collect()

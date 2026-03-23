@@ -282,10 +282,11 @@ pub async fn execute_safe_on_fork(
     // Check if any transactions are CREATE (contract deployment).
     // Safe.execTransaction cannot directly deploy contracts — CREATE txs
     // must be routed through a CreateCall helper via DelegateCall.
-    let has_creates =
-        run.tx_indices.iter().filter_map(|&idx| btxs.get(idx)).any(|btx| {
-            matches!(btx.transaction.to(), Some(alloy_primitives::TxKind::Create) | None)
-        });
+    let has_creates = run
+        .tx_indices
+        .iter()
+        .filter_map(|&idx| btxs.get(idx))
+        .any(|btx| matches!(btx.to, Some(alloy_primitives::TxKind::Create) | None));
 
     if has_creates {
         // Deploy CreateCall helper at a deterministic address
@@ -301,10 +302,9 @@ pub async fn execute_safe_on_fork(
         .iter()
         .filter_map(|&idx| btxs.get(idx))
         .map(|btx| {
-            let is_create =
-                matches!(btx.transaction.to(), Some(alloy_primitives::TxKind::Create) | None);
-            let value = btx.transaction.value().unwrap_or_default();
-            let input = btx.transaction.input().cloned().unwrap_or_default();
+            let is_create = matches!(btx.to, Some(alloy_primitives::TxKind::Create) | None);
+            let value = btx.value;
+            let input = btx.input.clone();
 
             if is_create {
                 // Wrap as DelegateCall to CreateCall.performCreate(value, bytecode)
@@ -319,8 +319,7 @@ pub async fn execute_safe_on_fork(
                 }
             } else {
                 let to = btx
-                    .transaction
-                    .to()
+                    .to
                     .and_then(|kind| match kind {
                         alloy_primitives::TxKind::Call(addr) => Some(addr),
                         alloy_primitives::TxKind::Create => None,
@@ -581,15 +580,14 @@ pub async fn execute_governor_on_fork(
             .get(idx)
             .ok_or_else(|| TrebError::Forge(format!("transaction index {idx} out of range")))?;
         let to = btx
-            .transaction
-            .to()
+            .to
             .and_then(|kind| match kind {
                 alloy_primitives::TxKind::Call(addr) => Some(addr),
                 alloy_primitives::TxKind::Create => None,
             })
             .unwrap_or(Address::ZERO);
-        let value = U256::from(btx.transaction.value().unwrap_or_default());
-        let data = btx.transaction.input().map(|b| b.to_vec()).unwrap_or_default();
+        let value = U256::from(btx.value);
+        let data = btx.input.to_vec();
         targets.push(to);
         values.push(value);
         calldatas.push(data);
@@ -806,14 +804,20 @@ pub async fn exec_safe_from_registry(
     // Build synthetic broadcastable transactions
     let mut btxs = foundry_cheatcodes::BroadcastableTransactions::default();
     for op in &operations {
-        let tx_json = serde_json::json!({
-            "from": format!("{:#x}", safe_address),
-            "to": format!("{:#x}", op.to),
-            "data": format!("0x{}", alloy_primitives::hex::encode(&op.data)),
+        btxs.push_back(foundry_cheatcodes::BroadcastableTransaction {
+            rpc: None,
+            from: safe_address,
+            to: Some(alloy_primitives::TxKind::Call(op.to)),
+            value: U256::ZERO,
+            input: op.data.clone(),
+            nonce: 0,
+            gas: None,
+            kind: foundry_cheatcodes::BroadcastKind::Unsigned {
+                chain_id: None,
+                blob_sidecar: None,
+                authorization_list: None,
+            },
         });
-        let tx: foundry_common::TransactionMaybeSigned = serde_json::from_value(tx_json)
-            .map_err(|e| TrebError::Forge(format!("build synthetic tx: {e}")))?;
-        btxs.push_back(foundry_cheatcodes::BroadcastableTransaction { rpc: None, transaction: tx });
     }
 
     execute_safe_on_fork(&provider, &run, &btxs, safe_address, chain_id, true).await
