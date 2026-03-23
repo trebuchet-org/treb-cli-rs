@@ -25,7 +25,7 @@ jobs:
             os: ubuntu-latest
             os_arch: linux-amd64
             use_cross: true
-          - target: aarch64-unknown-linux-musl
+          - target: blacksmith-4vcpu-ubuntu-2404-arm
             os: ubuntu-latest
             os_arch: linux-arm64
             use_cross: true

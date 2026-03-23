@@ -15,7 +15,7 @@ env:
 jobs:
   check-and-update:
     name: Check for foundry nightly update
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       updated: ${{ steps.check.outputs.updated }}
       tag: ${{ steps.check.outputs.tag }}
@@ -115,7 +115,7 @@ jobs:
     name: Create Release
     needs: [check-and-update, build]
     if: needs.check-and-update.outputs.updated == 'true'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: write
     steps:
