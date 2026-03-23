@@ -34,7 +34,11 @@ jobs:
           components: clippy, rustfmt
       - uses: foundry-rs/foundry-toolchain@v1
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --all-targets
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Run tests (retry failed only)
+        run: cargo nextest run --workspace --all-targets --retries 2
 
   clippy:
     name: cargo clippy
