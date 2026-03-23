@@ -1,4 +1,4 @@
-name: Foundry Stable Pin Build
+name: Foundry Pin Builds
 
 on:
   schedule:
@@ -12,15 +12,67 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test-stable-pin:
-    name: Test with foundry stable
+  # Step 1: Update ci/foundry-stable-pins.toml with latest foundry tags
+  # and commit to main if changed.
+  update-targets:
+    name: Update foundry targets
     runs-on: ubuntu-latest
     outputs:
-      tag: ${{ steps.resolve.outputs.tag }}
-      foundry_version: ${{ steps.resolve.outputs.foundry_version }}
+      matrix: ${{ steps.discover.outputs.matrix }}
+      updated: ${{ steps.commit.outputs.updated }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run update script
+        run: ci/update-foundry-targets.sh
+
+      - name: Commit if changed
+        id: commit
+        run: |
+          if git diff --quiet ci/foundry-stable-pins.toml; then
+            echo "No changes to foundry targets"
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add ci/foundry-stable-pins.toml
+            git commit -m "chore: update foundry pin targets"
+            git push origin main
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build matrix from targets
+        id: discover
+        run: |
+          # Read [targets] section from pins file
+          TARGETS=$(python3 -c "
+          import re
+          with open('ci/foundry-stable-pins.toml') as f: content = f.read()
+          m = re.search(r'\[targets\]\n(.*?)(?=\n\[|\Z)', content, re.DOTALL)
+          if m:
+              for line in m.group(1).strip().splitlines():
+                  key = line.split('=')[0].strip().strip('\"')
+                  if key:
+                      print(key)
+          ")
+          MATRIX=$(echo "$TARGETS" | jq -Rnc '[inputs | select(length > 0)]')
+          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
+          echo "Targets: $MATRIX"
+
+  # Step 2: Test each foundry target
+  test-pin:
+    name: Test foundry ${{ matrix.foundry_tag }}
+    needs: update-targets
+    if: needs.update-targets.outputs.matrix != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        foundry_tag: ${{ fromJson(needs.update-targets.outputs.matrix) }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: main  # use latest (may include the target update commit)
           submodules: recursive
 
       - uses: dtolnay/rust-toolchain@nightly
@@ -28,116 +80,55 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: foundry-${{ matrix.foundry_tag }}
 
-      - name: Resolve versions
-        id: resolve
+      - name: Apply foundry pin
         run: |
-          TREB_SHORT="$(git rev-parse --short HEAD)"
+          FOUNDRY_TAG="${{ matrix.foundry_tag }}"
 
-          # Read foundry stable tag from pins file
-          if [ -f ci/foundry-stable-pins.toml ]; then
-            FOUNDRY_VERSION=$(grep -oP 'tag\s*=\s*"\K[^"]+' ci/foundry-stable-pins.toml | head -1)
-          else
-            echo "ci/foundry-stable-pins.toml not found"
-            exit 1
-          fi
+          # Replace foundry dep tags
+          sed -i -E "s|tag = \"(nightly-[a-f0-9]+\|v[0-9][^\"]*)\"|tag = \"${FOUNDRY_TAG}\"|g" Cargo.toml
 
-          TAG="v2-nightly-${TREB_SHORT}--foundry-${FOUNDRY_VERSION}"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "foundry_version=${FOUNDRY_VERSION}" >> "$GITHUB_OUTPUT"
-
-      - name: Apply foundry stable pins
-        run: |
-          FOUNDRY_VERSION="${{ steps.resolve.outputs.foundry_version }}"
-
-          # Replace foundry nightly tag with stable tag
-          sed -i "s|tag = \"nightly-[a-f0-9]*\"|tag = \"${FOUNDRY_VERSION}\"|g" Cargo.toml
-
-          # Apply [patch.crates-io] from pins file if present
-          if [ -f ci/foundry-stable-pins.toml ] && grep -q '\[patch' ci/foundry-stable-pins.toml; then
-            python3 - <<'PY'
+          # Remove existing [patch.crates-io]
+          python3 -c "
           import re
+          with open('Cargo.toml') as f: cargo = f.read()
+          cargo = re.sub(r'\n\[patch\.crates-io\].*', '', cargo, flags=re.DOTALL)
+          with open('Cargo.toml', 'w') as f: f.write(cargo)
+          "
 
-          # Read the pins file
-          with open("ci/foundry-stable-pins.toml") as f:
-              pins_content = f.read()
-
-          # Extract [patch.crates-io.*] sections
-          patch_sections = []
-          in_patch = False
-          current = []
-          for line in pins_content.splitlines():
-              if re.match(r'\[patch\.crates-io', line):
-                  in_patch = True
-                  current = [line]
-              elif in_patch and (line.startswith('[') and not line.startswith('[patch')):
-                  patch_sections.append('\n'.join(current))
-                  in_patch = False
-                  current = []
-              elif in_patch:
-                  current.append(line)
-          if current:
-              patch_sections.append('\n'.join(current))
-
-          if not patch_sections:
-              print("No [patch.crates-io] sections found in pins file")
+          # Apply version-specific patches
+          python3 - "$FOUNDRY_TAG" <<'PY'
+          import sys, re
+          tag = sys.argv[1]
+          try:
+              with open("ci/foundry-stable-pins.toml") as f: pins = f.read()
+          except FileNotFoundError:
               exit(0)
-
-          # Read Cargo.toml
-          with open("Cargo.toml") as f:
-              cargo = f.read()
-
-          # Remove existing [patch.crates-io] section if present
-          cargo = re.sub(r'\n\[patch\.crates-io\].*?(?=\n\[|\Z)', '', cargo, flags=re.DOTALL)
-
-          # Append patch sections
-          cargo += '\n' + '\n'.join(patch_sections) + '\n'
-
-          with open("Cargo.toml", "w") as f:
-              f.write(cargo)
-
-          print("Applied stable pins to Cargo.toml")
+          pattern = rf'\[patches\."{re.escape(tag)}"\]\n(.*?)(?=\n\[|\Z)'
+          m = re.search(pattern, pins, re.DOTALL)
+          if not m: exit(0)
+          entries = m.group(1).strip()
+          if entries:
+              with open("Cargo.toml", "a") as f:
+                  f.write(f"\n[patch.crates-io]\n{entries}\n")
+              print(f"Applied patches for {tag}")
           PY
-          fi
+
+          echo "--- foundry tag: $FOUNDRY_TAG ---"
+          grep "foundry" Cargo.toml | head -3
 
       - name: Test
         run: cargo test --workspace --all-targets
 
-  build:
-    name: Release Build
-    needs: test-stable-pin
-    uses: ./.github/workflows/release-build.yml
-    with:
-      tag: ${{ needs.test-stable-pin.outputs.tag }}
-
-  release:
-    name: Create Release
-    needs: [test-stable-pin, build]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          merge-multiple: true
-          path: dist/
-
-      - name: Create/update release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ needs.test-stable-pin.outputs.tag }}
-          FOUNDRY: ${{ needs.test-stable-pin.outputs.foundry_version }}
+      - name: Set tag output
+        id: tag
+        if: success()
         run: |
-          # Delete previous stable-pin release for this treb commit if exists
-          gh release delete "$TAG" --yes 2>/dev/null || true
+          TREB_SHORT="$(git rev-parse --short HEAD)"
+          echo "tag=v2-nightly-${TREB_SHORT}--foundry-${{ matrix.foundry_tag }}" >> "$GITHUB_OUTPUT"
 
-          cd dist
-          cat *.sha256 | sort > checksums.txt
-
-          gh release create "$TAG" \
-            --title "treb $TAG" \
-            --notes "Nightly build with foundry $FOUNDRY (stable pin)" \
-            --prerelease \
-            *.tar.gz *.sha256 checksums.txt
+  # Step 3: Build releases for targets that passed tests
+  # (only triggers if test-pin succeeded for all — use continue-on-error
+  #  on test-pin if you want partial builds)

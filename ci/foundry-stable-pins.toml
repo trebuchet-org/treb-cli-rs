@@ -1,18 +1,19 @@
-# Foundry stable pin configuration.
+# Alloy / dependency patches needed for specific foundry versions.
 #
-# Used by the stable-pin.yml workflow to build treb against a stable
-# foundry release. The workflow patches Cargo.toml at build time —
-# main branch always tracks foundry nightly.
+# The stable-pin workflow auto-discovers foundry targets (latest 2 minor
+# stables + latest RC). This file provides [patch.crates-io] overrides
+# for foundry versions that can't resolve deps cleanly.
 #
-# When bumping foundry stable:
-#   1. Update [foundry] tag below
-#   2. Update [patch.crates-io] entries if alloy pin requirements change
-#   3. The stable-pin workflow will validate on next daily run
+# Format: [patches."<foundry-tag>"] with key = dependency override.
+# Versions not listed here are assumed to need no patches.
 
-[foundry]
-tag = "v1.5.1"
+[patches."v1.5.1"]
+svm-rs-builds = { git = "https://github.com/alloy-rs/svm-rs", tag = "v0.5.24" }
 
-# Foundry v1.5.1 needs svm-rs pinned (alloy-evm compat).
-# Foundry nightly resolves its own — these are ONLY for stable builds.
-[patch.crates-io]
+# v1.5.0 needs the same patches as v1.5.1
+[patches."v1.5.0"]
+svm-rs-builds = { git = "https://github.com/alloy-rs/svm-rs", tag = "v0.5.24" }
+
+# v1.4.x needs the same svm-rs pin
+[patches."v1.4.4"]
 svm-rs-builds = { git = "https://github.com/alloy-rs/svm-rs", tag = "v0.5.24" }
