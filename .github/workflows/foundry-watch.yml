@@ -1,0 +1,138 @@
+name: Foundry Nightly Watch
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Every 6 hours
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-and-update:
+    name: Check for foundry nightly update
+    runs-on: ubuntu-latest
+    outputs:
+      updated: ${{ steps.check.outputs.updated }}
+      tag: ${{ steps.check.outputs.tag }}
+      foundry_tag: ${{ steps.check.outputs.foundry_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Check for new foundry nightly
+        id: check
+        run: |
+          # Get latest foundry nightly release tag
+          LATEST_TAG=$(curl -fsSL https://api.github.com/repos/foundry-rs/foundry/releases/tags/nightly \
+            | jq -r '.tag_name // empty')
+
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No foundry nightly tag found"
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Get the target commit for the nightly tag
+          LATEST_HASH=$(curl -fsSL https://api.github.com/repos/foundry-rs/foundry/releases/tags/nightly \
+            | jq -r '.target_commitish // empty')
+
+          # Find current foundry tag in Cargo.toml
+          CURRENT_TAG=$(grep -oP 'tag\s*=\s*"nightly-\K[^"]+' Cargo.toml | head -1 || echo "")
+
+          if [ "$CURRENT_TAG" = "$LATEST_HASH" ]; then
+            echo "Already on latest foundry nightly ($CURRENT_TAG)"
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          FOUNDRY_TAG="nightly-${LATEST_HASH}"
+          FOUNDRY_SHORT="${LATEST_HASH:0:8}"
+          TREB_SHORT="$(git rev-parse --short HEAD)"
+          RELEASE_TAG="v2-nightly-${TREB_SHORT}--foundry-nightly-${FOUNDRY_SHORT}"
+
+          echo "New foundry nightly: $FOUNDRY_TAG"
+          echo "updated=true" >> "$GITHUB_OUTPUT"
+          echo "tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "foundry_tag=${FOUNDRY_TAG}" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@nightly
+        if: steps.check.outputs.updated == 'true'
+
+      - name: Update Cargo.toml foundry dep
+        if: steps.check.outputs.updated == 'true'
+        run: |
+          FOUNDRY_TAG="${{ steps.check.outputs.foundry_tag }}"
+          # Update all foundry git dep tags in Cargo.toml
+          sed -i "s|tag = \"nightly-[a-f0-9]*\"|tag = \"${FOUNDRY_TAG}\"|g" Cargo.toml
+
+      - name: Test
+        if: steps.check.outputs.updated == 'true'
+        run: cargo test --workspace --all-targets
+
+      - name: Commit and push
+        if: steps.check.outputs.updated == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore: bump foundry to ${{ steps.check.outputs.foundry_tag }}"
+          git push origin main
+
+      - name: Open issue on failure
+        if: failure() && steps.check.outputs.updated == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Foundry nightly ${{ steps.check.outputs.foundry_tag }} breaks treb tests`,
+              body: `The foundry nightly watch detected a new foundry nightly that fails treb tests.\n\nFoundry tag: \`${{ steps.check.outputs.foundry_tag }}\`\nWorkflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              labels: ['foundry-compat']
+            });
+
+  build:
+    name: Release Build
+    needs: check-and-update
+    if: needs.check-and-update.outputs.updated == 'true'
+    uses: ./.github/workflows/release-build.yml
+    with:
+      tag: ${{ needs.check-and-update.outputs.tag }}
+
+  release:
+    name: Create Release
+    needs: [check-and-update, build]
+    if: needs.check-and-update.outputs.updated == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist/
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.check-and-update.outputs.tag }}
+        run: |
+          # Delete previous nightly with same foundry if exists
+          gh release delete "$TAG" --yes 2>/dev/null || true
+
+          cd dist
+          cat *.sha256 | sort > checksums.txt
+
+          gh release create "$TAG" \
+            --title "treb $TAG" \
+            --notes "Nightly build with foundry ${{ needs.check-and-update.outputs.foundry_tag }}" \
+            --prerelease \
+            *.tar.gz *.sha256 checksums.txt

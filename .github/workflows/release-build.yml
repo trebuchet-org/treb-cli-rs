@@ -3,7 +3,13 @@ name: Release Build
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - 'v*'
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Release tag (FQID)'
+        required: true
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -63,7 +69,9 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          ARCHIVE_NAME="treb-${{ github.ref_name }}-${{ matrix.os_arch }}"
+          # Use workflow_call input tag if available, otherwise git tag
+          TAG="${{ inputs.tag || github.ref_name }}"
+          ARCHIVE_NAME="treb-${TAG}-${{ matrix.os_arch }}"
           STAGING="staging-${ARCHIVE_NAME}"
           TARGET_DIR="target/${{ matrix.target }}/release/build"
           mkdir -p "${STAGING}/completions"

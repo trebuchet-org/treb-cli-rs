@@ -1,263 +1,567 @@
-#!/bin/sh
-# trebup — installer for treb, the smart-contract deployment tool
-#
-# Usage:
-#   curl -fsSL https://raw.githubusercontent.com/trebuchet-org/treb-cli-rs/main/scripts/trebup | sh
-#
-# Environment variables:
-#   TREB_VERSION     Install a specific version tag (default: latest release)
-#   TREB_INSTALL_DIR Install directory (default: ~/.local/bin)
-#   TREB_REPO        GitHub repository (default: trebuchet-org/treb-cli-rs)
+#!/usr/bin/env bash
+set -eo pipefail
 
-set -e
+# trebup — unified installer for treb (Rust v2 + Go v1)
+#
+# Install:
+#   curl -fsSL https://raw.githubusercontent.com/trebuchet-org/treb-cli-rs/main/scripts/trebup | bash
+#
+# Version scheme:
+#   v2-nightly-{hash}--foundry-nightly-{hash}   Rust nightly + foundry nightly
+#   v2-nightly-{hash}--foundry-v1.5.1           Rust nightly + foundry stable
+#   v2.1.0--foundry-v1.5.1                      Rust stable + foundry stable
+#   v1-nightly                                   Go nightly (system forge)
+
+TREBUP_VERSION="2.0.0"
+
+TREB_DIR="${TREB_DIR:-$HOME/.treb}"
+TREB_BIN_DIR="$TREB_DIR/bin"
+TREB_VERSIONS_DIR="$TREB_DIR/versions"
+TREB_ACTIVE_FILE="$TREB_DIR/.active"
+
+RUST_REPO="trebuchet-org/treb-cli-rs"
+GO_REPO="trebuchet-org/treb-cli"
 
 # ---------------------------------------------------------------------------
-# Help
+# Main
 # ---------------------------------------------------------------------------
 
-usage() {
-    cat <<'USAGE'
-trebup — installer for treb, the smart-contract deployment tool
+main() {
+  need_cmd curl
+  need_cmd tar
 
-USAGE:
-    trebup [OPTIONS]
+  local cmd="install"
+  local install_version=""
+  local foundry_channel="stable"
 
-OPTIONS:
-    -h, --help    Print this help message
+  while [[ -n $1 ]]; do
+    case $1 in
+      --)               shift; break;;
+      -h|--help)        usage; exit 0;;
+      -v|--version)     echo "trebup $TREBUP_VERSION"; exit 0;;
+      -U|--update)      cmd="update"; shift; continue;;
+      -l|--list)        cmd="list"; shift; continue;;
+      -u|--use)         shift; cmd="use"; install_version="$1";;
+      -i|--install)     shift; install_version="$1";;
+      --foundry)        shift; foundry_channel="$1";;
+      *)                warn "unknown option: $1"; usage; exit 1;;
+    esac
+    shift
+  done
 
-ENVIRONMENT VARIABLES:
-    TREB_VERSION      Install a specific version tag (default: latest release)
-    TREB_INSTALL_DIR  Install directory (default: ~/.local/bin)
-    TREB_REPO         GitHub repository (default: trebuchet-org/treb-cli-rs)
+  banner
 
-EXAMPLES:
-    # Install latest version
-    curl -fsSL https://raw.githubusercontent.com/trebuchet-org/treb-cli-rs/main/scripts/trebup | sh
+  case "$cmd" in
+    list)    do_list; exit 0;;
+    use)     do_use "$install_version"; exit 0;;
+    update)  do_update; exit 0;;
+    install) ;;
+  esac
 
-    # Install a specific version
-    TREB_VERSION=v0.1.0 trebup
+  # Migrate old installations on first run
+  migrate_if_needed
 
-    # Install to a custom directory
-    TREB_INSTALL_DIR=/usr/local/bin trebup
-USAGE
+  # Resolve what to install
+  local tag repo
+  resolve_install "$install_version" "$foundry_channel" tag repo
+
+  say "installing treb ($tag)"
+
+  # Detect platform
+  local platform arch
+  detect_platform platform arch
+
+  # Download + extract
+  local archive="treb-${tag}-${platform}-${arch}.tar.gz"
+  local checksum_file="treb-${tag}-${platform}-${arch}.sha256"
+  local base_url="https://github.com/${repo}/releases/download/${tag}"
+  local version_dir="$TREB_VERSIONS_DIR/$tag"
+
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "$tmp_dir"' EXIT INT TERM
+
+  say "downloading $archive..."
+  curl -fsSL "${base_url}/${archive}" -o "${tmp_dir}/${archive}"
+  if curl -fsSL "${base_url}/${checksum_file}" -o "${tmp_dir}/${checksum_file}" 2>/dev/null; then
+    verify_checksum "$tmp_dir" "$checksum_file"
+  fi
+
+  # Extract to version dir
+  ensure mkdir -p "$version_dir"
+  ensure tar xzf "${tmp_dir}/${archive}" -C "$version_dir"
+
+  # Activate
+  activate "$tag"
+
+  # Install shell completions from archive
+  if [ -d "$version_dir/completions" ]; then
+    install_completions "$version_dir/completions"
+  fi
+
+  say "done! treb $tag installed to $TREB_BIN_DIR/treb"
+  check_path
 }
 
-for arg in "$@"; do
-    case "$arg" in
-        -h|--help)
-            usage
-            exit 0
-            ;;
-    esac
-done
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
 
-REPO="${TREB_REPO:-trebuchet-org/treb-cli-rs}"
-BINARY="treb"
+do_list() {
+  if [ ! -d "$TREB_VERSIONS_DIR" ]; then
+    say "no versions installed"
+    return
+  fi
+
+  local active
+  active="$(cat "$TREB_ACTIVE_FILE" 2>/dev/null || echo "")"
+
+  say "installed versions:"
+  for dir in "$TREB_VERSIONS_DIR"/*/; do
+    [ -d "$dir" ] || continue
+    local v
+    v="$(basename "$dir")"
+    local marker="  "
+    [ "$v" = "$active" ] && marker="* "
+
+    # Detect runtime from version prefix
+    local info=""
+    case "$v" in
+      v1*)  info=" (go, system forge)" ;;
+      *--foundry-nightly*) info=" (foundry nightly)" ;;
+      *--foundry-v*)
+        local fv="${v##*--foundry-}"
+        info=" (foundry $fv)" ;;
+    esac
+
+    echo "  ${marker}${v}${info}"
+  done
+}
+
+do_use() {
+  local version="$1"
+  if [ -z "$version" ]; then
+    err "version not specified. Run 'trebup --list' to see installed versions."
+  fi
+
+  local version_dir="$TREB_VERSIONS_DIR/$version"
+  if [ ! -d "$version_dir" ]; then
+    err "version '$version' not installed. Run 'trebup --list' to see installed versions."
+  fi
+
+  activate "$version"
+  say "switched to treb $version"
+}
+
+do_update() {
+  local url="https://raw.githubusercontent.com/${RUST_REPO}/main/scripts/trebup"
+  say "updating trebup..."
+  ensure curl -fsSL "$url" -o "$TREB_BIN_DIR/trebup.tmp"
+  ensure chmod +x "$TREB_BIN_DIR/trebup.tmp"
+  ensure mv "$TREB_BIN_DIR/trebup.tmp" "$TREB_BIN_DIR/trebup"
+  say "updated trebup to latest version"
+}
+
+# ---------------------------------------------------------------------------
+# Version resolution
+# ---------------------------------------------------------------------------
+
+resolve_install() {
+  local version="$1"
+  local foundry_channel="$2"
+  local -n _tag=$3
+  local -n _repo=$4
+
+  # Default: latest Rust nightly + foundry stable
+  if [ -z "$version" ]; then
+    version="v2-nightly"
+  fi
+
+  # Aliases
+  case "$version" in
+    nightly)      version="v2-nightly" ;;
+    go-nightly)   version="v1-nightly" ;;
+  esac
+
+  # Route by major version
+  case "$version" in
+    v1*)
+      _repo="$GO_REPO"
+      # Go has no foundry dimension — resolve tag directly
+      if [[ "$version" == "v1-nightly" ]]; then
+        _tag="v1-nightly"
+      else
+        _tag="$version"
+      fi
+      return
+      ;;
+    v2*)
+      _repo="$RUST_REPO"
+      ;;
+    *)
+      err "cannot determine repo for version: $version"
+      ;;
+  esac
+
+  # Rust: resolve foundry channel into a full FQID tag
+  if [[ "$version" == v2-nightly* && "$version" != *--foundry-* ]]; then
+    # Need to find the latest release matching this pattern + foundry channel
+    local pattern
+    if [ "$foundry_channel" = "nightly" ]; then
+      pattern="v2-nightly-.*--foundry-nightly-"
+    else
+      pattern="v2-nightly-.*--foundry-v"
+    fi
+
+    local resolved
+    resolved="$(find_latest_release "$RUST_REPO" "$pattern")"
+    if [ -z "$resolved" ]; then
+      err "no release found matching pattern: $pattern"
+    fi
+    _tag="$resolved"
+  elif [[ "$version" == v2.* && "$version" != *--foundry-* ]]; then
+    # Stable version — find matching release with foundry channel
+    local pattern
+    if [ "$foundry_channel" = "nightly" ]; then
+      pattern="${version}--foundry-nightly-"
+    else
+      pattern="${version}--foundry-v"
+    fi
+
+    local resolved
+    resolved="$(find_latest_release "$RUST_REPO" "$pattern")"
+    if [ -z "$resolved" ]; then
+      err "no release found for $version with foundry $foundry_channel"
+    fi
+    _tag="$resolved"
+  else
+    # Fully qualified — use as-is
+    _tag="$version"
+  fi
+}
+
+find_latest_release() {
+  local repo="$1"
+  local pattern="$2"
+
+  curl -fsSL "https://api.github.com/repos/${repo}/releases?per_page=30" 2>/dev/null \
+    | grep '"tag_name"' \
+    | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/' \
+    | grep -E "$pattern" \
+    | head -1
+}
+
+# ---------------------------------------------------------------------------
+# Activate a version
+# ---------------------------------------------------------------------------
+
+activate() {
+  local version="$1"
+  local version_dir="$TREB_VERSIONS_DIR/$version"
+
+  ensure mkdir -p "$TREB_BIN_DIR"
+
+  if [ -f "$version_dir/treb" ]; then
+    ensure cp "$version_dir/treb" "$TREB_BIN_DIR/treb"
+    ensure chmod +x "$TREB_BIN_DIR/treb"
+  elif [ -f "$version_dir/treb-cli" ]; then
+    ensure cp "$version_dir/treb-cli" "$TREB_BIN_DIR/treb"
+    ensure chmod +x "$TREB_BIN_DIR/treb"
+  else
+    err "no treb binary found in $version_dir"
+  fi
+
+  echo "$version" > "$TREB_ACTIVE_FILE"
+}
+
+# ---------------------------------------------------------------------------
+# Migration
+# ---------------------------------------------------------------------------
+
+migrate_if_needed() {
+  local migrated=0
+
+  # 1. Migrate old bare version directories (Go trebup layout)
+  if [ -d "$TREB_VERSIONS_DIR" ]; then
+    for dir in "$TREB_VERSIONS_DIR"/*/; do
+      [ -d "$dir" ] || continue
+      local v
+      v="$(basename "$dir")"
+
+      # Skip if already in FQID format
+      [[ "$v" == v1-* || "$v" == v2-* || "$v" == v1.* || "$v" == v2.* ]] && continue
+
+      # Probe the binary
+      local detected=""
+      if [ -f "$dir/treb" ]; then
+        detected="$("$dir/treb" version 2>/dev/null | head -1 || echo "")"
+      fi
+
+      local new_name=""
+      if [[ "$detected" == *"foundry"* || "$detected" == *"v2"* ]]; then
+        # Rust binary — try to extract commit hash
+        local hash
+        hash="$(echo "$detected" | grep -o '[0-9a-f]\{7\}' | head -1 || echo "unknown")"
+        new_name="v2-nightly-${hash}--foundry-unknown"
+      else
+        # Assume Go
+        new_name="v1-${v}"
+      fi
+
+      if [ -n "$new_name" ] && [ ! -d "$TREB_VERSIONS_DIR/$new_name" ]; then
+        mv "$dir" "$TREB_VERSIONS_DIR/$new_name"
+        say "migrated $v → $new_name"
+        migrated=1
+      fi
+    done
+  fi
+
+  # 2. Migrate old ~/.local/bin/treb install
+  if [ -f "$HOME/.local/bin/treb" ] && [ ! -f "$TREB_BIN_DIR/treb" ]; then
+    local detected=""
+    detected="$("$HOME/.local/bin/treb" version 2>/dev/null | head -1 || echo "")"
+
+    local fqid="v2-nightly-unknown--foundry-unknown"
+    if [[ "$detected" == *"v1"* ]]; then
+      fqid="v1-migrated"
+    fi
+
+    ensure mkdir -p "$TREB_VERSIONS_DIR/$fqid"
+    cp "$HOME/.local/bin/treb" "$TREB_VERSIONS_DIR/$fqid/treb"
+    chmod +x "$TREB_VERSIONS_DIR/$fqid/treb"
+
+    ensure mkdir -p "$TREB_BIN_DIR"
+    cp "$TREB_VERSIONS_DIR/$fqid/treb" "$TREB_BIN_DIR/treb"
+    chmod +x "$TREB_BIN_DIR/treb"
+    echo "$fqid" > "$TREB_ACTIVE_FILE"
+
+    say "migrated ~/.local/bin/treb → $fqid"
+    migrated=1
+  fi
+
+  # 3. Replace old trebup if present
+  if [ -f "$TREB_BIN_DIR/trebup" ]; then
+    local old_version
+    old_version="$(grep 'TREBUP_INSTALLER_VERSION=' "$TREB_BIN_DIR/trebup" 2>/dev/null | head -1 || echo "")"
+    if [[ "$old_version" == *"0.1.0"* ]]; then
+      # Old Go trebup — will be replaced when new trebup installs itself
+      say "replacing old trebup (v0.1.0)"
+      migrated=1
+    fi
+  fi
+
+  # 4. Write .active if missing
+  if [ ! -f "$TREB_ACTIVE_FILE" ] && [ -f "$TREB_BIN_DIR/treb" ]; then
+    local detected=""
+    detected="$("$TREB_BIN_DIR/treb" version 2>/dev/null | head -1 || echo "")"
+    # Best effort — just mark it
+    echo "unknown" > "$TREB_ACTIVE_FILE"
+  fi
+
+  # 5. Clean up cargo install artifacts
+  rm -f "$TREB_DIR/.crates.toml" "$TREB_DIR/.crates2.json" 2>/dev/null
+
+  if [ "$migrated" -eq 1 ]; then
+    say "migration complete"
+    echo ""
+  fi
+}
 
 # ---------------------------------------------------------------------------
 # Platform detection
 # ---------------------------------------------------------------------------
 
 detect_platform() {
-    _os="$(uname -s)"
-    _arch="$(uname -m)"
+  local -n _platform=$1
+  local -n _arch=$2
 
-    case "$_os" in
-        Linux)
-            case "$_arch" in
-                x86_64)          echo "linux-amd64" ;;
-                aarch64|arm64)   echo "linux-arm64" ;;
-                *)
-                    echo "Unsupported platform: $_os/$_arch" >&2
-                    exit 1
-                    ;;
-            esac
-            ;;
-        Darwin)
-            case "$_arch" in
-                x86_64)          echo "darwin-amd64" ;;
-                arm64|aarch64)   echo "darwin-arm64" ;;
-                *)
-                    echo "Unsupported platform: $_os/$_arch" >&2
-                    exit 1
-                    ;;
-            esac
-            ;;
-        *)
-            echo "Unsupported platform: $_os" >&2
-            exit 1
-            ;;
-    esac
+  local os
+  os="$(uname -s)"
+  local machine
+  machine="$(uname -m)"
+
+  case "$os" in
+    Linux)   _platform="linux" ;;
+    Darwin)  _platform="darwin" ;;
+    MINGW*|MSYS*|CYGWIN*) _platform="windows" ;;
+    *)       err "unsupported OS: $os" ;;
+  esac
+
+  case "$machine" in
+    x86_64)
+      # Check for Rosetta
+      if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = "1" ]; then
+        _arch="arm64"
+      else
+        _arch="amd64"
+      fi
+      ;;
+    aarch64|arm64) _arch="arm64" ;;
+    *)             err "unsupported architecture: $machine" ;;
+  esac
 }
-
-OS_ARCH="$(detect_platform)"
-
-# ---------------------------------------------------------------------------
-# Resolve version
-# ---------------------------------------------------------------------------
-
-if [ -n "$TREB_VERSION" ]; then
-    VERSION="$TREB_VERSION"
-else
-    printf "Fetching latest treb version... "
-    VERSION="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-        | grep '"tag_name"' \
-        | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
-    echo "$VERSION"
-fi
-
-if [ -z "$VERSION" ]; then
-    echo "error: could not determine version to install" >&2
-    exit 1
-fi
-
-# ---------------------------------------------------------------------------
-# Resolve install directory
-# ---------------------------------------------------------------------------
-
-INSTALL_DIR="${TREB_INSTALL_DIR:-$HOME/.local/bin}"
-mkdir -p "$INSTALL_DIR"
-
-# ---------------------------------------------------------------------------
-# Download
-# ---------------------------------------------------------------------------
-
-ARCHIVE="treb-${VERSION}-${OS_ARCH}.tar.gz"
-CHECKSUM_FILE="treb-${VERSION}-${OS_ARCH}.sha256"
-BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
-
-TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
-
-echo "Downloading treb ${VERSION} for ${OS_ARCH}..."
-curl -fsSL "${BASE_URL}/${ARCHIVE}" -o "${TMP_DIR}/${ARCHIVE}"
-curl -fsSL "${BASE_URL}/${CHECKSUM_FILE}" -o "${TMP_DIR}/${CHECKSUM_FILE}"
 
 # ---------------------------------------------------------------------------
 # Checksum verification
 # ---------------------------------------------------------------------------
 
-echo "Verifying checksum..."
-cd "$TMP_DIR"
+verify_checksum() {
+  local dir="$1"
+  local checksum_file="$2"
 
-if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum -c "$CHECKSUM_FILE"
-elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 -c "$CHECKSUM_FILE"
-else
-    echo "error: no SHA-256 tool found (sha256sum or shasum required)" >&2
-    exit 1
-fi
-
-# ---------------------------------------------------------------------------
-# Extract and install
-# ---------------------------------------------------------------------------
-
-tar xzf "$ARCHIVE"
-install -m 755 "$BINARY" "${INSTALL_DIR}/${BINARY}"
-
-echo ""
-echo "treb ${VERSION} installed to ${INSTALL_DIR}/${BINARY}"
+  cd "$dir"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -c "$checksum_file" >/dev/null 2>&1 || err "checksum verification failed"
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 -c "$checksum_file" >/dev/null 2>&1 || err "checksum verification failed"
+  else
+    warn "no SHA-256 tool found, skipping checksum verification"
+  fi
+}
 
 # ---------------------------------------------------------------------------
-# Install shell completions
+# Shell completions
 # ---------------------------------------------------------------------------
 
-if [ -d "completions" ]; then
-    zsh_completion_dir() {
-        _fallback_dir="$HOME/.zsh/completions"
-        _zsh_fpath=""
+install_completions() {
+  local comp_dir="$1"
+  local shell
+  shell="$(basename "${SHELL:-}")"
 
-        if [ -n "${FPATH:-}" ]; then
-            _zsh_fpath="$(printf '%s' "$FPATH" | tr ':' '\n')"
-        elif command -v zsh >/dev/null 2>&1; then
-            if _zsh_fpath="$(zsh -ic 'print -rl -- $fpath' </dev/null 2>/dev/null)"; then
-                :
-            elif _zsh_fpath="$(zsh -fc 'print -rl -- $fpath' 2>/dev/null)"; then
-                :
-            else
-                _zsh_fpath=""
-            fi
-        fi
-
-        if [ -n "$_zsh_fpath" ]; then
-            _old_ifs=$IFS
-            IFS='
-'
-            for _dir in $_zsh_fpath; do
-                if [ -n "$_dir" ] && [ -d "$_dir" ] && [ -w "$_dir" ]; then
-                    IFS=$_old_ifs
-                    printf '%s\n' "$_dir"
-                    return 0
-                fi
-            done
-            IFS=$_old_ifs
-        fi
-
-        printf '%s\n' "$_fallback_dir"
-        return 1
-    }
-
-    install_completions() {
-        _shell="$(basename "${SHELL:-}")"
-
-        case "$_shell" in
-            bash)
-                _comp_dir="${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions"
-                if [ -f "completions/treb.bash" ]; then
-                    mkdir -p "$_comp_dir"
-                    cp "completions/treb.bash" "$_comp_dir/treb"
-                    echo "Bash completions installed to $_comp_dir/treb"
-                fi
-                ;;
-            zsh)
-                if [ -f "completions/_treb" ]; then
-                    if _comp_dir="$(zsh_completion_dir)"; then
-                        _needs_setup=0
-                    else
-                        _needs_setup=1
-                    fi
-
-                    mkdir -p "$_comp_dir"
-                    cp "completions/_treb" "$_comp_dir/_treb"
-                    echo "Zsh completions installed to $_comp_dir/_treb"
-
-                    if [ "$_needs_setup" -eq 1 ]; then
-                        echo "No writable zsh completion directory was found in fpath."
-                        echo "If ~/.zsh/completions is not already in fpath, add this to ~/.zshrc:"
-                        echo "  fpath=(~/.zsh/completions \$fpath)"
-                        echo "Then refresh completions with:"
-                        echo "  autoload -Uz compinit && compinit"
-                    fi
-                fi
-                ;;
-            fish)
-                _comp_dir="${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions"
-                if [ -f "completions/treb.fish" ]; then
-                    mkdir -p "$_comp_dir"
-                    cp "completions/treb.fish" "$_comp_dir/treb.fish"
-                    echo "Fish completions installed to $_comp_dir/treb.fish"
-                fi
-                ;;
-            *)
-                echo "Shell completions available in the archive but not auto-installed for $_shell"
-                ;;
-        esac
-    }
-
-    install_completions
-fi
+  case "$shell" in
+    bash)
+      local bash_dir="${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions"
+      if [ -f "$comp_dir/treb.bash" ]; then
+        mkdir -p "$bash_dir"
+        cp "$comp_dir/treb.bash" "$bash_dir/treb"
+        say "bash completions installed"
+      fi
+      ;;
+    zsh)
+      if [ -f "$comp_dir/_treb" ]; then
+        local zsh_dir="$HOME/.zsh/completions"
+        mkdir -p "$zsh_dir"
+        cp "$comp_dir/_treb" "$zsh_dir/_treb"
+        say "zsh completions installed to $zsh_dir/_treb"
+      fi
+      ;;
+    fish)
+      local fish_dir="${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions"
+      if [ -f "$comp_dir/treb.fish" ]; then
+        mkdir -p "$fish_dir"
+        cp "$comp_dir/treb.fish" "$fish_dir/treb.fish"
+        say "fish completions installed"
+      fi
+      ;;
+  esac
+}
 
 # ---------------------------------------------------------------------------
 # PATH check
 # ---------------------------------------------------------------------------
 
-case ":$PATH:" in
-    *":${INSTALL_DIR}:"*)
-        ;;
+check_path() {
+  case ":$PATH:" in
+    *":${TREB_BIN_DIR}:"*) ;;
     *)
-        echo ""
-        echo "NOTE: ${INSTALL_DIR} is not in your PATH."
-        echo "Add it with:  export PATH=\"${INSTALL_DIR}:\$PATH\""
-        ;;
-esac
+      echo ""
+      say "NOTE: ${TREB_BIN_DIR} is not in your PATH."
+      say "Add it with:  export PATH=\"${TREB_BIN_DIR}:\$PATH\""
+      ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# Self-install (when piped from curl)
+# ---------------------------------------------------------------------------
+
+install_trebup() {
+  ensure mkdir -p "$TREB_BIN_DIR"
+  # Copy this script to ~/.treb/bin/trebup
+  if [ -f "$0" ] && [ "$0" != "bash" ] && [ "$0" != "/dev/stdin" ]; then
+    cp "$0" "$TREB_BIN_DIR/trebup"
+    chmod +x "$TREB_BIN_DIR/trebup"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# UI
+# ---------------------------------------------------------------------------
+
+banner() {
+  cat <<'EOF'
+
+ ▀█▀ █▀▄ █▀▀ █▀▄ █ █ █▀▀ █ █ █▀▀ ▀█▀
+  █  █▀▄ █▀▀ █▀▄ █ █ █   █▀█ █▀▀  █
+  ▀  ▀ ▀ ▀▀▀ ▀▀  ▀▀▀ ▀▀▀ ▀ ▀ ▀▀▀  ▀
+
+ deploy smart contracts from forge scripts
+
+EOF
+}
+
+usage() {
+  cat <<'EOF'
+trebup — installer for treb
+
+USAGE:
+    trebup [OPTIONS]
+
+OPTIONS:
+    -h, --help            Print this help message
+    -v, --version         Print trebup version
+    -i, --install TAG     Install a specific version
+    -u, --use TAG         Switch to an already-installed version
+    -l, --list            List installed versions
+    --foundry CHANNEL     Foundry channel: stable (default) or nightly
+    -U, --update          Update trebup itself
+
+EXAMPLES:
+    trebup                              Install latest treb nightly (foundry stable)
+    trebup --foundry nightly            Install latest treb nightly (foundry nightly)
+    trebup --install v2.1.0             Install treb stable
+    trebup --install v1-nightly         Install Go nightly
+    trebup --list                       List installed versions
+    trebup --use v2-nightly-a5f2ae0--foundry-v1.5.1
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+need_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    err "need '$1' (command not found)"
+  fi
+}
+
+say() {
+  echo "trebup: $*"
+}
+
+warn() {
+  echo "trebup: warning: $*" >&2
+}
+
+err() {
+  echo "trebup: error: $*" >&2
+  exit 1
+}
+
+ensure() {
+  "$@"
+  local status=$?
+  if [ $status -ne 0 ]; then
+    err "command failed: $*"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Run
+# ---------------------------------------------------------------------------
+
+# Install trebup itself to ~/.treb/bin/ when running for the first time
+install_trebup
+
+main "$@"

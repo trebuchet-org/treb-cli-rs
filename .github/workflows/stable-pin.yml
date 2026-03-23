@@ -1,0 +1,141 @@
+name: Foundry Stable Pin Build
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test-stable-pin:
+    name: Test with foundry stable
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      foundry_version: ${{ steps.resolve.outputs.foundry_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Resolve versions
+        id: resolve
+        run: |
+          TREB_SHORT="$(git rev-parse --short HEAD)"
+
+          # Read foundry stable tag from pins file
+          if [ -f ci/foundry-stable-pins.toml ]; then
+            FOUNDRY_VERSION=$(grep -oP 'tag\s*=\s*"\K[^"]+' ci/foundry-stable-pins.toml | head -1)
+          else
+            echo "ci/foundry-stable-pins.toml not found"
+            exit 1
+          fi
+
+          TAG="v2-nightly-${TREB_SHORT}--foundry-${FOUNDRY_VERSION}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "foundry_version=${FOUNDRY_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Apply foundry stable pins
+        run: |
+          FOUNDRY_VERSION="${{ steps.resolve.outputs.foundry_version }}"
+
+          # Replace foundry nightly tag with stable tag
+          sed -i "s|tag = \"nightly-[a-f0-9]*\"|tag = \"${FOUNDRY_VERSION}\"|g" Cargo.toml
+
+          # Apply [patch.crates-io] from pins file if present
+          if [ -f ci/foundry-stable-pins.toml ] && grep -q '\[patch' ci/foundry-stable-pins.toml; then
+            python3 - <<'PY'
+          import re
+
+          # Read the pins file
+          with open("ci/foundry-stable-pins.toml") as f:
+              pins_content = f.read()
+
+          # Extract [patch.crates-io.*] sections
+          patch_sections = []
+          in_patch = False
+          current = []
+          for line in pins_content.splitlines():
+              if re.match(r'\[patch\.crates-io', line):
+                  in_patch = True
+                  current = [line]
+              elif in_patch and (line.startswith('[') and not line.startswith('[patch')):
+                  patch_sections.append('\n'.join(current))
+                  in_patch = False
+                  current = []
+              elif in_patch:
+                  current.append(line)
+          if current:
+              patch_sections.append('\n'.join(current))
+
+          if not patch_sections:
+              print("No [patch.crates-io] sections found in pins file")
+              exit(0)
+
+          # Read Cargo.toml
+          with open("Cargo.toml") as f:
+              cargo = f.read()
+
+          # Remove existing [patch.crates-io] section if present
+          cargo = re.sub(r'\n\[patch\.crates-io\].*?(?=\n\[|\Z)', '', cargo, flags=re.DOTALL)
+
+          # Append patch sections
+          cargo += '\n' + '\n'.join(patch_sections) + '\n'
+
+          with open("Cargo.toml", "w") as f:
+              f.write(cargo)
+
+          print("Applied stable pins to Cargo.toml")
+          PY
+          fi
+
+      - name: Test
+        run: cargo test --workspace --all-targets
+
+  build:
+    name: Release Build
+    needs: test-stable-pin
+    uses: ./.github/workflows/release-build.yml
+    with:
+      tag: ${{ needs.test-stable-pin.outputs.tag }}
+
+  release:
+    name: Create Release
+    needs: [test-stable-pin, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist/
+
+      - name: Create/update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.test-stable-pin.outputs.tag }}
+          FOUNDRY: ${{ needs.test-stable-pin.outputs.foundry_version }}
+        run: |
+          # Delete previous stable-pin release for this treb commit if exists
+          gh release delete "$TAG" --yes 2>/dev/null || true
+
+          cd dist
+          cat *.sha256 | sort > checksums.txt
+
+          gh release create "$TAG" \
+            --title "treb $TAG" \
+            --notes "Nightly build with foundry $FOUNDRY (stable pin)" \
+            --prerelease \
+            *.tar.gz *.sha256 checksums.txt
