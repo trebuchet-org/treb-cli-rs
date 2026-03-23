@@ -158,7 +158,16 @@ impl Normalizer for BuildDateNormalizer {
         let human_date =
             Regex::new(r"((?:Date:|built:)\s+)(?:<TIMESTAMP>(?: UTC)?|\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2}:\d{2} UTC)?)")
                 .unwrap();
-        human_date.replace_all(&result, "${1}<DATE>").into_owned()
+        let result = human_date.replace_all(&result, "${1}<DATE>");
+
+        // Bare YYYY-MM-DD dates embedded in strings (e.g. rustc version "rustc 1.96.0-nightly (hash
+        // 2026-03-21)")
+        let bare_date = Regex::new(r"\b\d{4}-\d{2}-\d{2}\b").unwrap();
+        let result = bare_date.replace_all(&result, "<DATE>");
+
+        // Rustc version string: "rustc 1.96.0-nightly" → "rustc <RUSTC_VERSION>"
+        let rustc_ver = Regex::new(r"rustc \d+\.\d+\.\d+(-[a-zA-Z0-9.\-]+)?").unwrap();
+        rustc_ver.replace_all(&result, "rustc <RUSTC_VERSION>").into_owned()
     }
 }
 

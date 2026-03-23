@@ -1,5 +1,5 @@
 === cmd 0: [version] ===
-treb v<VERSION>
+treb <SHORT_HASH>
 
 commit: <COMMIT>
 built:  <DATE>

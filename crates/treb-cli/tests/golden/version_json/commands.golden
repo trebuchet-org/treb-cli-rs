@@ -4,7 +4,7 @@
   "date": "<DATE>",
   "forgeVersion": "forge v<VERSION> (<SHORT_HASH>)",
   "foundryVersion": "v<VERSION>",
-  "rustVersion": "rustc 1.96.0-nightly (<SHORT_HASH> 2026-03-01)",
+  "rustVersion": "rustc <RUSTC_VERSION> (<SHORT_HASH> <DATE>)",
   "trebSolCommit": "<SHORT_HASH>",
   "version": "<SHORT_HASH>"
 }
