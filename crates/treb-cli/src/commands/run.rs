@@ -2473,7 +2473,6 @@ needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
 
     #[test]
     fn format_tx_operations_includes_all_operations() {
-        // Disable color so we get predictable output
         owo_colors::set_override(false);
         let operations = vec![
             Operation {
@@ -2490,9 +2489,12 @@ needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
             },
         ];
 
-        // Format: "type truncated_target.method()" joined by " | "
+        // Strip ANSI codes for stable comparison (owo_colors global override
+        // can be affected by other tests in the same process)
+        let raw = format_tx_operations(&operations);
+        let result = crate::ui::terminal::strip_ansi_codes(&raw);
         assert_eq!(
-            format_tx_operations(&operations),
+            result,
             "DEPLOY 0x0000...1001.CREATE() | DEPLOY 0x0000...1002.CREATE()"
         );
     }
