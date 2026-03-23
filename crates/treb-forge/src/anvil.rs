@@ -343,13 +343,26 @@ pub fn spawn_background_anvil(
         .try_clone()
         .map_err(|e| TrebError::Fork(format!("failed to clone log file handle: {e}")))?;
 
-    let child = Command::new("anvil")
-        .args(&args)
+    let mut cmd = Command::new("anvil");
+    cmd.args(&args)
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(log_file_err))
-        .stdin(Stdio::null())
-        .spawn()
-        .map_err(|e| TrebError::Fork(format!("failed to spawn anvil: {e}")))?;
+        .stdin(Stdio::null());
+
+    // Detach from parent process group so Anvil survives parent exit.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // Safety: setsid() is async-signal-safe.
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
+    }
+
+    let child = cmd.spawn().map_err(|e| TrebError::Fork(format!("failed to spawn anvil: {e}")))?;
 
     let pid = child.id();
 
