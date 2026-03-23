@@ -2493,10 +2493,7 @@ needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
         // can be affected by other tests in the same process)
         let raw = format_tx_operations(&operations);
         let result = crate::ui::terminal::strip_ansi_codes(&raw);
-        assert_eq!(
-            result,
-            "DEPLOY 0x0000...1001.CREATE() | DEPLOY 0x0000...1002.CREATE()"
-        );
+        assert_eq!(result, "DEPLOY 0x0000...1001.CREATE() | DEPLOY 0x0000...1002.CREATE()");
     }
 
     #[test]
