@@ -65,6 +65,12 @@ main() {
   local tag repo
   resolve_install "$install_version" "$foundry_channel" tag repo
 
+  if [ -z "$tag" ]; then
+    err "no release found. The nightly CI may not have published a release yet.
+  Check https://github.com/${RUST_REPO}/releases for available versions,
+  or install a specific tag with: trebup --install <tag>"
+  fi
+
   say "installing treb ($tag)"
 
   # Detect platform
@@ -72,8 +78,19 @@ main() {
   detect_platform platform arch
 
   # Download + extract
-  local archive="treb-${tag}-${platform}-${arch}.tar.gz"
-  local checksum_file="treb-${tag}-${platform}-${arch}.sha256"
+  # Go repo uses underscores: treb_tag_platform_arch.tar.gz
+  # Rust repo uses hyphens: treb-tag-platform-arch.tar.gz
+  local archive checksum_file
+  case "$repo" in
+    *treb-cli-rs)
+      archive="treb-${tag}-${platform}-${arch}.tar.gz"
+      checksum_file="treb-${tag}-${platform}-${arch}.sha256"
+      ;;
+    *)
+      archive="treb_${tag}_${platform}_${arch}.tar.gz"
+      checksum_file="treb_${tag}_${platform}_${arch}.sha256"
+      ;;
+  esac
   local base_url="https://github.com/${repo}/releases/download/${tag}"
   local version_dir="$TREB_VERSIONS_DIR/$tag"
 
@@ -187,9 +204,9 @@ resolve_install() {
   case "$version" in
     v1*)
       _repo="$GO_REPO"
-      # Go has no foundry dimension — resolve tag directly
+      # Go has no foundry dimension — map to Go's current tag format
       if [[ "$version" == "v1-nightly" ]]; then
-        _tag="v1-nightly"
+        _tag="nightly"  # Go repo uses bare "nightly" tag
       else
         _tag="$version"
       fi
@@ -205,33 +222,37 @@ resolve_install() {
 
   # Rust: resolve foundry channel into a full FQID tag
   if [[ "$version" == v2-nightly* && "$version" != *--foundry-* ]]; then
-    # Need to find the latest release matching this pattern + foundry channel
-    local pattern
+    # Try FQID format first, fall back to legacy tag format
+    local pattern resolved
     if [ "$foundry_channel" = "nightly" ]; then
       pattern="v2-nightly-.*--foundry-nightly-"
     else
       pattern="v2-nightly-.*--foundry-v"
     fi
 
-    local resolved
     resolved="$(find_latest_release "$RUST_REPO" "$pattern")"
     if [ -z "$resolved" ]; then
-      err "no release found matching pattern: $pattern"
+      # Fall back to latest release (pre-FQID tags like v0.1.0)
+      say "no FQID release found, falling back to latest release..."
+      resolved="$(find_latest_release "$RUST_REPO" "^v")"
+    fi
+    if [ -z "$resolved" ]; then
+      err "no release found for treb v2 nightly (foundry $foundry_channel)"
     fi
     _tag="$resolved"
   elif [[ "$version" == v2.* && "$version" != *--foundry-* ]]; then
-    # Stable version — find matching release with foundry channel
-    local pattern
+    # Stable version — try FQID, fall back to exact tag
+    local pattern resolved
     if [ "$foundry_channel" = "nightly" ]; then
       pattern="${version}--foundry-nightly-"
     else
       pattern="${version}--foundry-v"
     fi
 
-    local resolved
     resolved="$(find_latest_release "$RUST_REPO" "$pattern")"
     if [ -z "$resolved" ]; then
-      err "no release found for $version with foundry $foundry_channel"
+      # Fall back to exact version tag (pre-FQID)
+      resolved="$version"
     fi
     _tag="$resolved"
   else
