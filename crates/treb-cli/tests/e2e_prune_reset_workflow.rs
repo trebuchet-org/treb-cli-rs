@@ -300,13 +300,18 @@ async fn e2e_reset_scoped_by_namespace() {
     // Step 2: Reset with a non-matching namespace → no files change.
     let reset_output = run_human(
         tmp.path().to_path_buf(),
-        vec!["registry".into(), "drop".into(), "--namespace".into(), "nonexistent".into(), "--yes".into()],
+        vec![
+            "registry".into(),
+            "drop".into(),
+            "--namespace".into(),
+            "nonexistent".into(),
+            "--yes".into(),
+        ],
     )
     .await;
     assert!(
-        reset_output.contains(
-            "Nothing to drop. No registry entries found matching the given filters."
-        ),
+        reset_output
+            .contains("Nothing to drop. No registry entries found matching the given filters."),
         "non-matching namespace drop must show the full empty-state message, got: {reset_output}"
     );
     assert_eq!(
@@ -323,7 +328,13 @@ async fn e2e_reset_scoped_by_namespace() {
     // Step 3: Reset the default namespace only.
     let result = run_json(
         tmp.path().to_path_buf(),
-        vec!["registry".into(), "drop".into(), "--namespace".into(), "default".into(), "--yes".into()],
+        vec![
+            "registry".into(),
+            "drop".into(),
+            "--namespace".into(),
+            "default".into(),
+            "--yes".into(),
+        ],
     )
     .await;
     assert_eq!(
@@ -388,8 +399,17 @@ async fn e2e_deploy_reset_redeploy() {
     // Step 2a: Reset human output check.
     // Scoped drop only removes the deployment (1 item) — the transaction survives
     // because its `deployments` list is empty (unlinked due to v2 ID mismatch).
-    let reset_output =
-        run_human(tmp.path().to_path_buf(), vec!["registry".into(), "drop".into(), "--namespace".into(), "default".into(), "--yes".into()]).await;
+    let reset_output = run_human(
+        tmp.path().to_path_buf(),
+        vec![
+            "registry".into(),
+            "drop".into(),
+            "--namespace".into(),
+            "default".into(),
+            "--yes".into(),
+        ],
+    )
+    .await;
     assert!(
         reset_output.contains("Successfully dropped 1 items from the registry."),
         "drop must show 'Successfully dropped 1 items from the registry.', got: {reset_output}"

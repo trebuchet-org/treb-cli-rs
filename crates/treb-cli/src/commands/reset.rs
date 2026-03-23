@@ -49,11 +49,7 @@ fn describe_drop_scope(
         None => parts.push("across all networks".to_string()),
     }
 
-    let scope = if parts.is_empty() {
-        String::new()
-    } else {
-        parts.join(" ")
-    };
+    let scope = if parts.is_empty() { String::new() } else { parts.join(" ") };
 
     DropScopeDisplay {
         header_scope: scope.clone(),
@@ -67,10 +63,7 @@ fn describe_drop_scope(
 
 /// Returns true if the deployment matches the given query string.
 /// Matches against contract name (case-insensitive), label, or full deployment ID.
-fn deployment_matches_query(
-    d: &treb_core::types::Deployment,
-    query: &str,
-) -> bool {
+fn deployment_matches_query(d: &treb_core::types::Deployment, query: &str) -> bool {
     // Exact ID match
     if d.id == query {
         return true;
@@ -157,8 +150,7 @@ pub async fn run(args: DropArgs, non_interactive: bool) -> anyhow::Result<()> {
             let chain_ok = chain_id_filter.is_none_or(|id| d.chain_id == id);
             let ns_ok =
                 args.namespace.as_deref().is_none_or(|ns| d.namespace.eq_ignore_ascii_case(ns));
-            let query_ok =
-                args.query.as_deref().is_none_or(|q| deployment_matches_query(d, q));
+            let query_ok = args.query.as_deref().is_none_or(|q| deployment_matches_query(d, q));
             chain_ok && ns_ok && query_ok
         })
         .map(|d| d.id.clone())
@@ -261,9 +253,7 @@ pub async fn run(args: DropArgs, non_interactive: bool) -> anyhow::Result<()> {
 
     if total == 0 {
         if !args.json {
-            println!(
-                "Nothing to drop. No registry entries found matching the given filters."
-            );
+            println!("Nothing to drop. No registry entries found matching the given filters.");
         }
         return Ok(());
     }
@@ -289,11 +279,8 @@ pub async fn run(args: DropArgs, non_interactive: bool) -> anyhow::Result<()> {
                     } else {
                         d.address.clone()
                     };
-                    let label = if d.label.is_empty() {
-                        String::new()
-                    } else {
-                        format!(":{}", d.label)
-                    };
+                    let label =
+                        if d.label.is_empty() { String::new() } else { format!(":{}", d.label) };
                     println!(
                         "    {}{} ({}) on chain {}",
                         d.contract_name, label, addr_short, d.chain_id
@@ -400,7 +387,7 @@ pub async fn run(args: DropArgs, non_interactive: bool) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{describe_drop_scope, deployment_matches_query};
+    use super::{deployment_matches_query, describe_drop_scope};
     use crate::ui::prompt::confirm_raw;
     use std::{
         collections::{BTreeSet, HashMap},
@@ -552,7 +539,10 @@ mod tests {
 
         let scope = describe_drop_scope(Some("Counter"), None, None, &chain_ids);
 
-        assert_eq!(scope.header_scope, "matching query \"Counter\" on network '42220' (chain 42220)");
+        assert_eq!(
+            scope.header_scope,
+            "matching query \"Counter\" on network '42220' (chain 42220)"
+        );
     }
 
     #[test]

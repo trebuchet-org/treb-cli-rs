@@ -11,7 +11,10 @@ use std::{
     path::PathBuf,
 };
 
-use treb_core::{TrebError, types::Deployment, types::contract_display_name};
+use treb_core::{
+    TrebError,
+    types::{Deployment, contract_display_name},
+};
 
 use crate::{SOLIDITY_REGISTRY_FILE, io::write_json_file};
 
@@ -55,10 +58,7 @@ impl SolidityRegistryStore {
     }
 
     /// Rebuild the Solidity registry from the given deployments and save to disk.
-    pub fn rebuild(
-        &self,
-        deployments: &HashMap<String, Deployment>,
-    ) -> Result<(), TrebError> {
+    pub fn rebuild(&self, deployments: &HashMap<String, Deployment>) -> Result<(), TrebError> {
         let registry = build_solidity_registry(deployments);
         write_json_file(&self.path, &registry)
     }
@@ -213,14 +213,8 @@ mod tests {
 
         assert_eq!(registry.len(), 2); // chains 1 and 42161
         assert_eq!(registry["1"].len(), 2); // default and staging
-        assert_eq!(
-            registry["1"]["default"]["Token"],
-            "0x1111111111111111111111111111111111111111"
-        );
-        assert_eq!(
-            registry["1"]["staging"]["Token"],
-            "0x2222222222222222222222222222222222222222"
-        );
+        assert_eq!(registry["1"]["default"]["Token"], "0x1111111111111111111111111111111111111111");
+        assert_eq!(registry["1"]["staging"]["Token"], "0x2222222222222222222222222222222222222222");
         assert_eq!(
             registry["42161"]["default"]["Token"],
             "0x3333333333333333333333333333333333333333"

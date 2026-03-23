@@ -7,10 +7,7 @@ use treb_registry::Registry;
 
 use crate::{output, ui::color};
 
-pub async fn queued_command(
-    network: Option<String>,
-    json: bool,
-) -> anyhow::Result<()> {
+pub async fn queued_command(network: Option<String>, json: bool) -> anyhow::Result<()> {
     let cwd = std::env::current_dir().context("cannot determine working directory")?;
     let treb_dir = cwd.join(".treb");
     if !treb_dir.exists() {
@@ -36,14 +33,15 @@ pub async fn queued_command(
     let all_proposals = registry.list_governor_proposals();
     let queued_proposals: Vec<_> = all_proposals
         .into_iter()
-        .filter(|p| !matches!(
-            p.status,
-            ProposalStatus::Executed | ProposalStatus::Canceled | ProposalStatus::Defeated
-        ))
+        .filter(|p| {
+            !matches!(
+                p.status,
+                ProposalStatus::Executed | ProposalStatus::Canceled | ProposalStatus::Defeated
+            )
+        })
         .filter(|p| {
             network.as_ref().is_none_or(|n| {
-                n.parse::<u64>().is_ok_and(|id| id == p.chain_id)
-                    || *n == p.chain_id.to_string()
+                n.parse::<u64>().is_ok_and(|id| id == p.chain_id) || *n == p.chain_id.to_string()
             })
         })
         .collect();

@@ -515,7 +515,12 @@ fn build_type_group_table(
 ) -> output::TableData {
     let mut table = Vec::new();
     for d in &tg.deployments {
-        table.push(build_deployment_row(d, &tg.category, fork_deployment_ids, queued_transaction_ids));
+        table.push(build_deployment_row(
+            d,
+            &tg.category,
+            fork_deployment_ids,
+            queued_transaction_ids,
+        ));
         if let Some(ref pi) = d.proxy_info {
             table.push(build_impl_row(namespace, chain_id, &pi.implementation, impl_lookup));
         }
@@ -724,7 +729,7 @@ pub async fn run(
             tag: filters.tag.clone(),
             contract: filters.contract.clone(),
             label: filters.label.clone(),
-            fork: false,    // skip namespace-based fork filter
+            fork: false, // skip namespace-based fork filter
             no_fork: false,
         };
         filter_deployments(&all_deployments, &base_filters)
@@ -1477,7 +1482,8 @@ mod tests {
         let fork_ids = HashSet::new();
         let impl_lookup = ImplNameLookup::new();
         let tg = TypeGroup { category: DisplayCategory::Proxy, deployments: vec![&d] };
-        let table = build_type_group_table(&tg, "mainnet", 42220, &fork_ids, &HashSet::new(), &impl_lookup);
+        let table =
+            build_type_group_table(&tg, "mainnet", 42220, &fork_ids, &HashSet::new(), &impl_lookup);
 
         assert_eq!(table.len(), 2, "proxy deployment should produce 2 table rows");
         assert!(
@@ -1534,7 +1540,8 @@ mod tests {
         let fork_ids = HashSet::new();
         let impl_lookup = build_impl_name_lookup(&full_refs);
         let tg = TypeGroup { category: DisplayCategory::Proxy, deployments: vec![&deployments[0]] };
-        let table = build_type_group_table(&tg, "mainnet", 42220, &fork_ids, &HashSet::new(), &impl_lookup);
+        let table =
+            build_type_group_table(&tg, "mainnet", 42220, &fork_ids, &HashSet::new(), &impl_lookup);
 
         assert_eq!(table.len(), 2);
         assert!(
@@ -1563,7 +1570,8 @@ mod tests {
         let fork_ids = HashSet::new();
         let impl_lookup = ImplNameLookup::new();
         let tg = TypeGroup { category: DisplayCategory::Singleton, deployments: vec![&d] };
-        let table = build_type_group_table(&tg, "mainnet", 42220, &fork_ids, &HashSet::new(), &impl_lookup);
+        let table =
+            build_type_group_table(&tg, "mainnet", 42220, &fork_ids, &HashSet::new(), &impl_lookup);
 
         assert_eq!(table.len(), 1, "non-proxy deployment should produce 1 table row");
     }
@@ -1586,7 +1594,8 @@ mod tests {
         let mut fork_ids = HashSet::new();
         fork_ids.insert(d.id.clone());
 
-        let display = build_contract_display(&d, &DisplayCategory::Proxy, &fork_ids, &HashSet::new());
+        let display =
+            build_contract_display(&d, &DisplayCategory::Proxy, &fork_ids, &HashSet::new());
         assert!(display.contains("[fork]"), "fork deployment display should contain [fork] badge");
     }
 

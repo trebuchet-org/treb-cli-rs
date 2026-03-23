@@ -5,10 +5,10 @@
 //! "runs" grouped by sender, then **reduces** each run into a flat list of
 //! simple actions:
 //!
-//! - **`RoutingAction::Exec`** — send tx(s) on-chain (wallet broadcast,
-//!   Safe `execTransaction` for 1/1, or Governor `propose()` call)
-//! - **`RoutingAction::Propose`** — propose to Safe Transaction Service
-//!   (multi-sig only, noop on fork)
+//! - **`RoutingAction::Exec`** — send tx(s) on-chain (wallet broadcast, Safe `execTransaction` for
+//!   1/1, or Governor `propose()` call)
+//! - **`RoutingAction::Propose`** — propose to Safe Transaction Service (multi-sig only, noop on
+//!   fork)
 //!
 //! Both action types may emit **`QueuedExecution`** items that represent
 //! deferred operations (Safe multi-sig approval, governance execution).
@@ -25,8 +25,10 @@ use treb_core::error::TrebError;
 
 use forge_script_sequence::ScriptSequence;
 
-use crate::sender::{ResolvedSender, SenderCategory};
-use crate::script::BroadcastReceipt;
+use crate::{
+    script::BroadcastReceipt,
+    sender::{ResolvedSender, SenderCategory},
+};
 
 /// Maximum queue depth for routing reducer chains.
 ///
@@ -172,10 +174,7 @@ pub fn partition_into_runs(
     // user script `vm.broadcast()`s from the timelock — the on-chain executor.
     let mut addr_to_role: HashMap<Address, (String, SenderCategory)> = HashMap::new();
     for (role, sender) in resolved_senders {
-        addr_to_role.insert(
-            sender.broadcast_address(),
-            (role.clone(), sender.category()),
-        );
+        addr_to_role.insert(sender.broadcast_address(), (role.clone(), sender.category()));
     }
 
     let mut runs: Vec<TransactionRun> = Vec::new();
@@ -192,16 +191,10 @@ pub fn partition_into_runs(
         }
 
         // New run — look up sender info
-        let (role, category) = addr_to_role
-            .get(&from)
-            .cloned()
-            .unwrap_or_else(|| {
-                let label = sender_labels
-                    .get(&from)
-                    .cloned()
-                    .unwrap_or_else(|| format!("{:#x}", from));
-                (label, SenderCategory::Wallet)
-            });
+        let (role, category) = addr_to_role.get(&from).cloned().unwrap_or_else(|| {
+            let label = sender_labels.get(&from).cloned().unwrap_or_else(|| format!("{:#x}", from));
+            (label, SenderCategory::Wallet)
+        });
 
         runs.push(TransactionRun {
             sender_role: role,
@@ -229,18 +222,9 @@ pub enum RunResult {
     /// All txs were broadcast on-chain and confirmed.
     Broadcast(Vec<BroadcastReceipt>),
     /// Txs were proposed to the Safe Transaction Service (live mode).
-    SafeProposed {
-        safe_tx_hash: B256,
-        safe_address: Address,
-        nonce: u64,
-        tx_count: usize,
-    },
+    SafeProposed { safe_tx_hash: B256, safe_address: Address, nonce: u64, tx_count: usize },
     /// Txs were submitted as a Governor proposal (live mode).
-    GovernorProposed {
-        proposal_id: String,
-        governor_address: Address,
-        tx_count: usize,
-    },
+    GovernorProposed { proposal_id: String, governor_address: Address, tx_count: usize },
 }
 
 /// Callback invoked after each top-level routing run completes.
@@ -298,12 +282,7 @@ pub async fn reduce_queue(
     let mut queue = std::collections::VecDeque::new();
 
     for run in runs {
-        queue.push_back(ReductionItem {
-            run,
-            btxs: btxs.clone(),
-            governance: None,
-            depth: 0,
-        });
+        queue.push_back(ReductionItem { run, btxs: btxs.clone(), governance: None, depth: 0 });
     }
 
     let mut actions = Vec::new();
@@ -332,10 +311,10 @@ pub async fn reduce_queue(
                 });
             }
             SenderCategory::Safe => {
-                let resolved = ctx.resolved_senders.get(&item.run.sender_role)
-                    .ok_or_else(|| TrebError::Forge(format!(
-                        "sender '{}' not found", item.run.sender_role
-                    )))?;
+                let resolved =
+                    ctx.resolved_senders.get(&item.run.sender_role).ok_or_else(|| {
+                        TrebError::Forge(format!("sender '{}' not found", item.run.sender_role))
+                    })?;
                 let safe_address = match resolved {
                     ResolvedSender::Safe { safe_address, .. } => *safe_address,
                     _ => return Err(TrebError::Safe("expected Safe sender".into())),
@@ -345,17 +324,19 @@ pub async fn reduce_queue(
                     cached
                 } else if ctx.is_fork {
                     let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
-                    let t = super::fork_routing::query_safe_threshold(&provider, safe_address).await?;
+                    let t =
+                        super::fork_routing::query_safe_threshold(&provider, safe_address).await?;
                     ctx.safe_threshold_cache.insert(safe_address, t);
                     t
                 } else {
-                    let safe_client = treb_safe::SafeServiceClient::new(ctx.chain_id)
-                        .ok_or_else(|| TrebError::Safe(format!(
-                            "Safe Transaction Service not available for chain {}", ctx.chain_id
-                        )))?;
-                    let info = safe_client
-                        .get_safe_info(&format!("{}", safe_address))
-                        .await?;
+                    let safe_client =
+                        treb_safe::SafeServiceClient::new(ctx.chain_id).ok_or_else(|| {
+                            TrebError::Safe(format!(
+                                "Safe Transaction Service not available for chain {}",
+                                ctx.chain_id
+                            ))
+                        })?;
+                    let info = safe_client.get_safe_info(&format!("{}", safe_address)).await?;
                     ctx.safe_threshold_cache.insert(safe_address, info.threshold);
                     info.threshold
                 };
@@ -365,9 +346,14 @@ pub async fn reduce_queue(
                 if threshold <= 1 {
                     // Safe(1/1) — reduce to direct execution
                     let planned = reduce_safe_1of1(
-                        &item.run, &item.btxs, resolved, safe_address,
-                        ctx, item.governance.clone(),
-                    ).await?;
+                        &item.run,
+                        &item.btxs,
+                        resolved,
+                        safe_address,
+                        ctx,
+                        item.governance.clone(),
+                    )
+                    .await?;
                     actions.push(planned);
                 } else {
                     // Safe(n/m) — reduce to proposal
@@ -381,19 +367,23 @@ pub async fn reduce_queue(
                         super::fork_routing::query_safe_nonce(&provider, safe_address).await?
                     } else {
                         let safe_client = treb_safe::SafeServiceClient::new(ctx.chain_id)
-                            .ok_or_else(|| TrebError::Safe(format!(
-                                "Safe Transaction Service not available for chain {}", ctx.chain_id
-                            )))?;
-                        safe_client
-                            .get_next_nonce(&format!("{}", safe_address))
-                            .await?
+                            .ok_or_else(|| {
+                                TrebError::Safe(format!(
+                                    "Safe Transaction Service not available for chain {}",
+                                    ctx.chain_id
+                                ))
+                            })?;
+                        safe_client.get_next_nonce(&format!("{}", safe_address)).await?
                     };
                     let offset = ctx.safe_nonce_offsets.entry(safe_address).or_insert(0);
                     let nonce = base_nonce + *offset;
                     *offset += 1;
 
                     let safe_tx_hash = compute_safe_tx_hash_for_ops(
-                        &operations, safe_address, nonce, ctx.chain_id,
+                        &operations,
+                        safe_address,
+                        nonce,
+                        ctx.chain_id,
                     );
 
                     let sender_role = item.run.sender_role.clone();
@@ -418,25 +408,37 @@ pub async fn reduce_queue(
                 }
             }
             SenderCategory::Governor => {
-                let resolved = ctx.resolved_senders.get(&item.run.sender_role)
-                    .ok_or_else(|| TrebError::Forge(format!(
-                        "sender '{}' not found", item.run.sender_role
-                    )))?;
+                let resolved =
+                    ctx.resolved_senders.get(&item.run.sender_role).ok_or_else(|| {
+                        TrebError::Forge(format!("sender '{}' not found", item.run.sender_role))
+                    })?;
 
                 let (governor_address, timelock_address, proposer, reducer_field) = match resolved {
-                    ResolvedSender::Governor { governor_address, timelock_address, proposer, reducer } => {
-                        (*governor_address, *timelock_address, proposer.as_ref(), reducer.clone())
+                    ResolvedSender::Governor {
+                        governor_address,
+                        timelock_address,
+                        proposer,
+                        reducer,
+                    } => (*governor_address, *timelock_address, proposer.as_ref(), reducer.clone()),
+                    _ => {
+                        return Err(TrebError::Forge(
+                            "expected Governor sender for governor routing".into(),
+                        ));
                     }
-                    _ => return Err(TrebError::Forge(
-                        "expected Governor sender for governor routing".into(),
-                    )),
                 };
 
                 // Extract transaction data for the proposal
                 let (targets, values, calldatas) = extract_governor_tx_data(&item.run, &item.btxs)?;
 
-                let gov_actions: Vec<GovernorAction> = targets.iter().zip(values.iter()).zip(calldatas.iter())
-                    .map(|((t, v), c)| GovernorAction { target: *t, value: *v, calldata: c.clone() })
+                let gov_actions: Vec<GovernorAction> = targets
+                    .iter()
+                    .zip(values.iter())
+                    .zip(calldatas.iter())
+                    .map(|((t, v), c)| GovernorAction {
+                        target: *t,
+                        value: *v,
+                        calldata: c.clone(),
+                    })
                     .collect();
 
                 let gov_ctx = GovernanceContext {
@@ -456,10 +458,8 @@ pub async fn reduce_queue(
 
                 // Try reducer script, fall back to inline Rust encoding
                 let project_root = std::env::current_dir().unwrap_or_default();
-                let reducer_script = super::reducer::resolve_reducer_path(
-                    reducer_field.as_deref(),
-                    &project_root,
-                );
+                let reducer_script =
+                    super::reducer::resolve_reducer_path(reducer_field.as_deref(), &project_root);
 
                 let reduced_btxs = if let Some(reducer_path) = reducer_script {
                     let env_vars = super::reducer::build_reducer_env_vars(
@@ -477,19 +477,21 @@ pub async fn reduce_queue(
                         env_vars,
                         ctx.rpc_url,
                         ctx.chain_id,
-                    ).await?
+                    )
+                    .await?
                 } else {
                     // Fallback: inline Rust encoding (backward compat)
-                    let propose_calldata = encode_governor_propose(&targets, &values, &calldatas, "");
-                    build_single_tx_broadcast(
-                        proposer_address, governor_address, propose_calldata,
-                    )
+                    let propose_calldata =
+                        encode_governor_propose(&targets, &values, &calldatas, "");
+                    build_single_tx_broadcast(proposer_address, governor_address, propose_calldata)
                 };
 
                 // Determine the proposer's category and push back onto queue
                 let proposer_category = proposer.category();
                 let proposer_role = find_proposer_role(
-                    &item.run.sender_role, ctx.resolved_senders, ctx.sender_configs,
+                    &item.run.sender_role,
+                    ctx.resolved_senders,
+                    ctx.sender_configs,
                 );
 
                 let proposer_run = TransactionRun {
@@ -568,39 +570,57 @@ pub async fn reduce_queue(
                         });
                     }
                     SenderCategory::Safe => {
-                        let proposer_resolved = ctx.resolved_senders.get(&front.run.sender_role)
-                            .ok_or_else(|| TrebError::Forge(format!(
-                                "sender '{}' not found", front.run.sender_role
-                            )))?;
+                        let proposer_resolved =
+                            ctx.resolved_senders.get(&front.run.sender_role).ok_or_else(|| {
+                                TrebError::Forge(format!(
+                                    "sender '{}' not found",
+                                    front.run.sender_role
+                                ))
+                            })?;
                         let proposer_safe = match proposer_resolved {
                             ResolvedSender::Safe { safe_address, .. } => *safe_address,
-                            _ => return Err(TrebError::Safe("expected Safe sender for proposer".into())),
+                            _ => {
+                                return Err(TrebError::Safe(
+                                    "expected Safe sender for proposer".into(),
+                                ));
+                            }
                         };
 
-                        let proposer_threshold = if let Some(&cached) = ctx.safe_threshold_cache.get(&proposer_safe) {
+                        let proposer_threshold = if let Some(&cached) =
+                            ctx.safe_threshold_cache.get(&proposer_safe)
+                        {
                             cached
                         } else if ctx.is_fork {
                             let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
-                            let t = super::fork_routing::query_safe_threshold(&provider, proposer_safe).await?;
+                            let t =
+                                super::fork_routing::query_safe_threshold(&provider, proposer_safe)
+                                    .await?;
                             ctx.safe_threshold_cache.insert(proposer_safe, t);
                             t
                         } else {
                             let safe_client = treb_safe::SafeServiceClient::new(ctx.chain_id)
-                                .ok_or_else(|| TrebError::Safe(format!(
-                                    "Safe Transaction Service not available for chain {}", ctx.chain_id
-                                )))?;
-                            let info = safe_client
-                                .get_safe_info(&format!("{}", proposer_safe))
-                                .await?;
+                                .ok_or_else(|| {
+                                    TrebError::Safe(format!(
+                                        "Safe Transaction Service not available for chain {}",
+                                        ctx.chain_id
+                                    ))
+                                })?;
+                            let info =
+                                safe_client.get_safe_info(&format!("{}", proposer_safe)).await?;
                             ctx.safe_threshold_cache.insert(proposer_safe, info.threshold);
                             info.threshold
                         };
 
                         if proposer_threshold <= 1 {
                             let planned = reduce_safe_1of1(
-                                &front.run, &front.btxs, proposer_resolved, proposer_safe,
-                                ctx, front.governance.clone(),
-                            ).await?;
+                                &front.run,
+                                &front.btxs,
+                                proposer_resolved,
+                                proposer_safe,
+                                ctx,
+                                front.governance.clone(),
+                            )
+                            .await?;
                             // Attach governance queued to the safe exec
                             actions.push(PlannedAction {
                                 run: item.run,
@@ -614,15 +634,17 @@ pub async fn reduce_queue(
                                 0
                             } else if ctx.is_fork {
                                 let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
-                                super::fork_routing::query_safe_nonce(&provider, proposer_safe).await?
+                                super::fork_routing::query_safe_nonce(&provider, proposer_safe)
+                                    .await?
                             } else {
                                 let safe_client = treb_safe::SafeServiceClient::new(ctx.chain_id)
-                                    .ok_or_else(|| TrebError::Safe(format!(
-                                        "Safe Transaction Service not available for chain {}", ctx.chain_id
-                                    )))?;
-                                safe_client
-                                    .get_next_nonce(&format!("{}", proposer_safe))
-                                    .await?
+                                    .ok_or_else(|| {
+                                    TrebError::Safe(format!(
+                                        "Safe Transaction Service not available for chain {}",
+                                        ctx.chain_id
+                                    ))
+                                })?;
+                                safe_client.get_next_nonce(&format!("{}", proposer_safe)).await?
                             };
                             let offset = ctx.safe_nonce_offsets.entry(proposer_safe).or_insert(0);
                             let nonce = base_nonce + *offset;
@@ -777,13 +799,13 @@ async fn reduce_safe_1of1(
     } else {
         // Live mode: build execTransaction calldata with real ECDSA signature.
         // Query nonce from Safe TX Service.
-        let safe_client = treb_safe::SafeServiceClient::new(ctx.chain_id)
-            .ok_or_else(|| TrebError::Safe(format!(
-                "Safe Transaction Service not available for chain {}", ctx.chain_id
-            )))?;
-        let safe_info = safe_client
-            .get_safe_info(&format!("{}", safe_address))
-            .await?;
+        let safe_client = treb_safe::SafeServiceClient::new(ctx.chain_id).ok_or_else(|| {
+            TrebError::Safe(format!(
+                "Safe Transaction Service not available for chain {}",
+                ctx.chain_id
+            ))
+        })?;
+        let safe_info = safe_client.get_safe_info(&format!("{}", safe_address)).await?;
         let nonce = safe_info.nonce;
 
         let (to, data, operation) = if operations.len() == 1 {
@@ -810,12 +832,15 @@ async fn reduce_safe_1of1(
 
         // Sign with the signer's private key
         let signer_key = crate::sender::extract_signing_key(
-            &run.sender_role, resolved_sender, ctx.sender_configs,
-        ).ok_or_else(|| TrebError::Safe(format!(
-            "no signing key for Safe sender '{}'", run.sender_role,
-        )))?;
-        let key_bytes: B256 = signer_key.parse()
-            .map_err(|e| TrebError::Safe(format!("invalid signer key: {e}")))?;
+            &run.sender_role,
+            resolved_sender,
+            ctx.sender_configs,
+        )
+        .ok_or_else(|| {
+            TrebError::Safe(format!("no signing key for Safe sender '{}'", run.sender_role,))
+        })?;
+        let key_bytes: B256 =
+            signer_key.parse().map_err(|e| TrebError::Safe(format!("invalid signer key: {e}")))?;
         let wallet_signer = foundry_wallets::WalletSigner::from_private_key(&key_bytes)
             .map_err(|e| TrebError::Safe(format!("failed to create signer: {e}")))?;
         let signature = treb_safe::sign_safe_tx(&wallet_signer, safe_tx_hash).await?;
@@ -833,15 +858,12 @@ async fn reduce_safe_1of1(
             gasToken: Address::ZERO,
             refundReceiver: Address::ZERO,
             signatures: signature.into(),
-        }.abi_encode();
+        }
+        .abi_encode();
 
         let signer_addr = alloy_signer::Signer::address(&wallet_signer);
 
-        let exec_tx = RoutableTx {
-            to: safe_address,
-            value: U256::ZERO,
-            data: exec_calldata,
-        };
+        let exec_tx = RoutableTx { to: safe_address, value: U256::ZERO, data: exec_calldata };
 
         Ok(PlannedAction {
             run: TransactionRun {
@@ -880,7 +902,8 @@ pub async fn execute_single_action(
             if let Some(safe_ctx) = safe {
                 if ctx.is_fork {
                     let provider = crate::provider::build_http_provider(ctx.rpc_url)?;
-                    let fallback_btxs = build_btxs_from_routable(safe_ctx.safe_address, transactions);
+                    let fallback_btxs =
+                        build_btxs_from_routable(safe_ctx.safe_address, transactions);
                     let btxs_to_use = original_btxs.unwrap_or(&fallback_btxs);
                     let receipts = super::fork_routing::execute_safe_on_fork(
                         &provider,
@@ -889,28 +912,45 @@ pub async fn execute_single_action(
                         safe_ctx.safe_address,
                         ctx.chain_id,
                         ctx.quiet,
-                    ).await?;
+                    )
+                    .await?;
                     RunResult::Broadcast(receipts)
                 } else {
                     let receipts = broadcast_routable_txs(
-                        ctx.rpc_url, *from, transactions, false,
+                        ctx.rpc_url,
+                        *from,
+                        transactions,
+                        false,
                         ctx.resolved_senders,
                         ctx.sequence.as_deref_mut(),
                         None,
-                    ).await?;
+                    )
+                    .await?;
                     RunResult::Broadcast(receipts)
                 }
             } else {
                 let receipts = broadcast_routable_txs(
-                    ctx.rpc_url, *from, transactions, ctx.is_fork,
+                    ctx.rpc_url,
+                    *from,
+                    transactions,
+                    ctx.is_fork,
                     ctx.resolved_senders,
                     ctx.sequence.as_deref_mut(),
                     Some(&planned.run.tx_indices),
-                ).await?;
+                )
+                .await?;
                 RunResult::Broadcast(receipts)
             }
         }
-        RoutingAction::Propose { safe_address, chain_id, operations, inner_transactions, sender_role, nonce, governance: _ } => {
+        RoutingAction::Propose {
+            safe_address,
+            chain_id,
+            operations,
+            inner_transactions,
+            sender_role,
+            nonce,
+            governance: _,
+        } => {
             if ctx.is_fork || ctx.defer_safe_proposals {
                 let safe_tx_hash = match &planned.queued {
                     Some(QueuedExecution::SafeProposal { safe_tx_hash, .. }) => *safe_tx_hash,
@@ -924,30 +964,33 @@ pub async fn execute_single_action(
                 }
             } else {
                 propose_to_safe_service(
-                    *safe_address, *chain_id, *nonce, operations,
-                    inner_transactions.len(), sender_role, ctx,
-                ).await?
+                    *safe_address,
+                    *chain_id,
+                    *nonce,
+                    operations,
+                    inner_transactions.len(),
+                    sender_role,
+                    ctx,
+                )
+                .await?
             }
         }
     };
 
     // Governance wrapping
     let final_result = match &planned.action {
-        RoutingAction::Exec { governance: Some(gov), .. } => {
-            match &result {
-                RunResult::Broadcast(receipts) => {
-                    let proposal_id = receipts.first()
-                        .map(|r| format!("{:#x}", r.hash))
-                        .unwrap_or_default();
-                    RunResult::GovernorProposed {
-                        proposal_id,
-                        governor_address: gov.governor_address,
-                        tx_count: planned.run.tx_indices.len(),
-                    }
+        RoutingAction::Exec { governance: Some(gov), .. } => match &result {
+            RunResult::Broadcast(receipts) => {
+                let proposal_id =
+                    receipts.first().map(|r| format!("{:#x}", r.hash)).unwrap_or_default();
+                RunResult::GovernorProposed {
+                    proposal_id,
+                    governor_address: gov.governor_address,
+                    tx_count: planned.run.tx_indices.len(),
                 }
-                _ => result,
             }
-        }
+            _ => result,
+        },
         RoutingAction::Propose { governance: Some(_), .. } => result,
         _ => result,
     };
@@ -1040,9 +1083,7 @@ pub async fn route_all_with_resume(
 
     for run in runs {
         let result = match run.category {
-            SenderCategory::Wallet => {
-                resume_wallet_run(&run, btxs, ctx, resume).await?
-            }
+            SenderCategory::Wallet => resume_wallet_run(&run, btxs, ctx, resume).await?,
             _ => {
                 // For Safe/Governor with resume, fall through to normal routing
                 // Build a single-run plan and execute
@@ -1104,9 +1145,7 @@ pub fn classify_run_transactions(
                 .transactions
                 .get(idx)
                 .map(|tx_meta| match tx_meta.hash {
-                    Some(h) if resume.completed_tx_hashes.contains(&h) => {
-                        TxResumeStatus::Confirmed
-                    }
+                    Some(h) if resume.completed_tx_hashes.contains(&h) => TxResumeStatus::Confirmed,
                     Some(_) => TxResumeStatus::Pending,
                     None => TxResumeStatus::Unsent,
                 })
@@ -1204,11 +1243,7 @@ async fn resume_wallet_run(
         .iter()
         .filter(|(_, s)| *s == TxResumeStatus::Pending)
         .filter_map(|(idx, _)| {
-            resume
-                .sequence
-                .transactions
-                .get(*idx)
-                .and_then(|tx| tx.hash.map(|h| (*idx, h)))
+            resume.sequence.transactions.get(*idx).and_then(|tx| tx.hash.map(|h| (*idx, h)))
         })
         .collect();
 
@@ -1230,12 +1265,8 @@ async fn resume_wallet_run(
     }
 
     // 3. Collect indices that still need broadcasting (unsent + dropped pending)
-    let need_broadcast: Vec<usize> = run
-        .tx_indices
-        .iter()
-        .filter(|idx| !receipt_map.contains_key(idx))
-        .copied()
-        .collect();
+    let need_broadcast: Vec<usize> =
+        run.tx_indices.iter().filter(|idx| !receipt_map.contains_key(idx)).copied().collect();
 
     // 4. Re-broadcast the unsent/dropped subset
     if !need_broadcast.is_empty() {
@@ -1263,11 +1294,8 @@ async fn resume_wallet_run(
     }
 
     // 5. Assemble receipts in run order
-    let receipts: Vec<BroadcastReceipt> = run
-        .tx_indices
-        .iter()
-        .filter_map(|idx| receipt_map.remove(idx))
-        .collect();
+    let receipts: Vec<BroadcastReceipt> =
+        run.tx_indices.iter().filter_map(|idx| receipt_map.remove(idx)).collect();
 
     Ok(RunResult::Broadcast(receipts))
 }
@@ -1346,9 +1374,9 @@ async fn broadcast_wallet_run_fork(
     let mut seq = sequence;
 
     for &tx_idx in &run.tx_indices {
-        let btx = btxs.get(tx_idx).ok_or_else(|| {
-            TrebError::Forge(format!("transaction index {tx_idx} out of range"))
-        })?;
+        let btx = btxs
+            .get(tx_idx)
+            .ok_or_else(|| TrebError::Forge(format!("transaction index {tx_idx} out of range")))?;
 
         let from = btx.transaction.from().unwrap_or_default();
 
@@ -1413,10 +1441,7 @@ async fn broadcast_wallet_run_live(
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     use alloy_rpc_types::TransactionRequest;
 
-    let wallet = crate::sender::resolve_wallet_for_address(
-        run.sender_address,
-        resolved_senders,
-    )?;
+    let wallet = crate::sender::resolve_wallet_for_address(run.sender_address, resolved_senders)?;
 
     let provider = crate::provider::build_wallet_provider(rpc_url, wallet)?;
 
@@ -1424,9 +1449,9 @@ async fn broadcast_wallet_run_live(
     let mut seq = sequence;
 
     for &tx_idx in &run.tx_indices {
-        let btx = btxs.get(tx_idx).ok_or_else(|| {
-            TrebError::Forge(format!("transaction index {tx_idx} out of range"))
-        })?;
+        let btx = btxs
+            .get(tx_idx)
+            .ok_or_else(|| TrebError::Forge(format!("transaction index {tx_idx} out of range")))?;
 
         let mut tx_req = TransactionRequest::default();
 
@@ -1521,16 +1546,18 @@ async fn propose_to_safe_service(
     };
     let safe_tx_hash = treb_safe::compute_safe_tx_hash(chain_id, safe_address, &safe_tx);
 
-    let resolved_sender = ctx.resolved_senders.get(sender_role)
+    let resolved_sender = ctx
+        .resolved_senders
+        .get(sender_role)
         .ok_or_else(|| TrebError::Forge(format!("sender '{}' not found", sender_role)))?;
 
-    let signer_key_hex = crate::sender::extract_signing_key(
-        sender_role, resolved_sender, ctx.sender_configs,
-    ).ok_or_else(|| TrebError::Safe(format!(
-        "no signing key for Safe sender '{}'", sender_role,
-    )))?;
-    let key_bytes: B256 = signer_key_hex.parse()
-        .map_err(|e| TrebError::Safe(format!("invalid signer key: {e}")))?;
+    let signer_key_hex =
+        crate::sender::extract_signing_key(sender_role, resolved_sender, ctx.sender_configs)
+            .ok_or_else(|| {
+                TrebError::Safe(format!("no signing key for Safe sender '{}'", sender_role,))
+            })?;
+    let key_bytes: B256 =
+        signer_key_hex.parse().map_err(|e| TrebError::Safe(format!("invalid signer key: {e}")))?;
     let wallet_signer = foundry_wallets::WalletSigner::from_private_key(&key_bytes)
         .map_err(|e| TrebError::Safe(format!("failed to create signer: {e}")))?;
     let signature = treb_safe::sign_safe_tx(&wallet_signer, safe_tx_hash).await?;
@@ -1553,20 +1580,12 @@ async fn propose_to_safe_service(
         origin: Some("treb".into()),
     };
 
-    let safe_client = treb_safe::SafeServiceClient::new(chain_id)
-        .ok_or_else(|| TrebError::Safe(format!(
-            "Safe Transaction Service not available for chain {chain_id}"
-        )))?;
-    safe_client
-        .propose_transaction(&format!("{}", safe_address), &request)
-        .await?;
+    let safe_client = treb_safe::SafeServiceClient::new(chain_id).ok_or_else(|| {
+        TrebError::Safe(format!("Safe Transaction Service not available for chain {chain_id}"))
+    })?;
+    safe_client.propose_transaction(&format!("{}", safe_address), &request).await?;
 
-    Ok(RunResult::SafeProposed {
-        safe_tx_hash,
-        safe_address,
-        nonce,
-        tx_count,
-    })
+    Ok(RunResult::SafeProposed { safe_tx_hash, safe_address, nonce, tx_count })
 }
 
 /// Poll the Safe Transaction Service until a proposed tx is executed.
@@ -1575,10 +1594,9 @@ pub async fn poll_safe_execution(
     safe_tx_hash: &B256,
     should_continue: impl Fn() -> bool,
 ) -> Result<Option<String>, TrebError> {
-    let safe_client = treb_safe::SafeServiceClient::new(chain_id)
-        .ok_or_else(|| TrebError::Safe(format!(
-            "Safe Transaction Service not available for chain {chain_id}"
-        )))?;
+    let safe_client = treb_safe::SafeServiceClient::new(chain_id).ok_or_else(|| {
+        TrebError::Safe(format!("Safe Transaction Service not available for chain {chain_id}"))
+    })?;
     let hash_hex = format!("{:#x}", safe_tx_hash);
 
     loop {
@@ -1608,11 +1626,13 @@ pub fn extract_governor_tx_data(
     let mut calldatas = Vec::with_capacity(run.tx_indices.len());
 
     for &idx in &run.tx_indices {
-        let btx = btxs.get(idx).ok_or_else(|| {
-            TrebError::Forge(format!("transaction index {idx} out of range"))
-        })?;
+        let btx = btxs
+            .get(idx)
+            .ok_or_else(|| TrebError::Forge(format!("transaction index {idx} out of range")))?;
 
-        let to = btx.transaction.to()
+        let to = btx
+            .transaction
+            .to()
             .and_then(|kind| match kind {
                 alloy_primitives::TxKind::Call(addr) => Some(addr),
                 alloy_primitives::TxKind::Create => None,
@@ -1620,9 +1640,7 @@ pub fn extract_governor_tx_data(
             .unwrap_or(Address::ZERO);
 
         let value = btx.transaction.value().unwrap_or_default();
-        let data = btx.transaction.input()
-            .map(|b| b.to_vec())
-            .unwrap_or_default();
+        let data = btx.transaction.input().map(|b| b.to_vec()).unwrap_or_default();
 
         targets.push(to);
         values.push(U256::from(value));
@@ -1651,7 +1669,8 @@ pub fn encode_governor_propose(
         values.to_vec(),
         calldatas.iter().map(|c| alloy_primitives::Bytes::from(c.clone())).collect::<Vec<_>>(),
         description.to_string(),
-    ).abi_encode_params();
+    )
+        .abi_encode_params();
 
     let mut calldata = selector.to_vec();
     calldata.extend_from_slice(&encoded);
@@ -1673,8 +1692,8 @@ fn build_single_tx_broadcast(
         "data": format!("0x{}", alloy_primitives::hex::encode(&calldata)),
     });
 
-    let tx_maybe_signed: TransactionMaybeSigned = serde_json::from_value(tx_json)
-        .expect("failed to build synthetic transaction");
+    let tx_maybe_signed: TransactionMaybeSigned =
+        serde_json::from_value(tx_json).expect("failed to build synthetic transaction");
 
     let btx = BroadcastableTransaction { rpc: None, transaction: tx_maybe_signed };
     let mut btxs = foundry_cheatcodes::BroadcastableTransactions::default();
@@ -1693,10 +1712,12 @@ fn extract_routable_txs(
 ) -> Result<Vec<RoutableTx>, TrebError> {
     let mut txs = Vec::with_capacity(run.tx_indices.len());
     for &idx in &run.tx_indices {
-        let btx = btxs.get(idx).ok_or_else(|| {
-            TrebError::Forge(format!("transaction index {idx} out of range"))
-        })?;
-        let to = btx.transaction.to()
+        let btx = btxs
+            .get(idx)
+            .ok_or_else(|| TrebError::Forge(format!("transaction index {idx} out of range")))?;
+        let to = btx
+            .transaction
+            .to()
             .and_then(|kind| match kind {
                 alloy_primitives::TxKind::Call(addr) => Some(addr),
                 alloy_primitives::TxKind::Create => None,
@@ -1716,10 +1737,12 @@ fn build_multisend_operations(
 ) -> Result<Vec<treb_safe::MultiSendOperation>, TrebError> {
     let mut ops = Vec::with_capacity(run.tx_indices.len());
     for &idx in &run.tx_indices {
-        let btx = btxs.get(idx).ok_or_else(|| {
-            TrebError::Forge(format!("transaction index {idx} out of range"))
-        })?;
-        let to = btx.transaction.to()
+        let btx = btxs
+            .get(idx)
+            .ok_or_else(|| TrebError::Forge(format!("transaction index {idx} out of range")))?;
+        let to = btx
+            .transaction
+            .to()
             .and_then(|kind| match kind {
                 alloy_primitives::TxKind::Call(addr) => Some(addr),
                 alloy_primitives::TxKind::Create => None,
@@ -1783,7 +1806,15 @@ async fn broadcast_routable_txs(
     if is_fork {
         broadcast_routable_txs_fork(rpc_url, from, transactions, sequence, tx_indices).await
     } else {
-        broadcast_routable_txs_live(rpc_url, from, transactions, resolved_senders, sequence, tx_indices).await
+        broadcast_routable_txs_live(
+            rpc_url,
+            from,
+            transactions,
+            resolved_senders,
+            sequence,
+            tx_indices,
+        )
+        .await
     }
 }
 
@@ -1806,9 +1837,9 @@ async fn broadcast_routable_txs_fork(
     for (i, tx) in transactions.iter().enumerate() {
         let mut tx_req = TransactionRequest::default().from(from).to(tx.to);
         if !tx.data.is_empty() {
-            tx_req.input = alloy_rpc_types::TransactionInput::new(
-                alloy_primitives::Bytes::from(tx.data.clone()),
-            );
+            tx_req.input = alloy_rpc_types::TransactionInput::new(alloy_primitives::Bytes::from(
+                tx.data.clone(),
+            ));
         }
         if !tx.value.is_zero() {
             tx_req = tx_req.value(tx.value);
@@ -1820,7 +1851,9 @@ async fn broadcast_routable_txs_fork(
         let receipt = provider
             .send_transaction(tx_req)
             .await
-            .map_err(|e| TrebError::Forge(format!("tx to {:#x} from {:#x} failed: {}", tx.to, from, e)))?
+            .map_err(|e| {
+                TrebError::Forge(format!("tx to {:#x} from {:#x} failed: {}", tx.to, from, e))
+            })?
             .get_receipt()
             .await
             .map_err(|e| TrebError::Forge(format!("get receipt failed: {e}")))?;
@@ -1868,9 +1901,9 @@ async fn broadcast_routable_txs_live(
         tx_req = tx_req.to(tx.to);
 
         if !tx.data.is_empty() {
-            tx_req.input = alloy_rpc_types::TransactionInput::new(
-                alloy_primitives::Bytes::from(tx.data.clone()),
-            );
+            tx_req.input = alloy_rpc_types::TransactionInput::new(alloy_primitives::Bytes::from(
+                tx.data.clone(),
+            ));
         }
 
         if !tx.value.is_zero() {
@@ -1997,10 +2030,10 @@ mod tests {
     // Resume helper tests
     // -----------------------------------------------------------------------
 
-    use std::collections::VecDeque;
     use alloy_primitives::map::HashMap as AlloyHashMap;
     use forge_script_sequence::{ScriptSequence, TransactionWithMetadata};
     use foundry_common::TransactionMaybeSigned;
+    use std::collections::VecDeque;
 
     /// Build a minimal ScriptSequence with transactions having the given hashes.
     fn make_resume_sequence(tx_hashes: &[Option<B256>]) -> ScriptSequence {
@@ -2161,9 +2194,7 @@ mod tests {
 
     #[test]
     fn is_nonce_conflict_detects_replacement_underpriced() {
-        let err = TrebError::Forge(
-            "send tx failed: replacement transaction underpriced".into(),
-        );
+        let err = TrebError::Forge("send tx failed: replacement transaction underpriced".into());
         assert!(is_nonce_conflict(&err));
     }
 
@@ -2220,7 +2251,8 @@ mod tests {
             let resp_str = resp_body.to_string();
             let http_resp = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
-                resp_str.len(), resp_str,
+                resp_str.len(),
+                resp_str,
             );
             let _ = stream.write_all(http_resp.as_bytes()).await;
         });
@@ -2257,7 +2289,8 @@ mod tests {
                 let resp_str = resp_body.to_string();
                 let http_resp = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
-                    resp_str.len(), resp_str,
+                    resp_str.len(),
+                    resp_str,
                 );
                 let _ = stream.write_all(http_resp.as_bytes()).await;
             }

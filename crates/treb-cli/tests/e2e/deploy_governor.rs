@@ -8,9 +8,7 @@
 //! This is **blocking** — call via `tokio::task::spawn_blocking` from async test code.
 
 use alloy_primitives::Address;
-use std::path::Path;
-use std::process::Command;
-use std::str::FromStr;
+use std::{path::Path, process::Command, str::FromStr};
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -85,10 +83,8 @@ pub fn verify_governor_via_eth_call(rpc_url: &str, gov: &DeployedGovernor) {
     assert_eq!(delay, gov.timelock_delay, "timelock delay mismatch");
 
     // Verify governor has PROPOSER_ROLE on timelock
-    let has_role_sig = format!(
-        "hasRole(bytes32,address)(bool) {} {}",
-        PROPOSER_ROLE, gov.governor_address
-    );
+    let has_role_sig =
+        format!("hasRole(bytes32,address)(bool) {} {}", PROPOSER_ROLE, gov.governor_address);
     let has_role_output = cast_call(rpc_url, &gov.timelock_address, &has_role_sig);
     assert!(
         has_role_output.trim() == "true",
@@ -117,9 +113,8 @@ fn parse_broadcast_artifacts(
     let json: serde_json::Value =
         serde_json::from_str(&data).unwrap_or_else(|e| panic!("invalid broadcast JSON: {e}"));
 
-    let transactions = json["transactions"]
-        .as_array()
-        .expect("broadcast JSON must have transactions array");
+    let transactions =
+        json["transactions"].as_array().expect("broadcast JSON must have transactions array");
 
     let mut token = None;
     let mut timelock = None;
@@ -180,17 +175,11 @@ fn cast_call(rpc_url: &str, to: &Address, sig: &str) -> String {
     cmd_args.extend(sig.split_whitespace());
     cmd_args.extend(["--rpc-url", rpc_url]);
 
-    let output = Command::new("cast")
-        .args(&cmd_args)
-        .output()
-        .expect("failed to execute cast");
+    let output = Command::new("cast").args(&cmd_args).output().expect("failed to execute cast");
     assert!(
         output.status.success(),
         "cast call {to} {sig} failed:\nstderr: {}",
         String::from_utf8_lossy(&output.stderr),
     );
-    String::from_utf8(output.stdout)
-        .unwrap()
-        .trim()
-        .to_string()
+    String::from_utf8(output.stdout).unwrap().trim().to_string()
 }

@@ -214,12 +214,8 @@ impl Normalizer for SpinnerNormalizer {
         // These appear after ANSI stripping as e.g. "⣾ Simulating", "⣽ Broadcasting",
         // or "⣾ Restarting fork...".  Match any text between consecutive braille chars
         // so new spinner messages don't require updating this regex.
-        let braille_spinner =
-            Regex::new(r"(?:[⣾⣽⣻⢿⡿⣟⣯⣷][^⣾⣽⣻⢿⡿⣟⣯⣷\n]*)+")
-                .unwrap();
-        braille_spinner
-            .replace_all(&result, "[spinner]\n")
-            .into_owned()
+        let braille_spinner = Regex::new(r"(?:[⣾⣽⣻⢿⡿⣟⣯⣷][^⣾⣽⣻⢿⡿⣟⣯⣷\n]*)+").unwrap();
+        braille_spinner.replace_all(&result, "[spinner]\n").into_owned()
     }
 }
 

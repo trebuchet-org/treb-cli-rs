@@ -4,7 +4,10 @@
 //! deployment extraction, proxy detection, hydration, duplicate detection,
 //! and registry recording into a single `execute` call.
 
-use std::{collections::HashMap, path::{Path, PathBuf}};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use alloy_primitives::{Address, B256, U256};
 use alloy_signer::Signer;
@@ -122,7 +125,8 @@ impl RunPipeline {
         };
 
         // Derive deployer sender category from resolved_senders for broadcast gating.
-        let deployer_is_safe = self.context.resolved_senders.get("deployer").is_some_and(|s| s.is_safe());
+        let deployer_is_safe =
+            self.context.resolved_senders.get("deployer").is_some_and(|s| s.is_safe());
         let has_governor_sender = self.context.resolved_senders.values().any(|s| s.is_governor());
 
         // 1. Compile project for artifact index
@@ -146,8 +150,7 @@ impl RunPipeline {
 
         let script_args = script_config.into_script_args()?;
         // All sender types can broadcast — routing handles Safe/Governor.
-        let wants_broadcast = script_args.broadcast
-            && self.context.config.broadcast;
+        let wants_broadcast = script_args.broadcast && self.context.config.broadcast;
 
         // Run forge: preprocess → compile → link → prepare → execute
         report(BroadcastPhase::Executing);
@@ -206,10 +209,8 @@ impl RunPipeline {
         let safe_transactions = sim.safe_transactions;
         let execution_traces = sim.execution_traces;
         let setup_traces = sim.setup_traces;
-        let hydrated_deployments: Vec<_> = sim.recorded_deployments
-            .into_iter()
-            .map(|rd| rd.deployment)
-            .collect();
+        let hydrated_deployments: Vec<_> =
+            sim.recorded_deployments.into_iter().map(|rd| rd.deployment).collect();
         let mut recorded_transactions = sim.recorded_transactions;
 
         // 4. Broadcast: hook → confirm → route by sender type
@@ -218,16 +219,14 @@ impl RunPipeline {
         let mut routing_queued_executions = Vec::new();
 
         let broadcast_confirmed = if wants_broadcast && !recorded_transactions.is_empty() {
-            let confirmed = self
-                .broadcast_hook
-                .is_none_or(|hook| hook(&recorded_transactions));
+            let confirmed = self.broadcast_hook.is_none_or(|hook| hook(&recorded_transactions));
 
             if confirmed {
                 if let Some(btxs) = &sim.broadcastable_transactions {
-                    let rpc_url = self.context.config.rpc_url.as_deref()
-                        .ok_or_else(|| TrebError::Forge(
-                            "RPC URL required for broadcast".into(),
-                        ))?;
+                    let rpc_url =
+                        self.context.config.rpc_url.as_deref().ok_or_else(|| {
+                            TrebError::Forge("RPC URL required for broadcast".into())
+                        })?;
 
                     // Build pre-routing sequence and ensure directories exist
                     // before broadcast so checkpoints can be saved incrementally.
@@ -262,8 +261,11 @@ impl RunPipeline {
                         safe_threshold_cache: std::collections::HashMap::new(),
                     };
                     let run_results = if let Some(ref resume) = self.resume_state {
-                        super::routing::route_all_with_resume(btxs, &mut ctx, resume).await?
-                            .into_iter().map(|(run, result)| (run, result, None)).collect()
+                        super::routing::route_all_with_resume(btxs, &mut ctx, resume)
+                            .await?
+                            .into_iter()
+                            .map(|(run, result)| (run, result, None))
+                            .collect()
                     } else {
                         super::routing::route_all_with_queued(btxs, &mut ctx).await?
                     };
@@ -293,10 +295,8 @@ impl RunPipeline {
         };
 
         // Merge routing-produced safe transactions with event-hydrated ones
-        let all_safe_transactions: Vec<_> = safe_transactions
-            .into_iter()
-            .chain(routing_safe_transactions)
-            .collect();
+        let all_safe_transactions: Vec<_> =
+            safe_transactions.into_iter().chain(routing_safe_transactions).collect();
 
         // 13. Duplicate detection
         let resolved = resolve_duplicates(hydrated_deployments, registry, DuplicateStrategy::Skip)?;
@@ -366,8 +366,10 @@ impl RunPipeline {
 // Routing → registry record builders
 // ---------------------------------------------------------------------------
 
-use super::routing::{RunResult, TransactionRun};
-use super::types::ProposedResult;
+use super::{
+    routing::{RunResult, TransactionRun},
+    types::ProposedResult,
+};
 use treb_core::types::safe_transaction::SafeTxData;
 
 /// Build `ProposedResult`, `SafeTransaction`, and `GovernorProposal` records from routing results.
@@ -379,7 +381,11 @@ fn build_proposed_records_from_routing(
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
     context: &PipelineContext,
     recorded_transactions: &[RecordedTransaction],
-) -> (Vec<ProposedResult>, Vec<treb_core::types::SafeTransaction>, Vec<treb_core::types::GovernorProposal>) {
+) -> (
+    Vec<ProposedResult>,
+    Vec<treb_core::types::SafeTransaction>,
+    Vec<treb_core::types::GovernorProposal>,
+) {
     let now = chrono::Utc::now();
     let mut proposed = Vec::new();
     let mut safe_txs = Vec::new();
@@ -396,12 +402,16 @@ fn build_proposed_records_from_routing(
                 });
 
                 // Build SafeTransaction record for registry
-                let tx_ids: Vec<String> = run.tx_indices.iter()
+                let tx_ids: Vec<String> = run
+                    .tx_indices
+                    .iter()
                     .filter_map(|&idx| recorded_transactions.get(idx))
                     .map(|rt| rt.transaction.id.clone())
                     .collect();
 
-                let safe_tx_data: Vec<SafeTxData> = run.tx_indices.iter()
+                let safe_tx_data: Vec<SafeTxData> = run
+                    .tx_indices
+                    .iter()
                     .filter_map(|&idx| recorded_transactions.get(idx))
                     .map(|rt| {
                         let op = rt.transaction.operations.first();
@@ -415,7 +425,8 @@ fn build_proposed_records_from_routing(
                     .collect();
 
                 // Determine the signer address from resolved senders
-                let proposed_by = context.resolved_senders
+                let proposed_by = context
+                    .resolved_senders
                     .get(&run.sender_role)
                     .and_then(|s| s.sub_signer().wallet_signer())
                     .map(|ws| {
@@ -448,35 +459,49 @@ fn build_proposed_records_from_routing(
                 });
 
                 // Extract actions from the broadcastable transactions
-                let actions: Vec<treb_core::types::GovernorAction> = run.tx_indices.iter()
+                let actions: Vec<treb_core::types::GovernorAction> = run
+                    .tx_indices
+                    .iter()
                     .filter_map(|&idx| btxs.get(idx))
                     .map(|btx| {
-                        let to = btx.transaction.to()
+                        let to = btx
+                            .transaction
+                            .to()
                             .and_then(|kind| match kind {
-                                alloy_primitives::TxKind::Call(addr) => Some(format!("{:#x}", addr)),
+                                alloy_primitives::TxKind::Call(addr) => {
+                                    Some(format!("{:#x}", addr))
+                                }
                                 alloy_primitives::TxKind::Create => None,
                             })
                             .unwrap_or_default();
                         let value = format!("{}", btx.transaction.value().unwrap_or_default());
-                        let calldata = btx.transaction.input()
+                        let calldata = btx
+                            .transaction
+                            .input()
                             .map(|b| format!("0x{}", alloy_primitives::hex::encode(b)))
                             .unwrap_or_default();
                         treb_core::types::GovernorAction { target: to, value, calldata }
                     })
                     .collect();
 
-                let tx_ids: Vec<String> = run.tx_indices.iter()
+                let tx_ids: Vec<String> = run
+                    .tx_indices
+                    .iter()
                     .filter_map(|&idx| recorded_transactions.get(idx))
                     .map(|rt| rt.transaction.id.clone())
                     .collect();
 
                 // Determine timelock from resolved sender
-                let timelock_addr = context.resolved_senders.get(&run.sender_role)
+                let timelock_addr = context
+                    .resolved_senders
+                    .get(&run.sender_role)
                     .and_then(|s| s.timelock_address())
                     .map(|a| a.to_checksum(None))
                     .unwrap_or_default();
 
-                let proposer_addr = context.resolved_senders.get(&run.sender_role)
+                let proposer_addr = context
+                    .resolved_senders
+                    .get(&run.sender_role)
                     .map(|s| s.sub_signer().sender_address().to_checksum(None))
                     .unwrap_or_default();
 
@@ -515,10 +540,8 @@ fn update_transaction_statuses_from_routing(
     _btxs: &foundry_cheatcodes::BroadcastableTransactions,
 ) {
     for (run, result) in run_results {
-        let is_proposed = matches!(
-            result,
-            RunResult::SafeProposed { .. } | RunResult::GovernorProposed { .. }
-        );
+        let is_proposed =
+            matches!(result, RunResult::SafeProposed { .. } | RunResult::GovernorProposed { .. });
         if is_proposed {
             // Mark all transactions in this run as Queued
             for &tx_idx in &run.tx_indices {
@@ -614,7 +637,12 @@ pub fn apply_routing_results(
         rt.transaction.broadcast_file = Some(rel_path.clone());
     }
 
-    Ok(RoutingOutcome { proposed_results, safe_transactions, governor_proposals, queued_executions: Vec::new() })
+    Ok(RoutingOutcome {
+        proposed_results,
+        safe_transactions,
+        governor_proposals,
+        queued_executions: Vec::new(),
+    })
 }
 
 /// Apply routing results with queued execution items.
@@ -624,7 +652,11 @@ pub fn apply_routing_results(
 /// `route_all_with_queued` and passes the queued items through.
 #[allow(clippy::too_many_arguments)]
 pub fn apply_routing_results_with_queued(
-    run_results_with_queued: &[(TransactionRun, RunResult, Option<super::routing::QueuedExecution>)],
+    run_results_with_queued: &[(
+        TransactionRun,
+        RunResult,
+        Option<super::routing::QueuedExecution>,
+    )],
     btxs: &foundry_cheatcodes::BroadcastableTransactions,
     recorded_transactions: &mut [RecordedTransaction],
     context: &PipelineContext,
@@ -634,26 +666,33 @@ pub fn apply_routing_results_with_queued(
     pre_built_sequence: Option<forge_script_sequence::ScriptSequence>,
 ) -> Result<RoutingOutcome, TrebError> {
     // Extract (run, result) pairs for the existing functions
-    let run_results: Vec<(TransactionRun, RunResult)> = run_results_with_queued.iter()
-        .map(|(run, result, _)| (
-            TransactionRun {
-                sender_role: run.sender_role.clone(),
-                category: run.category,
-                sender_address: run.sender_address,
-                tx_indices: run.tx_indices.clone(),
-            },
-            result.clone(),
-        ))
+    let run_results: Vec<(TransactionRun, RunResult)> = run_results_with_queued
+        .iter()
+        .map(|(run, result, _)| {
+            (
+                TransactionRun {
+                    sender_role: run.sender_role.clone(),
+                    category: run.category,
+                    sender_address: run.sender_address,
+                    tx_indices: run.tx_indices.clone(),
+                },
+                result.clone(),
+            )
+        })
         .collect();
 
     // Collect queued items
-    let queued_executions: Vec<super::routing::QueuedExecution> = run_results_with_queued.iter()
-        .filter_map(|(_, _, q)| q.clone())
-        .collect();
+    let queued_executions: Vec<super::routing::QueuedExecution> =
+        run_results_with_queued.iter().filter_map(|(_, _, q)| q.clone()).collect();
 
     let mut outcome = apply_routing_results(
-        &run_results, btxs, recorded_transactions, context,
-        script_path, chain_id, script_sig,
+        &run_results,
+        btxs,
+        recorded_transactions,
+        context,
+        script_path,
+        chain_id,
+        script_sig,
         pre_built_sequence,
     )?;
     outcome.queued_executions = queued_executions;
@@ -685,7 +724,6 @@ pub(super) async fn render_traces_for_verbosity(
         decoder.identify(&arena.arena, &mut identifier);
     }
 
-
     let mut execution_parts = Vec::new();
     let mut setup_parts = Vec::new();
 
@@ -710,10 +748,8 @@ pub(super) async fn render_traces_for_verbosity(
         }
     }
 
-    let execution_traces =
-        (!execution_parts.is_empty()).then(|| execution_parts.join("\n"));
-    let setup_traces =
-        (!setup_parts.is_empty()).then(|| setup_parts.join("\n"));
+    let execution_traces = (!execution_parts.is_empty()).then(|| execution_parts.join("\n"));
+    let setup_traces = (!setup_parts.is_empty()).then(|| setup_parts.join("\n"));
 
     (execution_traces, setup_traces)
 }
@@ -732,9 +768,7 @@ pub(super) fn strip_internal_events(rendered: &str) -> String {
     ];
     rendered
         .lines()
-        .filter(|line| {
-            !INTERNAL_EVENTS.iter().any(|ev| line.contains(&format!("emit {ev}")))
-        })
+        .filter(|line| !INTERNAL_EVENTS.iter().any(|ev| line.contains(&format!("emit {ev}"))))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -761,7 +795,9 @@ pub(super) fn extract_transaction_simulated(events: &[ParsedEvent]) -> Vec<Trans
 }
 
 /// Extract `SafeTransactionQueued` events from parsed event list.
-pub(super) fn extract_safe_transaction_queued(events: &[ParsedEvent]) -> Vec<SafeTransactionQueued> {
+pub(super) fn extract_safe_transaction_queued(
+    events: &[ParsedEvent],
+) -> Vec<SafeTransactionQueued> {
     events
         .iter()
         .filter_map(|e| match e {
@@ -775,7 +811,9 @@ pub(super) fn extract_safe_transaction_queued(events: &[ParsedEvent]) -> Vec<Saf
 }
 
 /// Extract `GovernorProposalCreated` events from parsed event list.
-pub(super) fn extract_governor_proposal_created(events: &[ParsedEvent]) -> Vec<GovernorProposalCreated> {
+pub(super) fn extract_governor_proposal_created(
+    events: &[ParsedEvent],
+) -> Vec<GovernorProposalCreated> {
     events
         .iter()
         .filter_map(|e| match e {
@@ -832,7 +870,12 @@ pub(super) fn build_recorded_transaction_metadata(
         })
         .collect::<Vec<_>>();
 
-    collect_recorded_transaction_metadata(tx_events, &transaction_deployments, &mut pending_traces, sender_id_labels)
+    collect_recorded_transaction_metadata(
+        tx_events,
+        &transaction_deployments,
+        &mut pending_traces,
+        sender_id_labels,
+    )
 }
 
 fn build_transaction_deployment_index(
@@ -872,10 +915,9 @@ fn collect_recorded_transaction_metadata(
 
             // Resolve sender name by senderId (keccak of role name) for
             // accurate identification when multiple senders share an address.
-            let sender_name = sender_id_labels
-                .get(&sim_tx.senderId)
-                .cloned()
-                .or_else(|| (!sim_tx.senderId.is_zero()).then(|| format!("{:#x}", sim_tx.senderId)));
+            let sender_name = sender_id_labels.get(&sim_tx.senderId).cloned().or_else(|| {
+                (!sim_tx.senderId.is_zero()).then(|| format!("{:#x}", sim_tx.senderId))
+            });
 
             (
                 tx_id,
@@ -916,11 +958,8 @@ pub(super) fn build_v2_recorded_transaction_metadata(
         })
         .collect();
 
-    let addr_to_role: HashMap<Address, String> = context
-        .sender_labels
-        .iter()
-        .map(|(addr, role)| (*addr, role.clone()))
-        .collect();
+    let addr_to_role: HashMap<Address, String> =
+        context.sender_labels.iter().map(|(addr, role)| (*addr, role.clone())).collect();
 
     btxs.iter()
         .enumerate()
@@ -1072,9 +1111,7 @@ pub(super) fn collapse_decoded_bytecode_args(
         // the raw data as creation code and inject a DecodedCallData so
         // the renderer shows a human-readable form instead.
         if decoded.call_data.is_none() && node.trace.data.len() >= BYTECODE_COLLAPSE_THRESHOLD {
-            if let Some(replacement) =
-                try_collapse_raw_data(&node.trace.data, artifact_index)
-            {
+            if let Some(replacement) = try_collapse_raw_data(&node.trace.data, artifact_index) {
                 decoded.call_data = Some(replacement);
             }
         }
@@ -1084,9 +1121,7 @@ pub(super) fn collapse_decoded_bytecode_args(
         // showing the first 4 bytes as a fake selector.
         if let Some(ref mut call_data) = decoded.call_data {
             if !call_data.signature.contains('(') && !call_data.args.is_empty() {
-                if let Some(replacement) =
-                    try_collapse_raw_create(call_data, artifact_index)
-                {
+                if let Some(replacement) = try_collapse_raw_create(call_data, artifact_index) {
                     *call_data = replacement;
                     continue;
                 }
@@ -1191,7 +1226,6 @@ pub(super) fn collapse_decoded_bytecode_args(
         *s = format!("0x{prefix}…{suffix} ({byte_count} bytes)");
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // Broadcast receipt application
@@ -1337,8 +1371,8 @@ async fn propose_safe_transactions(
 // ===========================================================================
 
 use super::types::{
-    ScriptEntry, ScriptPhase, ScriptProgress, ScriptResult,
-    SessionPhase, SessionProgressCallback, SessionState,
+    ScriptEntry, ScriptPhase, ScriptProgress, ScriptResult, SessionPhase, SessionProgressCallback,
+    SessionState,
 };
 
 /// Unified pipeline that handles both single-script (`treb run`) and
@@ -1348,7 +1382,8 @@ use super::types::{
 /// the returned [`SimulatedSession`] before optionally calling
 /// [`broadcast_all()`] to route transactions and write to the registry.
 /// Callback fired after each routing action completes during broadcast.
-pub type OnActionComplete = Box<dyn Fn(&super::routing::TransactionRun, &super::routing::RunResult) + Send + Sync>;
+pub type OnActionComplete =
+    Box<dyn Fn(&super::routing::TransactionRun, &super::routing::RunResult) + Send + Sync>;
 
 pub struct SessionPipeline {
     scripts: Vec<ScriptEntry>,
@@ -1365,12 +1400,7 @@ impl Default for SessionPipeline {
 
 impl SessionPipeline {
     pub fn new() -> Self {
-        Self {
-            scripts: Vec::new(),
-            progress: None,
-            resume: false,
-            on_action_complete: None,
-        }
+        Self { scripts: Vec::new(), progress: None, resume: false, on_action_complete: None }
     }
 
     /// Add a script to the execution queue.
@@ -1420,15 +1450,12 @@ impl SessionPipeline {
         // Phase 1: Compile (once, shared across all scripts)
         // ------------------------------------------------------------------
         report(&SessionPhase::Compiling);
-        let project_root = self
-            .scripts
-            .first()
-            .map(|e| e.context.project_root.clone())
-            .unwrap_or_default();
-        let foundry_config = load_foundry_config(&project_root)
-            .map_err(|e| (Vec::new(), String::new(), e))?;
-        let compilation = compile_project(&foundry_config)
-            .map_err(|e| (Vec::new(), String::new(), e))?;
+        let project_root =
+            self.scripts.first().map(|e| e.context.project_root.clone()).unwrap_or_default();
+        let foundry_config =
+            load_foundry_config(&project_root).map_err(|e| (Vec::new(), String::new(), e))?;
+        let compilation =
+            compile_project(&foundry_config).map_err(|e| (Vec::new(), String::new(), e))?;
         let artifact_index = ArtifactIndex::from_compile_output(compilation);
 
         // ------------------------------------------------------------------
@@ -1442,10 +1469,8 @@ impl SessionPipeline {
 
         let ephemeral_anvil = if is_multi {
             report(&SessionPhase::SpawningAnvil);
-            let upstream_url = self
-                .scripts
-                .first()
-                .and_then(|e| e.config.rpc_url_ref().map(|s| s.to_string()));
+            let upstream_url =
+                self.scripts.first().and_then(|e| e.config.rpc_url_ref().map(|s| s.to_string()));
 
             if let Some(ref url) = upstream_url {
                 let resolved = if url.starts_with("http://") || url.starts_with("https://") {
@@ -1503,12 +1528,7 @@ impl SessionPipeline {
 
         let script_phases: HashMap<String, ScriptPhase> = session_state
             .as_ref()
-            .map(|ss| {
-                ss.scripts
-                    .iter()
-                    .map(|sp| (sp.name.clone(), sp.phase.clone()))
-                    .collect()
-            })
+            .map(|ss| ss.scripts.iter().map(|sp| (sp.name.clone(), sp.phase.clone())).collect())
             .unwrap_or_default();
 
         // ------------------------------------------------------------------
@@ -1517,10 +1537,8 @@ impl SessionPipeline {
         let mut simulated: Vec<SimulatedScript> = Vec::new();
         let mut skipped_results: Vec<ScriptResult> = Vec::new();
 
-        let config_hash = session_state
-            .as_ref()
-            .map(|ss| ss.config_hash.clone())
-            .unwrap_or_default();
+        let config_hash =
+            session_state.as_ref().map(|ss| ss.config_hash.clone()).unwrap_or_default();
         let mut state_scripts: Vec<ScriptProgress> = Vec::new();
 
         for entry in self.scripts {
@@ -1565,7 +1583,8 @@ impl SessionPipeline {
 
             report(&SessionPhase::Simulating(name.clone()));
 
-            let deployer_is_safe = context.resolved_senders.get("deployer").is_some_and(|s| s.is_safe());
+            let deployer_is_safe =
+                context.resolved_senders.get("deployer").is_some_and(|s| s.is_safe());
 
             let script_args = match config.into_script_args() {
                 Ok(args) => args,
@@ -1590,10 +1609,9 @@ impl SessionPipeline {
                     .link()
                     .await
                     .map_err(|e| TrebError::Forge(format!("forge linking failed: {e}")))?;
-                let prepared = linked
-                    .prepare_execution()
-                    .await
-                    .map_err(|e| TrebError::Forge(format!("forge execution preparation failed: {e}")))?;
+                let prepared = linked.prepare_execution().await.map_err(|e| {
+                    TrebError::Forge(format!("forge execution preparation failed: {e}"))
+                })?;
                 prepared
                     .execute()
                     .await
@@ -1698,17 +1716,12 @@ impl SessionPipeline {
                 transactions: pipeline_result.transactions.len(),
             });
 
-            let _ = super::broadcast_writer::save_session_state(&treb_dir, &SessionState {
-                config_hash: config_hash.clone(),
-                scripts: state_scripts.clone(),
-            });
+            let _ = super::broadcast_writer::save_session_state(
+                &treb_dir,
+                &SessionState { config_hash: config_hash.clone(), scripts: state_scripts.clone() },
+            );
 
-            simulated.push(SimulatedScript {
-                name,
-                result: pipeline_result,
-                btxs,
-                context,
-            });
+            simulated.push(SimulatedScript { name, result: pipeline_result, btxs, context });
         }
 
         // Multi-script: restore registry to pre-session state
@@ -1794,8 +1807,10 @@ impl SimulatedSession {
 
         let mut results: Vec<ScriptResult> = self.skipped_results;
         // Persists across components so sequential Safe proposals get incrementing nonces
-        let mut safe_nonce_offsets: std::collections::HashMap<alloy_primitives::Address, u64> = std::collections::HashMap::new();
-        let mut safe_threshold_cache: std::collections::HashMap<alloy_primitives::Address, u64> = std::collections::HashMap::new();
+        let mut safe_nonce_offsets: std::collections::HashMap<alloy_primitives::Address, u64> =
+            std::collections::HashMap::new();
+        let mut safe_threshold_cache: std::collections::HashMap<alloy_primitives::Address, u64> =
+            std::collections::HashMap::new();
 
         // Merge mode: defer Safe proposals across components and combine
         // adjacent proposals targeting the same Safe address.
@@ -1819,13 +1834,18 @@ impl SimulatedSession {
                                 result,
                                 broadcastable_transactions: Some(btxs.clone()),
                             });
-                            if let Some(sp) = self.state_scripts.iter_mut().find(|sp| sp.name == name) {
+                            if let Some(sp) =
+                                self.state_scripts.iter_mut().find(|sp| sp.name == name)
+                            {
                                 sp.phase = ScriptPhase::Failed { phase: "broadcast".into() };
                             }
-                            let _ = super::broadcast_writer::save_session_state(&self.treb_dir, &SessionState {
-                                config_hash: self.config_hash.clone(),
-                                scripts: self.state_scripts.clone(),
-                            });
+                            let _ = super::broadcast_writer::save_session_state(
+                                &self.treb_dir,
+                                &SessionState {
+                                    config_hash: self.config_hash.clone(),
+                                    scripts: self.state_scripts.clone(),
+                                },
+                            );
                             return Err((results, name, e));
                         }
                     };
@@ -1837,9 +1857,14 @@ impl SimulatedSession {
                         for (role, sender) in &context.resolved_senders {
                             if sender.is_safe() {
                                 let key = crate::sender::extract_signing_key(
-                                    role, sender, &context.sender_configs,
-                                ).map(|s| s.to_string());
-                                let proposed_by = sender.sub_signer().wallet_signer()
+                                    role,
+                                    sender,
+                                    &context.sender_configs,
+                                )
+                                .map(|s| s.to_string());
+                                let proposed_by = sender
+                                    .sub_signer()
+                                    .wallet_signer()
                                     .map(|ws| Signer::address(ws).to_checksum(None))
                                     .unwrap_or_default();
                                 if let Some(key) = key {
@@ -1859,7 +1884,9 @@ impl SimulatedSession {
                         chain_id: context.config.chain_id,
                         is_fork: context.config.is_fork,
                         quiet: context.config.quiet,
-                        on_run_complete: self.on_action_complete.as_ref()
+                        on_run_complete: self
+                            .on_action_complete
+                            .as_ref()
                             .map(|cb| &**cb as &super::routing::OnRunComplete),
                         resolved_senders: &context.resolved_senders,
                         sender_labels: &context.sender_labels,
@@ -1877,17 +1904,22 @@ impl SimulatedSession {
                             context.config.chain_id,
                             &context.config.script_sig,
                             rpc_url,
-                        ).await;
+                        )
+                        .await;
                         if let Some(ref rs) = resume_state {
                             // Resume uses the old path (no queued items)
-                            super::routing::route_all_with_resume(btxs, &mut route_ctx, rs).await
-                                .map(|r| r.into_iter().map(|(run, result)| (run, result, None)).collect())
+                            super::routing::route_all_with_resume(btxs, &mut route_ctx, rs)
+                                .await
+                                .map(|r| {
+                                    r.into_iter().map(|(run, result)| (run, result, None)).collect()
+                                })
                         } else {
                             super::routing::route_all_with_queued(btxs, &mut route_ctx).await
                         }
                     } else if should_merge {
                         route_with_deferred_proposals(
-                            btxs, &mut route_ctx,
+                            btxs,
+                            &mut route_ctx,
                             &result.transactions,
                             &mut pending_proposals,
                             &name,
@@ -1895,7 +1927,8 @@ impl SimulatedSession {
                             &context.config.script_path,
                             context.config.chain_id,
                             &context.config.script_sig,
-                        ).await
+                        )
+                        .await
                     } else {
                         super::routing::route_all_with_queued(btxs, &mut route_ctx).await
                     };
@@ -1937,11 +1970,8 @@ impl SimulatedSession {
                             }
 
                             // Duplicate detection
-                            let hydrated_deployments: Vec<_> = result
-                                .deployments
-                                .drain(..)
-                                .map(|rd| rd.deployment)
-                                .collect();
+                            let hydrated_deployments: Vec<_> =
+                                result.deployments.drain(..).map(|rd| rd.deployment).collect();
 
                             let resolved = match resolve_duplicates(
                                 hydrated_deployments,
@@ -1994,13 +2024,18 @@ impl SimulatedSession {
                                 result,
                                 broadcastable_transactions: Some(btxs.clone()),
                             });
-                            if let Some(sp) = self.state_scripts.iter_mut().find(|sp| sp.name == name) {
+                            if let Some(sp) =
+                                self.state_scripts.iter_mut().find(|sp| sp.name == name)
+                            {
                                 sp.phase = ScriptPhase::Failed { phase: "broadcast".into() };
                             }
-                            let _ = super::broadcast_writer::save_session_state(&self.treb_dir, &SessionState {
-                                config_hash: self.config_hash.clone(),
-                                scripts: self.state_scripts.clone(),
-                            });
+                            let _ = super::broadcast_writer::save_session_state(
+                                &self.treb_dir,
+                                &SessionState {
+                                    config_hash: self.config_hash.clone(),
+                                    scripts: self.state_scripts.clone(),
+                                },
+                            );
                             return Err((results, name, e));
                         }
                     }
@@ -2011,16 +2046,15 @@ impl SimulatedSession {
             if let Some(sp) = self.state_scripts.iter_mut().find(|sp| sp.name == name) {
                 sp.phase = ScriptPhase::Broadcast;
             }
-            let _ = super::broadcast_writer::save_session_state(&self.treb_dir, &SessionState {
-                config_hash: self.config_hash.clone(),
-                scripts: self.state_scripts.clone(),
-            });
+            let _ = super::broadcast_writer::save_session_state(
+                &self.treb_dir,
+                &SessionState {
+                    config_hash: self.config_hash.clone(),
+                    scripts: self.state_scripts.clone(),
+                },
+            );
 
-            results.push(ScriptResult {
-                name,
-                result,
-                broadcastable_transactions: btxs,
-            });
+            results.push(ScriptResult { name, result, broadcastable_transactions: btxs });
         }
 
         // Phase B+C: Merge adjacent Safe proposals and submit
@@ -2114,9 +2148,7 @@ fn merge_adjacent_safe_proposals(pending: Vec<PendingSafeProposal>) -> Vec<Merge
     let mut merged: Vec<MergedSafeProposal> = Vec::new();
 
     for p in pending {
-        let should_extend = merged
-            .last()
-            .is_some_and(|last| last.safe_address == p.safe_address);
+        let should_extend = merged.last().is_some_and(|last| last.safe_address == p.safe_address);
 
         if should_extend {
             let last = merged.last_mut().unwrap();
@@ -2176,14 +2208,23 @@ async fn route_with_deferred_proposals(
                 ..
             } => {
                 let safe_tx_hash = super::routing::compute_safe_tx_hash_for_ops(
-                    operations, *safe_address, *nonce, *proposal_chain_id,
+                    operations,
+                    *safe_address,
+                    *nonce,
+                    *proposal_chain_id,
                 );
 
-                let tx_ids: Vec<String> = planned.run.tx_indices.iter()
+                let tx_ids: Vec<String> = planned
+                    .run
+                    .tx_indices
+                    .iter()
                     .filter_map(|&i| recorded_txs.get(i))
                     .map(|rt| rt.transaction.id.clone())
                     .collect();
-                let safe_tx_data_items: Vec<SafeTxData> = planned.run.tx_indices.iter()
+                let safe_tx_data_items: Vec<SafeTxData> = planned
+                    .run
+                    .tx_indices
+                    .iter()
                     .filter_map(|&i| recorded_txs.get(i))
                     .map(|rt| {
                         let op = rt.transaction.operations.first();
@@ -2197,7 +2238,10 @@ async fn route_with_deferred_proposals(
                     .collect();
 
                 let (_, bp, _) = super::broadcast_writer::compute_broadcast_paths(
-                    project_root, script_path, chain_id, script_sig,
+                    project_root,
+                    script_path,
+                    chain_id,
+                    script_sig,
                 );
 
                 pending.push(PendingSafeProposal {
@@ -2230,9 +2274,8 @@ async fn route_with_deferred_proposals(
                 results.push((run, run_result, planned.queued.clone()));
             }
             _ => {
-                let (run, run_result, queued) = super::routing::execute_single_action(
-                    planned, route_ctx, Some(btxs),
-                ).await?;
+                let (run, run_result, queued) =
+                    super::routing::execute_single_action(planned, route_ctx, Some(btxs)).await?;
                 if let Some(cb) = &route_ctx.on_run_complete {
                     cb(&run, &run_result);
                 }
@@ -2260,8 +2303,8 @@ async fn submit_merged_to_safe_service(
         (treb_safe::MULTI_SEND_ADDRESS, multi_send_data, 1u8)
     };
 
-    let key_bytes: B256 = signing_key_hex.parse()
-        .map_err(|e| TrebError::Safe(format!("invalid signer key: {e}")))?;
+    let key_bytes: B256 =
+        signing_key_hex.parse().map_err(|e| TrebError::Safe(format!("invalid signer key: {e}")))?;
     let wallet_signer = foundry_wallets::WalletSigner::from_private_key(&key_bytes)
         .map_err(|e| TrebError::Safe(format!("failed to create signer: {e}")))?;
     let signature = sign_safe_tx(&wallet_signer, safe_tx_hash).await?;
@@ -2284,13 +2327,13 @@ async fn submit_merged_to_safe_service(
         origin: Some("treb".into()),
     };
 
-    let safe_client = SafeServiceClient::new(merged.chain_id)
-        .ok_or_else(|| TrebError::Safe(format!(
-            "Safe Transaction Service not available for chain {}", merged.chain_id,
-        )))?;
-    safe_client
-        .propose_transaction(&format!("{}", merged.safe_address), &request)
-        .await?;
+    let safe_client = SafeServiceClient::new(merged.chain_id).ok_or_else(|| {
+        TrebError::Safe(format!(
+            "Safe Transaction Service not available for chain {}",
+            merged.chain_id,
+        ))
+    })?;
+    safe_client.propose_transaction(&format!("{}", merged.safe_address), &request).await?;
 
     Ok(())
 }
@@ -2328,13 +2371,13 @@ async fn submit_merged_proposals(
             let provider = crate::provider::build_http_provider(rpc)?;
             super::fork_routing::query_safe_nonce(&provider, proposal.safe_address).await?
         } else {
-            let client = SafeServiceClient::new(proposal.chain_id)
-                .ok_or_else(|| TrebError::Safe(format!(
-                    "Safe Transaction Service not available for chain {}", proposal.chain_id,
-                )))?;
-            client
-                .get_next_nonce(&format!("{}", proposal.safe_address))
-                .await?
+            let client = SafeServiceClient::new(proposal.chain_id).ok_or_else(|| {
+                TrebError::Safe(format!(
+                    "Safe Transaction Service not available for chain {}",
+                    proposal.chain_id,
+                ))
+            })?;
+            client.get_next_nonce(&format!("{}", proposal.safe_address)).await?
         };
         base_nonces.insert(proposal.safe_address, nonce);
     }
@@ -2351,21 +2394,19 @@ async fn submit_merged_proposals(
 
         // Compute merged hash
         let safe_tx_hash = super::routing::compute_safe_tx_hash_for_ops(
-            &proposal.operations, proposal.safe_address, nonce, proposal.chain_id,
+            &proposal.operations,
+            proposal.safe_address,
+            nonce,
+            proposal.chain_id,
         );
 
         // Look up signing key and proposed_by for this sender role
-        let (signing_key, proposed_by) = sender_info.sender_signing
-            .get(&proposal.sender_role)
-            .cloned()
-            .unwrap_or_default();
+        let (signing_key, proposed_by) =
+            sender_info.sender_signing.get(&proposal.sender_role).cloned().unwrap_or_default();
 
         // Submit to Safe TX Service (live mode only)
         if !sender_info.is_fork && !signing_key.is_empty() {
-            submit_merged_to_safe_service(
-                proposal, nonce, safe_tx_hash,
-                &signing_key,
-            ).await?;
+            submit_merged_to_safe_service(proposal, nonce, safe_tx_hash, &signing_key).await?;
         }
 
         // Write merged SafeTransaction to registry
@@ -2388,10 +2429,15 @@ async fn submit_merged_proposals(
 
         // Back-patch each component's deferred file with the merged hash/nonce
         let new_hash_str = format!("{:#x}", safe_tx_hash);
-        for (orig_hash, bp) in proposal.original_safe_tx_hashes.iter().zip(&proposal.broadcast_paths) {
+        for (orig_hash, bp) in
+            proposal.original_safe_tx_hashes.iter().zip(&proposal.broadcast_paths)
+        {
             let old_hash_str = format!("{:#x}", orig_hash);
             let _ = super::broadcast_writer::update_deferred_safe_proposal(
-                bp, &old_hash_str, &new_hash_str, nonce,
+                bp,
+                &old_hash_str,
+                &new_hash_str,
+                nonce,
             );
         }
 
@@ -2635,7 +2681,6 @@ mod tests {
         }];
 
         let mut pending = vec![PendingExecutionTrace {
-
             to,
             kind: CallKind::Call,
             data,
@@ -2645,8 +2690,12 @@ mod tests {
             node_idx: 0,
         }];
 
-        let metadata =
-            collect_recorded_transaction_metadata(&events, &HashMap::new(), &mut pending, &HashMap::new());
+        let metadata = collect_recorded_transaction_metadata(
+            &events,
+            &HashMap::new(),
+            &mut pending,
+            &HashMap::new(),
+        );
         let tx_meta = metadata
             .get("tx-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
             .expect("metadata should exist");
@@ -2702,7 +2751,6 @@ mod tests {
         ]);
         let mut pending = vec![
             PendingExecutionTrace {
-    
                 to: deployed_2,
                 kind: CallKind::Create,
                 data: vec![1, 2, 3, 4],
@@ -2712,7 +2760,6 @@ mod tests {
                 node_idx: 0,
             },
             PendingExecutionTrace {
-    
                 to: deployed_1,
                 kind: CallKind::Create,
                 data: vec![4, 3, 2, 1],
@@ -2723,7 +2770,12 @@ mod tests {
             },
         ];
 
-        let metadata = collect_recorded_transaction_metadata(&events, &deployments, &mut pending, &HashMap::new());
+        let metadata = collect_recorded_transaction_metadata(
+            &events,
+            &deployments,
+            &mut pending,
+            &HashMap::new(),
+        );
         let tx_meta_1 = metadata
             .get("tx-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
             .expect("metadata should exist");
@@ -2780,7 +2832,8 @@ mod tests {
             foundry_evm::traces::SparsedTraceArena { arena, ignored: Default::default() },
         )];
 
-        let metadata = build_recorded_transaction_metadata(&events, &deployments, &traces, &HashMap::new());
+        let metadata =
+            build_recorded_transaction_metadata(&events, &deployments, &traces, &HashMap::new());
         let tx_meta = metadata
             .get("tx-0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
             .expect("metadata should exist");

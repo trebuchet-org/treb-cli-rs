@@ -59,17 +59,15 @@ pub async fn query_proposal_state(
     let id = U256::from_str_radix(proposal_id, 10)
         .map_err(|e| TrebError::Governor(format!("invalid proposal ID '{proposal_id}': {e}")))?;
 
-    let gov_addr: Address = governor_address
-        .parse()
-        .map_err(|e| TrebError::Governor(format!("invalid governor address '{governor_address}': {e}")))?;
+    let gov_addr: Address = governor_address.parse().map_err(|e| {
+        TrebError::Governor(format!("invalid governor address '{governor_address}': {e}"))
+    })?;
 
     let provider = crate::provider::build_http_provider(rpc_url)
         .map_err(|e| TrebError::Governor(format!("failed to build RPC provider: {e}")))?;
 
     let calldata = build_state_calldata(&id);
-    let tx = TransactionRequest::default()
-        .to(gov_addr)
-        .input(TransactionInput::new(calldata));
+    let tx = TransactionRequest::default().to(gov_addr).input(TransactionInput::new(calldata));
 
     let result = provider.call(tx).await.map_err(|e| {
         let err_str = e.to_string();
@@ -220,13 +218,10 @@ mod tests {
             return;
         };
 
-        let status = query_proposal_state(
-            &rpc_url,
-            "0x0000000000000000000000000000000000000001",
-            "42",
-        )
-        .await
-        .unwrap();
+        let status =
+            query_proposal_state(&rpc_url, "0x0000000000000000000000000000000000000001", "42")
+                .await
+                .unwrap();
 
         assert_eq!(status, ProposalStatus::Queued);
     }
@@ -240,14 +235,11 @@ mod tests {
             return;
         };
 
-        let err = query_proposal_state(
-            &rpc_url,
-            "0x0000000000000000000000000000000000000001",
-            "42",
-        )
-        .await
-        .unwrap_err()
-        .to_string();
+        let err =
+            query_proposal_state(&rpc_url, "0x0000000000000000000000000000000000000001", "42")
+                .await
+                .unwrap_err()
+                .to_string();
 
         assert!(err.contains("RPC error calling Governor state()"), "got: {err}");
         assert!(err.contains("rate limit exceeded"), "got: {err}");
@@ -263,14 +255,11 @@ mod tests {
             return;
         };
 
-        let err = query_proposal_state(
-            &rpc_url,
-            "0x0000000000000000000000000000000000000001",
-            "42",
-        )
-        .await
-        .unwrap_err()
-        .to_string();
+        let err =
+            query_proposal_state(&rpc_url, "0x0000000000000000000000000000000000000001", "42")
+                .await
+                .unwrap_err()
+                .to_string();
 
         assert!(err.contains("Governor state() call reverted"), "got: {err}");
         assert!(err.contains("execution reverted"), "got: {err}");
@@ -285,14 +274,11 @@ mod tests {
             return;
         };
 
-        let err = query_proposal_state(
-            &rpc_url,
-            "0x0000000000000000000000000000000000000001",
-            "42",
-        )
-        .await
-        .unwrap_err()
-        .to_string();
+        let err =
+            query_proposal_state(&rpc_url, "0x0000000000000000000000000000000000000001", "42")
+                .await
+                .unwrap_err()
+                .to_string();
 
         // Alloy surfaces the JSON-RPC error from the response body;
         // the HTTP status code is not included in the error.

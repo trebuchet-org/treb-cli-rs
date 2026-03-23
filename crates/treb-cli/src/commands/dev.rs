@@ -147,9 +147,7 @@ pub enum AnvilSubcommand {
 
 pub async fn run(subcommand: DevSubcommand) -> anyhow::Result<()> {
     match subcommand {
-        DevSubcommand::FundSenders { network, amount } => {
-            run_fund_senders(network, amount).await
-        }
+        DevSubcommand::FundSenders { network, amount } => run_fund_senders(network, amount).await,
         DevSubcommand::Anvil { subcommand } => match subcommand {
             AnvilSubcommand::Start { network, port, fork_block_number, name } => {
                 run_anvil_start(network, port, fork_block_number, name).await
@@ -1166,10 +1164,9 @@ async fn run_fund_senders(network: Option<String>, amount: u64) -> anyhow::Resul
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("no network configured; pass --network"))?;
 
-        store
-            .get_active_fork(net)
-            .map(|entry| entry.rpc_url.clone())
-            .ok_or_else(|| anyhow::anyhow!("no active fork for network '{net}'; run `treb fork enter` first"))?
+        store.get_active_fork(net).map(|entry| entry.rpc_url.clone()).ok_or_else(|| {
+            anyhow::anyhow!("no active fork for network '{net}'; run `treb fork enter` first")
+        })?
     };
 
     // Resolve senders to get addresses
@@ -1675,7 +1672,11 @@ mod tests {
             chain_id: 31337,
             fork_url: String::new(), // no upstream fork for test
             fork_block_number: None,
-            snapshot_dir: treb_dir.join("priv/snapshots").join(network).to_string_lossy().into_owned(),
+            snapshot_dir: treb_dir
+                .join("priv/snapshots")
+                .join(network)
+                .to_string_lossy()
+                .into_owned(),
             started_at: now,
             env_var_name: String::new(),
             original_rpc: String::new(),

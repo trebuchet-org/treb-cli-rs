@@ -163,28 +163,16 @@ fn seed_drop_registry(project_root: &std::path::Path) {
     registry.insert_deployment(make_deployment("dep-3", 42220, "default", "tx-2")).unwrap();
 
     // Transactions — linked to deployments
-    registry
-        .insert_transaction(make_transaction("tx-1", 1, &["dep-1", "dep-2"]))
-        .unwrap();
-    registry
-        .insert_transaction(make_transaction("tx-2", 42220, &["dep-3"]))
-        .unwrap();
+    registry.insert_transaction(make_transaction("tx-1", 1, &["dep-1", "dep-2"])).unwrap();
+    registry.insert_transaction(make_transaction("tx-2", 42220, &["dep-3"])).unwrap();
 
     // Safe transactions — linked to transactions
-    registry
-        .insert_safe_transaction(make_safe_transaction("safe-tx-1", 1, &["tx-1"]))
-        .unwrap();
-    registry
-        .insert_safe_transaction(make_safe_transaction("safe-tx-2", 42220, &["tx-2"]))
-        .unwrap();
+    registry.insert_safe_transaction(make_safe_transaction("safe-tx-1", 1, &["tx-1"])).unwrap();
+    registry.insert_safe_transaction(make_safe_transaction("safe-tx-2", 42220, &["tx-2"])).unwrap();
 
     // Governor proposals — linked to transactions
-    registry
-        .insert_governor_proposal(make_governor_proposal("gov-1", 1, &["tx-1"]))
-        .unwrap();
-    registry
-        .insert_governor_proposal(make_governor_proposal("gov-2", 42220, &["tx-2"]))
-        .unwrap();
+    registry.insert_governor_proposal(make_governor_proposal("gov-1", 1, &["tx-1"])).unwrap();
+    registry.insert_governor_proposal(make_governor_proposal("gov-2", 42220, &["tx-2"])).unwrap();
 }
 
 /// Seed namespace-scoped drop fixtures with linked entries in two namespaces.

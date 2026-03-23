@@ -9,23 +9,18 @@
 mod e2e;
 
 use alloy_primitives::Address;
-use e2e::deploy_governor::deploy_governor;
-use e2e::deploy_safe::deploy_safe;
 use e2e::{
-    assert_registry_consistent, copy_dir_recursive, read_deployments, read_registry_file,
-    read_transactions, spawn_anvil_or_skip, treb,
+    assert_registry_consistent, copy_dir_recursive, deploy_governor::deploy_governor,
+    deploy_safe::deploy_safe, read_deployments, read_registry_file, read_transactions,
+    spawn_anvil_or_skip, treb,
 };
-use std::path::Path;
-use std::str::FromStr;
+use std::{path::Path, str::FromStr};
 
 /// Well-known Anvil account #0.
 const ACCOUNT_0: &str = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 
 fn fixture_project() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("project")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("project")
 }
 
 /// Write a treb.toml that configures both a wallet sender (deployer) and a
@@ -166,10 +161,7 @@ async fn mixed_wallet_safe_broadcast_on_fork() {
     // 8c. Verify all transactions have status EXECUTED
     let txs = read_transactions(tmp.path());
     let txs_map = txs.as_object().expect("transactions.json must be object");
-    assert!(
-        !txs_map.is_empty(),
-        "should have at least 1 transaction record"
-    );
+    assert!(!txs_map.is_empty(), "should have at least 1 transaction record");
     for (tx_id, tx) in txs_map {
         assert_eq!(
             tx["status"].as_str(),
@@ -179,22 +171,18 @@ async fn mixed_wallet_safe_broadcast_on_fork() {
     }
 
     // 8d. Verify wallet-sender transaction's sender matches the wallet address
-    let has_wallet_tx = txs_map.values().any(|tx| {
-        tx["sender"]
-            .as_str()
-            .is_some_and(|s| s.eq_ignore_ascii_case(ACCOUNT_0))
-    });
+    let has_wallet_tx = txs_map
+        .values()
+        .any(|tx| tx["sender"].as_str().is_some_and(|s| s.eq_ignore_ascii_case(ACCOUNT_0)));
     assert!(
         has_wallet_tx,
         "should have a transaction with sender matching the wallet address {ACCOUNT_0}"
     );
 
     // 8e. Verify safe-sender transaction's sender matches the Safe proxy address
-    let has_safe_tx = txs_map.values().any(|tx| {
-        tx["sender"]
-            .as_str()
-            .is_some_and(|s| s.eq_ignore_ascii_case(&safe_addr_str))
-    });
+    let has_safe_tx = txs_map
+        .values()
+        .any(|tx| tx["sender"].as_str().is_some_and(|s| s.eq_ignore_ascii_case(&safe_addr_str)));
     assert!(
         has_safe_tx,
         "should have a transaction with sender matching the Safe proxy address {safe_addr_str}"
@@ -256,11 +244,7 @@ async fn mixed_wallet_governor_on_fork() {
         .expect("deploy_governor should not panic");
 
     // 4. Write treb.toml with mixed wallet + Governor sender config
-    write_mixed_wallet_governor_treb_toml(
-        tmp.path(),
-        &gov.governor_address,
-        &gov.timelock_address,
-    );
+    write_mixed_wallet_governor_treb_toml(tmp.path(), &gov.governor_address, &gov.timelock_address);
 
     // 5. Run `treb init`
     let tmp_path = tmp.path().to_path_buf();
@@ -347,20 +331,14 @@ async fn mixed_wallet_governor_on_fork() {
     // 8c. Verify transactions
     let txs = read_transactions(tmp.path());
     let txs_map = txs.as_object().expect("transactions.json must be object");
-    assert!(
-        !txs_map.is_empty(),
-        "should have at least 1 transaction record"
-    );
+    assert!(!txs_map.is_empty(), "should have at least 1 transaction record");
 
     // 8d. Verify wallet-sender transaction is EXECUTED with correct sender
-    let wallet_tx = txs_map.values().find(|tx| {
-        tx["sender"]
-            .as_str()
-            .is_some_and(|s| s.eq_ignore_ascii_case(ACCOUNT_0))
-    });
-    let wallet_tx = wallet_tx.expect(
-        "should have a transaction with sender matching the wallet address",
-    );
+    let wallet_tx = txs_map
+        .values()
+        .find(|tx| tx["sender"].as_str().is_some_and(|s| s.eq_ignore_ascii_case(ACCOUNT_0)));
+    let wallet_tx =
+        wallet_tx.expect("should have a transaction with sender matching the wallet address");
     assert_eq!(
         wallet_tx["status"].as_str(),
         Some("EXECUTED"),
@@ -370,13 +348,10 @@ async fn mixed_wallet_governor_on_fork() {
     // 8e. Verify governor-sender transaction is QUEUED with sender = timelock address
     let timelock_addr_str = format!("{}", gov.timelock_address);
     let governor_tx = txs_map.values().find(|tx| {
-        tx["sender"]
-            .as_str()
-            .is_some_and(|s| s.eq_ignore_ascii_case(&timelock_addr_str))
+        tx["sender"].as_str().is_some_and(|s| s.eq_ignore_ascii_case(&timelock_addr_str))
     });
-    let governor_tx = governor_tx.expect(
-        "should have a transaction with sender matching the timelock address",
-    );
+    let governor_tx =
+        governor_tx.expect("should have a transaction with sender matching the timelock address");
     assert_eq!(
         governor_tx["status"].as_str(),
         Some("QUEUED"),
@@ -397,27 +372,18 @@ async fn mixed_wallet_governor_on_fork() {
 
     // proposalId should match the map key
     let proposal_id = proposal["proposalId"].as_str().unwrap();
-    assert_eq!(
-        proposal_id, proposal_id_key,
-        "proposalId value should match the map key"
-    );
+    assert_eq!(proposal_id, proposal_id_key, "proposalId value should match the map key");
 
     // governorAddress should match deployed governor
     assert_eq!(
-        proposal["governorAddress"]
-            .as_str()
-            .unwrap()
-            .to_lowercase(),
+        proposal["governorAddress"].as_str().unwrap().to_lowercase(),
         format!("{}", gov.governor_address).to_lowercase(),
         "governorAddress should match deployed governor"
     );
 
     // timelockAddress should match deployed timelock
     assert_eq!(
-        proposal["timelockAddress"]
-            .as_str()
-            .unwrap()
-            .to_lowercase(),
+        proposal["timelockAddress"].as_str().unwrap().to_lowercase(),
         timelock_addr_str.to_lowercase(),
         "timelockAddress should match deployed timelock"
     );
@@ -429,13 +395,8 @@ async fn mixed_wallet_governor_on_fork() {
     );
 
     // 8g. Verify transactionIds array links to the QUEUED transactions
-    let tx_ids = proposal["transactionIds"]
-        .as_array()
-        .expect("transactionIds must be array");
-    assert!(
-        !tx_ids.is_empty(),
-        "should have at least 1 linked transactionId"
-    );
+    let tx_ids = proposal["transactionIds"].as_array().expect("transactionIds must be array");
+    assert!(!tx_ids.is_empty(), "should have at least 1 linked transactionId");
 
     for tx_id in tx_ids {
         let tx_id_str = tx_id.as_str().unwrap();

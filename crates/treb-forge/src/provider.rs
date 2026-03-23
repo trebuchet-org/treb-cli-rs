@@ -9,9 +9,8 @@ use treb_core::TrebError;
 
 /// Build an HTTP provider (no wallet) for read-only RPC calls.
 pub fn build_http_provider(rpc_url: &str) -> Result<impl Provider, TrebError> {
-    let url: url::Url = rpc_url
-        .parse()
-        .map_err(|e| TrebError::Forge(format!("invalid RPC URL: {e}")))?;
+    let url: url::Url =
+        rpc_url.parse().map_err(|e| TrebError::Forge(format!("invalid RPC URL: {e}")))?;
 
     Ok(alloy_provider::ProviderBuilder::new().connect_http(url))
 }
@@ -21,11 +20,8 @@ pub fn build_wallet_provider(
     rpc_url: &str,
     wallet: EthereumWallet,
 ) -> Result<impl Provider, TrebError> {
-    let url: url::Url = rpc_url
-        .parse()
-        .map_err(|e| TrebError::Forge(format!("invalid RPC URL: {e}")))?;
+    let url: url::Url =
+        rpc_url.parse().map_err(|e| TrebError::Forge(format!("invalid RPC URL: {e}")))?;
 
-    Ok(alloy_provider::ProviderBuilder::new()
-        .wallet(wallet)
-        .connect_http(url))
+    Ok(alloy_provider::ProviderBuilder::new().wallet(wallet).connect_http(url))
 }

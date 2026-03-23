@@ -154,10 +154,8 @@ pub async fn setup_project() -> tempfile::TempDir {
     let tmp = tempfile::tempdir().unwrap();
 
     // Copy project fixture as the base: provides forge-std, foundry.toml, src/.
-    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("project");
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("project");
     copy_dir_recursive(&fixture, tmp.path());
 
     // Write SimpleContract.sol used by the deploy script.
@@ -331,30 +329,26 @@ pub fn assert_broadcast_artifacts(project_root: &Path, script_name: &str, chain_
     let broadcast_dir = project_root.join("broadcast");
     assert!(broadcast_dir.exists(), "broadcast/ directory must exist after broadcast");
 
-    let run_latest = broadcast_dir
-        .join(script_name)
-        .join(chain_id.to_string())
-        .join("run-latest.json");
+    let run_latest =
+        broadcast_dir.join(script_name).join(chain_id.to_string()).join("run-latest.json");
     assert!(run_latest.exists(), "run-latest.json must exist at {}", run_latest.display());
 
     let data = fs::read_to_string(&run_latest)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", run_latest.display()));
-    let json: serde_json::Value =
-        serde_json::from_str(&data).unwrap_or_else(|e| panic!("run-latest.json is not valid JSON: {e}"));
+    let json: serde_json::Value = serde_json::from_str(&data)
+        .unwrap_or_else(|e| panic!("run-latest.json is not valid JSON: {e}"));
 
     // Validate transactions array.
-    let transactions = json["transactions"]
-        .as_array()
-        .expect("run-latest.json must have a 'transactions' array");
+    let transactions =
+        json["transactions"].as_array().expect("run-latest.json must have a 'transactions' array");
     assert!(!transactions.is_empty(), "transactions array must not be empty");
     for (i, tx) in transactions.iter().enumerate() {
         assert!(!tx["hash"].is_null(), "transactions[{i}].hash must not be null");
     }
 
     // Validate receipts array.
-    let receipts = json["receipts"]
-        .as_array()
-        .expect("run-latest.json must have a 'receipts' array");
+    let receipts =
+        json["receipts"].as_array().expect("run-latest.json must have a 'receipts' array");
     assert!(!receipts.is_empty(), "receipts array must not be empty");
     for (i, receipt) in receipts.iter().enumerate() {
         assert!(

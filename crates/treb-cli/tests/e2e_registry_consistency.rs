@@ -56,14 +56,8 @@ async fn e2e_registry_consistency_after_deployment() {
 
     // Each transaction must have expected structure
     for (tx_id, tx) in txns_obj {
-        assert!(
-            tx["hash"].as_str().is_some(),
-            "transaction {tx_id} missing hash field"
-        );
-        assert!(
-            tx["status"].as_str().is_some(),
-            "transaction {tx_id} missing status field"
-        );
+        assert!(tx["hash"].as_str().is_some(), "transaction {tx_id} missing hash field");
+        assert!(tx["status"].as_str().is_some(), "transaction {tx_id} missing status field");
     }
 
     // Verify lookup.json byName key matches contractName (lowercase)
@@ -107,7 +101,11 @@ async fn e2e_registry_consistency_after_tag() {
     let tmp_path = tmp.path().to_path_buf();
     let id = dep_id.clone();
     tokio::task::spawn_blocking(move || {
-        treb().args(["registry", "tag", &id, "--add", "stable"]).current_dir(&tmp_path).assert().success();
+        treb()
+            .args(["registry", "tag", &id, "--add", "stable"])
+            .current_dir(&tmp_path)
+            .assert()
+            .success();
     })
     .await
     .unwrap();
@@ -115,7 +113,11 @@ async fn e2e_registry_consistency_after_tag() {
     let tmp_path = tmp.path().to_path_buf();
     let id = dep_id.clone();
     tokio::task::spawn_blocking(move || {
-        treb().args(["registry", "tag", &id, "--add", "production"]).current_dir(&tmp_path).assert().success();
+        treb()
+            .args(["registry", "tag", &id, "--add", "production"])
+            .current_dir(&tmp_path)
+            .assert()
+            .success();
     })
     .await
     .unwrap();
@@ -179,7 +181,17 @@ async fn e2e_registry_consistency_after_reset() {
     assert_deployment_count(tmp.path().to_path_buf(), 1).await;
 
     // Reset everything
-    let result = run_json(tmp.path().to_path_buf(), vec!["registry".into(), "drop".into(), "--namespace".into(), "default".into(), "--yes".into()]).await;
+    let result = run_json(
+        tmp.path().to_path_buf(),
+        vec![
+            "registry".into(),
+            "drop".into(),
+            "--namespace".into(),
+            "default".into(),
+            "--yes".into(),
+        ],
+    )
+    .await;
     assert_eq!(result["removedDeployments"].as_u64(), Some(1));
 
     // Verify deployments are empty after scoped drop
@@ -255,7 +267,11 @@ async fn e2e_registry_consistency_after_fork_cycle() {
     let tmp_path = tmp.path().to_path_buf();
     let id = dep_id.clone();
     tokio::task::spawn_blocking(move || {
-        treb().args(["registry", "tag", &id, "--add", "fork-test"]).current_dir(&tmp_path).assert().success();
+        treb()
+            .args(["registry", "tag", &id, "--add", "fork-test"])
+            .current_dir(&tmp_path)
+            .assert()
+            .success();
     })
     .await
     .unwrap();
@@ -266,11 +282,7 @@ async fn e2e_registry_consistency_after_fork_cycle() {
     // Fork exit (no args — holistic exit stops all forks and restores registry)
     let tmp_path = tmp.path().to_path_buf();
     tokio::task::spawn_blocking(move || {
-        treb()
-            .args(["fork", "exit"])
-            .current_dir(&tmp_path)
-            .assert()
-            .success();
+        treb().args(["fork", "exit"]).current_dir(&tmp_path).assert().success();
     })
     .await
     .unwrap();

@@ -393,8 +393,16 @@ async fn prune_check_onchain_dry_run() {
 
     // Run prune with --check-onchain
     let chain_str = chain_id.to_string();
-    let args =
-        &["registry", "prune", "--check-onchain", "--rpc-url", &rpc_url, "--dry-run", "--network", &chain_str];
+    let args = &[
+        "registry",
+        "prune",
+        "--check-onchain",
+        "--rpc-url",
+        &rpc_url,
+        "--dry-run",
+        "--network",
+        &chain_str,
+    ];
     let assertion = ctx.run(args);
     let stdout = String::from_utf8_lossy(&assertion.get_output().stdout).to_string();
     let stderr = String::from_utf8_lossy(&assertion.get_output().stderr).to_string();

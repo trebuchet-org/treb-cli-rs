@@ -198,13 +198,7 @@ async fn run_dry_run() {
 
     let test = IntegrationTest::new("run_dry_run")
         .setup(&["init"])
-        .test(&[
-            "run",
-            "script/Deploy.s.sol",
-            "--network",
-            "anvil-31337",
-            "--non-interactive",
-        ])
+        .test(&["run", "script/Deploy.s.sol", "--network", "anvil-31337", "--non-interactive"])
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(CompilerOutputNormalizer))
         .extra_normalizer(Box::new(GasNormalizer))
@@ -325,13 +319,7 @@ fn run_verbose_json() {
 
     let test = IntegrationTest::new("run_verbose_json")
         .setup(&["init"])
-        .test(&[
-            "run",
-            "script/Deploy.s.sol",
-            "--non-interactive",
-            "--verbose",
-            "--json",
-        ])
+        .test(&["run", "script/Deploy.s.sol", "--non-interactive", "--verbose", "--json"])
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(CompilerOutputNormalizer))
         .extra_normalizer(Box::new(GasNormalizer))

@@ -14,12 +14,12 @@ pub mod types;
 pub use io::{VersionedStore, read_versioned_file, write_versioned_file};
 pub use lookup::LookupStore;
 pub use registry::Registry;
+pub use solidity_registry::SolidityRegistryStore;
 pub use store::{
     AddressbookStore, DeploymentStore, ForkStateStore, GovernorProposalStore, SafeTransactionStore,
     TransactionStore,
     fork_state::{remove_snapshot, restore_registry, snapshot_registry},
 };
-pub use solidity_registry::SolidityRegistryStore;
 pub use types::LookupIndex;
 
 // ── File-name constants ────────────────────────────────────────────────────

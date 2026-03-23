@@ -14,10 +14,7 @@ use crate::{
     script::{ExecutionResult, ScriptConfig},
 };
 
-use super::{
-    PipelineContext,
-    types::PipelineResult,
-};
+use super::{PipelineContext, types::PipelineResult};
 
 /// Progress callback for compose pipeline phases.
 pub type ComposeProgressCallback = Box<dyn Fn(ComposePhase) + Send>;
@@ -99,15 +96,12 @@ impl ComposePipeline {
 
         // 1. Compile once (shared across all scripts)
         report(ComposePhase::Compiling);
-        let project_root = self
-            .scripts
-            .first()
-            .map(|(_, ctx, _)| ctx.project_root.clone())
-            .unwrap_or_default();
+        let project_root =
+            self.scripts.first().map(|(_, ctx, _)| ctx.project_root.clone()).unwrap_or_default();
         let foundry_config = super::orchestrator::load_foundry_config(&project_root)
             .map_err(|e| (Vec::new(), String::new(), e))?;
-        let compilation = compile_project(&foundry_config)
-            .map_err(|e| (Vec::new(), String::new(), e))?;
+        let compilation =
+            compile_project(&foundry_config).map_err(|e| (Vec::new(), String::new(), e))?;
         let artifact_index = ArtifactIndex::from_compile_output(compilation);
 
         // Snapshot the registry so we can write intermediate deployments
@@ -120,10 +114,8 @@ impl ComposePipeline {
         // 2. Spawn an ephemeral Anvil fork for compose simulation.
         // All scripts fork from this instance so state flows between steps
         // without mutating the upstream fork.
-        let upstream_url = self
-            .scripts
-            .first()
-            .and_then(|(_, _, sc)| sc.rpc_url_ref().map(|s| s.to_string()));
+        let upstream_url =
+            self.scripts.first().and_then(|(_, _, sc)| sc.rpc_url_ref().map(|s| s.to_string()));
 
         let ephemeral_anvil = if let Some(ref url) = upstream_url {
             // If the URL is a network name (not http://...), resolve it to
@@ -159,7 +151,8 @@ impl ComposePipeline {
             for (_, _, sc) in &mut self.scripts {
                 sc.rpc_url(url);
             }
-            upstream_url.as_deref()
+            upstream_url
+                .as_deref()
                 .filter(|u| !u.starts_with("http://") && !u.starts_with("https://"))
                 .and_then(|network| unsafe {
                     treb_config::override_rpc_endpoint(&project_root, network, url)
@@ -173,14 +166,8 @@ impl ComposePipeline {
         for (name, context, script_config) in self.scripts {
             report(ComposePhase::Executing(name.clone()));
 
-            match Self::simulate_one(
-                &name,
-                &context,
-                script_config,
-                &artifact_index,
-                registry,
-            )
-            .await
+            match Self::simulate_one(&name, &context, script_config, &artifact_index, registry)
+                .await
             {
                 Ok(sim) => {
                     // Replay broadcastable transactions on the ephemeral Anvil
@@ -188,7 +175,8 @@ impl ComposePipeline {
                     if let Some(ref btxs) = sim.result_transactions {
                         if let Some(ref url) = ephemeral_url {
                             if let Err(e) = replay_transactions_on_fork(url, btxs).await {
-                                let _ = treb_registry::restore_registry(&snapshot_dir, &registry_dir);
+                                let _ =
+                                    treb_registry::restore_registry(&snapshot_dir, &registry_dir);
                                 let _ = std::fs::remove_dir_all(&snapshot_dir);
                                 return Err((results, name, e));
                             }
@@ -308,11 +296,7 @@ impl ComposePipeline {
             setup_traces: sim.setup_traces,
         };
 
-        Ok(ComponentSimulation {
-            name: name.to_string(),
-            result,
-            result_transactions,
-        })
+        Ok(ComponentSimulation { name: name.to_string(), result, result_transactions })
     }
 }
 
@@ -325,10 +309,10 @@ pub async fn replay_transactions_on_fork(
     rpc_url: &str,
     txs: &foundry_cheatcodes::BroadcastableTransactions,
 ) -> Result<(), TrebError> {
+    use super::fork_routing::{anvil_impersonate, anvil_stop_impersonating};
     use alloy_primitives::U256;
     use alloy_provider::Provider;
     use alloy_rpc_types::{TransactionInput, TransactionRequest};
-    use super::fork_routing::{anvil_impersonate, anvil_stop_impersonating};
 
     let provider = crate::provider::build_http_provider(rpc_url)?;
 
@@ -344,7 +328,9 @@ pub async fn replay_transactions_on_fork(
                     (from, U256::from(100_000_000_000_000_000_000u128)),
                 )
                 .await
-                .map_err(|e| TrebError::Forge(format!("compose replay: fund sender failed: {e}")))?;
+                .map_err(|e| {
+                    TrebError::Forge(format!("compose replay: fund sender failed: {e}"))
+                })?;
         }
     }
 
@@ -352,9 +338,9 @@ pub async fn replay_transactions_on_fork(
         let from = btx.transaction.from().unwrap_or_default();
 
         // Impersonate the sender so Anvil accepts the tx without a signature
-        anvil_impersonate(&provider, from).await.map_err(|e| {
-            TrebError::Forge(format!("compose replay: impersonate failed: {e}"))
-        })?;
+        anvil_impersonate(&provider, from)
+            .await
+            .map_err(|e| TrebError::Forge(format!("compose replay: impersonate failed: {e}")))?;
 
         // Build the transaction request
         let mut tx = TransactionRequest::default().from(from);
@@ -382,10 +368,7 @@ pub async fn replay_transactions_on_fork(
 
         // Send the transaction and wait for receipt
         let pending = provider.send_transaction(tx).await.map_err(|e| {
-            TrebError::Forge(format!(
-                "compose replay: tx {} from {:#x} failed: {e}",
-                i, from
-            ))
+            TrebError::Forge(format!("compose replay: tx {} from {:#x} failed: {e}", i, from))
         })?;
 
         pending.get_receipt().await.map_err(|e| {
@@ -401,4 +384,3 @@ pub async fn replay_transactions_on_fork(
 
     Ok(())
 }
-

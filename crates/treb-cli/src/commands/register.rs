@@ -30,7 +30,6 @@ use owo_colors::{OwoColorize, Style};
 const FOUNDRY_TOML: &str = "foundry.toml";
 const TREB_DIR: &str = ".treb";
 
-
 // ── RPC URL resolution ──────────────────────────────────────────────────
 
 /// Resolve the RPC URL from --rpc-url or --network (via foundry.toml endpoints).
@@ -133,7 +132,6 @@ fn resolve_effective_namespace(
         Err(_) => "default".to_string(),
     })
 }
-
 
 // ── Contract name resolution ────────────────────────────────────────────
 
@@ -535,7 +533,6 @@ pub async fn run(
 
     Ok(())
 }
-
 
 // ── Tests ───────────────────────────────────────────────────────────────
 

@@ -10,20 +10,19 @@
 mod e2e;
 
 use alloy_primitives::Address;
-use e2e::deploy_governor::{deploy_governor, verify_governor_via_eth_call};
-use e2e::deploy_safe::{deploy_safe, verify_safe_via_eth_call};
-use e2e::{copy_dir_recursive, read_transactions, spawn_anvil_or_skip, treb};
-use std::path::Path;
-use std::str::FromStr;
+use e2e::{
+    copy_dir_recursive,
+    deploy_governor::{deploy_governor, verify_governor_via_eth_call},
+    deploy_safe::{deploy_safe, verify_safe_via_eth_call},
+    read_transactions, spawn_anvil_or_skip, treb,
+};
+use std::{path::Path, str::FromStr};
 
 /// Well-known Anvil test account #0.
 const ACCOUNT_0: &str = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 
 fn fixture_project() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("project")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("project")
 }
 
 /// Write a treb.toml that configures a Governor sender with a Wallet proposer.
@@ -152,12 +151,7 @@ async fn governor_wallet_propose_on_fork() {
     // 8a. Check deployments exist
     let deps = e2e::read_registry_file(tmp.path(), "deployments.json");
     let deps_map = deps.as_object().expect("deployments.json must be object");
-    assert_eq!(
-        deps_map.len(),
-        1,
-        "should have exactly 1 deployment, got {}",
-        deps_map.len()
-    );
+    assert_eq!(deps_map.len(), 1, "should have exactly 1 deployment, got {}", deps_map.len());
 
     // 8b. Verify the deployment has the Counter contract with non-zero address
     let (_, dep) = deps_map.iter().next().unwrap();
@@ -167,13 +161,9 @@ async fn governor_wallet_propose_on_fork() {
         "deployment should be for Counter contract"
     );
     let dep_address = dep["address"].as_str().unwrap();
-    assert!(
-        dep_address.starts_with("0x"),
-        "deployment address should start with 0x"
-    );
+    assert!(dep_address.starts_with("0x"), "deployment address should start with 0x");
     assert_ne!(
-        dep_address,
-        "0x0000000000000000000000000000000000000000",
+        dep_address, "0x0000000000000000000000000000000000000000",
         "deployment address should be non-zero"
     );
 
@@ -191,14 +181,8 @@ async fn governor_wallet_propose_on_fork() {
 
     // proposalId should be non-empty
     let proposal_id = proposal["proposalId"].as_str().unwrap();
-    assert!(
-        !proposal_id.is_empty(),
-        "proposalId should be non-empty"
-    );
-    assert_eq!(
-        proposal_id, proposal_id_key,
-        "proposalId value should match the map key"
-    );
+    assert!(!proposal_id.is_empty(), "proposalId should be non-empty");
+    assert_eq!(proposal_id, proposal_id_key, "proposalId value should match the map key");
 
     // status should be pending
     assert_eq!(
@@ -209,49 +193,31 @@ async fn governor_wallet_propose_on_fork() {
 
     // governorAddress should match deployed governor
     assert_eq!(
-        proposal["governorAddress"]
-            .as_str()
-            .unwrap()
-            .to_lowercase(),
+        proposal["governorAddress"].as_str().unwrap().to_lowercase(),
         format!("{}", gov.governor_address).to_lowercase(),
         "governorAddress should match deployed governor"
     );
 
     // timelockAddress should match deployed timelock
     assert_eq!(
-        proposal["timelockAddress"]
-            .as_str()
-            .unwrap()
-            .to_lowercase(),
+        proposal["timelockAddress"].as_str().unwrap().to_lowercase(),
         format!("{}", gov.timelock_address).to_lowercase(),
         "timelockAddress should match deployed timelock"
     );
 
     // chainId should be 31337 (Anvil)
-    assert_eq!(
-        proposal["chainId"].as_u64(),
-        Some(31337),
-        "chainId should be 31337"
-    );
+    assert_eq!(proposal["chainId"].as_u64(), Some(31337), "chainId should be 31337");
 
     // proposedBy should be account #0 (the wallet proposer)
     assert_eq!(
-        proposal["proposedBy"]
-            .as_str()
-            .unwrap()
-            .to_lowercase(),
+        proposal["proposedBy"].as_str().unwrap().to_lowercase(),
         ACCOUNT_0.to_lowercase(),
         "proposedBy should be the wallet proposer (account #0)"
     );
 
     // transactionIds should be non-empty
-    let tx_ids = proposal["transactionIds"]
-        .as_array()
-        .expect("transactionIds must be array");
-    assert!(
-        !tx_ids.is_empty(),
-        "should have at least 1 linked transactionId"
-    );
+    let tx_ids = proposal["transactionIds"].as_array().expect("transactionIds must be array");
+    assert!(!tx_ids.is_empty(), "should have at least 1 linked transactionId");
 
     // forkExecutedAt should be set (fork simulation runs automatically in non-interactive mode)
     assert!(
@@ -262,10 +228,7 @@ async fn governor_wallet_propose_on_fork() {
     // 8d. Verify transaction records
     let txs = read_transactions(tmp.path());
     let txs_map = txs.as_object().expect("transactions.json must be object");
-    assert!(
-        !txs_map.is_empty(),
-        "should have at least 1 transaction record"
-    );
+    assert!(!txs_map.is_empty(), "should have at least 1 transaction record");
 
     // Verify linked transactions
     let timelock_addr_str = format!("{}", gov.timelock_address);
@@ -461,12 +424,7 @@ async fn governor_safe_propose_on_fork() {
     // 9a. Check deployments exist
     let deps = e2e::read_registry_file(tmp.path(), "deployments.json");
     let deps_map = deps.as_object().expect("deployments.json must be object");
-    assert_eq!(
-        deps_map.len(),
-        1,
-        "should have exactly 1 deployment, got {}",
-        deps_map.len()
-    );
+    assert_eq!(deps_map.len(), 1, "should have exactly 1 deployment, got {}", deps_map.len());
 
     // 9b. Verify the deployment has the Counter contract with non-zero address
     let (_, dep) = deps_map.iter().next().unwrap();
@@ -476,13 +434,9 @@ async fn governor_safe_propose_on_fork() {
         "deployment should be for Counter contract"
     );
     let dep_address = dep["address"].as_str().unwrap();
-    assert!(
-        dep_address.starts_with("0x"),
-        "deployment address should start with 0x"
-    );
+    assert!(dep_address.starts_with("0x"), "deployment address should start with 0x");
     assert_ne!(
-        dep_address,
-        "0x0000000000000000000000000000000000000000",
+        dep_address, "0x0000000000000000000000000000000000000000",
         "deployment address should be non-zero"
     );
 
@@ -500,14 +454,8 @@ async fn governor_safe_propose_on_fork() {
 
     // proposalId should be non-empty
     let proposal_id = proposal["proposalId"].as_str().unwrap();
-    assert!(
-        !proposal_id.is_empty(),
-        "proposalId should be non-empty"
-    );
-    assert_eq!(
-        proposal_id, proposal_id_key,
-        "proposalId value should match the map key"
-    );
+    assert!(!proposal_id.is_empty(), "proposalId should be non-empty");
+    assert_eq!(proposal_id, proposal_id_key, "proposalId value should match the map key");
 
     // status should be pending
     assert_eq!(
@@ -518,47 +466,29 @@ async fn governor_safe_propose_on_fork() {
 
     // governorAddress should match deployed governor
     assert_eq!(
-        proposal["governorAddress"]
-            .as_str()
-            .unwrap()
-            .to_lowercase(),
+        proposal["governorAddress"].as_str().unwrap().to_lowercase(),
         format!("{}", gov.governor_address).to_lowercase(),
         "governorAddress should match deployed governor"
     );
 
     // timelockAddress should match deployed timelock
     assert_eq!(
-        proposal["timelockAddress"]
-            .as_str()
-            .unwrap()
-            .to_lowercase(),
+        proposal["timelockAddress"].as_str().unwrap().to_lowercase(),
         format!("{}", gov.timelock_address).to_lowercase(),
         "timelockAddress should match deployed timelock"
     );
 
     // chainId should be 31337 (Anvil)
-    assert_eq!(
-        proposal["chainId"].as_u64(),
-        Some(31337),
-        "chainId should be 31337"
-    );
+    assert_eq!(proposal["chainId"].as_u64(), Some(31337), "chainId should be 31337");
 
     // transactionIds should be non-empty
-    let tx_ids = proposal["transactionIds"]
-        .as_array()
-        .expect("transactionIds must be array");
-    assert!(
-        !tx_ids.is_empty(),
-        "should have at least 1 linked transactionId"
-    );
+    let tx_ids = proposal["transactionIds"].as_array().expect("transactionIds must be array");
+    assert!(!tx_ids.is_empty(), "should have at least 1 linked transactionId");
 
     // 9d. Verify transaction records
     let txs = read_transactions(tmp.path());
     let txs_map = txs.as_object().expect("transactions.json must be object");
-    assert!(
-        !txs_map.is_empty(),
-        "should have at least 1 transaction record"
-    );
+    assert!(!txs_map.is_empty(), "should have at least 1 transaction record");
 
     // Verify linked transactions
     let timelock_addr_str = format!("{}", gov.timelock_address);
@@ -688,12 +618,7 @@ async fn governor_skip_fork_execution() {
     // 8a. Check deployments exist
     let deps = e2e::read_registry_file(tmp.path(), "deployments.json");
     let deps_map = deps.as_object().expect("deployments.json must be object");
-    assert_eq!(
-        deps_map.len(),
-        1,
-        "should have exactly 1 deployment, got {}",
-        deps_map.len()
-    );
+    assert_eq!(deps_map.len(), 1, "should have exactly 1 deployment, got {}", deps_map.len());
 
     // 8b. Verify the deployment has the Counter contract with non-zero address
     let (_, dep) = deps_map.iter().next().unwrap();
@@ -703,13 +628,9 @@ async fn governor_skip_fork_execution() {
         "deployment should be for Counter contract"
     );
     let dep_address = dep["address"].as_str().unwrap();
-    assert!(
-        dep_address.starts_with("0x"),
-        "deployment address should start with 0x"
-    );
+    assert!(dep_address.starts_with("0x"), "deployment address should start with 0x");
     assert_ne!(
-        dep_address,
-        "0x0000000000000000000000000000000000000000",
+        dep_address, "0x0000000000000000000000000000000000000000",
         "deployment address should be non-zero"
     );
 
@@ -727,14 +648,8 @@ async fn governor_skip_fork_execution() {
 
     // proposalId should be non-empty
     let proposal_id = proposal["proposalId"].as_str().unwrap();
-    assert!(
-        !proposal_id.is_empty(),
-        "proposalId should be non-empty"
-    );
-    assert_eq!(
-        proposal_id, proposal_id_key,
-        "proposalId value should match the map key"
-    );
+    assert!(!proposal_id.is_empty(), "proposalId should be non-empty");
+    assert_eq!(proposal_id, proposal_id_key, "proposalId value should match the map key");
 
     // status should be pending (not executed, since we skipped fork execution)
     assert_eq!(
@@ -745,78 +660,51 @@ async fn governor_skip_fork_execution() {
 
     // governorAddress should match deployed governor
     assert_eq!(
-        proposal["governorAddress"]
-            .as_str()
-            .unwrap()
-            .to_lowercase(),
+        proposal["governorAddress"].as_str().unwrap().to_lowercase(),
         format!("{}", gov.governor_address).to_lowercase(),
         "governorAddress should match deployed governor"
     );
 
     // timelockAddress should match deployed timelock
     assert_eq!(
-        proposal["timelockAddress"]
-            .as_str()
-            .unwrap()
-            .to_lowercase(),
+        proposal["timelockAddress"].as_str().unwrap().to_lowercase(),
         format!("{}", gov.timelock_address).to_lowercase(),
         "timelockAddress should match deployed timelock"
     );
 
     // chainId should be 31337 (Anvil)
-    assert_eq!(
-        proposal["chainId"].as_u64(),
-        Some(31337),
-        "chainId should be 31337"
-    );
+    assert_eq!(proposal["chainId"].as_u64(), Some(31337), "chainId should be 31337");
 
     // forkExecutedAt should NOT be set (--skip-fork-execution was used)
     assert!(
-        proposal.get("forkExecutedAt").is_none()
-            || proposal["forkExecutedAt"].is_null(),
+        proposal.get("forkExecutedAt").is_none() || proposal["forkExecutedAt"].is_null(),
         "forkExecutedAt should NOT be set when --skip-fork-execution is used, got: {:?}",
         proposal.get("forkExecutedAt")
     );
 
     // actions should be a non-empty array with target/value/calldata
-    let actions = proposal["actions"]
-        .as_array()
-        .expect("actions must be an array");
+    let actions = proposal["actions"].as_array().expect("actions must be an array");
     assert!(
         !actions.is_empty(),
         "actions array should have at least 1 entry for Counter deployment"
     );
     for action in actions {
-        assert!(
-            action["target"].as_str().is_some(),
-            "action should have a target field"
-        );
+        assert!(action["target"].as_str().is_some(), "action should have a target field");
         assert!(
             action["value"].is_string() || action["value"].is_number(),
             "action should have a value field"
         );
-        assert!(
-            action["calldata"].as_str().is_some(),
-            "action should have a calldata field"
-        );
+        assert!(action["calldata"].as_str().is_some(), "action should have a calldata field");
     }
 
     // transactionIds should be non-empty
-    let tx_ids = proposal["transactionIds"]
-        .as_array()
-        .expect("transactionIds must be array");
-    assert!(
-        !tx_ids.is_empty(),
-        "should have at least 1 linked transactionId"
-    );
+    let tx_ids = proposal["transactionIds"].as_array().expect("transactionIds must be array");
+    assert!(!tx_ids.is_empty(), "should have at least 1 linked transactionId");
 
     // 8d. Verify transaction records — all should be QUEUED (not EXECUTED)
     let txs = read_transactions(tmp.path());
     let txs_map = txs.as_object().expect("transactions.json must be object");
-    assert!(
-        !txs_map.is_empty(),
-        "should have at least 1 transaction record"
-    );
+    assert!(!txs_map.is_empty(), "should have at least 1 transaction record");
 
     let timelock_addr_str = format!("{}", gov.timelock_address);
     for tx_id in tx_ids {

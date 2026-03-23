@@ -103,11 +103,7 @@ fn roundtrip_transaction_simulated() {
             sender: Address::ZERO,
             returnData: Bytes::new(),
             gasUsed: U256::ZERO,
-            transaction: Transaction {
-                to: Address::ZERO,
-                data: Bytes::new(),
-                value: U256::ZERO,
-            },
+            transaction: Transaction { to: Address::ZERO, data: Bytes::new(), value: U256::ZERO },
         },
     };
 

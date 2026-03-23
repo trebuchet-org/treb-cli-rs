@@ -25,16 +25,15 @@
 
 mod e2e;
 
-use std::collections::HashMap;
-use std::fs;
+use std::{collections::HashMap, fs};
 
 use chrono::Utc;
 use e2e::treb;
 use treb_core::types::{
-    ArtifactInfo, Deployment, DeploymentMethod, DeploymentStrategy, DeploymentType,
-    GovernorAction, GovernorProposal, ProposalStatus, ProxyInfo, Transaction, TransactionStatus,
-    VerificationInfo, VerificationStatus,
-    safe_transaction::{Confirmation, SafeTxData, SafeTransaction},
+    ArtifactInfo, Deployment, DeploymentMethod, DeploymentStrategy, DeploymentType, GovernorAction,
+    GovernorProposal, ProposalStatus, ProxyInfo, Transaction, TransactionStatus, VerificationInfo,
+    VerificationStatus,
+    safe_transaction::{Confirmation, SafeTransaction, SafeTxData},
 };
 use treb_registry::Registry;
 
@@ -55,12 +54,7 @@ const GOVERNOR_ADDRESS: &str = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65";
 // ── Shared helpers ──────────────────────────────────────────────────────
 
 async fn spawn_celo_sepolia_fork() -> Option<treb_forge::AnvilInstance> {
-    match treb_forge::anvil::AnvilConfig::new()
-        .port(0)
-        .fork_url(CELO_SEPOLIA_RPC)
-        .spawn()
-        .await
-    {
+    match treb_forge::anvil::AnvilConfig::new().port(0).fork_url(CELO_SEPOLIA_RPC).spawn().await {
         Ok(anvil) => Some(anvil),
         Err(err) => {
             let msg = err.to_string();
@@ -317,13 +311,13 @@ async fn fork_exec_safe_upgrades_proxy() {
     // Registry updated
     let dep = read_deployment(tmp.path(), dep_id);
     assert!(
-        dep["proxyInfo"]["implementation"]
-            .as_str()
-            .unwrap()
-            .eq_ignore_ascii_case(BOX_V2),
+        dep["proxyInfo"]["implementation"].as_str().unwrap().eq_ignore_ascii_case(BOX_V2),
         "impl should be BoxV2"
     );
-    assert!(!dep["proxyInfo"]["history"].as_array().unwrap().is_empty(), "history should have entry");
+    assert!(
+        !dep["proxyInfo"]["history"].as_array().unwrap().is_empty(),
+        "history should have entry"
+    );
 
     // On-chain verification
     assert_eq!(cast_call(&rpc_url, PROXY_ADDRESS, "version()(string)"), "v2");
@@ -381,10 +375,7 @@ async fn fork_exec_safe_multi_op_batch() {
     // Proxy upgraded
     let dep = read_deployment(tmp.path(), dep_id);
     assert!(
-        dep["proxyInfo"]["implementation"]
-            .as_str()
-            .unwrap()
-            .eq_ignore_ascii_case(BOX_V2),
+        dep["proxyInfo"]["implementation"].as_str().unwrap().eq_ignore_ascii_case(BOX_V2),
         "impl should be BoxV2"
     );
 
@@ -411,12 +402,7 @@ async fn fork_exec_governor_upgrades_proxy() {
     let dep_id = "default/11142220/GovBox/";
     let mut registry = Registry::open(tmp.path()).unwrap();
     registry
-        .insert_deployment(make_deployment(
-            dep_id,
-            GOV_PROXY_ADDRESS,
-            "GovBox",
-            TIMELOCK_ADDRESS,
-        ))
+        .insert_deployment(make_deployment(dep_id, GOV_PROXY_ADDRESS, "GovBox", TIMELOCK_ADDRESS))
         .unwrap();
     registry
         .insert_transaction(make_transaction("tx-deploy-govbox", vec![dep_id.to_string()]))
@@ -445,10 +431,7 @@ async fn fork_exec_governor_upgrades_proxy() {
     // Registry updated
     let dep = read_deployment(tmp.path(), dep_id);
     assert!(
-        dep["proxyInfo"]["implementation"]
-            .as_str()
-            .unwrap()
-            .eq_ignore_ascii_case(BOX_V2),
+        dep["proxyInfo"]["implementation"].as_str().unwrap().eq_ignore_ascii_case(BOX_V2),
         "impl should be BoxV2"
     );
 
@@ -476,12 +459,7 @@ async fn fork_exec_mixed_safe_and_governor() {
 
     let mut registry = Registry::open(tmp.path()).unwrap();
     registry
-        .insert_deployment(make_deployment(
-            safe_dep_id,
-            PROXY_ADDRESS,
-            "SafeBox",
-            SAFE_ADDRESS,
-        ))
+        .insert_deployment(make_deployment(safe_dep_id, PROXY_ADDRESS, "SafeBox", SAFE_ADDRESS))
         .unwrap();
     registry
         .insert_transaction(make_transaction("tx-deploy-safebox", vec![safe_dep_id.to_string()]))
@@ -532,18 +510,12 @@ async fn fork_exec_mixed_safe_and_governor() {
     // Both proxies upgraded
     let safe_dep = read_deployment(tmp.path(), safe_dep_id);
     assert!(
-        safe_dep["proxyInfo"]["implementation"]
-            .as_str()
-            .unwrap()
-            .eq_ignore_ascii_case(BOX_V2),
+        safe_dep["proxyInfo"]["implementation"].as_str().unwrap().eq_ignore_ascii_case(BOX_V2),
         "Safe proxy impl should be BoxV2"
     );
     let gov_dep = read_deployment(tmp.path(), gov_dep_id);
     assert!(
-        gov_dep["proxyInfo"]["implementation"]
-            .as_str()
-            .unwrap()
-            .eq_ignore_ascii_case(BOX_V2),
+        gov_dep["proxyInfo"]["implementation"].as_str().unwrap().eq_ignore_ascii_case(BOX_V2),
         "Gov proxy impl should be BoxV2"
     );
 
@@ -619,18 +591,12 @@ async fn fork_exec_multiple_safe_txs() {
     // Both proxies upgraded
     let dep1 = read_deployment(tmp.path(), dep1_id);
     assert!(
-        dep1["proxyInfo"]["implementation"]
-            .as_str()
-            .unwrap()
-            .eq_ignore_ascii_case(BOX_V2),
+        dep1["proxyInfo"]["implementation"].as_str().unwrap().eq_ignore_ascii_case(BOX_V2),
         "Proxy1 impl should be BoxV2"
     );
     let dep2 = read_deployment(tmp.path(), dep2_id);
     assert!(
-        dep2["proxyInfo"]["implementation"]
-            .as_str()
-            .unwrap()
-            .eq_ignore_ascii_case(BOX_V2),
+        dep2["proxyInfo"]["implementation"].as_str().unwrap().eq_ignore_ascii_case(BOX_V2),
         "Proxy3 impl should be BoxV2"
     );
 
@@ -691,12 +657,7 @@ async fn fork_exec_governor_multi_action() {
     let dep_id = "default/11142220/GovBox/";
     let mut registry = Registry::open(tmp.path()).unwrap();
     registry
-        .insert_deployment(make_deployment(
-            dep_id,
-            GOV_PROXY_ADDRESS,
-            "GovBox",
-            TIMELOCK_ADDRESS,
-        ))
+        .insert_deployment(make_deployment(dep_id, GOV_PROXY_ADDRESS, "GovBox", TIMELOCK_ADDRESS))
         .unwrap();
     registry
         .insert_transaction(make_transaction("tx-deploy-govbox", vec![dep_id.to_string()]))
@@ -727,10 +688,7 @@ async fn fork_exec_governor_multi_action() {
     // Proxy upgraded and value set
     let dep = read_deployment(tmp.path(), dep_id);
     assert!(
-        dep["proxyInfo"]["implementation"]
-            .as_str()
-            .unwrap()
-            .eq_ignore_ascii_case(BOX_V2),
+        dep["proxyInfo"]["implementation"].as_str().unwrap().eq_ignore_ascii_case(BOX_V2),
         "impl should be BoxV2"
     );
 
@@ -797,10 +755,7 @@ async fn sync_tx_hash_detects_upgrade_on_fork() {
     // Verify reset
     let dep_before = read_deployment(tmp.path(), dep_id);
     assert!(
-        dep_before["proxyInfo"]["implementation"]
-            .as_str()
-            .unwrap()
-            .eq_ignore_ascii_case(BOX_V1),
+        dep_before["proxyInfo"]["implementation"].as_str().unwrap().eq_ignore_ascii_case(BOX_V1),
         "impl should be reset to BoxV1"
     );
 
@@ -842,10 +797,7 @@ async fn sync_tx_hash_detects_upgrade_on_fork() {
         // Verify: proxy impl updated back to BoxV2 by sync
         let dep_after = read_deployment(tmp.path(), dep_id);
         assert!(
-            dep_after["proxyInfo"]["implementation"]
-                .as_str()
-                .unwrap()
-                .eq_ignore_ascii_case(BOX_V2),
+            dep_after["proxyInfo"]["implementation"].as_str().unwrap().eq_ignore_ascii_case(BOX_V2),
             "sync should have detected upgrade to BoxV2"
         );
     }

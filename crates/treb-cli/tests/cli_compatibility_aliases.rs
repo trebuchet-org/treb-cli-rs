@@ -355,8 +355,10 @@ fn compatibility_suite_still_exposes_completion_output_shape() {
 
 #[test]
 fn register_help_exposes_phase_10_flag_surface() {
-    let output =
-        treb().args(["registry", "add", "--help"]).output().expect("register help command should run");
+    let output = treb()
+        .args(["registry", "add", "--help"])
+        .output()
+        .expect("register help command should run");
 
     assert!(output.status.success(), "treb registry add --help should succeed");
 
@@ -368,7 +370,8 @@ fn register_help_exposes_phase_10_flag_surface() {
 
 #[test]
 fn sync_help_exposes_phase_10_flag_surface() {
-    let output = treb().args(["registry", "sync", "--help"]).output().expect("sync help command should run");
+    let output =
+        treb().args(["registry", "sync", "--help"]).output().expect("sync help command should run");
 
     assert!(output.status.success(), "treb sync --help should succeed");
 
@@ -416,10 +419,7 @@ fn fork_exit_holistic_succeeds() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("Exited fork mode"),
-        "exit output should confirm exit: {stdout}"
-    );
+    assert!(stdout.contains("Exited fork mode"), "exit output should confirm exit: {stdout}");
 }
 
 /// Fork history: `--network` flag filters correctly.

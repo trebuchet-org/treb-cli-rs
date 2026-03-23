@@ -89,11 +89,7 @@ async fn e2e_fork_enter_deploy_revert_exit() {
     // Step 6: fork revert → restores from snapshot (deployment removed)
     let tmp_path = tmp.path().to_path_buf();
     tokio::task::spawn_blocking(move || {
-        treb()
-            .args(["fork", "revert"])
-            .current_dir(&tmp_path)
-            .assert()
-            .success();
+        treb().args(["fork", "revert"]).current_dir(&tmp_path).assert().success();
     })
     .await
     .unwrap();
@@ -118,11 +114,7 @@ async fn e2e_fork_enter_deploy_revert_exit() {
     // Step 9: fork exit → restores registry, removes fork entry
     let tmp_path = tmp.path().to_path_buf();
     tokio::task::spawn_blocking(move || {
-        treb()
-            .args(["fork", "exit"])
-            .current_dir(&tmp_path)
-            .assert()
-            .success();
+        treb().args(["fork", "exit"]).current_dir(&tmp_path).assert().success();
     })
     .await
     .unwrap();
@@ -200,11 +192,7 @@ async fn e2e_fork_enter_deploy_exit_restores_state() {
     // Exit fork → should restore to pre-fork state (no tag)
     let tmp_path = tmp.path().to_path_buf();
     tokio::task::spawn_blocking(move || {
-        treb()
-            .args(["fork", "exit"])
-            .current_dir(&tmp_path)
-            .assert()
-            .success();
+        treb().args(["fork", "exit"]).current_dir(&tmp_path).assert().success();
     })
     .await
     .unwrap();
@@ -272,20 +260,12 @@ async fn e2e_fork_status_shows_active_fork() {
     assert_eq!(s["network"].as_str(), Some("anvil-31337"), "network must match");
     assert_eq!(s["chainId"].as_u64(), Some(31337), "chainId must be 31337");
     assert!(s["rpcUrl"].as_str().is_some(), "rpcUrl must be set");
-    assert_eq!(
-        s["status"].as_str(),
-        Some("running"),
-        "status must be running"
-    );
+    assert_eq!(s["status"].as_str(), Some("running"), "status must be running");
 
     // Clean up: exit fork mode
     let tmp_path = tmp.path().to_path_buf();
     tokio::task::spawn_blocking(move || {
-        treb()
-            .args(["fork", "exit"])
-            .current_dir(&tmp_path)
-            .assert()
-            .success();
+        treb().args(["fork", "exit"]).current_dir(&tmp_path).assert().success();
     })
     .await
     .unwrap();

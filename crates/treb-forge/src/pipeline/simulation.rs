@@ -11,8 +11,8 @@ use treb_registry::Registry;
 use crate::{
     artifacts::ArtifactIndex,
     events::{
-        ExtractedCollision,
-        decode_events, detect_proxy_relationships, extract_collisions, extract_deployments,
+        ExtractedCollision, decode_events, detect_proxy_relationships, extract_collisions,
+        extract_deployments,
     },
     script::ExecutionResult,
 };
@@ -24,10 +24,9 @@ use super::{
         hydrate_transactions, hydrate_transactions_from_broadcast, populate_safe_context,
     },
     orchestrator::{
-        build_v2_recorded_transaction_metadata,
-        collapse_decoded_bytecode_args, extract_governor_proposal_created,
-        extract_safe_transaction_queued, extract_transaction_simulated,
-        render_traces_for_verbosity, strip_internal_events,
+        build_v2_recorded_transaction_metadata, collapse_decoded_bytecode_args,
+        extract_governor_proposal_created, extract_safe_transaction_queued,
+        extract_transaction_simulated, render_traces_for_verbosity, strip_internal_events,
     },
     types::{RecordedDeployment, RecordedTransaction},
 };
@@ -84,9 +83,7 @@ pub async fn hydrate_simulation(
             err_parts.push(execution.logs.join("\n"));
         }
         let contracts = artifact_index.inner();
-        let mut decoder = CallTraceDecoderBuilder::new()
-            .with_known_contracts(contracts)
-            .build();
+        let mut decoder = CallTraceDecoderBuilder::new().with_known_contracts(contracts).build();
         let mut identifier = TraceIdentifiers::new().with_local(contracts);
         for (_, arena) in &execution.traces {
             decoder.identify(&arena.arena, &mut identifier);
@@ -218,7 +215,9 @@ pub async fn hydrate_simulation(
         .into_iter()
         .map(|tx| {
             let metadata = transaction_metadata.remove(&tx.id).unwrap_or_default();
-            let sender_category = metadata.sender_name.as_ref()
+            let sender_category = metadata
+                .sender_name
+                .as_ref()
                 .and_then(|name| context.resolved_senders.get(name))
                 .map(|s| s.category());
             RecordedTransaction {

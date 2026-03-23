@@ -342,12 +342,7 @@ fn build_registry_drop() -> ClapCommand {
     ClapCommand::new("drop")
         .about("Drop registry entries by query, network, or namespace")
         .arg(Arg::new("query").help("Deployment query (contract name, label, or ID)"))
-        .arg(
-            Arg::new("network")
-                .long("network")
-                .short('n')
-                .help("Network name or chain ID"),
-        )
+        .arg(Arg::new("network").long("network").short('n').help("Network name or chain ID"))
         .arg(Arg::new("namespace").long("namespace").short('s').help("Deployment namespace"))
         .arg(
             Arg::new("yes")
@@ -415,7 +410,6 @@ fn build_registry_add() -> ClapCommand {
         .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
 }
 
-
 fn build_version() -> ClapCommand {
     ClapCommand::new("version")
         .about("Print version information")
@@ -477,21 +471,11 @@ fn build_compose() -> ClapCommand {
         .arg(Arg::new("env").long("env").num_args(1).help("Set environment variables (KEY=VALUE)"))
 }
 
-
 fn build_queued() -> ClapCommand {
     ClapCommand::new("queued")
         .about("List queued Safe/Governor operations")
-        .arg(
-            Arg::new("network")
-                .long("network")
-                .help("Network name or chain ID"),
-        )
-        .arg(
-            Arg::new("json")
-                .long("json")
-                .action(ArgAction::SetTrue)
-                .help("Output as JSON"),
-        )
+        .arg(Arg::new("network").long("network").help("Network name or chain ID"))
+        .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"))
 }
 
 fn build_fork() -> ClapCommand {
@@ -518,21 +502,13 @@ fn build_fork() -> ClapCommand {
                 ),
         )
         .subcommand(
-            ClapCommand::new("exit")
-                .about("Exit fork mode: stop all Anvils, restore registry"),
+            ClapCommand::new("exit").about("Exit fork mode: stop all Anvils, restore registry"),
         )
-        .subcommand(
-            ClapCommand::new("revert")
-                .about("Revert all forks to their initial state"),
-        )
+        .subcommand(ClapCommand::new("revert").about("Revert all forks to their initial state"))
         .subcommand(
             ClapCommand::new("restart")
                 .about("Restart a fork from a new block")
-                .arg(
-                    Arg::new("network")
-                        .long("network")
-                        .help("Network name to restart"),
-                )
+                .arg(Arg::new("network").long("network").help("Network name to restart"))
                 .arg(
                     Arg::new("fork-block-number")
                         .long("fork-block-number")
@@ -547,11 +523,7 @@ fn build_fork() -> ClapCommand {
         .subcommand(
             ClapCommand::new("history")
                 .about("Show fork history")
-                .arg(
-                    Arg::new("network")
-                        .long("network")
-                        .help("Filter by network name"),
-                )
+                .arg(Arg::new("network").long("network").help("Filter by network name"))
                 .arg(
                     Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"),
                 ),
@@ -566,11 +538,7 @@ fn build_fork() -> ClapCommand {
                         .action(ArgAction::SetTrue)
                         .help("Continuously tail log files"),
                 )
-                .arg(
-                    Arg::new("network")
-                        .long("network")
-                        .help("Filter to a specific network"),
-                ),
+                .arg(Arg::new("network").long("network").help("Filter to a specific network")),
         )
         .subcommand(
             ClapCommand::new("exec")
@@ -582,16 +550,9 @@ fn build_fork() -> ClapCommand {
                         .action(ArgAction::SetTrue)
                         .help("Execute all queued items"),
                 )
+                .arg(Arg::new("network").long("network").help("Network name or chain ID"))
                 .arg(
-                    Arg::new("network")
-                        .long("network")
-                        .help("Network name or chain ID"),
-                )
-                .arg(
-                    Arg::new("json")
-                        .long("json")
-                        .action(ArgAction::SetTrue)
-                        .help("Output as JSON"),
+                    Arg::new("json").long("json").action(ArgAction::SetTrue).help("Output as JSON"),
                 ),
         )
 }

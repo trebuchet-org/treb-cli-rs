@@ -13,10 +13,7 @@ use e2e::{copy_dir_recursive, spawn_anvil_or_skip, treb};
 use std::path::Path;
 
 fn fixture_project() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("project")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("project")
 }
 
 /// Write a treb.toml with a 5-level governor chain where each governor's
@@ -311,10 +308,7 @@ async fn hardware_wallet_signer_error() {
         );
 
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains("Ledger"),
-            "stderr should mention 'Ledger', got:\n{stderr}"
-        );
+        assert!(stderr.contains("Ledger"), "stderr should mention 'Ledger', got:\n{stderr}");
     })
     .await
     .unwrap();

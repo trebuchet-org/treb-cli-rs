@@ -196,7 +196,10 @@ fn sync_without_init_fails() {
 
 #[test]
 fn sync_help_shows_expected_flags() {
-    let output = treb().args(["registry", "sync", "--help"]).output().expect("failed to run treb registry sync --help");
+    let output = treb()
+        .args(["registry", "sync", "--help"])
+        .output()
+        .expect("failed to run treb registry sync --help");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("--network"), "help should show --network");

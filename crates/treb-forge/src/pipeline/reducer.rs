@@ -9,8 +9,10 @@
 //! `Governor.propose()` call. Custom reducers can target any governance system
 //! by reading the same `TREB_REDUCER_*` env vars.
 
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use alloy_primitives::{Address, U256};
 use foundry_cheatcodes::BroadcastableTransactions;
@@ -32,7 +34,9 @@ impl ScopedEnvVars {
         for (k, v) in &vars {
             // SAFETY: reducer invocation is single-threaded within the routing
             // pipeline — no concurrent env reads during script execution.
-            unsafe { std::env::set_var(k, v); }
+            unsafe {
+                std::env::set_var(k, v);
+            }
         }
         Self { keys }
     }
@@ -42,7 +46,9 @@ impl Drop for ScopedEnvVars {
     fn drop(&mut self) {
         for k in &self.keys {
             // SAFETY: see ScopedEnvVars::set
-            unsafe { std::env::remove_var(k); }
+            unsafe {
+                std::env::remove_var(k);
+            }
         }
     }
 }
@@ -65,22 +71,13 @@ pub fn build_reducer_env_vars(
     let encoded = (
         targets.to_vec(),
         values.to_vec(),
-        calldatas
-            .iter()
-            .map(|c| alloy_primitives::Bytes::from(c.clone()))
-            .collect::<Vec<_>>(),
+        calldatas.iter().map(|c| alloy_primitives::Bytes::from(c.clone())).collect::<Vec<_>>(),
     )
         .abi_encode_params();
 
     let mut vars = HashMap::new();
-    vars.insert(
-        "TREB_REDUCER_ADDRESS".into(),
-        format!("{:#x}", governor_address),
-    );
-    vars.insert(
-        "TREB_REDUCER_PROPOSER".into(),
-        format!("{:#x}", proposer_address),
-    );
+    vars.insert("TREB_REDUCER_ADDRESS".into(), format!("{:#x}", governor_address));
+    vars.insert("TREB_REDUCER_PROPOSER".into(), format!("{:#x}", proposer_address));
     vars.insert(
         "TREB_REDUCER_PENDING_TXS".into(),
         format!("0x{}", alloy_primitives::hex::encode(&encoded)),
@@ -88,9 +85,7 @@ pub fn build_reducer_env_vars(
     vars.insert("TREB_REDUCER_DESCRIPTION".into(), description.to_string());
     vars.insert(
         "TREB_REDUCER_TIMELOCK".into(),
-        timelock_address
-            .map(|a| format!("{:#x}", a))
-            .unwrap_or_default(),
+        timelock_address.map(|a| format!("{:#x}", a)).unwrap_or_default(),
     );
     vars.insert("TREB_REDUCER_CHAIN_ID".into(), chain_id.to_string());
     vars
@@ -102,20 +97,14 @@ pub fn build_reducer_env_vars(
 /// 1. Explicit `reducer` field on the sender config → use that path
 /// 2. No explicit reducer → built-in `lib/treb-sol/.../GovernorReducer.sol`
 /// 3. Built-in path doesn't exist → `None` (caller falls back to inline Rust encoding)
-pub fn resolve_reducer_path(
-    reducer: Option<&str>,
-    project_root: &Path,
-) -> Option<PathBuf> {
+pub fn resolve_reducer_path(reducer: Option<&str>, project_root: &Path) -> Option<PathBuf> {
     if let Some(explicit) = reducer {
         let p = project_root.join(explicit);
         if p.exists() {
             return Some(p);
         }
         // Explicit path that doesn't exist — warn but fall back
-        eprintln!(
-            "warning: reducer script not found: {}",
-            p.display()
-        );
+        eprintln!("warning: reducer script not found: {}", p.display());
         return None;
     }
 
@@ -196,16 +185,7 @@ mod tests {
 
     #[test]
     fn build_reducer_env_vars_no_timelock() {
-        let vars = build_reducer_env_vars(
-            Address::ZERO,
-            Address::ZERO,
-            &[],
-            &[],
-            &[],
-            "",
-            None,
-            1,
-        );
+        let vars = build_reducer_env_vars(Address::ZERO, Address::ZERO, &[], &[], &[], "", None, 1);
         assert_eq!(vars["TREB_REDUCER_TIMELOCK"], "");
     }
 
@@ -234,11 +214,8 @@ mod tests {
     fn scoped_env_vars_cleanup() {
         let key = "TREB_TEST_SCOPED_ENV_12345";
         {
-            let _guard = ScopedEnvVars::set(
-                [(key.to_string(), "hello".to_string())]
-                    .into_iter()
-                    .collect(),
-            );
+            let _guard =
+                ScopedEnvVars::set([(key.to_string(), "hello".to_string())].into_iter().collect());
             assert_eq!(std::env::var(key).unwrap(), "hello");
         }
         assert!(std::env::var(key).is_err());

@@ -459,7 +459,15 @@ fn compose_json_execution_failure_emits_only_wrapped_json_error() {
     .unwrap();
 
     let output = treb()
-        .args(["compose", "broken.yaml", "--broadcast", "--network", "localhost", "--json", "--non-interactive"])
+        .args([
+            "compose",
+            "broken.yaml",
+            "--broadcast",
+            "--network",
+            "localhost",
+            "--json",
+            "--non-interactive",
+        ])
         .current_dir(tmp.path())
         .output()
         .expect("failed to run compose execution failure --json");
@@ -516,20 +524,11 @@ fn compose_setup_failure_uses_component_failed_renderer() {
 
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
     // Component failure renderer should show ❌ Failed: line
-    assert!(
-        stderr.contains("❌ Failed:"),
-        "missing per-component failure line: {stderr}"
-    );
+    assert!(stderr.contains("❌ Failed:"), "missing per-component failure line: {stderr}");
     // The banner should show the component in the plan
-    assert!(
-        stderr.contains("[1] missing"),
-        "banner should list the component: {stderr}"
-    );
+    assert!(stderr.contains("[1] missing"), "banner should list the component: {stderr}");
     let separator = "═".repeat(70);
-    assert!(
-        stderr.contains(&separator),
-        "summary separator should be present: {stderr}"
-    );
+    assert!(stderr.contains(&separator), "summary separator should be present: {stderr}");
     assert!(
         stderr.contains("❌ Orchestration failed"),
         "summary should show orchestration failed: {stderr}"
@@ -583,7 +582,15 @@ fn compose_resume_failure_shows_resume_banner_and_step_start() {
     .unwrap();
 
     let output = treb()
-        .args(["compose", "resume.yaml", "--resume", "--broadcast", "--network", "localhost", "--non-interactive"])
+        .args([
+            "compose",
+            "resume.yaml",
+            "--resume",
+            "--broadcast",
+            "--network",
+            "localhost",
+            "--non-interactive",
+        ])
         .current_dir(tmp.path())
         .output()
         .expect("failed to run resumed compose failure");
@@ -596,15 +603,9 @@ fn compose_resume_failure_shows_resume_banner_and_step_start() {
         "missing resume banner: {stderr}"
     );
     // The banner plan should show the resumed component
-    assert!(
-        stderr.contains("[2] missing"),
-        "banner should list the resumed component: {stderr}"
-    );
+    assert!(stderr.contains("[2] missing"), "banner should list the resumed component: {stderr}");
     // The done component should be marked as skipped in the plan
-    assert!(
-        stderr.contains("(skipped)"),
-        "done component should show as skipped: {stderr}"
-    );
+    assert!(stderr.contains("(skipped)"), "done component should show as skipped: {stderr}");
 }
 
 // ── Compose without init (non-simulation) ────────────────────────────────

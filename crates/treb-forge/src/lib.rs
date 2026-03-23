@@ -32,6 +32,8 @@ pub use broadcast::{
 pub use compiler::{CompilationOutput, compile_files, compile_project};
 pub use console::decode_console_logs;
 pub use createx::{CREATEX_ADDRESS, createx_deployed_bytecode, deploy_createx, verify_createx};
+pub use fund::fund_senders_on_fork;
+pub use governor::{is_terminal, query_proposal_state};
 pub use pipeline::{
     ConflictType, DuplicateConflict, DuplicateStrategy, PipelineConfig, PipelineContext,
     PipelineResult, RecordedDeployment, RecordedTransaction, ResolvedDuplicates, RunPipeline,
@@ -46,8 +48,6 @@ pub use sender::{
     ResolvedSender, SenderCategory, default_test_signers, extract_signing_key, in_memory_signer,
     resolve_all_senders, resolve_sender, resolve_wallet_for_address,
 };
-pub use fund::fund_senders_on_fork;
-pub use governor::{is_terminal, query_proposal_state};
 pub use sender_config::encode_sender_configs;
 pub use version::{ForgeVersion, detect_forge_version};
 

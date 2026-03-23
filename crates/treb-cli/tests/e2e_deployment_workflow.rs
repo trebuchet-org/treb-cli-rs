@@ -214,13 +214,7 @@ async fn e2e_dry_run_no_registry_mutation() {
     let rpc = rpc_url.clone();
     tokio::task::spawn_blocking(move || {
         treb()
-            .args([
-                "run",
-                "script/TrebDeploySimple.s.sol",
-                "--rpc-url",
-                &rpc,
-                "--non-interactive",
-            ])
+            .args(["run", "script/TrebDeploySimple.s.sol", "--rpc-url", &rpc, "--non-interactive"])
             .current_dir(&tmp_path)
             .assert()
             .success();

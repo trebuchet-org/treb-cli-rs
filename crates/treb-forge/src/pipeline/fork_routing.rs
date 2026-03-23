@@ -3,10 +3,10 @@
 //! Instead of simply impersonating contract addresses, this module executes
 //! transactions through the real on-chain contracts on an Anvil fork:
 //!
-//! - **Safe**: builds MultiSend bundles, queries owners/threshold, pre-approves
-//!   hashes, and calls `execTransaction` — exercising the actual Safe contract.
-//! - **Governor + Timelock**: schedules on the timelock, fast-forwards time,
-//!   and executes — exercising access control and atomicity.
+//! - **Safe**: builds MultiSend bundles, queries owners/threshold, pre-approves hashes, and calls
+//!   `execTransaction` — exercising the actual Safe contract.
+//! - **Governor + Timelock**: schedules on the timelock, fast-forwards time, and executes —
+//!   exercising access control and atomicity.
 //!
 //! This gives fork-mode the same `msg.sender` semantics as production.
 
@@ -70,10 +70,8 @@ sol! {
 /// `EXECUTOR_ROLE = keccak256("EXECUTOR_ROLE")`
 /// Used by OZ TimelockController for access control on `executeBatch`.
 const EXECUTOR_ROLE: B256 = B256::new([
-    0xd8, 0xaa, 0x0f, 0x31, 0x94, 0x97, 0x1a, 0x2a,
-    0x11, 0x66, 0x79, 0xf7, 0xc2, 0x09, 0x0f, 0x69,
-    0x39, 0xc8, 0xd4, 0xe0, 0x1a, 0x2a, 0x8d, 0x7e,
-    0x41, 0xd5, 0x5e, 0x53, 0x51, 0x46, 0x9e, 0x63,
+    0xd8, 0xaa, 0x0f, 0x31, 0x94, 0x97, 0x1a, 0x2a, 0x11, 0x66, 0x79, 0xf7, 0xc2, 0x09, 0x0f, 0x69,
+    0x39, 0xc8, 0xd4, 0xe0, 0x1a, 0x2a, 0x8d, 0x7e, 0x41, 0xd5, 0x5e, 0x53, 0x51, 0x46, 0x9e, 0x63,
 ]);
 
 // ---------------------------------------------------------------------------
@@ -92,10 +90,8 @@ async fn eth_call_bytes(
     if let Some(f) = from {
         tx = tx.from(f);
     }
-    let result = provider
-        .call(tx)
-        .await
-        .map_err(|e| TrebError::Forge(format!("eth_call failed: {e}")))?;
+    let result =
+        provider.call(tx).await.map_err(|e| TrebError::Forge(format!("eth_call failed: {e}")))?;
     Ok(result.to_vec())
 }
 
@@ -113,9 +109,7 @@ pub async fn impersonate_send_tx(
     anvil_set_balance(provider, from, U256::from(100_000_000_000_000_000_000u128)).await?;
     anvil_impersonate(provider, from).await?;
 
-    let mut tx = TransactionRequest::default()
-        .from(from)
-        .to(to);
+    let mut tx = TransactionRequest::default().from(from).to(to);
     tx.gas = Some(30_000_000);
     if !data.is_empty() {
         tx.input = TransactionInput::new(Bytes::from(data.to_vec()));
@@ -179,10 +173,7 @@ pub(crate) async fn anvil_impersonate(
 
 pub(crate) async fn anvil_stop_impersonating(provider: &impl Provider, addr: Address) {
     let _ = provider
-        .raw_request::<_, serde_json::Value>(
-            "anvil_stopImpersonatingAccount".into(),
-            (addr,),
-        )
+        .raw_request::<_, serde_json::Value>("anvil_stopImpersonatingAccount".into(), (addr,))
         .await;
 }
 
@@ -199,15 +190,9 @@ async fn anvil_set_code(
     Ok(())
 }
 
-async fn evm_increase_time(
-    provider: &impl Provider,
-    seconds: u64,
-) -> Result<(), TrebError> {
+async fn evm_increase_time(provider: &impl Provider, seconds: u64) -> Result<(), TrebError> {
     provider
-        .raw_request::<_, serde_json::Value>(
-            "evm_increaseTime".into(),
-            (U256::from(seconds),),
-        )
+        .raw_request::<_, serde_json::Value>("evm_increaseTime".into(), (U256::from(seconds),))
         .await
         .map_err(|e| TrebError::Forge(format!("evm_increaseTime failed: {e}")))?;
     Ok(())
@@ -244,10 +229,7 @@ async fn block_gas_limit(provider: &impl Provider) -> Result<u64, TrebError> {
         .raw_request("eth_getBlockByNumber".into(), ("latest", false))
         .await
         .map_err(|e| TrebError::Forge(format!("get block failed: {e}")))?;
-    let hex = block
-        .get("gasLimit")
-        .and_then(|v| v.as_str())
-        .unwrap_or("0x1c9c380");
+    let hex = block.get("gasLimit").and_then(|v| v.as_str()).unwrap_or("0x1c9c380");
     let stripped = hex.strip_prefix("0x").unwrap_or(hex);
     u64::from_str_radix(stripped, 16)
         .map_err(|e| TrebError::Forge(format!("hex parse gas limit: {e}")))
@@ -256,11 +238,7 @@ async fn block_gas_limit(provider: &impl Provider) -> Result<u64, TrebError> {
 /// Truncate a checksummed or lowercased address to `0x1234...5678` form.
 fn short_addr(addr: Address) -> String {
     let s = format!("{:#x}", addr);
-    if s.len() >= 10 {
-        format!("{}...{}", &s[..6], &s[s.len() - 4..])
-    } else {
-        s
-    }
+    if s.len() >= 10 { format!("{}...{}", &s[..6], &s[s.len() - 4..]) } else { s }
 }
 
 /// Print a progress line to stderr, clearing any active spinner first.
@@ -276,8 +254,8 @@ macro_rules! progress {
 
 /// Deterministic address for the CreateCall helper deployed on fork.
 const CREATE_CALL_ADDRESS: Address = Address::new([
-    0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC,
-    0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0x01,
+    0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC,
+    0xCC, 0xCC, 0xCC, 0x01,
 ]);
 
 /// Runtime bytecode for CreateCall.sol compiled with solc 0.8.30.
@@ -304,9 +282,10 @@ pub async fn execute_safe_on_fork(
     // Check if any transactions are CREATE (contract deployment).
     // Safe.execTransaction cannot directly deploy contracts — CREATE txs
     // must be routed through a CreateCall helper via DelegateCall.
-    let has_creates = run.tx_indices.iter()
-        .filter_map(|&idx| btxs.get(idx))
-        .any(|btx| matches!(btx.transaction.to(), Some(alloy_primitives::TxKind::Create) | None));
+    let has_creates =
+        run.tx_indices.iter().filter_map(|&idx| btxs.get(idx)).any(|btx| {
+            matches!(btx.transaction.to(), Some(alloy_primitives::TxKind::Create) | None)
+        });
 
     if has_creates {
         // Deploy CreateCall helper at a deterministic address
@@ -317,19 +296,21 @@ pub async fn execute_safe_on_fork(
 
     // Build MultiSend operations from the run's transactions.
     // CREATE transactions are wrapped as DelegateCall to CreateCall.performCreate().
-    let operations: Vec<treb_safe::MultiSendOperation> = run.tx_indices.iter()
+    let operations: Vec<treb_safe::MultiSendOperation> = run
+        .tx_indices
+        .iter()
         .filter_map(|&idx| btxs.get(idx))
         .map(|btx| {
-            let is_create = matches!(btx.transaction.to(), Some(alloy_primitives::TxKind::Create) | None);
+            let is_create =
+                matches!(btx.transaction.to(), Some(alloy_primitives::TxKind::Create) | None);
             let value = btx.transaction.value().unwrap_or_default();
             let input = btx.transaction.input().cloned().unwrap_or_default();
 
             if is_create {
                 // Wrap as DelegateCall to CreateCall.performCreate(value, bytecode)
-                let calldata = performCreateCall {
-                    value: U256::from(value),
-                    deploymentData: input,
-                }.abi_encode();
+                let calldata =
+                    performCreateCall { value: U256::from(value), deploymentData: input }
+                        .abi_encode();
                 treb_safe::MultiSendOperation {
                     operation: 1, // DelegateCall
                     to: CREATE_CALL_ADDRESS,
@@ -337,7 +318,9 @@ pub async fn execute_safe_on_fork(
                     data: calldata.into(),
                 }
             } else {
-                let to = btx.transaction.to()
+                let to = btx
+                    .transaction
+                    .to()
                     .and_then(|kind| match kind {
                         alloy_primitives::TxKind::Call(addr) => Some(addr),
                         alloy_primitives::TxKind::Create => None,
@@ -377,15 +360,25 @@ pub async fn execute_safe_on_fork(
             if batch.len() == 1 {
                 progress!(
                     "  batch {}/{}: direct Call to {}",
-                    i + 1, batch_count, short_addr(batch[0].to),
+                    i + 1,
+                    batch_count,
+                    short_addr(batch[0].to),
                 );
             } else {
                 progress!(
                     "  batch {}/{}: MultiSend DelegateCall ({} ops)",
-                    i + 1, batch_count, batch.len(),
+                    i + 1,
+                    batch_count,
+                    batch.len(),
                 );
                 for (j, op) in batch.iter().enumerate() {
-                    progress!("    [{}/{}] Call {} ({} bytes)", j + 1, batch.len(), short_addr(op.to), op.data.len());
+                    progress!(
+                        "    [{}/{}] Call {} ({} bytes)",
+                        j + 1,
+                        batch.len(),
+                        short_addr(op.to),
+                        op.data.len()
+                    );
                 }
             }
         }
@@ -400,7 +393,9 @@ pub async fn execute_safe_on_fork(
         let receipt = execute_safe_batch(provider, batch, safe_address, chain_id).await?;
         if !receipt.status {
             return Err(TrebError::Forge(format!(
-                "Safe.execTransaction reverted on fork (batch {}/{})", i + 1, batch_count,
+                "Safe.execTransaction reverted on fork (batch {}/{})",
+                i + 1,
+                batch_count,
             )));
         }
         all_receipts.push(receipt);
@@ -426,8 +421,8 @@ async fn split_into_batches(
     // Estimate gas for each operation
     let mut gas_estimates = Vec::with_capacity(operations.len());
     for op in operations {
-        let estimate = estimate_gas_for_call(provider, safe_address, op.to, &op.data).await
-            .unwrap_or(200_000); // fallback if estimation fails
+        let estimate =
+            estimate_gas_for_call(provider, safe_address, op.to, &op.data).await.unwrap_or(200_000); // fallback if estimation fails
         gas_estimates.push(estimate + estimate / 5); // +20% buffer
     }
 
@@ -471,19 +466,22 @@ async fn execute_safe_batch(
     };
 
     // Query Safe nonce, owners, threshold
-    let nonce_bytes = eth_call_bytes(provider, safe_address, &nonceCall {}.abi_encode(), None).await?;
+    let nonce_bytes =
+        eth_call_bytes(provider, safe_address, &nonceCall {}.abi_encode(), None).await?;
     let nonce = U256::abi_decode(&nonce_bytes)
         .map_err(|e| TrebError::Forge(format!("decode nonce: {e}")))?;
 
-    let owners_bytes = eth_call_bytes(provider, safe_address, &getOwnersCall {}.abi_encode(), None).await?;
+    let owners_bytes =
+        eth_call_bytes(provider, safe_address, &getOwnersCall {}.abi_encode(), None).await?;
     let owners = <Vec<Address>>::abi_decode(&owners_bytes)
         .map_err(|e| TrebError::Forge(format!("decode owners: {e}")))?;
 
-    let threshold_bytes = eth_call_bytes(provider, safe_address, &getThresholdCall {}.abi_encode(), None).await?;
+    let threshold_bytes =
+        eth_call_bytes(provider, safe_address, &getThresholdCall {}.abi_encode(), None).await?;
     let threshold_val = U256::abi_decode(&threshold_bytes)
         .map_err(|e| TrebError::Forge(format!("decode threshold: {e}")))?;
-    let threshold: usize = threshold_val.try_into()
-        .map_err(|_| TrebError::Forge("threshold too large".into()))?;
+    let threshold: usize =
+        threshold_val.try_into().map_err(|_| TrebError::Forge("threshold too large".into()))?;
 
     // Compute safeTxHash (EIP-712)
     let safe_tx = treb_safe::SafeTx {
@@ -526,7 +524,8 @@ async fn execute_safe_batch(
         gasToken: Address::ZERO,
         refundReceiver: Address::ZERO,
         signatures: Bytes::from(signatures),
-    }.abi_encode();
+    }
+    .abi_encode();
 
     let executor = approvers[0];
     impersonate_send_tx(provider, executor, safe_address, &exec_calldata, U256::ZERO).await
@@ -543,9 +542,9 @@ fn build_pre_approved_signatures(owners: &[Address]) -> Vec<u8> {
     for owner in &sorted {
         let mut r = [0u8; 32];
         r[12..32].copy_from_slice(owner.as_slice());
-        sigs.extend_from_slice(&r);       // r = padded address
+        sigs.extend_from_slice(&r); // r = padded address
         sigs.extend_from_slice(&[0u8; 32]); // s = 0
-        sigs.push(1);                      // v = 1 (pre-approved)
+        sigs.push(1); // v = 1 (pre-approved)
     }
     sigs
 }
@@ -559,8 +558,8 @@ fn build_pre_approved_signatures(owners: &[Address]) -> Vec<u8> {
 /// Skips `Governor.propose()` (the proposer may lack governance tokens on
 /// a fork) and goes straight to the timelock:
 ///
-/// - **With timelock**: `scheduleBatch` → warp time → grant `EXECUTOR_ROLE`
-///   → `executeBatch`. This exercises timelock access control and atomicity.
+/// - **With timelock**: `scheduleBatch` → warp time → grant `EXECUTOR_ROLE` → `executeBatch`. This
+///   exercises timelock access control and atomicity.
 /// - **Without timelock**: impersonate the governor and send each tx directly.
 pub async fn execute_governor_on_fork(
     provider: &impl Provider,
@@ -578,10 +577,12 @@ pub async fn execute_governor_on_fork(
     let mut calldatas: Vec<Vec<u8>> = Vec::with_capacity(tx_count);
 
     for &idx in &run.tx_indices {
-        let btx = btxs.get(idx).ok_or_else(|| {
-            TrebError::Forge(format!("transaction index {idx} out of range"))
-        })?;
-        let to = btx.transaction.to()
+        let btx = btxs
+            .get(idx)
+            .ok_or_else(|| TrebError::Forge(format!("transaction index {idx} out of range")))?;
+        let to = btx
+            .transaction
+            .to()
             .and_then(|kind| match kind {
                 alloy_primitives::TxKind::Call(addr) => Some(addr),
                 alloy_primitives::TxKind::Create => None,
@@ -603,31 +604,47 @@ pub async fn execute_governor_on_fork(
             if !quiet {
                 progress!(
                     "Executing via Governor {} ({} tx{})",
-                    short_addr(governor_address), tx_count, if tx_count == 1 { "" } else { "s" },
+                    short_addr(governor_address),
+                    tx_count,
+                    if tx_count == 1 { "" } else { "s" },
                 );
             }
             let receipt = schedule_and_execute_timelock(
-                provider, &targets, &values, &calldatas,
-                governor_address, timelock, quiet,
-            ).await?;
+                provider,
+                &targets,
+                &values,
+                &calldatas,
+                governor_address,
+                timelock,
+                quiet,
+            )
+            .await?;
             Ok(vec![receipt])
         }
         None => {
             if !quiet {
                 progress!(
                     "Executing via Governor {} ({} tx{})",
-                    short_addr(governor_address), tx_count, if tx_count == 1 { "" } else { "s" },
+                    short_addr(governor_address),
+                    tx_count,
+                    if tx_count == 1 { "" } else { "s" },
                 );
                 progress!("  Executing from governor (no timelock)...");
             }
             let mut receipts = Vec::new();
             for i in 0..targets.len() {
                 let receipt = impersonate_send_tx(
-                    provider, governor_address, targets[i], &calldatas[i], values[i],
-                ).await?;
+                    provider,
+                    governor_address,
+                    targets[i],
+                    &calldatas[i],
+                    values[i],
+                )
+                .await?;
                 if !receipt.status {
                     return Err(TrebError::Forge(format!(
-                        "governor tx {} to {:#x} reverted on fork", i, targets[i],
+                        "governor tx {} to {:#x} reverted on fork",
+                        i, targets[i],
                     )));
                 }
                 receipts.push(receipt);
@@ -652,21 +669,24 @@ async fn schedule_and_execute_timelock(
     timelock_address: Address,
     quiet: bool,
 ) -> Result<BroadcastReceipt, TrebError> {
-    let calldatas_bytes: Vec<Bytes> = calldatas.iter()
-        .map(|c| Bytes::from(c.clone()))
-        .collect();
+    let calldatas_bytes: Vec<Bytes> = calldatas.iter().map(|c| Bytes::from(c.clone())).collect();
 
     // description_hash = keccak256("") — matches Governor.propose("") behavior
     let description_hash = keccak256(b"");
 
     // 1. Query timelock delay
-    let delay_bytes = eth_call_bytes(provider, timelock_address, &getMinDelayCall {}.abi_encode(), None).await?;
+    let delay_bytes =
+        eth_call_bytes(provider, timelock_address, &getMinDelayCall {}.abi_encode(), None).await?;
     let delay = U256::abi_decode(&delay_bytes)
         .map_err(|e| TrebError::Forge(format!("decode getMinDelay: {e}")))?;
     let delay_secs: u64 = delay.try_into().unwrap_or(0);
 
     if !quiet {
-        progress!("  Scheduling on timelock {} (delay={}s)...", short_addr(timelock_address), delay_secs);
+        progress!(
+            "  Scheduling on timelock {} (delay={}s)...",
+            short_addr(timelock_address),
+            delay_secs
+        );
     }
 
     // 2. Schedule on Timelock (impersonate Governor, which has PROPOSER_ROLE)
@@ -677,25 +697,28 @@ async fn schedule_and_execute_timelock(
         predecessor: B256::ZERO,
         salt: description_hash,
         delay,
-    }.abi_encode();
+    }
+    .abi_encode();
 
     let schedule_receipt = impersonate_send_tx(
-        provider, governor_address, timelock_address, &schedule_calldata, U256::ZERO,
-    ).await?;
+        provider,
+        governor_address,
+        timelock_address,
+        &schedule_calldata,
+        U256::ZERO,
+    )
+    .await?;
     if !schedule_receipt.status {
         return Err(TrebError::Forge("scheduleBatch reverted on fork".into()));
     }
 
-    // 3. Grant EXECUTOR_ROLE to the governor so it can call executeBatch.
-    //    Impersonate the timelock itself — it has DEFAULT_ADMIN_ROLE in OZ's
-    //    default TimelockController setup (the timelock is its own admin).
-    let grant_calldata = grantRoleCall {
-        role: EXECUTOR_ROLE,
-        account: governor_address,
-    }.abi_encode();
-    impersonate_send_tx(
-        provider, timelock_address, timelock_address, &grant_calldata, U256::ZERO,
-    ).await?;
+    // 3. Grant EXECUTOR_ROLE to the governor so it can call executeBatch. Impersonate the timelock
+    //    itself — it has DEFAULT_ADMIN_ROLE in OZ's default TimelockController setup (the timelock
+    //    is its own admin).
+    let grant_calldata =
+        grantRoleCall { role: EXECUTOR_ROLE, account: governor_address }.abi_encode();
+    impersonate_send_tx(provider, timelock_address, timelock_address, &grant_calldata, U256::ZERO)
+        .await?;
 
     // 4. Warp time past the delay
     if delay_secs > 0 {
@@ -716,11 +739,17 @@ async fn schedule_and_execute_timelock(
         payloads: calldatas_bytes,
         predecessor: B256::ZERO,
         salt: description_hash,
-    }.abi_encode();
+    }
+    .abi_encode();
 
     let receipt = impersonate_send_tx(
-        provider, governor_address, timelock_address, &execute_calldata, U256::ZERO,
-    ).await?;
+        provider,
+        governor_address,
+        timelock_address,
+        &execute_calldata,
+        U256::ZERO,
+    )
+    .await?;
 
     if !receipt.status {
         return Err(TrebError::Forge("executeBatch reverted on fork".into()));
@@ -745,10 +774,12 @@ pub async fn exec_safe_from_registry(
     transactions: &[treb_core::types::safe_transaction::SafeTxData],
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     let provider = crate::provider::build_http_provider(rpc_url)?;
-    let safe_address: Address = safe_address_str.parse()
+    let safe_address: Address = safe_address_str
+        .parse()
         .map_err(|e| TrebError::Forge(format!("invalid safe address: {e}")))?;
 
-    let operations: Vec<treb_safe::MultiSendOperation> = transactions.iter()
+    let operations: Vec<treb_safe::MultiSendOperation> = transactions
+        .iter()
         .map(|txd| {
             let data_hex = txd.data.strip_prefix("0x").unwrap_or(&txd.data);
             treb_safe::MultiSendOperation {
@@ -780,13 +811,9 @@ pub async fn exec_safe_from_registry(
             "to": format!("{:#x}", op.to),
             "data": format!("0x{}", alloy_primitives::hex::encode(&op.data)),
         });
-        let tx: foundry_common::TransactionMaybeSigned =
-            serde_json::from_value(tx_json)
-                .map_err(|e| TrebError::Forge(format!("build synthetic tx: {e}")))?;
-        btxs.push_back(foundry_cheatcodes::BroadcastableTransaction {
-            rpc: None,
-            transaction: tx,
-        });
+        let tx: foundry_common::TransactionMaybeSigned = serde_json::from_value(tx_json)
+            .map_err(|e| TrebError::Forge(format!("build synthetic tx: {e}")))?;
+        btxs.push_back(foundry_cheatcodes::BroadcastableTransaction { rpc: None, transaction: tx });
     }
 
     execute_safe_on_fork(&provider, &run, &btxs, safe_address, chain_id, true).await
@@ -811,13 +838,11 @@ pub async fn exec_governance_from_registry(
     }
     .map_err(|e| TrebError::Forge(format!("invalid governance address: {e}")))?;
 
-    let targets: Vec<Address> = actions.iter()
-        .map(|a| a.target.parse().unwrap_or_default())
-        .collect();
-    let values: Vec<U256> = actions.iter()
-        .map(|a| a.value.parse().unwrap_or_default())
-        .collect();
-    let calldatas: Vec<Vec<u8>> = actions.iter()
+    let targets: Vec<Address> =
+        actions.iter().map(|a| a.target.parse().unwrap_or_default()).collect();
+    let values: Vec<U256> = actions.iter().map(|a| a.value.parse().unwrap_or_default()).collect();
+    let calldatas: Vec<Vec<u8>> = actions
+        .iter()
         .map(|a| {
             let hex = a.calldata.strip_prefix("0x").unwrap_or(&a.calldata);
             alloy_primitives::hex::decode(hex).unwrap_or_default()
@@ -836,15 +861,21 @@ pub async fn exec_governance_from_registry(
 // ---------------------------------------------------------------------------
 
 /// Query the Safe contract's threshold on a fork.
-pub async fn query_safe_threshold(provider: &impl Provider, safe: Address) -> Result<u64, TrebError> {
-    let threshold_bytes = eth_call_bytes(provider, safe, &getThresholdCall {}.abi_encode(), None).await
-        .map_err(|e| TrebError::Safe(format!(
-            "failed to query Safe {:#x}: {e}\n\n\
+pub async fn query_safe_threshold(
+    provider: &impl Provider,
+    safe: Address,
+) -> Result<u64, TrebError> {
+    let threshold_bytes = eth_call_bytes(provider, safe, &getThresholdCall {}.abi_encode(), None)
+        .await
+        .map_err(|e| {
+            TrebError::Safe(format!(
+                "failed to query Safe {:#x}: {e}\n\n\
              The Safe contract may not exist on this fork. \
              If it was deployed after the fork was created, \
              run `treb fork restart` to re-fork from the latest block.",
-            safe
-        )))?;
+                safe
+            ))
+        })?;
     if threshold_bytes.is_empty() {
         return Err(TrebError::Safe(format!(
             "Safe {:#x} has no code on this fork.\n\n\
@@ -853,22 +884,21 @@ pub async fn query_safe_threshold(provider: &impl Provider, safe: Address) -> Re
             safe
         )));
     }
-    let val = U256::abi_decode(&threshold_bytes)
-        .map_err(|e| TrebError::Safe(format!(
+    let val = U256::abi_decode(&threshold_bytes).map_err(|e| {
+        TrebError::Safe(format!(
             "failed to decode threshold from Safe {:#x}: {e}\n\n\
              The contract may not be a Safe. Check the safe address in your config.",
             safe
-        )))?;
+        ))
+    })?;
     val.try_into().map_err(|_| TrebError::Safe("threshold too large".into()))
 }
 
 /// Query the Safe contract's nonce on a fork.
 pub async fn query_safe_nonce(provider: &impl Provider, safe: Address) -> Result<u64, TrebError> {
-    let nonce_bytes = eth_call_bytes(provider, safe, &nonceCall {}.abi_encode(), None).await
-        .map_err(|e| TrebError::Safe(format!(
-            "failed to query Safe {:#x}: {e}",
-            safe
-        )))?;
+    let nonce_bytes = eth_call_bytes(provider, safe, &nonceCall {}.abi_encode(), None)
+        .await
+        .map_err(|e| TrebError::Safe(format!("failed to query Safe {:#x}: {e}", safe)))?;
     if nonce_bytes.is_empty() {
         return Err(TrebError::Safe(format!(
             "Safe {:#x} has no code on this fork.\n\n\
@@ -876,11 +906,9 @@ pub async fn query_safe_nonce(provider: &impl Provider, safe: Address) -> Result
             safe
         )));
     }
-    let val = U256::abi_decode(&nonce_bytes)
-        .map_err(|e| TrebError::Safe(format!(
-            "failed to decode nonce from Safe {:#x}: {e}",
-            safe
-        )))?;
+    let val = U256::abi_decode(&nonce_bytes).map_err(|e| {
+        TrebError::Safe(format!("failed to decode nonce from Safe {:#x}: {e}", safe))
+    })?;
     val.try_into().map_err(|_| TrebError::Safe("nonce too large".into()))
 }
 
@@ -902,12 +930,13 @@ pub async fn simulate_governance_on_fork(
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     let mut receipts = Vec::new();
     for i in 0..targets.len() {
-        let receipt = impersonate_send_tx(
-            provider, governance_address, targets[i], &calldatas[i], values[i],
-        ).await?;
+        let receipt =
+            impersonate_send_tx(provider, governance_address, targets[i], &calldatas[i], values[i])
+                .await?;
         if !receipt.status {
             return Err(TrebError::Forge(format!(
-                "governance simulation tx {} to {:#x} reverted on fork", i, targets[i],
+                "governance simulation tx {} to {:#x} reverted on fork",
+                i, targets[i],
             )));
         }
         receipts.push(receipt);

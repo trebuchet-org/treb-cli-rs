@@ -7,10 +7,12 @@
 mod e2e;
 
 use alloy_primitives::Address;
-use e2e::deploy_safe::{deploy_safe, verify_safe_via_eth_call};
-use e2e::{copy_dir_recursive, spawn_anvil_or_skip};
-use std::path::Path;
-use std::str::FromStr;
+use e2e::{
+    copy_dir_recursive,
+    deploy_safe::{deploy_safe, verify_safe_via_eth_call},
+    spawn_anvil_or_skip,
+};
+use std::{path::Path, str::FromStr};
 
 /// Well-known Anvil test accounts.
 const ACCOUNT_0: &str = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
@@ -18,10 +20,7 @@ const ACCOUNT_1: &str = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 const ACCOUNT_2: &str = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC";
 
 fn fixture_project() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("project")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("project")
 }
 
 /// Deploy Safe(1/1) with Anvil account #0 as sole owner, verify via eth_call.

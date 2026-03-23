@@ -293,8 +293,10 @@ pub struct BackgroundAnvilConfig {
 pub fn spawn_background_anvil(
     config: &BackgroundAnvilConfig,
 ) -> Result<BackgroundAnvil, TrebError> {
-    use std::fs;
-    use std::process::{Command, Stdio};
+    use std::{
+        fs,
+        process::{Command, Stdio},
+    };
 
     // Ensure parent directories exist for PID and log files.
     if let Some(parent) = config.pid_file.parent() {
@@ -329,9 +331,7 @@ pub fn spawn_background_anvil(
     if let Some(chain_id) = config.chain_id {
         match chain_id {
             42220 | 44787 | 62320 => args.push("--celo".to_string()),
-            10 | 420 | 8453 | 84532 | 7777777 | 999999999 => {
-                args.push("--optimism".to_string())
-            }
+            10 | 420 | 8453 | 84532 | 7777777 | 999999999 => args.push("--optimism".to_string()),
             _ => {}
         }
     }
@@ -397,9 +397,7 @@ pub fn poll_anvil_health(rpc_url: &str, is_forked: bool) -> Result<(), TrebError
 
         if Instant::now() >= deadline {
             let err_msg = result.unwrap_err();
-            return Err(TrebError::Fork(format!(
-                "anvil not ready after {timeout:?}: {err_msg}"
-            )));
+            return Err(TrebError::Fork(format!("anvil not ready after {timeout:?}: {err_msg}")));
         }
 
         std::thread::sleep(interval);
@@ -421,10 +419,8 @@ pub fn stop_background_anvil(pid_file: &std::path::Path) -> Result<(), TrebError
         }
     };
 
-    let pid: i32 = pid_str
-        .trim()
-        .parse()
-        .map_err(|e| TrebError::Fork(format!("invalid PID in file: {e}")))?;
+    let pid: i32 =
+        pid_str.trim().parse().map_err(|e| TrebError::Fork(format!("invalid PID in file: {e}")))?;
 
     // Send SIGTERM.
     #[cfg(unix)]
@@ -441,8 +437,7 @@ pub fn stop_background_anvil(pid_file: &std::path::Path) -> Result<(), TrebError
         }
 
         // Wait for process to exit (up to 5 seconds).
-        let deadline =
-            std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
             let ret = unsafe { libc::kill(pid, 0) };
             if ret != 0 {
@@ -460,9 +455,7 @@ pub fn stop_background_anvil(pid_file: &std::path::Path) -> Result<(), TrebError
     #[cfg(not(unix))]
     {
         // On non-Unix, use the `kill` command as a fallback.
-        let _ = std::process::Command::new("kill")
-            .arg(pid.to_string())
-            .status();
+        let _ = std::process::Command::new("kill").arg(pid.to_string()).status();
     }
 
     // Remove PID file.

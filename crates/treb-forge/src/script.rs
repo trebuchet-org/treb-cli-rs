@@ -100,8 +100,8 @@ pub async fn execute_script(
     // Clone result before the state machine potentially consumes `executed`.
     let result = executed.execution_result.clone();
 
-    let should_broadcast = executed.args.broadcast
-        && result.transactions.as_ref().is_some_and(|txs| !txs.is_empty());
+    let should_broadcast =
+        executed.args.broadcast && result.transactions.as_ref().is_some_and(|txs| !txs.is_empty());
 
     // Build a simulation result for the confirm callback.
     let decoded_logs = crate::console::decode_console_logs(&result.logs);
@@ -118,57 +118,52 @@ pub async fn execute_script(
         broadcast_receipts: None,
     };
 
-    let confirmed = if should_broadcast {
-        confirm.is_none_or(|f| f(&sim_result))
-    } else {
-        false
-    };
+    let confirmed = if should_broadcast { confirm.is_none_or(|f| f(&sim_result)) } else { false };
 
-    let broadcast_receipts = if should_broadcast && confirmed {
-        let pre_sim = executed
-            .prepare_simulation()
-            .await
-            .map_err(|e| TrebError::Forge(format!("forge simulation preparation failed: {e}")))?;
+    let broadcast_receipts =
+        if should_broadcast && confirmed {
+            let pre_sim = executed.prepare_simulation().await.map_err(|e| {
+                TrebError::Forge(format!("forge simulation preparation failed: {e}"))
+            })?;
 
-        let filled = pre_sim
-            .fill_metadata()
-            .await
-            .map_err(|e| TrebError::Forge(format!("forge metadata fill failed: {e}")))?;
+            let filled = pre_sim
+                .fill_metadata()
+                .await
+                .map_err(|e| TrebError::Forge(format!("forge metadata fill failed: {e}")))?;
 
-        let bundled = filled
-            .bundle()
-            .await
-            .map_err(|e| TrebError::Forge(format!("forge bundling failed: {e}")))?;
+            let bundled = filled
+                .bundle()
+                .await
+                .map_err(|e| TrebError::Forge(format!("forge bundling failed: {e}")))?;
 
-        let bundled = bundled
-            .wait_for_pending()
-            .await
-            .map_err(|e| TrebError::Forge(format!("forge pending transaction wait failed: {e}")))?;
+            let bundled = bundled.wait_for_pending().await.map_err(|e| {
+                TrebError::Forge(format!("forge pending transaction wait failed: {e}"))
+            })?;
 
-        let broadcasted = bundled
-            .broadcast()
-            .await
-            .map_err(|e| TrebError::Forge(format!("forge broadcast failed: {e}")))?;
+            let broadcasted = bundled
+                .broadcast()
+                .await
+                .map_err(|e| TrebError::Forge(format!("forge broadcast failed: {e}")))?;
 
-        let mut receipts = Vec::new();
-        for seq in broadcasted.sequence.sequences() {
-            for (tx_meta, receipt) in seq.transactions.iter().zip(seq.receipts.iter()) {
-                let raw = serde_json::to_value(receipt).ok();
-                receipts.push(BroadcastReceipt {
-                    hash: receipt.transaction_hash,
-                    block_number: receipt.block_number.unwrap_or_default(),
-                    gas_used: receipt.gas_used,
-                    status: receipt.inner.inner.inner.receipt.status.coerce_status(),
-                    contract_name: tx_meta.contract_name.clone().filter(|s| !s.is_empty()),
-                    contract_address: receipt.contract_address,
-                    raw_receipt: raw,
-                });
+            let mut receipts = Vec::new();
+            for seq in broadcasted.sequence.sequences() {
+                for (tx_meta, receipt) in seq.transactions.iter().zip(seq.receipts.iter()) {
+                    let raw = serde_json::to_value(receipt).ok();
+                    receipts.push(BroadcastReceipt {
+                        hash: receipt.transaction_hash,
+                        block_number: receipt.block_number.unwrap_or_default(),
+                        gas_used: receipt.gas_used,
+                        status: receipt.inner.inner.inner.receipt.status.coerce_status(),
+                        contract_name: tx_meta.contract_name.clone().filter(|s| !s.is_empty()),
+                        contract_address: receipt.contract_address,
+                        raw_receipt: raw,
+                    });
+                }
             }
-        }
-        Some(receipts)
-    } else {
-        None
-    };
+            Some(receipts)
+        } else {
+            None
+        };
 
     Ok(ExecutionResult {
         success: result.success,
@@ -182,7 +177,6 @@ pub async fn execute_script(
         broadcast_receipts,
     })
 }
-
 
 /// Builder for constructing forge `ScriptArgs` from treb configuration.
 pub struct ScriptConfig {
@@ -578,7 +572,12 @@ mod tests {
         // evm.sender should be the derived address
         assert_eq!(args.evm.sender, Some(ANVIL_ADDR_0));
         // wallet opts should have the private key in the keys list
-        assert!(args.wallets.private_keys.as_ref().is_some_and(|keys| keys.contains(&ANVIL_KEY_0.to_string())));
+        assert!(
+            args.wallets
+                .private_keys
+                .as_ref()
+                .is_some_and(|keys| keys.contains(&ANVIL_KEY_0.to_string()))
+        );
     }
 
     #[test]
@@ -624,7 +623,12 @@ mod tests {
         // evm.sender should be the safe address
         assert_eq!(args.evm.sender, Some(safe_addr.parse::<Address>().unwrap()));
         // wallet opts should have the sub-signer's private key for vm.broadcast()
-        assert!(args.wallets.private_keys.as_ref().is_some_and(|keys| keys.contains(&ANVIL_KEY_0.to_string())));
+        assert!(
+            args.wallets
+                .private_keys
+                .as_ref()
+                .is_some_and(|keys| keys.contains(&ANVIL_KEY_0.to_string()))
+        );
     }
 
     #[test]
@@ -709,8 +713,12 @@ mod tests {
             resolved_senders.insert(k, v);
         }
 
-        let config = build_script_config_with_senders(&resolved_cfg, "script/Deploy.s.sol", &resolved_senders)
-            .unwrap();
+        let config = build_script_config_with_senders(
+            &resolved_cfg,
+            "script/Deploy.s.sol",
+            &resolved_senders,
+        )
+        .unwrap();
         let args = config.into_script_args().unwrap();
 
         // Should have multiple private keys

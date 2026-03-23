@@ -279,7 +279,8 @@ pub fn match_governance_logs(
         // ProposalExecuted(uint256 proposalId) — proposalId is in data (non-indexed)
         if topic0.eq_ignore_ascii_case(topics::PROPOSAL_EXECUTED) {
             let data = log.get("data").and_then(|v| v.as_str()).unwrap_or("");
-            let stripped = data.strip_prefix("0x").or_else(|| data.strip_prefix("0X")).unwrap_or(data);
+            let stripped =
+                data.strip_prefix("0x").or_else(|| data.strip_prefix("0X")).unwrap_or(data);
             // data is a 32-byte ABI-encoded uint256
             if stripped.len() >= 64 {
                 let proposal_id_hex = &stripped[..64];
@@ -289,9 +290,7 @@ pub fn match_governance_logs(
                     let id_str = id.to_string();
                     for proposal in pending_proposals {
                         if proposal.proposal_id == id_str {
-                            return Some(GovernanceMatch::GovernorProposal {
-                                proposal_id: id_str,
-                            });
+                            return Some(GovernanceMatch::GovernorProposal { proposal_id: id_str });
                         }
                     }
                 }
@@ -408,14 +407,9 @@ fn walk_trace_for_governance(
         }
     };
 
-    let input = call
-        .get("input")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let input_stripped = input
-        .strip_prefix("0x")
-        .or_else(|| input.strip_prefix("0X"))
-        .unwrap_or(input);
+    let input = call.get("input").and_then(|v| v.as_str()).unwrap_or("");
+    let input_stripped =
+        input.strip_prefix("0x").or_else(|| input.strip_prefix("0X")).unwrap_or(input);
 
     // Check Safe: execTransaction selector to a known safe address
     if safe_addrs.contains(&to) && input_stripped.len() >= 8 {
@@ -436,10 +430,8 @@ fn walk_trace_for_governance(
     // Check Governor: call to a known governor address
     if governor_addrs.contains(&to) && input_stripped.len() >= 8 {
         // Find pending proposals for this governor address
-        let matching: Vec<_> = pending_proposals
-            .iter()
-            .filter(|p| p.governor_address.to_lowercase() == to)
-            .collect();
+        let matching: Vec<_> =
+            pending_proposals.iter().filter(|p| p.governor_address.to_lowercase() == to).collect();
 
         if matching.len() == 1 {
             // Unambiguous: single pending proposal for this governor
@@ -494,20 +486,13 @@ pub struct ProcessedReceipt {
 }
 
 /// Fetch receipt + traces for a tx hash and extract all deployment/upgrade info.
-pub async fn process_tx_receipt(
-    rpc_url: &str,
-    tx_hash: &str,
-) -> anyhow::Result<ProcessedReceipt> {
+pub async fn process_tx_receipt(rpc_url: &str, tx_hash: &str) -> anyhow::Result<ProcessedReceipt> {
     let client = rpc_client()?;
 
     // Fetch receipt
-    let receipt = rpc_call(
-        &client,
-        rpc_url,
-        "eth_getTransactionReceipt",
-        serde_json::json!([tx_hash]),
-    )
-    .await?;
+    let receipt =
+        rpc_call(&client, rpc_url, "eth_getTransactionReceipt", serde_json::json!([tx_hash]))
+            .await?;
 
     if receipt.is_null() {
         bail!("transaction receipt not found: {tx_hash}");
@@ -515,8 +500,7 @@ pub async fn process_tx_receipt(
 
     let block_number =
         parse_hex_u64(receipt.get("blockNumber").and_then(|v| v.as_str()).unwrap_or("0x0"));
-    let gas_used =
-        parse_hex_u64(receipt.get("gasUsed").and_then(|v| v.as_str()).unwrap_or("0x0"));
+    let gas_used = parse_hex_u64(receipt.get("gasUsed").and_then(|v| v.as_str()).unwrap_or("0x0"));
 
     let receipt_status = receipt.get("status").and_then(|v| v.as_str()).unwrap_or("0x1");
     if receipt_status == "0x0" {
@@ -550,11 +534,7 @@ pub async fn process_tx_receipt(
     // Also check receipt contractAddress as safety net
     if let Some(addr) = receipt_contract_address(&receipt) {
         if !creations.iter().any(|c| c.address.eq_ignore_ascii_case(&addr)) {
-            let sender = receipt
-                .get("from")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
+            let sender = receipt.get("from").and_then(|v| v.as_str()).unwrap_or("").to_string();
             creations.push(TracedCreation {
                 address: addr,
                 from: sender,
@@ -614,21 +594,16 @@ pub fn apply_receipt_to_registry(
 
     // Build address → deployment index for lookups
     let all_deployments = registry.list_deployments();
-    let addr_to_dep: std::collections::HashMap<String, String> = all_deployments
-        .iter()
-        .map(|d| (d.address.to_lowercase(), d.id.clone()))
-        .collect();
+    let addr_to_dep: std::collections::HashMap<String, String> =
+        all_deployments.iter().map(|d| (d.address.to_lowercase(), d.id.clone())).collect();
 
     // Process proxy upgrades from Upgraded events
     for upgrade in &processed.proxy_upgrades {
         let proxy_addr_lower = format!("{:#x}", upgrade.proxy_address).to_lowercase();
         if let Some(dep_id) = addr_to_dep.get(&proxy_addr_lower) {
             if let Some(dep) = registry.get_deployment(dep_id).cloned() {
-                let old_impl = dep
-                    .proxy_info
-                    .as_ref()
-                    .map(|p| p.implementation.clone())
-                    .unwrap_or_default();
+                let old_impl =
+                    dep.proxy_info.as_ref().map(|p| p.implementation.clone()).unwrap_or_default();
 
                 let new_impl = format!("{:#x}", upgrade.new_implementation);
 
@@ -652,9 +627,7 @@ pub fn apply_receipt_to_registry(
                 proxy_info.implementation = new_impl.clone();
                 updated.updated_at = Utc::now();
 
-                registry
-                    .update_deployment(updated)
-                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                registry.update_deployment(updated).map_err(|e| anyhow::anyhow!("{e}"))?;
 
                 upgraded_deployments.push(UpgradedDeployment {
                     deployment_id: dep_id.clone(),
@@ -679,11 +652,7 @@ pub fn apply_receipt_to_registry(
         }
     }
 
-    Ok(ReceiptApplicationResult {
-        upgraded_deployments,
-        new_creations,
-        verified_deployments,
-    })
+    Ok(ReceiptApplicationResult { upgraded_deployments, new_creations, verified_deployments })
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────
@@ -767,7 +736,8 @@ mod tests {
         let proxy_addr = alloy_primitives::address!("e7f1725E7734CE288F8367e1Bb143E90bb3F0512");
 
         // Upgraded(address implementation) event signature:
-        // keccak256("Upgraded(address)") = 0xbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b
+        // keccak256("Upgraded(address)") =
+        // 0xbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b
         let upgraded_sig = "0xbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b";
         // Implementation address is indexed (topic[1]), left-padded to 32 bytes
         let impl_topic = format!("0x000000000000000000000000{}", &format!("{:#x}", impl_addr)[2..]);
@@ -794,7 +764,10 @@ mod tests {
         assert_eq!(parse_hex_u64("invalid"), 0);
     }
 
-    fn make_pending_proposal(proposal_id: &str, governor: &str) -> treb_core::types::GovernorProposal {
+    fn make_pending_proposal(
+        proposal_id: &str,
+        governor: &str,
+    ) -> treb_core::types::GovernorProposal {
         treb_core::types::GovernorProposal {
             proposal_id: proposal_id.to_string(),
             governor_address: governor.to_string(),
@@ -812,7 +785,10 @@ mod tests {
         }
     }
 
-    fn make_pending_safe_tx(safe_tx_hash: &str, safe_address: &str) -> treb_core::types::SafeTransaction {
+    fn make_pending_safe_tx(
+        safe_tx_hash: &str,
+        safe_address: &str,
+    ) -> treb_core::types::SafeTransaction {
         treb_core::types::SafeTransaction {
             safe_tx_hash: safe_tx_hash.to_string(),
             safe_address: safe_address.to_string(),

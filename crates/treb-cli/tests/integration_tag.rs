@@ -166,7 +166,8 @@ fn tag_add_preserves_go_compatible_bare_deployments_file() {
         "seeded fixture should start as the Go-compatible bare-map format"
     );
 
-    ctx.run(["registry", "tag", "--add", "core", "mainnet/42220/CDPLiquidityStrategy:v3.0.0"]).success();
+    ctx.run(["registry", "tag", "--add", "core", "mainnet/42220/CDPLiquidityStrategy:v3.0.0"])
+        .success();
 
     let after = fs::read_to_string(&deployments_path).expect("read updated deployments file");
     let json: serde_json::Value =

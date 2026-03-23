@@ -148,7 +148,8 @@ pub fn hydrate_collision(
     let now = Utc::now();
     let namespace = &context.config.namespace;
     let chain_id = context.config.chain_id;
-    let id = generate_deployment_id(namespace, chain_id, &collision.contract_name, &collision.label);
+    let id =
+        generate_deployment_id(namespace, chain_id, &collision.contract_name, &collision.label);
 
     Deployment {
         id,
@@ -481,11 +482,8 @@ pub fn build_v2_transaction_metadata(
     broadcastable_txs: &foundry_cheatcodes::BroadcastableTransactions,
     context: &PipelineContext,
 ) -> HashMap<String, V2TransactionMetadata> {
-    let addr_to_role: HashMap<Address, String> = context
-        .sender_labels
-        .iter()
-        .map(|(addr, role)| (*addr, role.clone()))
-        .collect();
+    let addr_to_role: HashMap<Address, String> =
+        context.sender_labels.iter().map(|(addr, role)| (*addr, role.clone())).collect();
 
     broadcastable_txs
         .iter()
@@ -514,11 +512,8 @@ pub fn apply_receipts(
     for (rt, receipt) in transactions.iter_mut().zip(receipts.iter()) {
         rt.transaction.hash = format!("{:#x}", receipt.hash);
         rt.transaction.block_number = receipt.block_number;
-        rt.transaction.status = if receipt.status {
-            TransactionStatus::Executed
-        } else {
-            TransactionStatus::Failed
-        };
+        rt.transaction.status =
+            if receipt.status { TransactionStatus::Executed } else { TransactionStatus::Failed };
         if receipt.gas_used > 0 {
             rt.gas_used = Some(receipt.gas_used);
         }
@@ -1156,12 +1151,15 @@ mod tests {
     fn hydrate_governor_proposal_with_timelock_from_sender() {
         let timelock_addr = address!("0000000000000000000000000000000000000088");
         let mut ctx = test_context();
-        ctx.resolved_senders.insert("deployer".to_string(), ResolvedSender::Governor {
-            governor_address: address!("0000000000000000000000000000000000000099"),
-            timelock_address: Some(timelock_addr),
-            proposer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
-            reducer: None,
-        });
+        ctx.resolved_senders.insert(
+            "deployer".to_string(),
+            ResolvedSender::Governor {
+                governor_address: address!("0000000000000000000000000000000000000099"),
+                timelock_address: Some(timelock_addr),
+                proposer: Box::new(ResolvedSender::Wallet(in_memory_signer(0).unwrap())),
+                reducer: None,
+            },
+        );
 
         let events = vec![GovernorProposalCreated {
             proposalId: U256::from(1u64),

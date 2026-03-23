@@ -9,12 +9,12 @@
 mod e2e;
 
 use alloy_primitives::{Address, U256};
-use e2e::deploy_safe::{deploy_safe, verify_safe_via_eth_call};
 use e2e::{
-    copy_dir_recursive, read_transactions, spawn_anvil_or_skip, treb,
+    copy_dir_recursive,
+    deploy_safe::{deploy_safe, verify_safe_via_eth_call},
+    read_transactions, spawn_anvil_or_skip, treb,
 };
-use std::path::Path;
-use std::str::FromStr;
+use std::{path::Path, str::FromStr};
 
 /// Well-known Anvil test accounts.
 const ACCOUNT_0: &str = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
@@ -22,10 +22,7 @@ const ACCOUNT_1: &str = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 const ACCOUNT_2: &str = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC";
 
 fn fixture_project() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("project")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("project")
 }
 
 /// Write a treb.toml that configures a Safe sender for the deployer role.
@@ -159,12 +156,7 @@ async fn safe_1of1_broadcast_on_fork() {
     // 8a. Check deployments exist
     let deps = e2e::read_registry_file(tmp.path(), "deployments.json");
     let deps_map = deps.as_object().expect("deployments.json must be object");
-    assert_eq!(
-        deps_map.len(),
-        1,
-        "should have exactly 1 deployment, got {}",
-        deps_map.len()
-    );
+    assert_eq!(deps_map.len(), 1, "should have exactly 1 deployment, got {}", deps_map.len());
 
     // 8b. Verify the deployment has the Counter contract
     let (_, dep) = deps_map.iter().next().unwrap();
@@ -175,23 +167,16 @@ async fn safe_1of1_broadcast_on_fork() {
     );
     // The deployment address should be non-zero
     let dep_address = dep["address"].as_str().unwrap();
-    assert!(
-        dep_address.starts_with("0x"),
-        "deployment address should start with 0x"
-    );
+    assert!(dep_address.starts_with("0x"), "deployment address should start with 0x");
     assert_ne!(
-        dep_address,
-        "0x0000000000000000000000000000000000000000",
+        dep_address, "0x0000000000000000000000000000000000000000",
         "deployment address should be non-zero"
     );
 
     // 8c. Verify transaction records
     let txs = read_transactions(tmp.path());
     let txs_map = txs.as_object().expect("transactions.json must be object");
-    assert!(
-        !txs_map.is_empty(),
-        "should have at least 1 transaction record"
-    );
+    assert!(!txs_map.is_empty(), "should have at least 1 transaction record");
 
     // Find the transaction and verify sender is the Safe address
     let (_, tx) = txs_map.iter().next().unwrap();
@@ -204,10 +189,7 @@ async fn safe_1of1_broadcast_on_fork() {
 
     // Transaction should be executed (not queued) for Safe(1/1)
     let tx_status = tx["status"].as_str().unwrap();
-    assert_eq!(
-        tx_status, "EXECUTED",
-        "Safe(1/1) transaction should be EXECUTED on fork"
-    );
+    assert_eq!(tx_status, "EXECUTED", "Safe(1/1) transaction should be EXECUTED on fork");
 
     // Transaction should have a non-empty hash
     let tx_hash = tx["hash"].as_str().unwrap();
@@ -238,9 +220,7 @@ fn read_counter_creation_bytecode(project_dir: &Path) -> Vec<u8> {
             .unwrap_or_else(|e| panic!("failed to read {}: {e}", artifact_path.display())),
     )
     .unwrap();
-    let hex_str = data["bytecode"]["object"]
-        .as_str()
-        .expect("bytecode.object must be a string");
+    let hex_str = data["bytecode"]["object"].as_str().expect("bytecode.object must be a string");
     let hex_str = hex_str.strip_prefix("0x").unwrap_or(hex_str);
     alloy_primitives::hex::decode(hex_str).expect("invalid hex in creation bytecode")
 }
@@ -383,11 +363,7 @@ async fn safe_2of3_proposal_on_fork() {
     );
 
     // 8d. Verify nonce = 0
-    assert_eq!(
-        stx["nonce"].as_u64(),
-        Some(0),
-        "Safe nonce should be 0 (first transaction)"
-    );
+    assert_eq!(stx["nonce"].as_u64(), Some(0), "Safe nonce should be 0 (first transaction)");
 
     // 8e. Verify non-empty safeTxHash (key matches value)
     assert!(
@@ -408,21 +384,13 @@ async fn safe_2of3_proposal_on_fork() {
     );
 
     // 8g. Verify linked transactionIds
-    let tx_ids = stx["transactionIds"]
-        .as_array()
-        .expect("transactionIds must be array");
-    assert!(
-        !tx_ids.is_empty(),
-        "should have at least 1 linked transactionId"
-    );
+    let tx_ids = stx["transactionIds"].as_array().expect("transactionIds must be array");
+    assert!(!tx_ids.is_empty(), "should have at least 1 linked transactionId");
 
     // 8h. Verify transaction records exist and are QUEUED
     let txs = read_transactions(tmp.path());
     let txs_map = txs.as_object().expect("transactions.json must be object");
-    assert!(
-        !txs_map.is_empty(),
-        "should have at least 1 transaction record"
-    );
+    assert!(!txs_map.is_empty(), "should have at least 1 transaction record");
     for tx_id in tx_ids {
         let tx_id_str = tx_id.as_str().unwrap();
         let tx = &txs_map[tx_id_str];

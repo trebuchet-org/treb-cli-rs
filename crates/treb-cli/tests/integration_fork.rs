@@ -77,9 +77,7 @@ fn seed_fork_with_run_snapshot(project_root: &std::path::Path) {
     store
         .push_run_snapshot(ForkRunSnapshot {
             index: 0,
-            source: ForkRunSource::Run {
-                script: "Deploy.s.sol".to_string(),
-            },
+            source: ForkRunSource::Run { script: "Deploy.s.sol".to_string() },
             registry_snapshot_dir: run_snapshot_dir.to_string_lossy().into_owned(),
             evm_snapshots,
             deployment_count: 3,

@@ -107,9 +107,7 @@ impl SenderTypes {
 /// `(string[] names, address[] addrs)` for the `SENDER_CONFIGS`
 /// environment variable. Type-specific configuration (private keys,
 /// signer references) stays entirely in Rust.
-pub fn encode_sender_configs(
-    resolved_senders: &HashMap<String, ResolvedSender>,
-) -> String {
+pub fn encode_sender_configs(resolved_senders: &HashMap<String, ResolvedSender>) -> String {
     // Use broadcast_address() — for Governor+timelock, this returns the
     // timelock address (the on-chain executor), so the Solidity side calls
     // vm.broadcast(timelockAddress) instead of vm.broadcast(governorAddress).
@@ -286,9 +284,7 @@ fn build_governance_config(
         .address
         .as_deref()
         .ok_or_else(|| {
-            TrebError::Config(format!(
-                "sender '{name}': governance sender missing 'address' field"
-            ))
+            TrebError::Config(format!("sender '{name}': governance sender missing 'address' field"))
         })?
         .parse()
         .map_err(|e| {
@@ -307,9 +303,7 @@ fn build_governance_config(
         .unwrap_or(Address::ZERO);
 
     let proposer_name = sender_config.proposer.as_deref().ok_or_else(|| {
-        TrebError::Config(format!(
-            "sender '{name}': governance sender missing 'proposer' field"
-        ))
+        TrebError::Config(format!("sender '{name}': governance sender missing 'proposer' field"))
     })?;
 
     // Validate proposer exists

@@ -14,9 +14,7 @@ use std::{
 use tempfile::TempDir;
 use treb_config::{LocalConfig, save_local_config};
 use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
-use treb_registry::{
-    DEPLOYMENTS_FILE, FORK_STATE_FILE, ForkStateStore, write_versioned_file,
-};
+use treb_registry::{DEPLOYMENTS_FILE, FORK_STATE_FILE, ForkStateStore, write_versioned_file};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -286,7 +284,10 @@ fn fork_exit_restores_registry() {
     );
 
     // Holistic snapshot directory should have been removed.
-    assert!(!holistic_snapshot_dir.exists(), "holistic snapshot directory should be removed after fork exit");
+    assert!(
+        !holistic_snapshot_dir.exists(),
+        "holistic snapshot directory should be removed after fork exit"
+    );
 
     // Fork state should no longer contain the "testnet" entry.
     let mut store2 = ForkStateStore::new(&treb_dir);
@@ -392,9 +393,8 @@ async fn fork_enter_accepts_network_and_rpc_url_flags() {
 
     let mut store = ForkStateStore::new(&treb_dir);
     store.load().unwrap();
-    let entry = store
-        .get_active_fork(network)
-        .expect("active fork entry should exist after fork enter");
+    let entry =
+        store.get_active_fork(network).expect("active fork entry should exist after fork enter");
 
     assert_eq!(entry.network, network);
     assert_eq!(entry.fork_url, rpc_url, "fork_url should match the --rpc-url flag");

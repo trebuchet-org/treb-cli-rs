@@ -138,7 +138,8 @@ fn prune_yes_removes_broken_entry_and_creates_backup() {
     // Insert a deployment with a broken transaction reference.
     registry.insert_deployment(make_deployment("dep-broken", "tx-missing", 1, "default")).unwrap();
 
-    let output = treb().args(["registry", "prune", "--yes"]).current_dir(tmp.path()).output().unwrap();
+    let output =
+        treb().args(["registry", "prune", "--yes"]).current_dir(tmp.path()).output().unwrap();
 
     assert!(output.status.success(), "prune --yes should succeed");
     let stdout = String::from_utf8(output.stdout).unwrap();
@@ -294,7 +295,11 @@ fn reset_network_removes_only_matching_chain() {
     registry.insert_deployment(make_deployment("dep-chain1", "", 1, "default")).unwrap();
     registry.insert_deployment(make_deployment("dep-chain42220", "", 42220, "default")).unwrap();
 
-    treb().args(["registry", "drop", "--network", "1", "--yes"]).current_dir(tmp.path()).assert().success();
+    treb()
+        .args(["registry", "drop", "--network", "1", "--yes"])
+        .current_dir(tmp.path())
+        .assert()
+        .success();
 
     let registry_after = treb_registry::Registry::open(tmp.path()).unwrap();
     assert!(
@@ -332,4 +337,3 @@ fn reset_namespace_removes_only_matching_namespace() {
         "dep-staging should remain (different namespace)"
     );
 }
-

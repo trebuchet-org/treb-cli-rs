@@ -330,12 +330,15 @@ fn print_compose_banner(
         } else {
             String::new()
         };
-        let fork_suffix = if is_fork {
-            format!(" {}", "[fork]".style(color::MAGENTA))
-        } else {
-            String::new()
-        };
-        eprintln!("  {:12} {}{}{}", "Network:", network_name.style(color::BLUE), chain_suffix, fork_suffix);
+        let fork_suffix =
+            if is_fork { format!(" {}", "[fork]".style(color::MAGENTA)) } else { String::new() };
+        eprintln!(
+            "  {:12} {}{}{}",
+            "Network:",
+            network_name.style(color::BLUE),
+            chain_suffix,
+            fork_suffix
+        );
     } else {
         let fork_tag = if is_fork { " [fork]" } else { "" };
         if chain_id > 0 {
@@ -965,9 +968,8 @@ pub async fn run(
         sender_overrides: HashMap::new(),
     })
     .context("failed to resolve configuration")?;
-    let banner_senders = resolve_all_senders(&banner_resolved.senders)
-        .await
-        .context("failed to resolve senders")?;
+    let banner_senders =
+        resolve_all_senders(&banner_resolved.senders).await.context("failed to resolve senders")?;
     let banner_network = network.as_deref().or(banner_resolved.network.as_deref());
 
     // Resolve chain ID for the banner
@@ -986,13 +988,11 @@ pub async fn run(
             if let Some(fork_entry) = net.and_then(|n| store.get_active_fork(n).cloned()) {
                 (true, Some(fork_entry.rpc_url))
             } else {
-                let url = net
-                    .and_then(|n| super::run::resolve_rpc_url_for_chain_id(n, &cwd));
+                let url = net.and_then(|n| super::run::resolve_rpc_url_for_chain_id(n, &cwd));
                 (false, url)
             }
         } else {
-            let url = net
-                .and_then(|n| super::run::resolve_rpc_url_for_chain_id(n, &cwd));
+            let url = net.and_then(|n| super::run::resolve_rpc_url_for_chain_id(n, &cwd));
             (false, url)
         }
     };
@@ -1000,8 +1000,7 @@ pub async fn run(
     // Auto-fund senders on fork
     if banner_is_fork {
         if let Some(ref rpc) = banner_rpc_url {
-            let fund_results =
-                treb_forge::fund_senders_on_fork(rpc, &banner_senders, 10_000).await;
+            let fund_results = treb_forge::fund_senders_on_fork(rpc, &banner_senders, 10_000).await;
             let funded_count = fund_results.iter().filter(|(_, _, ok)| *ok).count();
             if funded_count > 0 && !json {
                 eprintln!(
@@ -1167,7 +1166,10 @@ pub async fn run(
                 })
                 .unwrap_or_else(|| format!("{err}"));
             if !json {
-                eprintln!("{}", styled(&format!("{} Failed: {}", emoji::CROSS, error_msg), color::RED));
+                eprintln!(
+                    "{}",
+                    styled(&format!("{} Failed: {}", emoji::CROSS, error_msg), color::RED)
+                );
             }
             component_results.push(ComponentResultEntry {
                 component: failed_name.clone(),
@@ -1210,7 +1212,9 @@ pub async fn run(
             let failure_error = failed_component.as_ref().map(|failed| {
                 anyhow::anyhow!(
                     "compose failed: component '{}' failed ({}/{} completed)",
-                    failed, completed, total
+                    failed,
+                    completed,
+                    total
                 )
             });
             if let Some(err) = failure_error {
@@ -1303,7 +1307,9 @@ pub async fn run(
                 for c in &result.collisions {
                     let line = format!(
                         "  {} {} at {}",
-                        emoji::WARNING, c.contract_name, c.existing_address,
+                        emoji::WARNING,
+                        c.contract_name,
+                        c.existing_address,
                     );
                     if use_color {
                         eprintln!("{}", line.style(crate::ui::color::YELLOW));
@@ -1344,7 +1350,10 @@ pub async fn run(
 
         eprintln!(
             "\n{} Simulation complete: {} transaction(s), {} deployment(s) across {} component(s)",
-            emoji::CHECK_MARK, total_txs, total_deps, sim_results.len()
+            emoji::CHECK_MARK,
+            total_txs,
+            total_deps,
+            sim_results.len()
         );
         eprintln!();
     }
@@ -1356,13 +1365,10 @@ pub async fn run(
     let script_results = if should_broadcast {
         // Confirmation prompt (interactive mode only)
         if prompts_enabled && !json {
-            let network_name = network.as_deref()
-                .or(banner_network)
-                .unwrap_or("unknown");
+            let network_name = network.as_deref().or(banner_network).unwrap_or("unknown");
             let fork_tag = if banner_is_fork { " [fork]" } else { "" };
-            let url_suffix = banner_rpc_url.as_deref()
-                .map(|u| format!(" ({u})"))
-                .unwrap_or_default();
+            let url_suffix =
+                banner_rpc_url.as_deref().map(|u| format!(" ({u})")).unwrap_or_default();
             eprintln!(
                 "\n  {} {}{}{}\n",
                 styled("Target:", color::BOLD),
@@ -1371,10 +1377,7 @@ pub async fn run(
                 styled(&url_suffix, color::GRAY),
             );
 
-            let confirmed = crate::ui::prompt::confirm(
-                "Broadcast these transactions?",
-                false,
-            );
+            let confirmed = crate::ui::prompt::confirm("Broadcast these transactions?", false);
             if !confirmed {
                 eprintln!("Broadcast cancelled.");
                 delete_compose_state();
@@ -1382,13 +1385,8 @@ pub async fn run(
             }
         }
         if !json {
-            let network_label = network.as_deref()
-                .or(banner_network)
-                .unwrap_or("network");
-            eprintln!(
-                "\n{}",
-                styled(&format!("Broadcasting to {network_label}..."), color::CYAN),
-            );
+            let network_label = network.as_deref().or(banner_network).unwrap_or("network");
+            eprintln!("\n{}", styled(&format!("Broadcasting to {network_label}..."), color::CYAN),);
         }
 
         // Pre-broadcast fork snapshot (if in fork mode)
@@ -1456,7 +1454,8 @@ pub async fn run(
                     error: Some(error_msg),
                 });
                 failed_component = Some(failed_name.clone());
-                let failed_idx = components_to_run.iter().position(|n| n == &failed_name).unwrap_or(0);
+                let failed_idx =
+                    components_to_run.iter().position(|n| n == &failed_name).unwrap_or(0);
                 for name in components_to_run.iter().skip(failed_idx + 1) {
                     component_results.push(ComponentResultEntry {
                         component: name.clone(),
@@ -1479,8 +1478,10 @@ pub async fn run(
         let treb_dir = cwd.join(super::run::TREB_DIR);
         let mut store = treb_registry::ForkStateStore::new(&treb_dir);
         if store.load().is_ok() && store.is_fork_mode_active() {
-            let total_deps: usize = script_results.iter().map(|sr| sr.result.deployments.len()).sum();
-            let total_txs: usize = script_results.iter().map(|sr| sr.result.transactions.len()).sum();
+            let total_deps: usize =
+                script_results.iter().map(|sr| sr.result.deployments.len()).sum();
+            let total_txs: usize =
+                script_results.iter().map(|sr| sr.result.transactions.len()).sum();
             if let Some(last) = store.data_mut().run_snapshots.last_mut() {
                 last.deployment_count = total_deps;
                 last.transaction_count = total_txs;
@@ -1540,7 +1541,6 @@ pub async fn run(
             total,
             &failed_component,
         );
-
     } else if success {
         // In JSON mode, execution failures bubble up to the top-level JSON
         // error wrapper instead of mixing a result payload with stderr errors.

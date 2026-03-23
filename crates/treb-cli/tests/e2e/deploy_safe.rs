@@ -8,9 +8,7 @@
 //! This is **blocking** — call via `tokio::task::spawn_blocking` from async test code.
 
 use alloy_primitives::Address;
-use std::path::Path;
-use std::process::Command;
-use std::str::FromStr;
+use std::{path::Path, process::Command, str::FromStr};
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -63,11 +61,7 @@ pub fn deploy_safe_with_salt(
     threshold: u64,
     salt_nonce: u64,
 ) -> DeployedSafe {
-    let owners_csv = owners
-        .iter()
-        .map(|a| format!("{a}"))
-        .collect::<Vec<_>>()
-        .join(",");
+    let owners_csv = owners.iter().map(|a| format!("{a}")).collect::<Vec<_>>().join(",");
 
     let output = Command::new("forge")
         .args([
@@ -107,9 +101,7 @@ pub fn verify_safe_via_eth_call(rpc_url: &str, safe: &DeployedSafe) {
     let owners_output = cast_call(rpc_url, &safe.proxy_address, "getOwners()(address[])");
     for owner in &safe.owners {
         assert!(
-            owners_output
-                .to_lowercase()
-                .contains(&format!("{owner}").to_lowercase()),
+            owners_output.to_lowercase().contains(&format!("{owner}").to_lowercase()),
             "getOwners() should contain {owner}, got: {owners_output}"
         );
     }
@@ -153,9 +145,8 @@ fn parse_broadcast_artifacts(
     let json: serde_json::Value =
         serde_json::from_str(&data).unwrap_or_else(|e| panic!("invalid broadcast JSON: {e}"));
 
-    let transactions = json["transactions"]
-        .as_array()
-        .expect("broadcast JSON must have transactions array");
+    let transactions =
+        json["transactions"].as_array().expect("broadcast JSON must have transactions array");
 
     let mut singleton = None;
     let mut factory = None;
@@ -230,8 +221,5 @@ fn cast_call(rpc_url: &str, to: &Address, sig: &str) -> String {
         "cast call {to} {sig} failed:\nstderr: {}",
         String::from_utf8_lossy(&output.stderr),
     );
-    String::from_utf8(output.stdout)
-        .unwrap()
-        .trim()
-        .to_string()
+    String::from_utf8(output.stdout).unwrap().trim().to_string()
 }

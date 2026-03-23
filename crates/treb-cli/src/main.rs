@@ -133,7 +133,8 @@ enum Commands {
         /// Filter by deployment label
         #[arg(long)]
         label: Option<String>,
-        /// Show only fork deployments (in fork mode: deployments added since fork enter; otherwise: fork/ namespace)
+        /// Show only fork deployments (in fork mode: deployments added since fork enter;
+        /// otherwise: fork/ namespace)
         #[arg(long)]
         fork: bool,
         /// Hide fork deployments
@@ -419,7 +420,8 @@ enum RegistrySubcommand {
         /// Network name or chain ID
         #[arg(long)]
         network: Option<String>,
-        /// Sync a specific transaction hash (fetches receipt, detects proxy upgrades and new deployments)
+        /// Sync a specific transaction hash (fetches receipt, detects proxy upgrades and new
+        /// deployments)
         #[arg(long, value_name = "HASH")]
         tx_hash: Option<String>,
         /// Explicit RPC URL (overrides network, required with --tx-hash unless fork is active)
@@ -679,14 +681,7 @@ fn build_grouped_help(cmd: &clap::Command) -> String {
         &mut s,
         cmd,
         "Management Commands:",
-        &[
-            "registry",
-            "queued",
-            "addressbook",
-            "dev",
-            "networks",
-            "config",
-        ],
+        &["registry", "queued", "addressbook", "dev", "networks", "config"],
     );
     s.push('\n');
     write_group(&mut s, cmd, "Additional Commands:", &["version", "completion", "help"]);
@@ -1170,9 +1165,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                     commands::sync::run(network, clean, debug, json).await?
                 }
             }
-            RegistrySubcommand::Prune(args) => {
-                commands::prune::run(args, non_interactive).await?
-            }
+            RegistrySubcommand::Prune(args) => commands::prune::run(args, non_interactive).await?,
             RegistrySubcommand::Tag { deployment, add, remove, network, namespace, json } => {
                 commands::tag::run(
                     deployment,
@@ -1213,9 +1206,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 )
                 .await?
             }
-            RegistrySubcommand::Drop(args) => {
-                commands::reset::run(args, non_interactive).await?
-            }
+            RegistrySubcommand::Drop(args) => commands::reset::run(args, non_interactive).await?,
         },
         Commands::Addressbook { namespace, network, subcommand } => {
             commands::addressbook::run(namespace, network, subcommand).await?
@@ -1429,7 +1420,14 @@ mod tests {
     #[test]
     fn tag_short_flags_parse_without_wiring_behavior() {
         let cli = parse_cli_from([
-            "treb", "registry", "tag", "Counter", "-n", "mainnet", "-s", "production",
+            "treb",
+            "registry",
+            "tag",
+            "Counter",
+            "-n",
+            "mainnet",
+            "-s",
+            "production",
         ])
         .unwrap();
 
@@ -1678,14 +1676,11 @@ mod tests {
 
     #[test]
     fn registry_subcommand_parses() {
-        let cli =
-            parse_cli_from(["treb", "registry", "drop", "--namespace", "default", "--yes"])
-                .unwrap();
+        let cli = parse_cli_from(["treb", "registry", "drop", "--namespace", "default", "--yes"])
+            .unwrap();
 
         match cli.command {
-            Commands::Registry {
-                subcommand: RegistrySubcommand::Drop(args),
-            } => {
+            Commands::Registry { subcommand: RegistrySubcommand::Drop(args) } => {
                 assert_eq!(args.namespace.as_deref(), Some("default"));
                 assert!(args.yes);
             }
@@ -1914,10 +1909,7 @@ mod tests {
 
     #[test]
     fn subcommand_help_uses_treb_bin_name() {
-        for args in [
-            ["treb-cli", "config", "--help"],
-            ["treb-cli", "completion", "--help"],
-        ] {
+        for args in [["treb-cli", "config", "--help"], ["treb-cli", "completion", "--help"]] {
             let err = build_grouped_command().try_get_matches_from(args).unwrap_err();
             assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
 

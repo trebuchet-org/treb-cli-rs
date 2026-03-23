@@ -1,5 +1,7 @@
-use std::collections::{HashMap, HashSet};
-use std::time::Duration;
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 
 use alloy_chains::Chain;
 use anyhow::Context;
@@ -426,11 +428,7 @@ pub async fn run(
 
             let state_result = match tokio::time::timeout(
                 Duration::from_secs(30),
-                query_proposal_state(
-                    rpc_url,
-                    &proposal.governor_address,
-                    &proposal.proposal_id,
-                ),
+                query_proposal_state(rpc_url, &proposal.governor_address, &proposal.proposal_id),
             )
             .await
             {
@@ -589,14 +587,16 @@ pub async fn run_tx_hash(
                                 if tx.status != TransactionStatus::Executed {
                                     tx.status = TransactionStatus::Executed;
                                     tx.hash = tx_hash.to_string();
-                                    registry.update_transaction(tx)
-                                        .with_context(|| format!("failed to update transaction {tx_id}"))?;
+                                    registry.update_transaction(tx).with_context(|| {
+                                        format!("failed to update transaction {tx_id}")
+                                    })?;
                                 }
                             }
                         }
 
-                        registry.update_safe_transaction(updated)
-                            .with_context(|| format!("failed to update safe transaction {safe_tx_hash}"))?;
+                        registry.update_safe_transaction(updated).with_context(|| {
+                            format!("failed to update safe transaction {safe_tx_hash}")
+                        })?;
                     }
                 }
             }
@@ -825,10 +825,7 @@ fn resolve_tx_hash_rpc_url(
     }
 
     if url.unresolved || url.expanded_url.trim().is_empty() {
-        anyhow::bail!(
-            "RPC URL for network '{}' could not be resolved",
-            network_name
-        );
+        anyhow::bail!("RPC URL for network '{}' could not be resolved", network_name);
     }
 
     Ok(url.expanded_url.clone())
@@ -941,9 +938,8 @@ fn find_deferred_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
         let path = entry.path();
         if path.is_dir() {
             result.extend(find_deferred_files(&path));
-        } else if path.file_name().is_some_and(|n| {
-            n.to_string_lossy().ends_with(".deferred.json")
-        }) {
+        } else if path.file_name().is_some_and(|n| n.to_string_lossy().ends_with(".deferred.json"))
+        {
             result.push(path);
         }
     }

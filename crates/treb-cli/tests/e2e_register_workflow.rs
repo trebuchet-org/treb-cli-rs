@@ -177,7 +177,11 @@ async fn e2e_register_tag_show_roundtrip() {
         let id = dep_id.clone();
         let t = tag.to_string();
         tokio::task::spawn_blocking(move || {
-            treb().args(["registry", "tag", &id, "--add", &t]).current_dir(&tmp_path).assert().success();
+            treb()
+                .args(["registry", "tag", &id, "--add", &t])
+                .current_dir(&tmp_path)
+                .assert()
+                .success();
         })
         .await
         .unwrap();

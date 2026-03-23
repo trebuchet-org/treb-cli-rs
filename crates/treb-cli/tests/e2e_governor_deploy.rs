@@ -7,15 +7,15 @@
 mod e2e;
 
 use alloy_primitives::Address;
-use e2e::deploy_governor::{deploy_governor, verify_governor_via_eth_call};
-use e2e::{copy_dir_recursive, spawn_anvil_or_skip};
+use e2e::{
+    copy_dir_recursive,
+    deploy_governor::{deploy_governor, verify_governor_via_eth_call},
+    spawn_anvil_or_skip,
+};
 use std::path::Path;
 
 fn fixture_project() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("project")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("project")
 }
 
 /// Deploy governance stack with default delay (1s), verify via eth_call.

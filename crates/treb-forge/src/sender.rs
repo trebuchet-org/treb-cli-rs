@@ -241,10 +241,8 @@ pub fn resolve_wallet_for_address(
     address: Address,
     resolved_senders: &HashMap<String, ResolvedSender>,
 ) -> Result<EthereumWallet, TrebError> {
-    let sender = resolved_senders
-        .values()
-        .find(|s| s.broadcast_address() == address)
-        .ok_or_else(|| {
+    let sender =
+        resolved_senders.values().find(|s| s.broadcast_address() == address).ok_or_else(|| {
             TrebError::Forge(format!("no resolved sender found for address {address}"))
         })?;
 
@@ -702,7 +700,8 @@ mod tests {
         let gov_addr = "0x0000000000000000000000000000000000000099";
         let tl_addr = "0x0000000000000000000000000000000000000088";
         let mut senders = HashMap::new();
-        senders.insert("my-gov".to_string(), governance_config(gov_addr, Some(tl_addr), "deployer"));
+        senders
+            .insert("my-gov".to_string(), governance_config(gov_addr, Some(tl_addr), "deployer"));
         senders.insert("deployer".to_string(), pk_config(ANVIL_KEY_0, None));
 
         let mut visited = HashSet::new();

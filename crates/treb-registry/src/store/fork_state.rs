@@ -363,11 +363,7 @@ impl ForkStateStore {
     /// Return the next run snapshot index (last index + 1, or 1 if empty).
     /// Index 0 is reserved for the "initial" fork-enter state in history display.
     pub fn next_run_snapshot_index(&self) -> u32 {
-        self.data
-            .run_snapshots
-            .last()
-            .map(|s| s.index + 1)
-            .unwrap_or(1)
+        self.data.run_snapshots.last().map(|s| s.index + 1).unwrap_or(1)
     }
 
     /// Return the run snapshot stack.

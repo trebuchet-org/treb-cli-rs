@@ -4,8 +4,7 @@
 //! flow with synthetic data, verifying that the pipeline produces correct
 //! core domain records without requiring real forge compilation.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use alloy_primitives::{Address, B256, Bytes, address, b256, keccak256};
 use tempfile::TempDir;
@@ -464,7 +463,13 @@ fn dry_run_leaves_registry_unchanged() {
         .collect();
     let recorded_txs: Vec<RecordedTransaction> = transactions
         .into_iter()
-        .map(|t| RecordedTransaction { transaction: t, sender_name: None, sender_category: None, gas_used: None, trace: None })
+        .map(|t| RecordedTransaction {
+            transaction: t,
+            sender_name: None,
+            sender_category: None,
+            gas_used: None,
+            trace: None,
+        })
         .collect();
 
     let result = build_pipeline_result(recorded_deps, recorded_txs, vec![], vec![], true);

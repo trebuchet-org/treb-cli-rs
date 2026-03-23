@@ -22,9 +22,7 @@ use std::{
 use alloy_primitives::map::HashMap as AlloyHashMap;
 
 use alloy_primitives::B256;
-use forge_script_sequence::{
-    ScriptSequence, TransactionWithMetadata, sig_to_file_name,
-};
+use forge_script_sequence::{ScriptSequence, TransactionWithMetadata, sig_to_file_name};
 use foundry_evm::traces::CallKind;
 use serde::{Deserialize, Serialize};
 use treb_core::error::TrebError;
@@ -121,16 +119,11 @@ pub fn compute_broadcast_paths(
     let sig_name = sig_to_file_name(sig);
     let latest_name = format!("{sig_name}-latest.json");
 
-    let broadcast_dir = project_root
-        .join("broadcast")
-        .join(&script_filename)
-        .join(chain_id.to_string());
+    let broadcast_dir =
+        project_root.join("broadcast").join(&script_filename).join(chain_id.to_string());
     let broadcast_path = broadcast_dir.join(&latest_name);
 
-    let cache_dir = project_root
-        .join("cache")
-        .join(&script_filename)
-        .join(chain_id.to_string());
+    let cache_dir = project_root.join("cache").join(&script_filename).join(chain_id.to_string());
     let cache_path = cache_dir.join(&latest_name);
 
     (broadcast_dir, broadcast_path, cache_path)
@@ -138,18 +131,13 @@ pub fn compute_broadcast_paths(
 
 /// Compute the deferred file path from the broadcast path.
 fn deferred_path_from(broadcast_path: &Path) -> PathBuf {
-    let stem = broadcast_path
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default();
+    let stem =
+        broadcast_path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
     broadcast_path.with_file_name(format!("{stem}.deferred.json"))
 }
 
 /// Build a relative path from project root to the broadcast file.
-pub fn relative_broadcast_path(
-    project_root: &Path,
-    broadcast_path: &Path,
-) -> String {
+pub fn relative_broadcast_path(project_root: &Path, broadcast_path: &Path) -> String {
     broadcast_path
         .strip_prefix(project_root)
         .unwrap_or(broadcast_path)
@@ -211,12 +199,10 @@ pub fn ensure_broadcast_dirs(sequence: &ScriptSequence) -> Result<(), TrebError>
 /// Called after each confirmed receipt so that a crash mid-broadcast preserves
 /// all prior progress. The timestamped copy is only written by the final
 /// `write_broadcast_artifacts()` call.
-pub fn save_sequence_checkpoint(
-    sequence: &mut ScriptSequence,
-) -> Result<(), TrebError> {
-    sequence.save(true, false).map_err(|e| {
-        TrebError::Forge(format!("failed to write checkpoint: {e}"))
-    })
+pub fn save_sequence_checkpoint(sequence: &mut ScriptSequence) -> Result<(), TrebError> {
+    sequence
+        .save(true, false)
+        .map_err(|e| TrebError::Forge(format!("failed to write checkpoint: {e}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -248,14 +234,8 @@ pub fn build_pre_routing_sequence(
 
         // Determine opcode (Create vs Call)
         let is_create =
-            btx.transaction
-                .to()
-                .is_none_or(|to| matches!(to, alloy_primitives::TxKind::Create));
-        tx_meta.opcode = if is_create {
-            CallKind::Create
-        } else {
-            CallKind::Call
-        };
+            btx.transaction.to().is_none_or(|to| matches!(to, alloy_primitives::TxKind::Create));
+        tx_meta.opcode = if is_create { CallKind::Create } else { CallKind::Call };
 
         // Set contract metadata from recorded transaction
         if let Some(rt) = recorded_txs.get(i) {
@@ -277,10 +257,8 @@ pub fn build_pre_routing_sequence(
         transactions.push_back(tx_meta);
     }
 
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
+    let timestamp =
+        SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
 
     ScriptSequence {
         transactions,
@@ -291,11 +269,7 @@ pub fn build_pre_routing_sequence(
         returns: AlloyHashMap::default(),
         timestamp,
         chain: ctx.config.chain_id,
-        commit: if ctx.git_commit.is_empty() {
-            None
-        } else {
-            Some(ctx.git_commit.clone())
-        },
+        commit: if ctx.git_commit.is_empty() { None } else { Some(ctx.git_commit.clone()) },
     }
 }
 
@@ -342,14 +316,11 @@ pub fn build_script_sequence(
                 }
 
                 // Determine opcode (Create vs Call)
-                let is_create = btx.transaction.to().is_none_or(|to| {
-                    matches!(to, alloy_primitives::TxKind::Create)
-                });
-                tx_meta.opcode = if is_create {
-                    CallKind::Create
-                } else {
-                    CallKind::Call
-                };
+                let is_create = btx
+                    .transaction
+                    .to()
+                    .is_none_or(|to| matches!(to, alloy_primitives::TxKind::Create));
+                tx_meta.opcode = if is_create { CallKind::Create } else { CallKind::Call };
 
                 // Set contract metadata from recorded transaction
                 if let Some(rt) = rt_by_index.get(&tx_idx) {
@@ -392,10 +363,8 @@ pub fn build_script_sequence(
         }
     }
 
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
+    let timestamp =
+        SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
 
     ScriptSequence {
         transactions,
@@ -406,11 +375,7 @@ pub fn build_script_sequence(
         returns: AlloyHashMap::default(),
         timestamp,
         chain: ctx.config.chain_id,
-        commit: if ctx.git_commit.is_empty() {
-            None
-        } else {
-            Some(ctx.git_commit.clone())
-        },
+        commit: if ctx.git_commit.is_empty() { None } else { Some(ctx.git_commit.clone()) },
     }
 }
 
@@ -427,19 +392,12 @@ pub fn build_deferred_operations(
     let mut safe_proposals = Vec::new();
     let mut governor_proposals = Vec::new();
 
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
+    let timestamp =
+        SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
 
     for (run, result) in run_results {
         match result {
-            RunResult::SafeProposed {
-                safe_tx_hash,
-                safe_address,
-                nonce,
-                tx_count: _,
-            } => {
+            RunResult::SafeProposed { safe_tx_hash, safe_address, nonce, tx_count: _ } => {
                 let tx_ids: Vec<String> = run
                     .tx_indices
                     .iter()
@@ -458,11 +416,7 @@ pub fn build_deferred_operations(
                     execution_tx_hash: None,
                 });
             }
-            RunResult::GovernorProposed {
-                proposal_id,
-                governor_address,
-                tx_count: _,
-            } => {
+            RunResult::GovernorProposed { proposal_id, governor_address, tx_count: _ } => {
                 let tx_ids: Vec<String> = run
                     .tx_indices
                     .iter()
@@ -487,11 +441,7 @@ pub fn build_deferred_operations(
     DeferredOperations {
         timestamp,
         chain: ctx.config.chain_id,
-        commit: if ctx.git_commit.is_empty() {
-            None
-        } else {
-            Some(ctx.git_commit.clone())
-        },
+        commit: if ctx.git_commit.is_empty() { None } else { Some(ctx.git_commit.clone()) },
         safe_proposals,
         governor_proposals,
     }
@@ -532,9 +482,9 @@ pub fn write_broadcast_artifacts(
 
     // Save the main ScriptSequence using Foundry's save method
     // (writes run-latest.json + run-{timestamp}.json + cache/ sensitive copy)
-    sequence.save(true, true).map_err(|e| {
-        TrebError::Forge(format!("failed to write broadcast file: {e}"))
-    })?;
+    sequence
+        .save(true, true)
+        .map_err(|e| TrebError::Forge(format!("failed to write broadcast file: {e}")))?;
 
     // Write deferred operations companion file
     if !deferred.safe_proposals.is_empty() || !deferred.governor_proposals.is_empty() {
@@ -561,9 +511,9 @@ pub fn write_broadcast_artifacts(
             serde_json::to_writer_pretty(&mut writer, deferred).map_err(|e| {
                 TrebError::Forge(format!("failed to serialize deferred operations: {e}"))
             })?;
-            writer.flush().map_err(|e| {
-                TrebError::Forge(format!("failed to flush deferred file: {e}"))
-            })?;
+            writer
+                .flush()
+                .map_err(|e| TrebError::Forge(format!("failed to flush deferred file: {e}")))?;
 
             // Timestamped copy of deferred file
             let ts_deferred = broadcast_path.with_file_name(format!(
@@ -602,17 +552,11 @@ pub fn update_deferred_safe_proposal(
     }
 
     let contents = fs::read_to_string(&deferred_file).map_err(|e| {
-        TrebError::Forge(format!(
-            "failed to read deferred file {}: {e}",
-            deferred_file.display()
-        ))
+        TrebError::Forge(format!("failed to read deferred file {}: {e}", deferred_file.display()))
     })?;
 
     let mut deferred: DeferredOperations = serde_json::from_str(&contents).map_err(|e| {
-        TrebError::Forge(format!(
-            "failed to parse deferred file {}: {e}",
-            deferred_file.display()
-        ))
+        TrebError::Forge(format!("failed to parse deferred file {}: {e}", deferred_file.display()))
     })?;
 
     for proposal in &mut deferred.safe_proposals {
@@ -623,18 +567,12 @@ pub fn update_deferred_safe_proposal(
     }
 
     let file = fs::File::create(&deferred_file).map_err(|e| {
-        TrebError::Forge(format!(
-            "failed to write deferred file {}: {e}",
-            deferred_file.display()
-        ))
+        TrebError::Forge(format!("failed to write deferred file {}: {e}", deferred_file.display()))
     })?;
     let mut writer = BufWriter::new(file);
-    serde_json::to_writer_pretty(&mut writer, &deferred).map_err(|e| {
-        TrebError::Forge(format!("failed to serialize deferred operations: {e}"))
-    })?;
-    writer.flush().map_err(|e| {
-        TrebError::Forge(format!("failed to flush deferred file: {e}"))
-    })?;
+    serde_json::to_writer_pretty(&mut writer, &deferred)
+        .map_err(|e| TrebError::Forge(format!("failed to serialize deferred operations: {e}")))?;
+    writer.flush().map_err(|e| TrebError::Forge(format!("failed to flush deferred file: {e}")))?;
 
     Ok(())
 }
@@ -673,19 +611,14 @@ pub async fn load_resume_state(
     // Load deferred operations (optional)
     let deferred_file = deferred_path_from(&broadcast_path);
     let deferred: Option<DeferredOperations> = if deferred_file.exists() {
-        fs::read_to_string(&deferred_file)
-            .ok()
-            .and_then(|c| serde_json::from_str(&c).ok())
+        fs::read_to_string(&deferred_file).ok().and_then(|c| serde_json::from_str(&c).ok())
     } else {
         None
     };
 
     // Poll on-chain receipts for transactions that have hashes
-    let hashes_to_check: Vec<B256> = sequence
-        .transactions
-        .iter()
-        .filter_map(|tx_meta| tx_meta.hash)
-        .collect();
+    let hashes_to_check: Vec<B256> =
+        sequence.transactions.iter().filter_map(|tx_meta| tx_meta.hash).collect();
 
     let mut completed_tx_hashes = std::collections::HashSet::new();
     let mut pending_tx_hashes = std::collections::HashSet::new();
@@ -695,8 +628,12 @@ pub async fn load_resume_state(
             Ok(provider) => {
                 for hash in &hashes_to_check {
                     match poll_receipt_exists(&provider, hash).await {
-                        true => { completed_tx_hashes.insert(*hash); }
-                        false => { pending_tx_hashes.insert(*hash); }
+                        true => {
+                            completed_tx_hashes.insert(*hash);
+                        }
+                        false => {
+                            pending_tx_hashes.insert(*hash);
+                        }
                     }
                 }
             }
@@ -735,10 +672,7 @@ pub async fn load_resume_state(
 ///
 /// Returns `true` if the provider returns a receipt, `false` otherwise
 /// (including RPC errors — treated as "not yet confirmed").
-async fn poll_receipt_exists(
-    provider: &impl alloy_provider::Provider,
-    tx_hash: &B256,
-) -> bool {
+async fn poll_receipt_exists(provider: &impl alloy_provider::Provider, tx_hash: &B256) -> bool {
     matches!(provider.get_transaction_receipt(*tx_hash).await, Ok(Some(_)))
 }
 
@@ -763,19 +697,12 @@ pub fn load_session_state(treb_dir: &Path) -> Option<SessionState> {
 }
 
 /// Save the session state file to `.treb/session-state.json`.
-pub fn save_session_state(
-    treb_dir: &Path,
-    state: &SessionState,
-) -> Result<(), TrebError> {
+pub fn save_session_state(treb_dir: &Path, state: &SessionState) -> Result<(), TrebError> {
     let path = treb_dir.join(SESSION_STATE_FILE);
-    let contents = serde_json::to_string_pretty(state).map_err(|e| {
-        TrebError::Forge(format!("failed to serialize session state: {e}"))
-    })?;
+    let contents = serde_json::to_string_pretty(state)
+        .map_err(|e| TrebError::Forge(format!("failed to serialize session state: {e}")))?;
     fs::write(&path, contents).map_err(|e| {
-        TrebError::Forge(format!(
-            "failed to write session state file {}: {e}",
-            path.display()
-        ))
+        TrebError::Forge(format!("failed to write session state file {}: {e}", path.display()))
     })
 }
 
@@ -797,21 +724,14 @@ mod tests {
 
     #[test]
     fn compute_broadcast_paths_basic() {
-        let (dir, broadcast, cache) = compute_broadcast_paths(
-            Path::new("/project"),
-            "script/Deploy.s.sol",
-            42220,
-            "run()",
-        );
+        let (dir, broadcast, cache) =
+            compute_broadcast_paths(Path::new("/project"), "script/Deploy.s.sol", 42220, "run()");
         assert_eq!(dir, PathBuf::from("/project/broadcast/Deploy.s.sol/42220"));
         assert_eq!(
             broadcast,
             PathBuf::from("/project/broadcast/Deploy.s.sol/42220/run-latest.json")
         );
-        assert_eq!(
-            cache,
-            PathBuf::from("/project/cache/Deploy.s.sol/42220/run-latest.json")
-        );
+        assert_eq!(cache, PathBuf::from("/project/cache/Deploy.s.sol/42220/run-latest.json"));
     }
 
     #[test]
@@ -890,8 +810,13 @@ mod tests {
     async fn load_resume_state_returns_none_for_missing() {
         let tmp = tempfile::tempdir().unwrap();
         let result = load_resume_state(
-            tmp.path(), "script/Deploy.s.sol", 1, "run()", "http://localhost:8545",
-        ).await;
+            tmp.path(),
+            "script/Deploy.s.sol",
+            1,
+            "run()",
+            "http://localhost:8545",
+        )
+        .await;
         assert!(result.is_none());
     }
 
@@ -1066,7 +991,11 @@ mod tests {
         btxs.push_back(make_btx(from, Some(Address::repeat_byte(0x02)), &[0xab, 0xcd]));
 
         let recorded_txs = vec![
-            make_recorded_tx("tx-1", Some(("Counter", "0x0000000000000000000000000000000000001234")), "CREATE"),
+            make_recorded_tx(
+                "tx-1",
+                Some(("Counter", "0x0000000000000000000000000000000000001234")),
+                "CREATE",
+            ),
             make_recorded_tx("tx-2", None, "setNumber"),
         ];
 
@@ -1218,8 +1147,7 @@ mod tests {
 
                 // Extract JSON body after \r\n\r\n
                 let body = request.split("\r\n\r\n").nth(1).unwrap_or("{}");
-                let req_json: serde_json::Value =
-                    serde_json::from_str(body).unwrap_or_default();
+                let req_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
 
                 let hash_str = req_json
                     .get("params")
@@ -1227,10 +1155,8 @@ mod tests {
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
 
-                let is_confirmed = hash_str
-                    .parse::<B256>()
-                    .ok()
-                    .is_some_and(|h| confirmed_hashes.contains(&h));
+                let is_confirmed =
+                    hash_str.parse::<B256>().ok().is_some_and(|h| confirmed_hashes.contains(&h));
 
                 let result = if is_confirmed {
                     serde_json::json!({
@@ -1274,17 +1200,14 @@ mod tests {
     async fn resume_state_all_unsent() {
         // All transactions have hash: None → both completed and pending are empty
         let tmp = tempfile::tempdir().unwrap();
-        write_sequence_fixture(
-            tmp.path(), "script/Deploy.s.sol", 1, "run()",
-            &[None, None],
-        );
+        write_sequence_fixture(tmp.path(), "script/Deploy.s.sol", 1, "run()", &[None, None]);
 
         let (port, handle) = start_mock_rpc(std::collections::HashSet::new()).await;
         let rpc_url = format!("http://127.0.0.1:{port}");
 
-        let state = load_resume_state(
-            tmp.path(), "script/Deploy.s.sol", 1, "run()", &rpc_url,
-        ).await.expect("should load");
+        let state = load_resume_state(tmp.path(), "script/Deploy.s.sol", 1, "run()", &rpc_url)
+            .await
+            .expect("should load");
 
         assert_eq!(state.sequence.transactions.len(), 2);
         assert!(state.completed_tx_hashes.is_empty(), "no completed hashes for unsent txs");
@@ -1298,19 +1221,16 @@ mod tests {
         // Hash is set and RPC returns a receipt → completed
         let hash = B256::repeat_byte(0xAA);
         let tmp = tempfile::tempdir().unwrap();
-        write_sequence_fixture(
-            tmp.path(), "script/Deploy.s.sol", 1, "run()",
-            &[Some(hash)],
-        );
+        write_sequence_fixture(tmp.path(), "script/Deploy.s.sol", 1, "run()", &[Some(hash)]);
 
         let mut confirmed = std::collections::HashSet::new();
         confirmed.insert(hash);
         let (port, handle) = start_mock_rpc(confirmed).await;
         let rpc_url = format!("http://127.0.0.1:{port}");
 
-        let state = load_resume_state(
-            tmp.path(), "script/Deploy.s.sol", 1, "run()", &rpc_url,
-        ).await.expect("should load");
+        let state = load_resume_state(tmp.path(), "script/Deploy.s.sol", 1, "run()", &rpc_url)
+            .await
+            .expect("should load");
 
         assert!(state.completed_tx_hashes.contains(&hash), "hash should be completed");
         assert!(state.pending_tx_hashes.is_empty(), "no pending hashes");
@@ -1323,18 +1243,15 @@ mod tests {
         // Hash is set but RPC returns null → pending
         let hash = B256::repeat_byte(0xBB);
         let tmp = tempfile::tempdir().unwrap();
-        write_sequence_fixture(
-            tmp.path(), "script/Deploy.s.sol", 1, "run()",
-            &[Some(hash)],
-        );
+        write_sequence_fixture(tmp.path(), "script/Deploy.s.sol", 1, "run()", &[Some(hash)]);
 
         // Empty confirmed set: all hashes come back as null
         let (port, handle) = start_mock_rpc(std::collections::HashSet::new()).await;
         let rpc_url = format!("http://127.0.0.1:{port}");
 
-        let state = load_resume_state(
-            tmp.path(), "script/Deploy.s.sol", 1, "run()", &rpc_url,
-        ).await.expect("should load");
+        let state = load_resume_state(tmp.path(), "script/Deploy.s.sol", 1, "run()", &rpc_url)
+            .await
+            .expect("should load");
 
         assert!(state.completed_tx_hashes.is_empty(), "no completed hashes");
         assert!(state.pending_tx_hashes.contains(&hash), "hash should be pending");
@@ -1348,7 +1265,10 @@ mod tests {
         let pending_hash = B256::repeat_byte(0x22);
         let tmp = tempfile::tempdir().unwrap();
         write_sequence_fixture(
-            tmp.path(), "script/Deploy.s.sol", 1, "run()",
+            tmp.path(),
+            "script/Deploy.s.sol",
+            1,
+            "run()",
             &[Some(confirmed_hash), Some(pending_hash), None],
         );
 
@@ -1357,9 +1277,9 @@ mod tests {
         let (port, handle) = start_mock_rpc(confirmed).await;
         let rpc_url = format!("http://127.0.0.1:{port}");
 
-        let state = load_resume_state(
-            tmp.path(), "script/Deploy.s.sol", 1, "run()", &rpc_url,
-        ).await.expect("should load");
+        let state = load_resume_state(tmp.path(), "script/Deploy.s.sol", 1, "run()", &rpc_url)
+            .await
+            .expect("should load");
 
         assert_eq!(state.sequence.transactions.len(), 3);
         assert_eq!(state.completed_tx_hashes.len(), 1, "one confirmed");
@@ -1397,12 +1317,7 @@ mod tests {
         std::fs::write(&deferred_path, contents).unwrap();
 
         // Patch it
-        update_deferred_safe_proposal(
-            &broadcast_path,
-            "0xaaaa",
-            "0xbbbb",
-            10,
-        ).unwrap();
+        update_deferred_safe_proposal(&broadcast_path, "0xaaaa", "0xbbbb", 10).unwrap();
 
         // Read back and verify
         let updated: DeferredOperations =
@@ -1440,12 +1355,7 @@ mod tests {
         std::fs::write(&deferred_path, serde_json::to_string_pretty(&deferred).unwrap()).unwrap();
 
         // Try to patch with non-matching hash
-        update_deferred_safe_proposal(
-            &broadcast_path,
-            "0xcccc",
-            "0xbbbb",
-            10,
-        ).unwrap();
+        update_deferred_safe_proposal(&broadcast_path, "0xcccc", "0xbbbb", 10).unwrap();
 
         let updated: DeferredOperations =
             serde_json::from_str(&std::fs::read_to_string(&deferred_path).unwrap()).unwrap();
@@ -1459,12 +1369,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let broadcast_path = dir.path().join("run-latest.json");
         // No deferred file exists — should return Ok without error
-        let result = update_deferred_safe_proposal(
-            &broadcast_path,
-            "0xaaaa",
-            "0xbbbb",
-            10,
-        );
+        let result = update_deferred_safe_proposal(&broadcast_path, "0xaaaa", "0xbbbb", 10);
         assert!(result.is_ok());
     }
 }
