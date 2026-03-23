@@ -16,7 +16,7 @@ jobs:
   # and commit to main if changed.
   update-targets:
     name: Update foundry targets
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       matrix: ${{ steps.discover.outputs.matrix }}
       updated: ${{ steps.commit.outputs.updated }}
@@ -68,7 +68,7 @@ jobs:
       fail-fast: false
       matrix:
         foundry_tag: ${{ fromJson(needs.update-targets.outputs.matrix) }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
         with:
