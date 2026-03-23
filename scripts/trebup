@@ -625,3 +625,4 @@ ensure() {
 install_trebup
 
 main "$@"
+# v2.0.0
