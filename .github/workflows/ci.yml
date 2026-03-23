@@ -7,21 +7,10 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: "sccache"
 
 jobs:
-  check:
-    name: cargo check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo check --workspace
-
   test:
     name: cargo test
     runs-on: ubuntu-latest
@@ -32,11 +21,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: clippy, rustfmt
+      - uses: mozilla-actions/sccache-action@v0.0.7
       - uses: foundry-rs/foundry-toolchain@v1
-      - uses: Swatinem/rust-cache@v2
-      - name: Install nextest
-        uses: taiki-e/install-action@nextest
-
+      - uses: taiki-e/install-action@nextest
       - name: Run tests (retry failed only)
         run: cargo nextest run --workspace --all-targets --retries 2
 
@@ -50,7 +37,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: mozilla-actions/sccache-action@v0.0.7
       - run: cargo clippy --workspace -- -D warnings
 
   fmt:
@@ -63,7 +50,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
-      - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
 
   smoke:
@@ -75,7 +61,7 @@ jobs:
         with:
           submodules: recursive
       - uses: dtolnay/rust-toolchain@nightly
-      - uses: Swatinem/rust-cache@v2
+      - uses: mozilla-actions/sccache-action@v0.0.7
       - name: Build binary
         run: cargo build --bin treb-cli
       - name: Validate version JSON
