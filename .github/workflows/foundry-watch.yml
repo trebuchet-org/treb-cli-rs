@@ -64,6 +64,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         if: steps.check.outputs.updated == 'true'
 
+      - uses: foundry-rs/foundry-toolchain@v1
+        if: steps.check.outputs.updated == 'true'
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.check.outputs.updated == 'true'
+
       - name: Update Cargo.toml foundry dep
         if: steps.check.outputs.updated == 'true'
         run: |

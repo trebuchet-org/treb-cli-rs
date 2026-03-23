@@ -25,6 +25,8 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@nightly
 
+      - uses: foundry-rs/foundry-toolchain@v1
+
       - uses: Swatinem/rust-cache@v2
 
       - name: Resolve versions

@@ -84,7 +84,9 @@ pub struct SafeInfoResponse {
 /// Accept both `"0"` (string) and `0` (integer) from the Safe TX Service,
 /// converting either to a `String`. Several gas/value fields come back as
 /// integers on some chains.
-fn deserialize_string_or_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+fn deserialize_string_or_number<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<String, D::Error> {
     use serde::de;
     struct Visitor;
     impl de::Visitor<'_> for Visitor {
@@ -92,11 +94,21 @@ fn deserialize_string_or_number<'de, D: serde::Deserializer<'de>>(d: D) -> Resul
         fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
             f.write_str("string or number")
         }
-        fn visit_str<E: de::Error>(self, v: &str) -> Result<String, E> { Ok(v.to_string()) }
-        fn visit_string<E: de::Error>(self, v: String) -> Result<String, E> { Ok(v) }
-        fn visit_u64<E: de::Error>(self, v: u64) -> Result<String, E> { Ok(v.to_string()) }
-        fn visit_i64<E: de::Error>(self, v: i64) -> Result<String, E> { Ok(v.to_string()) }
-        fn visit_f64<E: de::Error>(self, v: f64) -> Result<String, E> { Ok(v.to_string()) }
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<String, E> {
+            Ok(v.to_string())
+        }
+        fn visit_string<E: de::Error>(self, v: String) -> Result<String, E> {
+            Ok(v)
+        }
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<String, E> {
+            Ok(v.to_string())
+        }
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<String, E> {
+            Ok(v.to_string())
+        }
+        fn visit_f64<E: de::Error>(self, v: f64) -> Result<String, E> {
+            Ok(v.to_string())
+        }
     }
     d.deserialize_any(Visitor)
 }
@@ -109,7 +121,9 @@ fn deserialize_u64_or_string<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u
         fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
             f.write_str("u64 or string-encoded u64")
         }
-        fn visit_u64<E: de::Error>(self, v: u64) -> Result<u64, E> { Ok(v) }
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<u64, E> {
+            Ok(v)
+        }
         fn visit_i64<E: de::Error>(self, v: i64) -> Result<u64, E> {
             u64::try_from(v).map_err(de::Error::custom)
         }
@@ -120,7 +134,9 @@ fn deserialize_u64_or_string<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u
     d.deserialize_any(Visitor)
 }
 
-fn deserialize_u64_or_string_default<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+fn deserialize_u64_or_string_default<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<u64, D::Error> {
     deserialize_u64_or_string(d)
 }
 
