@@ -3,7 +3,7 @@ set -eo pipefail
 
 # trebup — unified installer for treb (Rust v2 + Go v1)
 #
-# Install:
+# Install (use bash, not sh):
 #   curl -fsSL https://raw.githubusercontent.com/trebuchet-org/treb-cli-rs/main/scripts/trebup | bash
 #
 # Version scheme:
