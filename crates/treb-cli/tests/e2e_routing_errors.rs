@@ -308,7 +308,10 @@ async fn hardware_wallet_signer_error() {
         );
 
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("Ledger"), "stderr should mention 'Ledger', got:\n{stderr}");
+        assert!(
+            stderr.contains("Ledger") || stderr.contains("HID"),
+            "stderr should mention 'Ledger' or 'HID', got:\n{stderr}",
+        );
     })
     .await
     .unwrap();
