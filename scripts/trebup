@@ -462,13 +462,33 @@ install_completions() {
 
 check_path() {
   case ":$PATH:" in
-    *":${TREB_BIN_DIR}:"*) ;;
-    *)
-      echo ""
-      say "NOTE: ${TREB_BIN_DIR} is not in your PATH."
-      say "Add it with:  export PATH=\"${TREB_BIN_DIR}:\$PATH\""
-      ;;
+    *":${TREB_BIN_DIR}:"*) return ;;
   esac
+
+  # Auto-add to shell profile
+  local profile=""
+  local shell_name
+  shell_name="$(basename "${SHELL:-}")"
+
+  case "$shell_name" in
+    zsh)  profile="${ZDOTDIR:-$HOME}/.zshenv" ;;
+    bash) profile="$HOME/.bashrc" ;;
+    fish) profile="${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish" ;;
+    *)    profile="$HOME/.profile" ;;
+  esac
+
+  if [ -n "$profile" ]; then
+    if ! grep -q "$TREB_BIN_DIR" "$profile" 2>/dev/null; then
+      echo "" >> "$profile"
+      if [ "$shell_name" = "fish" ]; then
+        echo "fish_add_path -a $TREB_BIN_DIR" >> "$profile"
+      else
+        echo "export PATH=\"\$PATH:$TREB_BIN_DIR\"" >> "$profile"
+      fi
+      say "added $TREB_BIN_DIR to PATH in $profile"
+      say "run 'source $profile' or start a new terminal to use treb"
+    fi
+  fi
 }
 
 # ---------------------------------------------------------------------------
