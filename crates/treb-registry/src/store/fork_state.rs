@@ -83,10 +83,10 @@ pub fn snapshot_registry(registry_dir: &Path, snapshot_dir: &Path) -> Result<(),
         // errors from metadata preservation (fchmod/futimens fail across users).
         if src.exists() {
             fs::write(snapshot_dir.join(file), fs::read(&src)?)?;
-        } else if let Some(legacy_src) = crate::legacy_registry_store_path(&src) {
-            if legacy_src.exists() {
-                fs::write(snapshot_dir.join(file), fs::read(&legacy_src)?)?;
-            }
+        } else if let Some(legacy_src) = crate::legacy_registry_store_path(&src)
+            && legacy_src.exists()
+        {
+            fs::write(snapshot_dir.join(file), fs::read(&legacy_src)?)?;
         }
     }
     Ok(())

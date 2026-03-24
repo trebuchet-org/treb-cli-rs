@@ -76,10 +76,10 @@ pub fn read_versioned_file_compat<T: DeserializeOwned + Default>(
         return read_versioned_file(path);
     }
 
-    if let Some(legacy_path) = crate::legacy_registry_store_path(path) {
-        if legacy_path.exists() {
-            return read_versioned_file(&legacy_path);
-        }
+    if let Some(legacy_path) = crate::legacy_registry_store_path(path)
+        && legacy_path.exists()
+    {
+        return read_versioned_file(&legacy_path);
     }
 
     Ok(T::default())
