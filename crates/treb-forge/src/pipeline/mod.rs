@@ -6,6 +6,7 @@
 
 pub mod broadcast_writer;
 pub mod compose;
+pub mod compose_plan;
 mod duplicates;
 pub mod fork_routing;
 mod hydration;

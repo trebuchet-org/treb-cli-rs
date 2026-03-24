@@ -815,10 +815,7 @@ async fn governor_proposal_captures_description() {
     // 7. Verify governor-txs.json has description
     let gov_txs = e2e::read_registry_file(tmp.path(), "governor-txs.json");
     let gov_txs_map = gov_txs.as_object().expect("governor-txs.json must be object");
-    assert!(
-        !gov_txs_map.is_empty(),
-        "should have at least 1 governor proposal"
-    );
+    assert!(!gov_txs_map.is_empty(), "should have at least 1 governor proposal");
 
     // Find the proposal with a description (the event-hydrated one)
     let description = gov_txs_map
