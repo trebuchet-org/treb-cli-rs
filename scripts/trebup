@@ -62,43 +62,43 @@ main() {
   migrate_if_needed
 
   # Resolve what to install
-  local tag="" repo=""
-  resolve_install "$install_version" "$foundry_channel" tag repo
+  RESOLVED_TAG="" ; RESOLVED_REPO=""
+  resolve_install "$install_version" "$foundry_channel"
 
-  if [ -z "$tag" ]; then
+  if [ -z "$RESOLVED_TAG" ]; then
     err "no release found. The nightly CI may not have published a release yet.
   Check https://github.com/${RUST_REPO}/releases for available versions,
   or install a specific tag with: trebup --install <tag>"
   fi
 
-  say "installing treb ($tag)"
+  say "installing treb ($RESOLVED_TAG)"
 
   # Detect platform
-  local platform arch
-  detect_platform platform arch
+  DETECTED_PLATFORM="" ; DETECTED_ARCH=""
+  detect_platform
 
   # Download + extract
   # Go repo uses underscores: treb_tag_platform_arch.tar.gz
   # Rust repo uses hyphens: treb-tag-platform-arch.tar.gz
   local archive checksum_file
-  case "$repo" in
+  case "$RESOLVED_REPO" in
     *treb-cli-rs)
-      archive="treb-${tag}-${platform}-${arch}.tar.gz"
-      checksum_file="treb-${tag}-${platform}-${arch}.sha256"
+      archive="treb-${tag}-${DETECTED_PLATFORM}-${DETECTED_ARCH}.tar.gz"
+      checksum_file="treb-${tag}-${DETECTED_PLATFORM}-${DETECTED_ARCH}.sha256"
       ;;
     *)
-      archive="treb_${tag}_${platform}_${arch}.tar.gz"
-      checksum_file="treb_${tag}_${platform}_${arch}.sha256"
+      archive="treb_${tag}_${DETECTED_PLATFORM}_${DETECTED_ARCH}.tar.gz"
+      checksum_file="treb_${tag}_${DETECTED_PLATFORM}_${DETECTED_ARCH}.sha256"
       ;;
   esac
   local base_url="https://github.com/${repo}/releases/download/${tag}"
-  local version_dir="$TREB_VERSIONS_DIR/$tag"
+  local version_dir="$TREB_VERSIONS_DIR/$RESOLVED_TAG"
 
   local tmp_dir
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 
-  say "downloading $archive..."
+  say "downloading $DETECTED_ARCHive..."
   curl -fsSL "${base_url}/${archive}" -o "${tmp_dir}/${archive}"
   if curl -fsSL "${base_url}/${checksum_file}" -o "${tmp_dir}/${checksum_file}" 2>/dev/null; then
     verify_checksum "$tmp_dir" "$checksum_file"
@@ -109,14 +109,14 @@ main() {
   ensure tar xzf "${tmp_dir}/${archive}" -C "$version_dir"
 
   # Activate
-  activate "$tag"
+  activate "$RESOLVED_TAG"
 
   # Install shell completions from archive
   if [ -d "$version_dir/completions" ]; then
     install_completions "$version_dir/completions"
   fi
 
-  say "done! treb $tag installed to $TREB_BIN_DIR/treb"
+  say "done! treb $RESOLVED_TAG installed to $TREB_BIN_DIR/treb"
   check_path
 }
 
@@ -186,8 +186,7 @@ do_update() {
 resolve_install() {
   local version="$1"
   local foundry_channel="$2"
-  local -n _tag=$3
-  local -n _repo=$4
+  # Returns via RESOLVED_TAG and RESOLVED_REPO globals
 
   # Default: latest Rust release (nightly or stable)
   if [ -z "$version" ]; then
@@ -200,13 +199,13 @@ resolve_install() {
     go-nightly)   version="v1-nightly" ;;
     latest)
       # Find the latest release regardless of naming scheme
-      _repo="$RUST_REPO"
+      RESOLVED_REPO="$RUST_REPO"
       local resolved
       resolved="$(find_latest_release "$RUST_REPO" "^v")"
       if [ -z "$resolved" ]; then
         err "no releases found at $RUST_REPO"
       fi
-      _tag="$resolved"
+      RESOLVED_TAG="$resolved"
       say "resolved latest → $resolved"
       return
       ;;
@@ -215,17 +214,17 @@ resolve_install() {
   # Route by major version
   case "$version" in
     v1*)
-      _repo="$GO_REPO"
+      RESOLVED_REPO="$GO_REPO"
       # Go has no foundry dimension — map to Go's current tag format
       if [[ "$version" == "v1-nightly" ]]; then
-        _tag="nightly"  # Go repo uses bare "nightly" tag
+        RESOLVED_TAG="nightly"  # Go repo uses bare "nightly" tag
       else
-        _tag="$version"
+        RESOLVED_TAG="$version"
       fi
       return
       ;;
     v2*)
-      _repo="$RUST_REPO"
+      RESOLVED_REPO="$RUST_REPO"
       ;;
     *)
       err "cannot determine repo for version: $version"
@@ -251,7 +250,7 @@ resolve_install() {
     if [ -z "$resolved" ]; then
       err "no release found for treb v2 nightly (foundry $foundry_channel)"
     fi
-    _tag="$resolved"
+    RESOLVED_TAG="$resolved"
   elif [[ "$version" == v2.* && "$version" != *--foundry-* ]]; then
     # Stable version — try FQID, fall back to exact tag
     local pattern resolved
@@ -266,10 +265,10 @@ resolve_install() {
       # Fall back to exact version tag (pre-FQID)
       resolved="$version"
     fi
-    _tag="$resolved"
+    RESOLVED_TAG="$resolved"
   else
     # Fully qualified — use as-is
-    _tag="$version"
+    RESOLVED_TAG="$version"
   fi
 }
 
@@ -405,8 +404,7 @@ migrate_if_needed() {
 # ---------------------------------------------------------------------------
 
 detect_platform() {
-  local -n _platform=$1
-  local -n _arch=$2
+  # Returns via DETECTED_PLATFORM and DETECTED_ARCH globals
 
   local os
   os="$(uname -s)"
@@ -414,9 +412,9 @@ detect_platform() {
   machine="$(uname -m)"
 
   case "$os" in
-    Linux)   _platform="linux" ;;
-    Darwin)  _platform="darwin" ;;
-    MINGW*|MSYS*|CYGWIN*) _platform="windows" ;;
+    Linux)   DETECTED_PLATFORM="linux" ;;
+    Darwin)  DETECTED_PLATFORM="darwin" ;;
+    MINGW*|MSYS*|CYGWIN*) DETECTED_PLATFORM="windows" ;;
     *)       err "unsupported OS: $os" ;;
   esac
 
@@ -424,12 +422,12 @@ detect_platform() {
     x86_64)
       # Check for Rosetta
       if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = "1" ]; then
-        _arch="arm64"
+        DETECTED_ARCH="arm64"
       else
-        _arch="amd64"
+        DETECTED_ARCH="amd64"
       fi
       ;;
-    aarch64|arm64) _arch="arm64" ;;
+    aarch64|arm64) DETECTED_ARCH="arm64" ;;
     *)             err "unsupported architecture: $machine" ;;
   esac
 }
