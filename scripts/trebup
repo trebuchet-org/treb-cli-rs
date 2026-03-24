@@ -160,16 +160,14 @@ do_available() {
   say "fetching available releases..."
   echo ""
 
-  # Fetch all Rust releases (up to 100 to capture nightlies)
-  local all_rust
-  all_rust="$(curl -fsSL "https://api.github.com/repos/${RUST_REPO}/releases?per_page=100" 2>/dev/null \
-    | grep '"tag_name"' \
-    | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
-
   local active
   active="$(cat "$TREB_ACTIVE_FILE" 2>/dev/null || echo "")"
 
-  # Split into stable and nightly
+  local all_rust
+  all_rust="$(curl -fsSL "https://api.github.com/repos/${RUST_REPO}/releases?per_page=50" 2>/dev/null \
+    | grep '"tag_name"' \
+    | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
+
   local stable_releases nightly_releases
   stable_releases="$(echo "$all_rust" | grep -v "nightly" || true)"
   nightly_releases="$(echo "$all_rust" | grep "nightly" | head -10 || true)"
