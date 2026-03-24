@@ -9,7 +9,8 @@ set -eo pipefail
 
 echo "Installing trebup..."
 
-TREB_DIR="${TREB_DIR:-"$HOME/.treb"}"
+BASE_DIR="${XDG_CONFIG_HOME:-$HOME}"
+TREB_DIR="${TREB_DIR:-"$BASE_DIR/.treb"}"
 TREB_BIN_DIR="$TREB_DIR/bin"
 
 BIN_URL="https://raw.githubusercontent.com/trebuchet-org/treb-cli-rs/main/scripts/trebup"
