@@ -127,7 +127,7 @@ jobs:
         if: success()
         run: |
           TREB_SHORT="$(git rev-parse --short HEAD)"
-          echo "tag=v2-nightly-${TREB_SHORT}--foundry-${{ matrix.foundry_tag }}" >> "$GITHUB_OUTPUT"
+          echo "tag=nightly-${TREB_SHORT}--foundry-${{ matrix.foundry_tag }}" >> "$GITHUB_OUTPUT"
 
   # Step 3: Build releases for targets that passed tests
   # (only triggers if test-pin succeeded for all — use continue-on-error

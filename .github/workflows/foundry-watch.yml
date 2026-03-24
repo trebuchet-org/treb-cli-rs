@@ -54,7 +54,7 @@ jobs:
           FOUNDRY_TAG="nightly-${LATEST_HASH}"
           FOUNDRY_SHORT="${LATEST_HASH:0:8}"
           TREB_SHORT="$(git rev-parse --short HEAD)"
-          RELEASE_TAG="v2-nightly-${TREB_SHORT}--foundry-nightly-${FOUNDRY_SHORT}"
+          RELEASE_TAG="nightly-${TREB_SHORT}--foundry-nightly-${FOUNDRY_SHORT}"
 
           echo "New foundry nightly: $FOUNDRY_TAG"
           echo "updated=true" >> "$GITHUB_OUTPUT"
@@ -90,16 +90,44 @@ jobs:
           git commit -m "chore: bump foundry to ${{ steps.check.outputs.foundry_tag }}"
           git push origin main
 
-      - name: Open issue on failure
+      - name: Close old foundry-compat issues and open new one on failure
         if: failure() && steps.check.outputs.updated == 'true'
         uses: actions/github-script@v7
         with:
           script: |
+            const tag = '${{ steps.check.outputs.foundry_tag }}';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title = `Foundry nightly ${tag} breaks treb tests`;
+
+            // Close all existing foundry-compat issues (old nightlies superseded)
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'foundry-compat',
+              state: 'open',
+            });
+            for (const issue of existing.data) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed',
+                state_reason: 'not_planned',
+              });
+            }
+
+            // Check if we already have an issue for this exact tag
+            const dupes = existing.data.filter(i => i.title === title);
+            if (dupes.length > 0) {
+              core.info(`Issue already exists for ${tag}, skipping`);
+              return;
+            }
+
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `Foundry nightly ${{ steps.check.outputs.foundry_tag }} breaks treb tests`,
-              body: `The foundry nightly watch detected a new foundry nightly that fails treb tests.\n\nFoundry tag: \`${{ steps.check.outputs.foundry_tag }}\`\nWorkflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              title,
+              body: `The foundry nightly watch detected a new foundry nightly that fails treb tests.\n\nFoundry tag: \`${tag}\`\nWorkflow run: ${runUrl}`,
               labels: ['foundry-compat']
             });
 

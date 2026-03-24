@@ -7,9 +7,10 @@ set -eo pipefail
 #   curl -fsSL https://raw.githubusercontent.com/trebuchet-org/treb-cli-rs/main/scripts/trebup | bash
 #
 # Version scheme:
-#   v2.0.0--foundry-v1.5.1                      Rust stable + foundry stable
-#   v2.0.0-nightly-{sha}--foundry-nightly-{sha} Rust nightly + foundry nightly
-#   v1.0.0                                       Go CLI (frozen)
+#   v2.0.0--foundry-v1.5.1                  Rust stable + foundry stable
+#   nightly-{sha}--foundry-nightly-{sha}    Rust nightly + foundry nightly
+#   nightly-{sha}--foundry-v1.5.1           Rust nightly + foundry stable
+#   v1.0.0                                  Go CLI (frozen)
 
 TREBUP_VERSION="2.0.0"
 
@@ -257,7 +258,18 @@ resolve_install() {
 
   # Aliases
   case "$version" in
-    nightly)      version="v2-nightly"; foundry_channel="any" ;;
+    nightly)
+      # Find latest nightly release (any foundry channel)
+      RESOLVED_REPO="$RUST_REPO"
+      local resolved
+      resolved="$(find_latest_release "$RUST_REPO" "^nightly-")"
+      if [ -z "$resolved" ]; then
+        err "no nightly releases found"
+      fi
+      RESOLVED_TAG="$resolved"
+      say "resolved nightly → $resolved"
+      return
+      ;;
     latest)
       # Find the latest release regardless of naming scheme
       RESOLVED_REPO="$RUST_REPO"
@@ -288,32 +300,8 @@ resolve_install() {
       ;;
   esac
 
-  # Rust: resolve foundry channel into a full FQID tag
-  if [[ "$version" == v2-nightly* && "$version" != *--foundry-* ]]; then
-    local pattern resolved
-
-    if [ "$foundry_channel" = "nightly" ]; then
-      # Explicit --foundry nightly
-      pattern="v2.*nightly.*--foundry-nightly-"
-    elif [ "$foundry_channel" = "stable" ]; then
-      # Explicit --foundry stable
-      pattern="v2.*nightly.*--foundry-v"
-    else
-      # Bare "nightly" — find any nightly release (prefer foundry-nightly)
-      pattern="v2.*nightly.*--foundry-"
-    fi
-
-    resolved="$(find_latest_release "$RUST_REPO" "$pattern")"
-    if [ -z "$resolved" ]; then
-      # Fall back to latest release
-      say "no nightly release found, falling back to latest release..."
-      resolved="$(find_latest_release "$RUST_REPO" "^v")"
-    fi
-    if [ -z "$resolved" ]; then
-      err "no release found for treb v2 nightly (foundry $foundry_channel)"
-    fi
-    RESOLVED_TAG="$resolved"
-  elif [[ "$version" == v2.* && "$version" != *--foundry-* ]]; then
+  # Rust stable: resolve foundry channel into FQID tag
+  if [[ "$version" == v2.* && "$version" != *--foundry-* ]]; then
     # Stable version — try FQID, fall back to exact tag
     local pattern resolved
     if [ "$foundry_channel" = "nightly" ]; then
