@@ -84,15 +84,15 @@ main() {
   local archive checksum_file
   case "$RESOLVED_REPO" in
     *treb-cli-rs)
-      archive="treb-${tag}-${DETECTED_PLATFORM}-${DETECTED_ARCH}.tar.gz"
-      checksum_file="treb-${tag}-${DETECTED_PLATFORM}-${DETECTED_ARCH}.sha256"
+      archive="treb-${RESOLVED_TAG}-${DETECTED_PLATFORM}-${DETECTED_ARCH}.tar.gz"
+      checksum_file="treb-${RESOLVED_TAG}-${DETECTED_PLATFORM}-${DETECTED_ARCH}.sha256"
       ;;
     *)
-      archive="treb_${tag}_${DETECTED_PLATFORM}_${DETECTED_ARCH}.tar.gz"
-      checksum_file="treb_${tag}_${DETECTED_PLATFORM}_${DETECTED_ARCH}.sha256"
+      archive="treb_${RESOLVED_TAG}_${DETECTED_PLATFORM}_${DETECTED_ARCH}.tar.gz"
+      checksum_file="treb_${RESOLVED_TAG}_${DETECTED_PLATFORM}_${DETECTED_ARCH}.sha256"
       ;;
   esac
-  local base_url="https://github.com/${repo}/releases/download/${tag}"
+  local base_url="https://github.com/${RESOLVED_REPO}/releases/download/${RESOLVED_TAG}"
   local version_dir="$TREB_VERSIONS_DIR/$RESOLVED_TAG"
 
   local tmp_dir
