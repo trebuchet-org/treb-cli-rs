@@ -7,10 +7,9 @@ set -eo pipefail
 #   curl -fsSL https://raw.githubusercontent.com/trebuchet-org/treb-cli-rs/main/scripts/trebup | bash
 #
 # Version scheme:
-#   v2-nightly-{hash}--foundry-nightly-{hash}   Rust nightly + foundry nightly
-#   v2-nightly-{hash}--foundry-v1.5.1           Rust nightly + foundry stable
-#   v2.1.0--foundry-v1.5.1                      Rust stable + foundry stable
-#   v1-nightly                                   Go nightly (system forge)
+#   v2.0.0--foundry-v1.5.1                      Rust stable + foundry stable
+#   v2.0.0-nightly-{sha}--foundry-nightly-{sha} Rust nightly + foundry nightly
+#   v1.0.0                                       Go CLI (frozen)
 
 TREBUP_VERSION="2.0.0"
 
@@ -144,7 +143,7 @@ do_list() {
     # Detect runtime from version prefix
     local info=""
     case "$v" in
-      v1*)  info=" (go, system forge)" ;;
+      v1*)  info=" (go)" ;;
       *--foundry-nightly*) info=" (foundry nightly)" ;;
       *--foundry-v*)
         local fv="${v##*--foundry-}"
@@ -196,7 +195,6 @@ resolve_install() {
   # Aliases
   case "$version" in
     nightly)      version="v2-nightly" ;;
-    go-nightly)   version="v1-nightly" ;;
     latest)
       # Find the latest release regardless of naming scheme
       RESOLVED_REPO="$RUST_REPO"
@@ -215,12 +213,8 @@ resolve_install() {
   case "$version" in
     v1*)
       RESOLVED_REPO="$GO_REPO"
-      # Go has no foundry dimension — map to Go's current tag format
-      if [[ "$version" == "v1-nightly" ]]; then
-        RESOLVED_TAG="nightly"  # Go repo uses bare "nightly" tag
-      else
-        RESOLVED_TAG="$version"
-      fi
+      # Go CLI frozen at v1.0.0 — no nightly channel
+      RESOLVED_TAG="$version"
       return
       ;;
     v2*)
@@ -587,12 +581,12 @@ OPTIONS:
     -U, --update          Update trebup itself
 
 EXAMPLES:
-    trebup                              Install latest treb nightly (foundry stable)
-    trebup --foundry nightly            Install latest treb nightly (foundry nightly)
-    trebup --install v2.1.0             Install treb stable
-    trebup --install v1-nightly         Install Go nightly
+    trebup                              Install latest treb release
+    trebup --foundry nightly            Install with foundry nightly
+    trebup --install v2.0.0             Install specific version
+    trebup --install v1.0.0             Install Go CLI (v1, frozen)
     trebup --list                       List installed versions
-    trebup --use v2-nightly-a5f2ae0--foundry-v1.5.1
+    trebup --use v2.0.0--foundry-v1.5.1
 EOF
 }
 
