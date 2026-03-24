@@ -9,7 +9,7 @@ use alloy_sol_types::SolEvent;
 
 use crate::events::abi::{
     AdminChanged, BeaconUpgraded, ContractCreation_0, ContractCreation_1, ContractDeployed,
-    Create3ProxyContractCreation, DeploymentCollision, GovernorProposalCreated,
+    Create3ProxyContractCreation, DeploymentCollision, GovernorBroadcast, GovernorProposalCreated,
     SafeTransactionExecuted, SafeTransactionQueued, TransactionSimulated, Upgraded,
 };
 
@@ -22,6 +22,7 @@ pub enum TrebEvent {
     SafeTransactionExecuted(SafeTransactionExecuted),
     DeploymentCollision(DeploymentCollision),
     GovernorProposalCreated(GovernorProposalCreated),
+    GovernorBroadcast(GovernorBroadcast),
 }
 
 /// A decoded CreateX factory event.
@@ -100,6 +101,12 @@ pub fn decode_events(logs: &[Log]) -> Vec<ParsedEvent> {
                 return decode_or_skip(log, "GovernorProposalCreated", |l| {
                     GovernorProposalCreated::decode_log_data(&l.data)
                         .map(|e| ParsedEvent::Treb(Box::new(TrebEvent::GovernorProposalCreated(e))))
+                });
+            }
+            if sig == GovernorBroadcast::SIGNATURE_HASH {
+                return decode_or_skip(log, "GovernorBroadcast", |l| {
+                    GovernorBroadcast::decode_log_data(&l.data)
+                        .map(|e| ParsedEvent::Treb(Box::new(TrebEvent::GovernorBroadcast(e))))
                 });
             }
 

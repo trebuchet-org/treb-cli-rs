@@ -13,9 +13,9 @@ pub mod proxy;
 // Re-export ABI types for convenience.
 pub use abi::{
     AdminChanged, BeaconUpgraded, ContractCreation_0, ContractCreation_1, ContractDeployed,
-    Create3ProxyContractCreation, DeploymentCollision, DeploymentDetails, GovernorProposalCreated,
-    SafeTransactionExecuted, SafeTransactionQueued, SimulatedTransaction, Transaction,
-    TransactionSimulated, Upgraded,
+    Create3ProxyContractCreation, DeploymentCollision, DeploymentDetails, GovernorBroadcast,
+    GovernorProposalCreated, SafeTransactionExecuted, SafeTransactionQueued, SimulatedTransaction,
+    Transaction, TransactionSimulated, Upgraded,
 };
 
 // Re-export decoder types and functions.

@@ -826,6 +826,21 @@ pub(super) fn extract_governor_proposal_created(
         .collect()
 }
 
+pub(super) fn extract_governor_broadcasts(
+    events: &[ParsedEvent],
+) -> Vec<crate::events::GovernorBroadcast> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            ParsedEvent::Treb(treb) => match treb.as_ref() {
+                TrebEvent::GovernorBroadcast(gb) => Some(gb.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
 #[derive(Clone, Debug, Default)]
 pub(super) struct RecordedTransactionMetadata {
     pub(super) sender_name: Option<String>,
