@@ -9,16 +9,20 @@ Deployment orchestration CLI for Foundry projects. treb manages the full lifecyc
 
 ### Using trebup (recommended)
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/trebuchet-org/treb-cli-rs/main/scripts/trebup | sh
+```bash
+curl -fsSL https://raw.githubusercontent.com/trebuchet-org/treb-cli-rs/main/scripts/install | bash
 ```
 
-`trebup` downloads the latest release for your platform, verifies checksums, and auto-installs shell completions for bash, zsh, and fish.
+This installs `trebup` (the version manager) to `~/.treb/bin/` and adds it to your PATH. Then use trebup to manage treb versions:
 
-| Variable | Default | Description |
-|---|---|---|
-| `TREB_VERSION` | latest | Install a specific release tag |
-| `TREB_INSTALL_DIR` | `~/.local/bin` | Installation directory |
+```bash
+trebup                                       # install latest release
+trebup --available                           # list all available releases
+trebup --install v2.0.0--foundry-v1.5.1      # install specific version
+trebup --foundry nightly                     # install with foundry nightly
+trebup --list                                # list installed versions
+trebup --use <version>                       # switch between versions
+```
 
 ### Building from Source
 
