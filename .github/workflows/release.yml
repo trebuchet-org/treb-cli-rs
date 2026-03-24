@@ -11,10 +11,7 @@ permissions:
 jobs:
   release:
     name: Create GitHub Release
-    if: >
-      github.event.workflow_run.conclusion == 'success' &&
-      startsWith(github.event.workflow_run.head_branch, 'v') &&
-      !contains(github.event.workflow_run.head_branch, 'nightly')
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
 
     steps:
@@ -99,8 +96,14 @@ jobs:
           EOF
           )
 
+          PRERELEASE=""
+          if [[ "$TAG" == nightly-* ]]; then
+            PRERELEASE="--prerelease"
+          fi
+
           gh release create "$TAG" \
             --title "treb $TAG" \
             --notes "$BODY" \
             --generate-notes \
+            $PRERELEASE \
             dist/*.tar.gz dist/*.sha256 dist/checksums.txt
