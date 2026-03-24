@@ -586,7 +586,12 @@ check_path() {
 install_trebup() {
   ensure mkdir -p "$TREB_BIN_DIR"
 
-  # If running from a real file (not piped), just copy it
+  # Already installed in the right place — nothing to do
+  if [ "$(realpath "$0" 2>/dev/null || echo "$0")" = "$(realpath "$TREB_BIN_DIR/trebup" 2>/dev/null || echo "")" ]; then
+    return
+  fi
+
+  # If running from a real file (not piped), copy it
   if [ -f "$0" ] && [ "$0" != "bash" ] && [ "$0" != "/dev/stdin" ]; then
     cp "$0" "$TREB_BIN_DIR/trebup"
     chmod +x "$TREB_BIN_DIR/trebup"
