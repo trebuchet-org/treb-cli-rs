@@ -201,7 +201,7 @@ do_available() {
   go_releases="$(curl -fsSL "https://api.github.com/repos/${GO_REPO}/releases?per_page=10" 2>/dev/null \
     | grep '"tag_name"' \
     | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/' \
-    | grep -v "nightly" || true)"
+    | grep -E "^v[0-9]" || true)"
 
   if [ -n "$go_releases" ]; then
     echo "  Go (frozen):"
