@@ -19,7 +19,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: clippy, rustfmt
-      - uses: mozilla-actions/sccache-action@v0.0.7
+      - uses: mozilla-actions/sccache-action@v0.0.9
         continue-on-error: true
       - name: Configure sccache
         run: |
@@ -44,7 +44,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: clippy
-      - uses: mozilla-actions/sccache-action@v0.0.7
+      - uses: mozilla-actions/sccache-action@v0.0.9
         continue-on-error: true
       - name: Configure sccache
         run: |
@@ -77,7 +77,7 @@ jobs:
         with:
           submodules: recursive
       - uses: dtolnay/rust-toolchain@nightly
-      - uses: mozilla-actions/sccache-action@v0.0.7
+      - uses: mozilla-actions/sccache-action@v0.0.9
         continue-on-error: true
       - name: Configure sccache
         run: |

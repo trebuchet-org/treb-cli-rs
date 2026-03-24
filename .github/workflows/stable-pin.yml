@@ -79,9 +79,14 @@ jobs:
 
       - uses: foundry-rs/foundry-toolchain@v1
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: foundry-${{ matrix.foundry_tag }}
+      - uses: mozilla-actions/sccache-action@v0.0.9
+        continue-on-error: true
+      - name: Configure sccache
+        run: |
+          if command -v sccache &>/dev/null && sccache --start-server 2>/dev/null; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          fi
 
       - name: Apply foundry pin
         run: |

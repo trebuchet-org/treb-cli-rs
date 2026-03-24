@@ -46,9 +46,14 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@nightly
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
+      - uses: mozilla-actions/sccache-action@v0.0.9
+        continue-on-error: true
+      - name: Configure sccache
+        run: |
+          if command -v sccache &>/dev/null && sccache --start-server 2>/dev/null; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          fi
 
       - name: Install cross
         if: matrix.use_cross

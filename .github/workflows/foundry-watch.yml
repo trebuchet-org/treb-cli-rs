@@ -63,8 +63,16 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
         if: steps.check.outputs.updated == 'true'
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: mozilla-actions/sccache-action@v0.0.9
         if: steps.check.outputs.updated == 'true'
+        continue-on-error: true
+      - name: Configure sccache
+        if: steps.check.outputs.updated == 'true'
+        run: |
+          if command -v sccache &>/dev/null && sccache --start-server 2>/dev/null; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          fi
 
       - name: Update Cargo.toml foundry dep
         if: steps.check.outputs.updated == 'true'
