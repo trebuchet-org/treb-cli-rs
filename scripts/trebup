@@ -62,7 +62,7 @@ main() {
   migrate_if_needed
 
   # Resolve what to install
-  local tag repo
+  local tag="" repo=""
   resolve_install "$install_version" "$foundry_channel" tag repo
 
   if [ -z "$tag" ]; then
@@ -189,15 +189,27 @@ resolve_install() {
   local -n _tag=$3
   local -n _repo=$4
 
-  # Default: latest Rust nightly + foundry stable
+  # Default: latest Rust release (nightly or stable)
   if [ -z "$version" ]; then
-    version="v2-nightly"
+    version="latest"
   fi
 
   # Aliases
   case "$version" in
     nightly)      version="v2-nightly" ;;
     go-nightly)   version="v1-nightly" ;;
+    latest)
+      # Find the latest release regardless of naming scheme
+      _repo="$RUST_REPO"
+      local resolved
+      resolved="$(find_latest_release "$RUST_REPO" "^v")"
+      if [ -z "$resolved" ]; then
+        err "no releases found at $RUST_REPO"
+      fi
+      _tag="$resolved"
+      say "resolved latest → $resolved"
+      return
+      ;;
   esac
 
   # Route by major version
