@@ -1,4 +1,4 @@
-treb nightly-<SHORT_HASH>--foundry-nightly-<SHORT_HASH>-3-g<COMMIT>-dirty
+treb nightly-<SHORT_HASH>--foundry-nightly-<SHORT_HASH>
 
 commit: <COMMIT>
 built:  <DATE>

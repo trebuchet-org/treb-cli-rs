@@ -346,6 +346,7 @@ pub fn populate_safe_context(
 /// The `timelock_address` is populated from the deployer sender if available.
 pub fn hydrate_governor_proposals(
     events: &[GovernorProposalCreated],
+    broadcasts: &[crate::events::GovernorBroadcast],
     context: &PipelineContext,
 ) -> Vec<GovernorProposal> {
     let now = Utc::now();
@@ -364,6 +365,21 @@ pub fn hydrate_governor_proposals(
             let tx_ids: Vec<String> =
                 event.transactionIds.iter().map(|id| format!("tx-{:#x}", id)).collect();
 
+            // Match GovernorBroadcast by governor address to get title/description
+            let description = broadcasts
+                .iter()
+                .find(|b| b.governor == event.governor)
+                .map(|b| {
+                    if b.title.is_empty() {
+                        b.description.clone()
+                    } else if b.description.is_empty() {
+                        b.title.clone()
+                    } else {
+                        format!("{}\n\n{}", b.title, b.description)
+                    }
+                })
+                .unwrap_or_default();
+
             GovernorProposal {
                 proposal_id: format!("{}", event.proposalId),
                 governor_address: event.governor.to_checksum(None),
@@ -373,7 +389,7 @@ pub fn hydrate_governor_proposals(
                 transaction_ids: tx_ids,
                 proposed_by: event.proposer.to_checksum(None),
                 proposed_at: now,
-                description: String::new(),
+                description,
                 executed_at: None,
                 fork_executed_at: None,
                 execution_tx_hash: String::new(),
@@ -1120,7 +1136,7 @@ mod tests {
             transactionIds: vec![tx_id_1, tx_id_2],
         }];
 
-        let proposals = hydrate_governor_proposals(&events, &ctx);
+        let proposals = hydrate_governor_proposals(&events, &[], &ctx);
         assert_eq!(proposals.len(), 1);
 
         let p = &proposals[0];
@@ -1168,7 +1184,7 @@ mod tests {
             )],
         }];
 
-        let proposals = hydrate_governor_proposals(&events, &ctx);
+        let proposals = hydrate_governor_proposals(&events, &[], &ctx);
         assert_eq!(proposals.len(), 1);
         assert_eq!(proposals[0].timelock_address, timelock_addr.to_checksum(None));
     }
@@ -1184,7 +1200,7 @@ mod tests {
             transactionIds: vec![],
         }];
 
-        let proposals = hydrate_governor_proposals(&events, &ctx);
+        let proposals = hydrate_governor_proposals(&events, &[], &ctx);
         assert_eq!(proposals.len(), 1);
         assert!(proposals[0].timelock_address.is_empty());
     }
@@ -1192,7 +1208,7 @@ mod tests {
     #[test]
     fn hydrate_governor_proposals_empty_events() {
         let ctx = test_context();
-        let proposals = hydrate_governor_proposals(&[], &ctx);
+        let proposals = hydrate_governor_proposals(&[], &[], &ctx);
         assert!(proposals.is_empty());
     }
 
@@ -1219,7 +1235,7 @@ mod tests {
             },
         ];
 
-        let proposals = hydrate_governor_proposals(&events, &ctx);
+        let proposals = hydrate_governor_proposals(&events, &[], &ctx);
         assert_eq!(proposals.len(), 2);
         assert_eq!(proposals[0].proposal_id, format!("{}", U256::from(100u64)));
         assert_eq!(proposals[1].proposal_id, format!("{}", U256::from(200u64)));

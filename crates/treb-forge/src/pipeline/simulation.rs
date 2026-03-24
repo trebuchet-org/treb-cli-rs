@@ -155,7 +155,9 @@ pub async fn hydrate_simulation(
 
     // 6. Hydrate governor proposals and safe transactions from events
     let governor_events = extract_governor_proposal_created(&parsed_events);
-    let governor_proposals = hydrate_governor_proposals(&governor_events, context);
+    let governor_broadcasts = super::orchestrator::extract_governor_broadcasts(&parsed_events);
+    let governor_proposals =
+        hydrate_governor_proposals(&governor_events, &governor_broadcasts, context);
 
     let safe_tx_events = extract_safe_transaction_queued(&parsed_events);
     let safe_transactions = hydrate_safe_transactions(&safe_tx_events, context);

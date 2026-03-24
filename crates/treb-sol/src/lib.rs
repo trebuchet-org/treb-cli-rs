@@ -87,6 +87,13 @@ sol! {
         address indexed proposer,
         bytes32[] transactionIds
     );
+
+    #[derive(Debug)]
+    event GovernorBroadcast(
+        address indexed governor,
+        string title,
+        string description
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -135,6 +142,7 @@ mod tests {
             ("SafeTransactionExecuted", SafeTransactionExecuted::SIGNATURE_HASH),
             ("DeploymentCollision", DeploymentCollision::SIGNATURE_HASH),
             ("GovernorProposalCreated", GovernorProposalCreated::SIGNATURE_HASH),
+            ("GovernorBroadcast", GovernorBroadcast::SIGNATURE_HASH),
             ("ContractCreation_0", ContractCreation_0::SIGNATURE_HASH),
             ("ContractCreation_1", ContractCreation_1::SIGNATURE_HASH),
             ("Create3ProxyContractCreation", Create3ProxyContractCreation::SIGNATURE_HASH),
@@ -157,6 +165,7 @@ mod tests {
             SafeTransactionExecuted::SIGNATURE_HASH,
             DeploymentCollision::SIGNATURE_HASH,
             GovernorProposalCreated::SIGNATURE_HASH,
+            GovernorBroadcast::SIGNATURE_HASH,
             ContractCreation_0::SIGNATURE_HASH,
             ContractCreation_1::SIGNATURE_HASH,
             Create3ProxyContractCreation::SIGNATURE_HASH,

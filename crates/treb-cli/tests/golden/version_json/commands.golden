@@ -6,5 +6,5 @@
   "foundryVersion": "nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca",
   "rustVersion": "rustc <RUSTC_VERSION> (<SHORT_HASH> <DATE>)",
   "trebSolCommit": "<SHORT_HASH>",
-  "version": "nightly-<SHORT_HASH>--foundry-nightly-<SHORT_HASH>-3-g<COMMIT>-dirty"
+  "version": "nightly-<SHORT_HASH>--foundry-nightly-<SHORT_HASH>"
 }

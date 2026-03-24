@@ -10,9 +10,9 @@
 
 // ITrebEvents
 pub use treb_sol::{
-    ContractDeployed, DeploymentCollision, DeploymentDetails, GovernorProposalCreated,
-    SafeTransactionExecuted, SafeTransactionQueued, SimulatedTransaction, Transaction,
-    TransactionSimulated,
+    ContractDeployed, DeploymentCollision, DeploymentDetails, GovernorBroadcast,
+    GovernorProposalCreated, SafeTransactionExecuted, SafeTransactionQueued, SimulatedTransaction,
+    Transaction, TransactionSimulated,
 };
 
 // ICreateX
