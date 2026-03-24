@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use alloy_network::Ethereum;
 use alloy_primitives::{Address, B256, hex};
 use chrono::Utc;
 
@@ -389,7 +390,7 @@ pub fn hydrate_governor_proposals(
 /// broadcastable transactions, using the `from` address to resolve sender names
 /// via the address-to-role reverse map.
 pub fn hydrate_transactions_from_broadcast(
-    broadcastable_txs: &foundry_cheatcodes::BroadcastableTransactions,
+    broadcastable_txs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     hydrated_deployments: &[Deployment],
     context: &PipelineContext,
 ) -> Vec<Transaction> {
@@ -399,12 +400,9 @@ pub fn hydrate_transactions_from_broadcast(
         .iter()
         .enumerate()
         .map(|(idx, btx)| {
-            let from_addr = btx.from;
-            let to_addr = btx.to.and_then(|kind| match kind {
-                alloy_primitives::TxKind::Call(addr) => Some(addr),
-                alloy_primitives::TxKind::Create => None,
-            });
-            let input = btx.input.clone();
+            let from_addr = btx.transaction.from().unwrap_or_default();
+            let to_addr = btx.transaction.to();
+            let input = btx.transaction.input().cloned().unwrap_or_default();
 
             let tx_id = broadcast_tx_id(&context.config.script_path, idx);
 
@@ -457,7 +455,7 @@ pub fn hydrate_transactions_from_broadcast(
                 status: TransactionStatus::Simulated,
                 block_number: 0,
                 sender: from_addr.to_checksum(None),
-                nonce: btx.nonce,
+                nonce: btx.transaction.nonce().unwrap_or(0),
                 deployments: linked_deployment_ids,
                 operations,
                 safe_context: None,
@@ -479,7 +477,7 @@ pub struct V2TransactionMetadata {
 
 /// Build metadata for v2 transactions from BroadcastableTransactions.
 pub fn build_v2_transaction_metadata(
-    broadcastable_txs: &foundry_cheatcodes::BroadcastableTransactions,
+    broadcastable_txs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     context: &PipelineContext,
 ) -> HashMap<String, V2TransactionMetadata> {
     let addr_to_role: HashMap<Address, String> =
@@ -489,10 +487,10 @@ pub fn build_v2_transaction_metadata(
         .iter()
         .enumerate()
         .map(|(idx, btx)| {
-            let from_addr = btx.from;
+            let from_addr = btx.transaction.from().unwrap_or_default();
             let tx_id = broadcast_tx_id(&context.config.script_path, idx);
             let sender_name = addr_to_role.get(&from_addr).cloned();
-            let gas_used = btx.gas.map(|g| g as u64);
+            let gas_used = btx.transaction.gas().map(|g| g as u64);
             (tx_id, V2TransactionMetadata { sender_name, gas_used })
         })
         .collect()

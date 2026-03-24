@@ -9,6 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use alloy_network::Ethereum;
 use alloy_primitives::{Address, B256, U256};
 use alloy_signer::Signer;
 use foundry_config::Config;
@@ -378,7 +379,7 @@ use treb_core::types::safe_transaction::SafeTxData;
 /// appropriate registry records so they can be persisted.
 fn build_proposed_records_from_routing(
     run_results: &[(TransactionRun, RunResult)],
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     context: &PipelineContext,
     recorded_transactions: &[RecordedTransaction],
 ) -> (
@@ -465,19 +466,16 @@ fn build_proposed_records_from_routing(
                     .filter_map(|&idx| btxs.get(idx))
                     .map(|btx| {
                         let to = btx
-                            .to
-                            .and_then(|kind| match kind {
-                                alloy_primitives::TxKind::Call(addr) => {
-                                    Some(format!("{:#x}", addr))
-                                }
-                                alloy_primitives::TxKind::Create => None,
-                            })
+                            .transaction
+                            .to()
+                            .map(|addr| format!("{:#x}", addr))
                             .unwrap_or_default();
-                        let value = format!("{}", btx.value);
-                        let calldata = if btx.input.is_empty() {
+                        let value = format!("{}", btx.transaction.value().unwrap_or_default());
+                        let input = btx.transaction.input().cloned().unwrap_or_default();
+                        let calldata = if input.is_empty() {
                             String::new()
                         } else {
-                            format!("0x{}", alloy_primitives::hex::encode(&btx.input))
+                            format!("0x{}", alloy_primitives::hex::encode(&input))
                         };
                         treb_core::types::GovernorAction { target: to, value, calldata }
                     })
@@ -536,7 +534,7 @@ fn build_proposed_records_from_routing(
 fn update_transaction_statuses_from_routing(
     recorded_transactions: &mut [RecordedTransaction],
     run_results: &[(TransactionRun, RunResult)],
-    _btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    _btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
 ) {
     for (run, result) in run_results {
         let is_proposed =
@@ -579,13 +577,13 @@ pub struct RoutingOutcome {
 #[allow(clippy::too_many_arguments)]
 pub fn apply_routing_results(
     run_results: &[(TransactionRun, RunResult)],
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     recorded_transactions: &mut [RecordedTransaction],
     context: &PipelineContext,
     script_path: &str,
     chain_id: u64,
     script_sig: &str,
-    pre_built_sequence: Option<forge_script_sequence::ScriptSequence<alloy_network::Ethereum>>,
+    pre_built_sequence: Option<forge_script_sequence::ScriptSequence<Ethereum>>,
 ) -> Result<RoutingOutcome, TrebError> {
     // Build Safe/Governor records from routing results
     let (proposed_results, safe_transactions, governor_proposals) =
@@ -656,13 +654,13 @@ pub fn apply_routing_results_with_queued(
         RunResult,
         Option<super::routing::QueuedExecution>,
     )],
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     recorded_transactions: &mut [RecordedTransaction],
     context: &PipelineContext,
     script_path: &str,
     chain_id: u64,
     script_sig: &str,
-    pre_built_sequence: Option<forge_script_sequence::ScriptSequence<alloy_network::Ethereum>>,
+    pre_built_sequence: Option<forge_script_sequence::ScriptSequence<Ethereum>>,
 ) -> Result<RoutingOutcome, TrebError> {
     // Extract (run, result) pairs for the existing functions
     let run_results: Vec<(TransactionRun, RunResult)> = run_results_with_queued
@@ -936,7 +934,7 @@ fn collect_recorded_transaction_metadata(
 /// Same logic as `build_recorded_transaction_metadata` but driven by
 /// `BroadcastableTransactions` instead of `TransactionSimulated` events.
 pub(super) fn build_v2_recorded_transaction_metadata(
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     extracted_deployments: &[ExtractedDeployment],
     traces: &Traces,
     context: &PipelineContext,
@@ -964,10 +962,10 @@ pub(super) fn build_v2_recorded_transaction_metadata(
         .enumerate()
         .map(|(idx, btx)| {
             let tx_id = super::hydration::broadcast_tx_id(&context.config.script_path, idx);
-            let from_addr = btx.from;
-            let to_kind = btx.to;
-            let input = btx.input.clone();
-            let value = btx.value;
+            let from_addr = btx.transaction.from().unwrap_or_default();
+            let to_addr = btx.transaction.to();
+            let input = btx.transaction.input().cloned().unwrap_or_default();
+            let value = btx.transaction.value().unwrap_or_default();
 
             let deployment_targets = transaction_deployments.get(&tx_id).map(Vec::as_slice);
 
@@ -977,20 +975,16 @@ pub(super) fn build_v2_recorded_transaction_metadata(
                     if candidate.matched || candidate.value != value {
                         return false;
                     }
-                    match to_kind {
-                        Some(alloy_primitives::TxKind::Call(to_addr)) => {
-                            !candidate.kind.is_any_create()
-                                && candidate.to == to_addr
-                                && candidate.data == input.as_ref()
+                    if let Some(to) = to_addr {
+                        !candidate.kind.is_any_create()
+                            && candidate.to == to
+                            && candidate.data == input.as_ref()
+                    } else {
+                        if !candidate.kind.is_any_create() {
+                            return false;
                         }
-                        Some(alloy_primitives::TxKind::Create) | None => {
-                            if !candidate.kind.is_any_create() {
-                                return false;
-                            }
-                            deployment_targets
-                                .is_some_and(|targets| targets.contains(&candidate.to))
-                                || (!input.is_empty() && candidate.data == input.as_ref())
-                        }
+                        deployment_targets.is_some_and(|targets| targets.contains(&candidate.to))
+                            || (!input.is_empty() && candidate.data == input.as_ref())
                     }
                 })
                 .map(|candidate| {
@@ -1762,7 +1756,7 @@ pub struct SimulatedSession {
 struct SimulatedScript {
     name: String,
     result: PipelineResult,
-    btxs: Option<foundry_cheatcodes::BroadcastableTransactions>,
+    btxs: Option<foundry_cheatcodes::BroadcastableTransactions<Ethereum>>,
     context: PipelineContext,
 }
 
@@ -2182,7 +2176,7 @@ fn merge_adjacent_safe_proposals(pending: Vec<PendingSafeProposal>) -> Vec<Merge
 /// submitting to the Safe Transaction Service.
 #[allow(clippy::too_many_arguments)]
 async fn route_with_deferred_proposals(
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     route_ctx: &mut super::routing::RouteContext<'_>,
     recorded_txs: &[RecordedTransaction],
     pending: &mut Vec<PendingSafeProposal>,

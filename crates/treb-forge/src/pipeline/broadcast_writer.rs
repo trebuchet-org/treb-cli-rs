@@ -45,30 +45,28 @@ fn btx_to_transaction_request(
 ) -> alloy_rpc_types::TransactionRequest {
     use alloy_rpc_types::{TransactionInput, TransactionRequest};
 
-    let mut tx = TransactionRequest::default().from(btx.from);
+    let from = btx.transaction.from().unwrap_or_default();
+    let mut tx = TransactionRequest::default().from(from);
 
-    if let Some(to) = btx.to {
-        match to {
-            alloy_primitives::TxKind::Call(addr) => {
-                tx = tx.to(addr);
-            }
-            alloy_primitives::TxKind::Create => {}
-        }
+    if let Some(to) = btx.transaction.to() {
+        tx = tx.to(to);
     }
 
-    if !btx.input.is_empty() {
-        tx.input = TransactionInput::new(btx.input.clone());
+    let input = btx.transaction.input().cloned().unwrap_or_default();
+    if !input.is_empty() {
+        tx.input = TransactionInput::new(input);
     }
 
-    if !btx.value.is_zero() {
-        tx = tx.value(btx.value);
+    let value = btx.transaction.value().unwrap_or_default();
+    if !value.is_zero() {
+        tx = tx.value(value);
     }
 
-    if let Some(gas) = btx.gas {
-        tx.gas = Some(gas);
+    if let Some(gas) = btx.transaction.gas() {
+        tx.gas = Some(gas as u64);
     }
 
-    tx.nonce = Some(btx.nonce);
+    tx.nonce = btx.transaction.nonce();
 
     tx
 }
@@ -256,7 +254,7 @@ pub fn save_sequence_checkpoint(sequence: &mut ScriptSequence<Ethereum>) -> Resu
 /// so the sequence can be updated in-place as each transaction is confirmed
 /// during broadcast.
 pub fn build_pre_routing_sequence(
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     recorded_txs: &[RecordedTransaction],
     ctx: &PipelineContext,
     broadcast_path: PathBuf,
@@ -274,7 +272,7 @@ pub fn build_pre_routing_sequence(
         // hash is None — not yet broadcast
 
         // Determine opcode (Create vs Call)
-        let is_create = btx.to.is_none_or(|to| matches!(to, alloy_primitives::TxKind::Create));
+        let is_create = btx.transaction.to().is_none();
         tx_meta.opcode = if is_create { CallKind::Create } else { CallKind::Call };
 
         // Set contract metadata from recorded transaction
@@ -318,7 +316,7 @@ pub fn build_pre_routing_sequence(
 /// Only includes transactions that were actually broadcast on-chain (wallet
 /// direct or Safe 1/1 execution). Deferred operations go to the companion file.
 pub fn build_script_sequence(
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     run_results: &[(TransactionRun, RunResult)],
     recorded_txs: &[RecordedTransaction],
     ctx: &PipelineContext,
@@ -357,8 +355,7 @@ pub fn build_script_sequence(
                 }
 
                 // Determine opcode (Create vs Call)
-                let is_create =
-                    btx.to.is_none_or(|to| matches!(to, alloy_primitives::TxKind::Create));
+                let is_create = btx.transaction.to().is_none();
                 tx_meta.opcode = if is_create { CallKind::Create } else { CallKind::Call };
 
                 // Set contract metadata from recorded transaction
@@ -865,6 +862,7 @@ mod tests {
 
     use alloy_primitives::Address;
     use foundry_cheatcodes::BroadcastableTransaction;
+    use foundry_common::TransactionMaybeSigned;
     use treb_core::types::{
         enums::TransactionStatus,
         transaction::{Operation, Transaction},
@@ -872,20 +870,15 @@ mod tests {
 
     /// Build a synthetic broadcastable transaction for testing.
     fn make_btx(from: Address, to: Option<Address>, data: &[u8]) -> BroadcastableTransaction {
-        BroadcastableTransaction {
-            rpc: None,
-            from,
-            to: to.map(alloy_primitives::TxKind::Call),
-            value: alloy_primitives::U256::ZERO,
-            input: alloy_primitives::Bytes::from(data.to_vec()),
-            nonce: 0,
-            gas: None,
-            kind: foundry_cheatcodes::BroadcastKind::Unsigned {
-                chain_id: None,
-                blob_sidecar: None,
-                authorization_list: None,
-            },
+        use alloy_rpc_types::{TransactionInput, TransactionRequest};
+        let mut tx_req = TransactionRequest::default().from(from);
+        if let Some(to_addr) = to {
+            tx_req = tx_req.to(to_addr);
         }
+        if !data.is_empty() {
+            tx_req.input = TransactionInput::new(alloy_primitives::Bytes::from(data.to_vec()));
+        }
+        BroadcastableTransaction { rpc: None, transaction: TransactionMaybeSigned::new(tx_req) }
     }
 
     /// Build a minimal RecordedTransaction with an optional DEPLOY operation.

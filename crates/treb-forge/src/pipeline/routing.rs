@@ -167,7 +167,7 @@ pub struct TransactionRun {
 /// while enabling per-sender routing (wallet broadcast vs Safe proposal vs
 /// Governor proposal).
 pub fn partition_into_runs(
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     resolved_senders: &HashMap<String, ResolvedSender>,
     sender_labels: &HashMap<Address, String>,
 ) -> Vec<TransactionRun> {
@@ -182,7 +182,7 @@ pub fn partition_into_runs(
     let mut runs: Vec<TransactionRun> = Vec::new();
 
     for (idx, btx) in btxs.iter().enumerate() {
-        let from = btx.from;
+        let from = btx.transaction.from().unwrap_or_default();
 
         // Check if this tx extends the current run (same sender)
         if let Some(current) = runs.last_mut() {
@@ -266,7 +266,7 @@ pub struct RouteContext<'a> {
 struct ReductionItem {
     run: TransactionRun,
     /// The broadcastable transactions (either original or synthetic for governor propose).
-    btxs: foundry_cheatcodes::BroadcastableTransactions,
+    btxs: foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     /// Governance context inherited from a parent governor reduction.
     governance: Option<GovernanceContext>,
     depth: u8,
@@ -277,7 +277,7 @@ struct ReductionItem {
 /// This is the classification step — no RPC calls for wallet/governor runs,
 /// but Safe runs query threshold/nonce to determine 1/1 vs multi-sig.
 pub async fn reduce_queue(
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     ctx: &mut RouteContext<'_>,
 ) -> Result<RoutingPlan, TrebError> {
     let runs = partition_into_runs(btxs, ctx.resolved_senders, ctx.sender_labels);
@@ -719,7 +719,7 @@ fn find_proposer_role(
 /// Reduce a Safe(1/1) run into an Exec action with full execTransaction calldata.
 async fn reduce_safe_1of1(
     run: &TransactionRun,
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     resolved_sender: &ResolvedSender,
     safe_address: Address,
     ctx: &RouteContext<'_>,
@@ -897,7 +897,7 @@ async fn reduce_safe_1of1(
 pub async fn execute_single_action(
     planned: &PlannedAction,
     ctx: &mut RouteContext<'_>,
-    original_btxs: Option<&foundry_cheatcodes::BroadcastableTransactions>,
+    original_btxs: Option<&foundry_cheatcodes::BroadcastableTransactions<Ethereum>>,
 ) -> Result<(TransactionRun, RunResult, Option<QueuedExecution>), TrebError> {
     let result = match &planned.action {
         RoutingAction::Exec { from, transactions, safe, governance: _ } => {
@@ -1020,7 +1020,7 @@ pub async fn execute_single_action(
 pub async fn execute_plan(
     plan: &RoutingPlan,
     ctx: &mut RouteContext<'_>,
-    original_btxs: Option<&foundry_cheatcodes::BroadcastableTransactions>,
+    original_btxs: Option<&foundry_cheatcodes::BroadcastableTransactions<Ethereum>>,
 ) -> Result<Vec<(TransactionRun, RunResult, Option<QueuedExecution>)>, TrebError> {
     let mut results = Vec::with_capacity(plan.actions.len());
 
@@ -1047,7 +1047,7 @@ pub async fn execute_plan(
 /// This is the main entry point. Reduces runs into a plan, then executes it.
 /// Returns `(TransactionRun, RunResult)` pairs for backward compatibility.
 pub async fn route_all(
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     ctx: &mut RouteContext<'_>,
 ) -> Result<Vec<(TransactionRun, RunResult)>, TrebError> {
     let plan = reduce_queue(btxs, ctx).await?;
@@ -1058,7 +1058,7 @@ pub async fn route_all(
 
 /// Route all with queued execution items returned.
 pub async fn route_all_with_queued(
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     ctx: &mut RouteContext<'_>,
 ) -> Result<Vec<(TransactionRun, RunResult, Option<QueuedExecution>)>, TrebError> {
     let plan = reduce_queue(btxs, ctx).await?;
@@ -1076,7 +1076,7 @@ pub async fn route_all_with_queued(
 /// dropped and re-broadcast. Nonce conflicts during re-broadcast produce a
 /// warning instead of a fatal error.
 pub async fn route_all_with_resume(
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     ctx: &mut RouteContext<'_>,
     resume: &super::broadcast_writer::ResumeState,
 ) -> Result<Vec<(TransactionRun, RunResult)>, TrebError> {
@@ -1211,7 +1211,7 @@ async fn poll_pending_receipt(
 /// Resume a wallet run: skip confirmed, poll pending, re-broadcast unsent.
 async fn resume_wallet_run(
     run: &TransactionRun,
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     ctx: &mut RouteContext<'_>,
     resume: &super::broadcast_writer::ResumeState,
 ) -> Result<RunResult, TrebError> {
@@ -1350,7 +1350,7 @@ pub fn flatten_receipts(results: &[(TransactionRun, RunResult)]) -> Vec<Broadcas
 pub async fn broadcast_wallet_run(
     rpc_url: &str,
     run: &TransactionRun,
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     is_fork: bool,
     resolved_senders: &HashMap<String, ResolvedSender>,
     sequence: Option<&mut ScriptSequence<Ethereum>>,
@@ -1366,7 +1366,7 @@ pub async fn broadcast_wallet_run(
 async fn broadcast_wallet_run_fork(
     rpc_url: &str,
     run: &TransactionRun,
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     sequence: Option<&mut ScriptSequence<Ethereum>>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     use alloy_rpc_types::TransactionRequest;
@@ -1380,25 +1380,21 @@ async fn broadcast_wallet_run_fork(
             .get(tx_idx)
             .ok_or_else(|| TrebError::Forge(format!("transaction index {tx_idx} out of range")))?;
 
-        let from = btx.from;
+        let from = btx.transaction.from().unwrap_or_default();
 
         // Build the transaction request
         let mut tx_req = TransactionRequest::default().from(from);
 
-        if let Some(to) = btx.to {
-            match to {
-                alloy_primitives::TxKind::Call(addr) => {
-                    tx_req = tx_req.to(addr);
-                }
-                alloy_primitives::TxKind::Create => {}
-            }
+        if let Some(to) = btx.transaction.to() {
+            tx_req = tx_req.to(to);
         }
 
-        if !btx.input.is_empty() {
-            tx_req.input = alloy_rpc_types::TransactionInput::new(btx.input.clone());
+        let input = btx.transaction.input().cloned().unwrap_or_default();
+        if !input.is_empty() {
+            tx_req.input = alloy_rpc_types::TransactionInput::new(input);
         }
 
-        let value = btx.value;
+        let value = btx.transaction.value().unwrap_or_default();
         if !value.is_zero() {
             tx_req = tx_req.value(value);
         }
@@ -1435,7 +1431,7 @@ async fn broadcast_wallet_run_fork(
 async fn broadcast_wallet_run_live(
     rpc_url: &str,
     run: &TransactionRun,
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     resolved_senders: &HashMap<String, ResolvedSender>,
     sequence: Option<&mut ScriptSequence<Ethereum>>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
@@ -1455,17 +1451,18 @@ async fn broadcast_wallet_run_live(
 
         let mut tx_req = TransactionRequest::default();
 
-        tx_req = tx_req.from(btx.from);
+        tx_req = tx_req.from(btx.transaction.from().unwrap_or_default());
 
-        if let Some(alloy_primitives::TxKind::Call(addr)) = btx.to {
-            tx_req = tx_req.to(addr);
+        if let Some(to) = btx.transaction.to() {
+            tx_req = tx_req.to(to);
         }
 
-        if !btx.input.is_empty() {
-            tx_req.input = alloy_rpc_types::TransactionInput::new(btx.input.clone());
+        let input = btx.transaction.input().cloned().unwrap_or_default();
+        if !input.is_empty() {
+            tx_req.input = alloy_rpc_types::TransactionInput::new(input);
         }
 
-        let value = btx.value;
+        let value = btx.transaction.value().unwrap_or_default();
         if !value.is_zero() {
             tx_req = tx_req.value(value);
         }
@@ -1615,7 +1612,7 @@ pub async fn poll_safe_execution(
 #[allow(clippy::type_complexity)]
 pub fn extract_governor_tx_data(
     run: &TransactionRun,
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
 ) -> Result<(Vec<Address>, Vec<U256>, Vec<Vec<u8>>), TrebError> {
     let mut targets = Vec::with_capacity(run.tx_indices.len());
     let mut values = Vec::with_capacity(run.tx_indices.len());
@@ -1626,16 +1623,10 @@ pub fn extract_governor_tx_data(
             .get(idx)
             .ok_or_else(|| TrebError::Forge(format!("transaction index {idx} out of range")))?;
 
-        let to = btx
-            .to
-            .and_then(|kind| match kind {
-                alloy_primitives::TxKind::Call(addr) => Some(addr),
-                alloy_primitives::TxKind::Create => None,
-            })
-            .unwrap_or(Address::ZERO);
+        let to = btx.transaction.to().unwrap_or(Address::ZERO);
 
-        let value = btx.value;
-        let data = btx.input.to_vec();
+        let value = btx.transaction.value().unwrap_or_default();
+        let data = btx.transaction.input().cloned().unwrap_or_default().to_vec();
 
         targets.push(to);
         values.push(U256::from(value));
@@ -1677,24 +1668,17 @@ fn build_single_tx_broadcast(
     from: Address,
     to: Address,
     calldata: Vec<u8>,
-) -> foundry_cheatcodes::BroadcastableTransactions {
-    use foundry_cheatcodes::{BroadcastKind, BroadcastableTransaction};
+) -> foundry_cheatcodes::BroadcastableTransactions<Ethereum> {
+    use alloy_rpc_types::{TransactionInput, TransactionRequest};
+    use foundry_cheatcodes::BroadcastableTransaction;
+    use foundry_common::TransactionMaybeSigned;
 
-    let btx = BroadcastableTransaction {
-        rpc: None,
-        from,
-        to: Some(alloy_primitives::TxKind::Call(to)),
-        value: U256::ZERO,
-        input: alloy_primitives::Bytes::from(calldata),
-        nonce: 0,
-        gas: None,
-        kind: BroadcastKind::Unsigned {
-            chain_id: None,
-            blob_sidecar: None,
-            authorization_list: None,
-        },
-    };
-    let mut btxs = foundry_cheatcodes::BroadcastableTransactions::default();
+    let mut tx_req = TransactionRequest::default().from(from).to(to);
+    tx_req.input = TransactionInput::new(alloy_primitives::Bytes::from(calldata));
+
+    let btx =
+        BroadcastableTransaction { rpc: None, transaction: TransactionMaybeSigned::new(tx_req) };
+    let mut btxs = foundry_cheatcodes::BroadcastableTransactions::<Ethereum>::default();
     btxs.push_back(btx);
     btxs
 }
@@ -1706,22 +1690,16 @@ fn build_single_tx_broadcast(
 /// Extract `RoutableTx` items from a run's broadcastable transactions.
 fn extract_routable_txs(
     run: &TransactionRun,
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
 ) -> Result<Vec<RoutableTx>, TrebError> {
     let mut txs = Vec::with_capacity(run.tx_indices.len());
     for &idx in &run.tx_indices {
         let btx = btxs
             .get(idx)
             .ok_or_else(|| TrebError::Forge(format!("transaction index {idx} out of range")))?;
-        let to = btx
-            .to
-            .and_then(|kind| match kind {
-                alloy_primitives::TxKind::Call(addr) => Some(addr),
-                alloy_primitives::TxKind::Create => None,
-            })
-            .unwrap_or(Address::ZERO);
-        let value = btx.value;
-        let data = btx.input.to_vec();
+        let to = btx.transaction.to().unwrap_or(Address::ZERO);
+        let value = btx.transaction.value().unwrap_or_default();
+        let data = btx.transaction.input().cloned().unwrap_or_default().to_vec();
         txs.push(RoutableTx { to, value: U256::from(value), data });
     }
     Ok(txs)
@@ -1730,22 +1708,16 @@ fn extract_routable_txs(
 /// Build MultiSend operations from a run's broadcastable transactions.
 fn build_multisend_operations(
     run: &TransactionRun,
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
 ) -> Result<Vec<treb_safe::MultiSendOperation>, TrebError> {
     let mut ops = Vec::with_capacity(run.tx_indices.len());
     for &idx in &run.tx_indices {
         let btx = btxs
             .get(idx)
             .ok_or_else(|| TrebError::Forge(format!("transaction index {idx} out of range")))?;
-        let to = btx
-            .to
-            .and_then(|kind| match kind {
-                alloy_primitives::TxKind::Call(addr) => Some(addr),
-                alloy_primitives::TxKind::Create => None,
-            })
-            .unwrap_or(Address::ZERO);
-        let value = btx.value;
-        let data = btx.input.clone();
+        let to = btx.transaction.to().unwrap_or(Address::ZERO);
+        let value = btx.transaction.value().unwrap_or_default();
+        let data = btx.transaction.input().cloned().unwrap_or_default();
         ops.push(treb_safe::MultiSendOperation {
             operation: 0, // Call
             to,
@@ -1934,22 +1906,20 @@ async fn broadcast_routable_txs_live(
 fn build_btxs_from_routable(
     from: Address,
     transactions: &[RoutableTx],
-) -> foundry_cheatcodes::BroadcastableTransactions {
-    let mut btxs = foundry_cheatcodes::BroadcastableTransactions::default();
+) -> foundry_cheatcodes::BroadcastableTransactions<Ethereum> {
+    use alloy_rpc_types::{TransactionInput, TransactionRequest};
+    use foundry_common::TransactionMaybeSigned;
+
+    let mut btxs = foundry_cheatcodes::BroadcastableTransactions::<Ethereum>::default();
     for tx in transactions {
+        let mut tx_req = TransactionRequest::default().from(from).to(tx.to);
+        tx_req.input = TransactionInput::new(alloy_primitives::Bytes::from(tx.data.clone()));
+        if !tx.value.is_zero() {
+            tx_req = tx_req.value(tx.value);
+        }
         btxs.push_back(foundry_cheatcodes::BroadcastableTransaction {
             rpc: None,
-            from,
-            to: Some(alloy_primitives::TxKind::Call(tx.to)),
-            value: tx.value,
-            input: alloy_primitives::Bytes::from(tx.data.clone()),
-            nonce: 0,
-            gas: None,
-            kind: foundry_cheatcodes::BroadcastKind::Unsigned {
-                chain_id: None,
-                blob_sidecar: None,
-                authorization_list: None,
-            },
+            transaction: TransactionMaybeSigned::new(tx_req),
         });
     }
     btxs
@@ -1984,7 +1954,7 @@ mod tests {
 
     #[test]
     fn extract_governor_tx_data_empty_run() {
-        let btxs = foundry_cheatcodes::BroadcastableTransactions::default();
+        let btxs = foundry_cheatcodes::BroadcastableTransactions::<Ethereum>::default();
         let run = TransactionRun {
             sender_role: "gov".into(),
             category: SenderCategory::Governor,
@@ -2000,7 +1970,7 @@ mod tests {
 
     #[test]
     fn extract_routable_txs_empty_run() {
-        let btxs = foundry_cheatcodes::BroadcastableTransactions::default();
+        let btxs = foundry_cheatcodes::BroadcastableTransactions::<Ethereum>::default();
         let run = TransactionRun {
             sender_role: "test".into(),
             category: SenderCategory::Wallet,

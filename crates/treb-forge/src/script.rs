@@ -5,6 +5,7 @@
 
 use std::{collections::HashMap, str::FromStr};
 
+use alloy_network::Ethereum;
 use alloy_primitives::{Address, B256, Bytes, Log};
 use forge_script::ScriptArgs;
 use foundry_cheatcodes::BroadcastableTransactions;
@@ -49,7 +50,7 @@ pub struct ExecutionResult {
     /// Map of addresses to human-readable labels discovered during execution.
     pub labeled_addresses: HashMap<Address, String>,
     /// Broadcast-ready transactions collected during script execution.
-    pub transactions: Option<BroadcastableTransactions>,
+    pub transactions: Option<BroadcastableTransactions<Ethereum>>,
     /// Execution traces from the script run.
     pub traces: Traces,
     /// Receipts from broadcast transactions.

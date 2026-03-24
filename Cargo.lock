@@ -1190,7 +1190,7 @@ dependencies = [
 [[package]]
 name = "anvil"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "alloy-chains",
  "alloy-consensus 2.0.0-rc.0",
@@ -1255,7 +1255,7 @@ dependencies = [
 [[package]]
 name = "anvil-core"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "alloy-consensus 2.0.0-rc.0",
  "alloy-dyn-abi",
@@ -1280,7 +1280,7 @@ dependencies = [
 [[package]]
 name = "anvil-rpc"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "serde",
  "serde_json",
@@ -1289,7 +1289,7 @@ dependencies = [
 [[package]]
 name = "anvil-server"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "anvil-rpc",
  "async-trait",
@@ -3324,7 +3324,7 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 [[package]]
 name = "forge-script"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "alloy-chains",
  "alloy-consensus 2.0.0-rc.0",
@@ -3369,7 +3369,7 @@ dependencies = [
 [[package]]
 name = "forge-script-sequence"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "alloy-network",
  "alloy-primitives 1.5.7",
@@ -3386,7 +3386,7 @@ dependencies = [
 [[package]]
 name = "forge-verify"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "alloy-consensus 2.0.0-rc.0",
  "alloy-dyn-abi",
@@ -3448,7 +3448,7 @@ dependencies = [
 [[package]]
 name = "foundry-cheatcodes"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "alloy-chains",
  "alloy-consensus 2.0.0-rc.0",
@@ -3503,7 +3503,7 @@ dependencies = [
 [[package]]
 name = "foundry-cheatcodes-spec"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "alloy-sol-types",
  "foundry-macros",
@@ -3513,7 +3513,7 @@ dependencies = [
 [[package]]
 name = "foundry-cli"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "alloy-chains",
  "alloy-dyn-abi",
@@ -3563,7 +3563,7 @@ dependencies = [
 [[package]]
 name = "foundry-cli-markdown"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "clap",
 ]
@@ -3571,7 +3571,7 @@ dependencies = [
 [[package]]
 name = "foundry-common"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "alloy-chains",
  "alloy-consensus 2.0.0-rc.0",
@@ -3628,7 +3628,7 @@ dependencies = [
 [[package]]
 name = "foundry-common-fmt"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "alloy-consensus 2.0.0-rc.0",
  "alloy-dyn-abi",
@@ -3747,7 +3747,7 @@ dependencies = [
 [[package]]
 name = "foundry-config"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "alloy-chains",
  "alloy-primitives 1.5.7",
@@ -3785,7 +3785,7 @@ dependencies = [
 [[package]]
 name = "foundry-debugger"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "alloy-primitives 1.5.7",
  "crossterm",
@@ -3804,11 +3804,12 @@ dependencies = [
 [[package]]
 name = "foundry-evm"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "alloy-dyn-abi",
  "alloy-evm",
  "alloy-json-abi 1.5.7",
+ "alloy-network",
  "alloy-primitives 1.5.7",
  "alloy-rpc-types",
  "alloy-sol-types",
@@ -3839,7 +3840,7 @@ dependencies = [
 [[package]]
 name = "foundry-evm-abi"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "alloy-primitives 1.5.7",
  "alloy-sol-types",
@@ -3852,7 +3853,7 @@ dependencies = [
 [[package]]
 name = "foundry-evm-core"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "alloy-chains",
  "alloy-consensus 2.0.0-rc.0",
@@ -3893,7 +3894,7 @@ dependencies = [
 [[package]]
 name = "foundry-evm-coverage"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "alloy-primitives 1.5.7",
  "eyre",
@@ -3910,7 +3911,7 @@ dependencies = [
 [[package]]
 name = "foundry-evm-fuzz"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "alloy-dyn-abi",
  "alloy-json-abi 1.5.7",
@@ -3936,7 +3937,7 @@ dependencies = [
 [[package]]
 name = "foundry-evm-networks"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "alloy-chains",
  "alloy-eips 2.0.0-rc.0",
@@ -3951,7 +3952,7 @@ dependencies = [
 [[package]]
 name = "foundry-evm-traces"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "alloy-dyn-abi",
  "alloy-json-abi 1.5.7",
@@ -4007,7 +4008,7 @@ dependencies = [
 [[package]]
 name = "foundry-linking"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "alloy-primitives 1.5.7",
  "foundry-compilers",
@@ -4019,7 +4020,7 @@ dependencies = [
 [[package]]
 name = "foundry-macros"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "proc-macro-error2",
  "proc-macro2",
@@ -4030,7 +4031,7 @@ dependencies = [
 [[package]]
 name = "foundry-primitives"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "alloy-consensus 2.0.0-rc.0",
  "alloy-evm",
@@ -4056,7 +4057,7 @@ dependencies = [
 [[package]]
 name = "foundry-wallets"
 version = "1.6.0"
-source = "git+https://github.com/foundry-rs/foundry?tag=nightly-e930477e92b860881feb2379f40927adb8e13aad#e930477e92b860881feb2379f40927adb8e13aad"
+source = "git+https://github.com/foundry-rs/foundry?tag=nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca#c360e23eb0b2b40165f38146a49c9c5d940f64ca"
 dependencies = [
  "alloy-consensus 2.0.0-rc.0",
  "alloy-dyn-abi",

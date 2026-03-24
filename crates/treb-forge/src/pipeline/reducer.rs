@@ -14,6 +14,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use alloy_network::Ethereum;
 use alloy_primitives::{Address, U256};
 use foundry_cheatcodes::BroadcastableTransactions;
 use treb_core::error::TrebError;
@@ -127,7 +128,7 @@ pub async fn invoke_reducer(
     env_vars: HashMap<String, String>,
     fork_url: &str,
     chain_id: u64,
-) -> Result<BroadcastableTransactions, TrebError> {
+) -> Result<BroadcastableTransactions<Ethereum>, TrebError> {
     use crate::script::{ScriptConfig, execute_script};
 
     // Set TREB_REDUCER_* env vars for the duration of script execution

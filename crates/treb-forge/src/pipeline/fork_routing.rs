@@ -10,6 +10,7 @@
 //!
 //! This gives fork-mode the same `msg.sender` semantics as production.
 
+use alloy_network::Ethereum;
 use alloy_primitives::{Address, B256, Bytes, U256, keccak256};
 use alloy_provider::Provider;
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
@@ -274,7 +275,7 @@ const CREATE_CALL_BYTECODE: &str = "608060405234801561000f575f5ffd5b506004361061
 pub async fn execute_safe_on_fork(
     provider: &impl Provider,
     run: &TransactionRun,
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     safe_address: Address,
     chain_id: u64,
     quiet: bool,
@@ -286,7 +287,7 @@ pub async fn execute_safe_on_fork(
         .tx_indices
         .iter()
         .filter_map(|&idx| btxs.get(idx))
-        .any(|btx| matches!(btx.to, Some(alloy_primitives::TxKind::Create) | None));
+        .any(|btx| btx.transaction.to().is_none());
 
     if has_creates {
         // Deploy CreateCall helper at a deterministic address
@@ -302,9 +303,9 @@ pub async fn execute_safe_on_fork(
         .iter()
         .filter_map(|&idx| btxs.get(idx))
         .map(|btx| {
-            let is_create = matches!(btx.to, Some(alloy_primitives::TxKind::Create) | None);
-            let value = btx.value;
-            let input = btx.input.clone();
+            let is_create = btx.transaction.to().is_none();
+            let value = btx.transaction.value().unwrap_or_default();
+            let input = btx.transaction.input().cloned().unwrap_or_default();
 
             if is_create {
                 // Wrap as DelegateCall to CreateCall.performCreate(value, bytecode)
@@ -318,13 +319,7 @@ pub async fn execute_safe_on_fork(
                     data: calldata.into(),
                 }
             } else {
-                let to = btx
-                    .to
-                    .and_then(|kind| match kind {
-                        alloy_primitives::TxKind::Call(addr) => Some(addr),
-                        alloy_primitives::TxKind::Create => None,
-                    })
-                    .unwrap_or(Address::ZERO);
+                let to = btx.transaction.to().unwrap_or(Address::ZERO);
                 treb_safe::MultiSendOperation {
                     operation: 0, // Call
                     to,
@@ -563,7 +558,7 @@ fn build_pre_approved_signatures(owners: &[Address]) -> Vec<u8> {
 pub async fn execute_governor_on_fork(
     provider: &impl Provider,
     run: &TransactionRun,
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     governor_address: Address,
     timelock_address: Option<Address>,
     quiet: bool,
@@ -579,15 +574,9 @@ pub async fn execute_governor_on_fork(
         let btx = btxs
             .get(idx)
             .ok_or_else(|| TrebError::Forge(format!("transaction index {idx} out of range")))?;
-        let to = btx
-            .to
-            .and_then(|kind| match kind {
-                alloy_primitives::TxKind::Call(addr) => Some(addr),
-                alloy_primitives::TxKind::Create => None,
-            })
-            .unwrap_or(Address::ZERO);
-        let value = U256::from(btx.value);
-        let data = btx.input.to_vec();
+        let to = btx.transaction.to().unwrap_or(Address::ZERO);
+        let value = U256::from(btx.transaction.value().unwrap_or_default());
+        let data = btx.transaction.input().cloned().unwrap_or_default().to_vec();
         targets.push(to);
         values.push(value);
         calldatas.push(data);
@@ -802,21 +791,15 @@ pub async fn exec_safe_from_registry(
     };
 
     // Build synthetic broadcastable transactions
-    let mut btxs = foundry_cheatcodes::BroadcastableTransactions::default();
+    let mut btxs = foundry_cheatcodes::BroadcastableTransactions::<Ethereum>::default();
     for op in &operations {
+        let mut tx_req = TransactionRequest::default().from(safe_address).to(op.to);
+        if !op.data.is_empty() {
+            tx_req.input = TransactionInput::new(op.data.clone());
+        }
         btxs.push_back(foundry_cheatcodes::BroadcastableTransaction {
             rpc: None,
-            from: safe_address,
-            to: Some(alloy_primitives::TxKind::Call(op.to)),
-            value: U256::ZERO,
-            input: op.data.clone(),
-            nonce: 0,
-            gas: None,
-            kind: foundry_cheatcodes::BroadcastKind::Unsigned {
-                chain_id: None,
-                blob_sidecar: None,
-                authorization_list: None,
-            },
+            transaction: foundry_common::TransactionMaybeSigned::new(tx_req),
         });
     }
 

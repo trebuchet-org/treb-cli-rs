@@ -21,18 +21,18 @@ treb-sol = { path = "crates/treb-sol" }
 # === Foundry + Alloy Version Pinning Strategy ===
 # Foundry: tracks nightly tags. foundry-watch.yml auto-bumps when tests pass.
 # Stable builds use ci/foundry-stable-pins.toml to patch back to a stable tag.
-foundry-config = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-e930477e92b860881feb2379f40927adb8e13aad" }
-foundry-common = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-e930477e92b860881feb2379f40927adb8e13aad" }
+foundry-config = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca" }
+foundry-common = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca" }
 foundry-compilers = "0.19.14"
-forge-script = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-e930477e92b860881feb2379f40927adb8e13aad" }
-forge-script-sequence = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-e930477e92b860881feb2379f40927adb8e13aad" }
-foundry-evm = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-e930477e92b860881feb2379f40927adb8e13aad" }
-foundry-cheatcodes = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-e930477e92b860881feb2379f40927adb8e13aad" }
-foundry-wallets = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-e930477e92b860881feb2379f40927adb8e13aad" }
-foundry-linking = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-e930477e92b860881feb2379f40927adb8e13aad" }
-foundry-cli = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-e930477e92b860881feb2379f40927adb8e13aad" }
-forge-verify = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-e930477e92b860881feb2379f40927adb8e13aad" }
-anvil = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-e930477e92b860881feb2379f40927adb8e13aad" }
+forge-script = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca" }
+forge-script-sequence = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca" }
+foundry-evm = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca" }
+foundry-cheatcodes = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca" }
+foundry-wallets = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca" }
+foundry-linking = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca" }
+foundry-cli = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca" }
+forge-verify = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca" }
+anvil = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca" }
 revm-inspectors = "0.33.2"
 
 # Alloy — versions aligned with foundry nightly (alloy 2.0.0-rc)

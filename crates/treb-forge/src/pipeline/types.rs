@@ -6,6 +6,7 @@
 
 use std::{collections::HashMap, path::PathBuf};
 
+use alloy_network::Ethereum;
 use alloy_primitives::Address;
 use serde::{Deserialize, Serialize};
 use treb_core::types::{
@@ -221,7 +222,7 @@ pub struct ScriptResult {
     pub result: PipelineResult,
     /// Raw broadcastable transactions from simulation.
     /// Retained for compose replay between scripts.
-    pub broadcastable_transactions: Option<foundry_cheatcodes::BroadcastableTransactions>,
+    pub broadcastable_transactions: Option<foundry_cheatcodes::BroadcastableTransactions<Ethereum>>,
 }
 
 // ---------------------------------------------------------------------------

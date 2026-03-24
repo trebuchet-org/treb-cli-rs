@@ -5,6 +5,7 @@
 //! After all scripts simulate, the caller can broadcast all collected
 //! transactions in order.
 
+use alloy_network::Ethereum;
 use treb_core::error::TrebError;
 use treb_registry::Registry;
 
@@ -42,7 +43,7 @@ pub struct ComponentSimulation {
     pub result: PipelineResult,
     /// Raw broadcastable transactions from the script execution.
     /// Used to replay state on the shared Anvil fork between compose steps.
-    pub result_transactions: Option<foundry_cheatcodes::BroadcastableTransactions>,
+    pub result_transactions: Option<foundry_cheatcodes::BroadcastableTransactions<Ethereum>>,
 }
 
 /// Compose orchestrator — executes multiple scripts with shared EVM state.
@@ -307,7 +308,7 @@ impl ComposePipeline {
 /// Anvil mines each tx immediately, persisting the state for the next script.
 pub async fn replay_transactions_on_fork(
     rpc_url: &str,
-    txs: &foundry_cheatcodes::BroadcastableTransactions,
+    txs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
 ) -> Result<(), TrebError> {
     use super::fork_routing::{anvil_impersonate, anvil_stop_impersonating};
     use alloy_primitives::U256;
@@ -319,7 +320,7 @@ pub async fn replay_transactions_on_fork(
     // Collect unique senders and fund them on the fork
     let mut funded = std::collections::HashSet::new();
     for btx in txs.iter() {
-        let from = btx.from;
+        let from = btx.transaction.from().unwrap_or_default();
         if funded.insert(from) {
             // 100 ETH — enough for any gas cost on the fork
             provider
@@ -335,7 +336,7 @@ pub async fn replay_transactions_on_fork(
     }
 
     for (i, btx) in txs.iter().enumerate() {
-        let from = btx.from;
+        let from = btx.transaction.from().unwrap_or_default();
 
         // Impersonate the sender so Anvil accepts the tx without a signature
         anvil_impersonate(&provider, from)
@@ -346,20 +347,16 @@ pub async fn replay_transactions_on_fork(
         let mut tx = TransactionRequest::default().from(from);
         tx.gas = Some(30_000_000);
 
-        if let Some(to) = btx.to {
-            match to {
-                alloy_primitives::TxKind::Call(addr) => {
-                    tx = tx.to(addr);
-                }
-                alloy_primitives::TxKind::Create => {}
-            }
+        if let Some(to) = btx.transaction.to() {
+            tx = tx.to(to);
         }
 
-        if !btx.input.is_empty() {
-            tx = tx.input(TransactionInput::new(btx.input.clone()));
+        let input = btx.transaction.input().cloned().unwrap_or_default();
+        if !input.is_empty() {
+            tx = tx.input(TransactionInput::new(input));
         }
 
-        let value = btx.value;
+        let value = btx.transaction.value().unwrap_or_default();
         if !value.is_zero() {
             tx = tx.value(value);
         }
