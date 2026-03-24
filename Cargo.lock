@@ -9043,7 +9043,7 @@ dependencies = [
 
 [[package]]
 name = "treb-cli"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "alloy-chains",
  "alloy-primitives 1.5.7",
@@ -9082,7 +9082,7 @@ dependencies = [
 
 [[package]]
 name = "treb-config"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "dotenvy",
  "foundry-config",
@@ -9095,7 +9095,7 @@ dependencies = [
 
 [[package]]
 name = "treb-core"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "alloy-json-abi 0.8.26",
  "alloy-primitives 1.5.7",
@@ -9109,7 +9109,7 @@ dependencies = [
 
 [[package]]
 name = "treb-forge"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "alloy-consensus 2.0.0-rc.0",
  "alloy-dyn-abi",
@@ -9153,7 +9153,7 @@ dependencies = [
 
 [[package]]
 name = "treb-registry"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "chrono",
  "fs2",
@@ -9166,7 +9166,7 @@ dependencies = [
 
 [[package]]
 name = "treb-safe"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "alloy-primitives 1.5.7",
  "alloy-signer",
@@ -9182,7 +9182,7 @@ dependencies = [
 
 [[package]]
 name = "treb-sol"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "alloy-primitives 1.5.7",
  "alloy-sol-types",
@@ -9190,7 +9190,7 @@ dependencies = [
 
 [[package]]
 name = "treb-verify"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "alloy-chains",
  "alloy-primitives 1.5.7",
