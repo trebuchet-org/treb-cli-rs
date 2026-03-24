@@ -40,6 +40,7 @@ main() {
       -v|--version)     echo "trebup $TREBUP_VERSION"; exit 0;;
       -U|--update)      cmd="update"; shift; continue;;
       -l|--list)        cmd="list"; shift; continue;;
+      -a|--available)   cmd="available"; shift; continue;;
       -u|--use)         shift; cmd="use"; install_version="$1";;
       -i|--install)     shift; install_version="$1";;
       --foundry)        shift; foundry_channel="$1";;
@@ -51,8 +52,9 @@ main() {
   banner
 
   case "$cmd" in
-    list)    do_list; exit 0;;
-    use)     do_use "$install_version"; exit 0;;
+    list)      do_list; exit 0;;
+    available) do_available; exit 0;;
+    use)       do_use "$install_version"; exit 0;;
     update)  do_update; exit 0;;
     install) ;;
   esac
@@ -152,6 +154,48 @@ do_list() {
 
     echo "  ${marker}${v}${info}"
   done
+}
+
+do_available() {
+  say "fetching available releases..."
+  echo ""
+
+  local rust_releases
+  rust_releases="$(curl -fsSL "https://api.github.com/repos/${RUST_REPO}/releases?per_page=20" 2>/dev/null \
+    | grep '"tag_name"' \
+    | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
+
+  local go_releases
+  go_releases="$(curl -fsSL "https://api.github.com/repos/${GO_REPO}/releases?per_page=10" 2>/dev/null \
+    | grep '"tag_name"' \
+    | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
+
+  local active
+  active="$(cat "$TREB_ACTIVE_FILE" 2>/dev/null || echo "")"
+
+  if [ -n "$rust_releases" ]; then
+    echo "  Rust (treb-cli-rs):"
+    for tag in $rust_releases; do
+      local marker="  "
+      [ "$tag" = "$active" ] && marker="* "
+      local installed=""
+      [ -d "$TREB_VERSIONS_DIR/$tag" ] && installed=" [installed]"
+      echo "    ${marker}${tag}${installed}"
+    done
+    echo ""
+  fi
+
+  if [ -n "$go_releases" ]; then
+    echo "  Go (treb-cli, frozen):"
+    for tag in $go_releases; do
+      local marker="  "
+      [ "$tag" = "$active" ] && marker="* "
+      local installed=""
+      [ -d "$TREB_VERSIONS_DIR/$tag" ] && installed=" [installed]"
+      echo "    ${marker}${tag}${installed}"
+    done
+    echo ""
+  fi
 }
 
 do_use() {
@@ -577,6 +621,7 @@ OPTIONS:
     -i, --install TAG     Install a specific version
     -u, --use TAG         Switch to an already-installed version
     -l, --list            List installed versions
+    -a, --available       List available releases from GitHub
     --foundry CHANNEL     Foundry channel: stable (default) or nightly
     -U, --update          Update trebup itself
 
