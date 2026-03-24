@@ -415,4 +415,31 @@ mod tests {
             other => panic!("expected Treb event, got {other:?}"),
         }
     }
+
+    #[test]
+    fn decode_governor_broadcast_from_raw_log() {
+        let governor = address!("0000000000000000000000000000000000000099");
+        let event = GovernorBroadcast {
+            governor,
+            title: "Upgrade to v2".into(),
+            description: "Full migration of token contract".into(),
+        };
+
+        let log_data = event.encode_log_data();
+        let log = make_log(Address::ZERO, log_data);
+        let events = decode_events(&[log]);
+
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ParsedEvent::Treb(treb) => match treb.as_ref() {
+                TrebEvent::GovernorBroadcast(decoded) => {
+                    assert_eq!(decoded.governor, governor);
+                    assert_eq!(decoded.title, "Upgrade to v2");
+                    assert_eq!(decoded.description, "Full migration of token contract");
+                }
+                other => panic!("expected GovernorBroadcast, got {other:?}"),
+            },
+            other => panic!("expected Treb event, got {other:?}"),
+        }
+    }
 }

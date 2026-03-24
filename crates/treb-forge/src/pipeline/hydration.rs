@@ -1240,4 +1240,92 @@ mod tests {
         assert_eq!(proposals[0].proposal_id, format!("{}", U256::from(100u64)));
         assert_eq!(proposals[1].proposal_id, format!("{}", U256::from(200u64)));
     }
+
+    #[test]
+    fn hydrate_governor_proposals_with_broadcast_description() {
+        let ctx = test_context();
+        let governor = address!("0000000000000000000000000000000000000099");
+
+        let events = vec![GovernorProposalCreated {
+            proposalId: U256::from(42u64),
+            governor,
+            proposer: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+            transactionIds: vec![],
+        }];
+
+        let broadcasts = vec![crate::events::GovernorBroadcast {
+            governor,
+            title: "Upgrade Token".into(),
+            description: "This proposal upgrades the token contract to v2.".into(),
+        }];
+
+        let proposals = hydrate_governor_proposals(&events, &broadcasts, &ctx);
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(
+            proposals[0].description,
+            "Upgrade Token\n\nThis proposal upgrades the token contract to v2."
+        );
+    }
+
+    #[test]
+    fn hydrate_governor_proposals_broadcast_title_only() {
+        let ctx = test_context();
+        let governor = address!("0000000000000000000000000000000000000099");
+
+        let events = vec![GovernorProposalCreated {
+            proposalId: U256::from(1u64),
+            governor,
+            proposer: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+            transactionIds: vec![],
+        }];
+
+        let broadcasts = vec![crate::events::GovernorBroadcast {
+            governor,
+            title: "Just a title".into(),
+            description: String::new(),
+        }];
+
+        let proposals = hydrate_governor_proposals(&events, &broadcasts, &ctx);
+        assert_eq!(proposals[0].description, "Just a title");
+    }
+
+    #[test]
+    fn hydrate_governor_proposals_broadcast_no_match() {
+        let ctx = test_context();
+
+        let events = vec![GovernorProposalCreated {
+            proposalId: U256::from(1u64),
+            governor: address!("0000000000000000000000000000000000000099"),
+            proposer: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+            transactionIds: vec![],
+        }];
+
+        // Broadcast for a different governor
+        let broadcasts = vec![crate::events::GovernorBroadcast {
+            governor: address!("0000000000000000000000000000000000000001"),
+            title: "Wrong governor".into(),
+            description: "Should not match".into(),
+        }];
+
+        let proposals = hydrate_governor_proposals(&events, &broadcasts, &ctx);
+        assert!(
+            proposals[0].description.is_empty(),
+            "description should be empty when governor doesn't match"
+        );
+    }
+
+    #[test]
+    fn hydrate_governor_proposals_without_broadcasts_empty_description() {
+        let ctx = test_context();
+
+        let events = vec![GovernorProposalCreated {
+            proposalId: U256::from(1u64),
+            governor: address!("0000000000000000000000000000000000000099"),
+            proposer: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+            transactionIds: vec![],
+        }];
+
+        let proposals = hydrate_governor_proposals(&events, &[], &ctx);
+        assert!(proposals[0].description.is_empty());
+    }
 }
