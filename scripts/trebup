@@ -257,7 +257,7 @@ resolve_install() {
 
   # Aliases
   case "$version" in
-    nightly)      version="v2-nightly" ;;
+    nightly)      version="v2-nightly"; foundry_channel="any" ;;
     latest)
       # Find the latest release regardless of naming scheme
       RESOLVED_REPO="$RUST_REPO"
@@ -290,18 +290,23 @@ resolve_install() {
 
   # Rust: resolve foundry channel into a full FQID tag
   if [[ "$version" == v2-nightly* && "$version" != *--foundry-* ]]; then
-    # Try FQID format first, fall back to legacy tag format
     local pattern resolved
+
     if [ "$foundry_channel" = "nightly" ]; then
-      pattern="v2-nightly-.*--foundry-nightly-"
+      # Explicit --foundry nightly
+      pattern="v2.*nightly.*--foundry-nightly-"
+    elif [ "$foundry_channel" = "stable" ]; then
+      # Explicit --foundry stable
+      pattern="v2.*nightly.*--foundry-v"
     else
-      pattern="v2-nightly-.*--foundry-v"
+      # Bare "nightly" — find any nightly release (prefer foundry-nightly)
+      pattern="v2.*nightly.*--foundry-"
     fi
 
     resolved="$(find_latest_release "$RUST_REPO" "$pattern")"
     if [ -z "$resolved" ]; then
-      # Fall back to latest release (pre-FQID tags like v0.1.0)
-      say "no FQID release found, falling back to latest release..."
+      # Fall back to latest release
+      say "no nightly release found, falling back to latest release..."
       resolved="$(find_latest_release "$RUST_REPO" "^v")"
     fi
     if [ -z "$resolved" ]; then
