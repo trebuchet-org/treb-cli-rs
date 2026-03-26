@@ -6,6 +6,11 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[features]
+default = ["foundry-nightly"]
+foundry-nightly = []
+foundry-v1-5-1 = []
+
 [dependencies]
 treb-core = { workspace = true }
 treb-config = { workspace = true }

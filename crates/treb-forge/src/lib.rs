@@ -11,6 +11,7 @@ pub mod compiler;
 pub mod console;
 pub mod createx;
 pub mod events;
+pub mod foundry_compat;
 pub mod fund;
 pub mod governor;
 pub mod pipeline;

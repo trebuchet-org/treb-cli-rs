@@ -6,7 +6,6 @@
 
 use std::collections::HashMap;
 
-use alloy_network::Ethereum;
 use alloy_primitives::{Address, B256, hex};
 use chrono::Utc;
 
@@ -29,12 +28,16 @@ use treb_core::types::{
     transaction::{Operation, Transaction},
 };
 
-use crate::events::{
-    abi::{
-        GovernorProposalCreated, SafeTransactionQueued, SimulatedTransaction, TransactionSimulated,
+use crate::{
+    events::{
+        abi::{
+            GovernorProposalCreated, SafeTransactionQueued, SimulatedTransaction,
+            TransactionSimulated,
+        },
+        deployments::ExtractedDeployment,
+        proxy::{ProxyRelationship, ProxyType},
     },
-    deployments::ExtractedDeployment,
-    proxy::{ProxyRelationship, ProxyType},
+    foundry_compat::{BroadcastableTransactions, broadcast_tx_to_address},
 };
 
 use super::PipelineContext;
@@ -430,7 +433,7 @@ pub fn hydrate_governor_proposals(
 /// broadcastable transactions, using the `from` address to resolve sender names
 /// via the address-to-role reverse map.
 pub fn hydrate_transactions_from_broadcast(
-    broadcastable_txs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
+    broadcastable_txs: &BroadcastableTransactions,
     hydrated_deployments: &[Deployment],
     context: &PipelineContext,
 ) -> Vec<Transaction> {
@@ -441,7 +444,7 @@ pub fn hydrate_transactions_from_broadcast(
         .enumerate()
         .map(|(idx, btx)| {
             let from_addr = btx.transaction.from().unwrap_or_default();
-            let to_addr = btx.transaction.to();
+            let to_addr = broadcast_tx_to_address(btx);
             let input = btx.transaction.input().cloned().unwrap_or_default();
 
             let tx_id = broadcast_tx_id(&context.config.script_path, idx);
@@ -517,7 +520,7 @@ pub struct V2TransactionMetadata {
 
 /// Build metadata for v2 transactions from BroadcastableTransactions.
 pub fn build_v2_transaction_metadata(
-    broadcastable_txs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
+    broadcastable_txs: &BroadcastableTransactions,
     context: &PipelineContext,
 ) -> HashMap<String, V2TransactionMetadata> {
     let addr_to_role: HashMap<Address, String> =

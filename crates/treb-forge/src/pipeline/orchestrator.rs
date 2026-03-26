@@ -9,7 +9,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use alloy_network::Ethereum;
 use alloy_primitives::{Address, B256, U256};
 use alloy_signer::Signer;
 use foundry_config::Config;
@@ -37,6 +36,7 @@ use crate::{
         abi::SimulatedTransaction,
         decoder::{ParsedEvent, TrebEvent},
     },
+    foundry_compat::{BroadcastableTransactions, ScriptSequence, broadcast_tx_to_address},
     script::{ExecutionResult, ScriptConfig, apply_deployed_libraries},
 };
 
@@ -563,7 +563,7 @@ use treb_core::types::safe_transaction::SafeTxData;
 /// appropriate registry records so they can be persisted.
 fn build_proposed_records_from_routing(
     run_results: &[(TransactionRun, RunResult)],
-    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
+    btxs: &BroadcastableTransactions,
     context: &PipelineContext,
     recorded_transactions: &[RecordedTransaction],
 ) -> (
@@ -649,9 +649,7 @@ fn build_proposed_records_from_routing(
                     .iter()
                     .filter_map(|&idx| btxs.get(idx))
                     .map(|btx| {
-                        let to = btx
-                            .transaction
-                            .to()
+                        let to = broadcast_tx_to_address(btx)
                             .map(|addr| format!("{:#x}", addr))
                             .unwrap_or_default();
                         let value = format!("{}", btx.transaction.value().unwrap_or_default());
@@ -718,7 +716,7 @@ fn build_proposed_records_from_routing(
 fn update_transaction_statuses_from_routing(
     recorded_transactions: &mut [RecordedTransaction],
     run_results: &[(TransactionRun, RunResult)],
-    _btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
+    _btxs: &BroadcastableTransactions,
 ) {
     for (run, result) in run_results {
         let is_proposed =
@@ -761,13 +759,13 @@ pub struct RoutingOutcome {
 #[allow(clippy::too_many_arguments)]
 pub fn apply_routing_results(
     run_results: &[(TransactionRun, RunResult)],
-    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
+    btxs: &BroadcastableTransactions,
     recorded_transactions: &mut [RecordedTransaction],
     context: &PipelineContext,
     script_path: &str,
     chain_id: u64,
     script_sig: &str,
-    pre_built_sequence: Option<forge_script_sequence::ScriptSequence<Ethereum>>,
+    pre_built_sequence: Option<ScriptSequence>,
     queued_operations: Option<&super::broadcast_writer::QueuedOperations>,
 ) -> Result<RoutingOutcome, TrebError> {
     // Build Safe/Governor records from routing results
@@ -842,13 +840,13 @@ pub fn apply_routing_results(
 pub fn apply_routing_results_with_queued(
     run_results: &[(TransactionRun, RunResult)],
     queued_executions: &[super::routing::QueuedExecution],
-    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
+    btxs: &BroadcastableTransactions,
     recorded_transactions: &mut [RecordedTransaction],
     context: &PipelineContext,
     script_path: &str,
     chain_id: u64,
     script_sig: &str,
-    pre_built_sequence: Option<forge_script_sequence::ScriptSequence<Ethereum>>,
+    pre_built_sequence: Option<ScriptSequence>,
     queued_operations: Option<&super::broadcast_writer::QueuedOperations>,
 ) -> Result<RoutingOutcome, TrebError> {
     let mut outcome = apply_routing_results(
@@ -1119,7 +1117,7 @@ fn collect_recorded_transaction_metadata(
 /// Same logic as `build_recorded_transaction_metadata` but driven by
 /// `BroadcastableTransactions` instead of `TransactionSimulated` events.
 pub(super) fn build_v2_recorded_transaction_metadata(
-    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
+    btxs: &BroadcastableTransactions,
     extracted_deployments: &[ExtractedDeployment],
     traces: &Traces,
     context: &PipelineContext,
@@ -1148,7 +1146,7 @@ pub(super) fn build_v2_recorded_transaction_metadata(
         .map(|(idx, btx)| {
             let tx_id = super::hydration::broadcast_tx_id(&context.config.script_path, idx);
             let from_addr = btx.transaction.from().unwrap_or_default();
-            let to_addr = btx.transaction.to();
+            let to_addr = broadcast_tx_to_address(btx);
             let input = btx.transaction.input().cloned().unwrap_or_default();
             let value = btx.transaction.value().unwrap_or_default();
 
@@ -1893,7 +1891,7 @@ pub struct SimulatedSession {
 struct SimulatedScript {
     name: String,
     result: PipelineResult,
-    btxs: Option<foundry_cheatcodes::BroadcastableTransactions<Ethereum>>,
+    btxs: Option<BroadcastableTransactions>,
     context: PipelineContext,
 }
 
@@ -2364,7 +2362,7 @@ fn merge_adjacent_safe_proposals(pending: Vec<PendingSafeProposal>) -> Vec<Merge
 /// submitting to the Safe Transaction Service.
 #[allow(clippy::too_many_arguments)]
 async fn route_with_queued_proposals(
-    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
+    btxs: &BroadcastableTransactions,
     route_ctx: &mut super::routing::RouteContext<'_>,
     recorded_txs: &[RecordedTransaction],
     pending: &mut Vec<PendingSafeProposal>,
