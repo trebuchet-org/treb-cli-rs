@@ -303,7 +303,8 @@ async fn compose_resume_reuses_partial_wallet_checkpoint() {
     ctx.anvil("anvil-31337")
         .unwrap()
         .instance()
-        .set_balance(
+        .api()
+        .anvil_set_balance(
             Address::from_str(RESUMER_ADDRESS).unwrap(),
             U256::from(1_000_000_000_000_000_000u128),
         )

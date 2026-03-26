@@ -10,9 +10,18 @@
 
 mod framework;
 
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::Path,
+    sync::{Arc, OnceLock},
+};
 
 use framework::context::TestContext;
+
+fn compose_test_lock() -> Arc<tokio::sync::Semaphore> {
+    static LOCK: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
+    LOCK.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(1))).clone()
+}
 
 async fn compose_library_test_context() -> Option<TestContext> {
     match TestContext::new("project").with_anvil("anvil-31337").await {
@@ -392,6 +401,7 @@ fn deployment_entry<'a>(
 
 #[tokio::test(flavor = "multi_thread")]
 async fn compose_linked_library_step_reuses_previous_library_in_next_script() {
+    let _permit = compose_test_lock().acquire_owned().await.unwrap();
     let Some(ctx) = compose_library_test_context().await else {
         return;
     };
@@ -463,6 +473,7 @@ async fn compose_linked_library_step_reuses_previous_library_in_next_script() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn compose_artifact_deploy_via_vm_get_code_uses_linked_library_from_previous_step() {
+    let _permit = compose_test_lock().acquire_owned().await.unwrap();
     let Some(ctx) = compose_library_test_context().await else {
         return;
     };
