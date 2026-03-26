@@ -38,6 +38,20 @@ trebup --path "$(pwd)"
 This builds the local checkout with Cargo, installs it under `~/.treb/versions/local-<sha>`,
 and activates it as the current `treb`.
 
+To compile the repo against a specific Foundry backend from source:
+
+```sh
+cargo run -p xtask -- foundry --backend nightly -- check -p treb-cli --tests
+cargo run -p xtask -- foundry --backend v1.5.1 -- check -p treb-cli --tests
+```
+
+The `v1.5.1` backend uses the vetted root manifest and lockfile from the
+`release/foundry-v1.5.1` git ref. If that ref is missing locally, fetch it once:
+
+```sh
+git fetch origin release/foundry-v1.5.1:refs/remotes/origin/release/foundry-v1.5.1
+```
+
 ## Quick Start
 
 **1. Initialize a project** (requires an existing `foundry.toml`):

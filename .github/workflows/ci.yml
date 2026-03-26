@@ -56,6 +56,30 @@ jobs:
           fi
       - run: cargo clippy --workspace -- -D warnings
 
+  compat-v1-5-1:
+    name: foundry v1.5.1 compat
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: mozilla-actions/sccache-action@v0.0.9
+        continue-on-error: true
+      - name: Configure sccache
+        run: |
+          if command -v sccache &>/dev/null && sccache --start-server 2>/dev/null; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "sccache unavailable, building without cache"
+          fi
+      - name: Fetch foundry release ref
+        run: git fetch origin release/foundry-v1.5.1:refs/remotes/origin/release/foundry-v1.5.1
+      - name: Check v1.5.1 backend
+        run: cargo run -p xtask -- foundry --backend v1.5.1 -- check -p treb-cli --tests
+
   fmt:
     name: cargo fmt
     runs-on: ubuntu-latest
