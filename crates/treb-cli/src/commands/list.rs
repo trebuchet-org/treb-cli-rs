@@ -11,7 +11,7 @@ use alloy_chains::Chain;
 use anyhow::{Context, bail};
 use owo_colors::OwoColorize;
 use serde::Serialize;
-use treb_core::types::{Deployment, DeploymentType};
+use treb_core::types::{Deployment, DeploymentType, ExecutionStatus};
 use treb_registry::Registry;
 
 use crate::{
@@ -22,6 +22,7 @@ use crate::{
 /// Filter criteria for deployments. All specified filters are combined with AND logic.
 pub struct DeploymentFilters {
     pub network: Option<String>,
+    pub resolved_chain_id: Option<u64>,
     pub namespace: Option<String>,
     pub deployment_type: Option<String>,
     pub tag: Option<String>,
@@ -49,7 +50,11 @@ pub fn filter_deployments<'a>(
                 }
             }
 
-            if let Some(ref network) = filters.network {
+            if let Some(resolved_chain_id) = filters.resolved_chain_id {
+                if d.chain_id != resolved_chain_id {
+                    return false;
+                }
+            } else if let Some(ref network) = filters.network {
                 if !network_matches(d.chain_id, network) {
                     return false;
                 }
@@ -214,6 +219,7 @@ fn build_other_namespaces(
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     let context_filters = DeploymentFilters {
         network: filters.network.clone(),
+        resolved_chain_id: filters.resolved_chain_id,
         namespace: None,
         deployment_type: filters.deployment_type.clone(),
         tag: filters.tag.clone(),
@@ -236,12 +242,62 @@ fn collect_fork_deployment_ids(deployments: &[&Deployment]) -> HashSet<String> {
     deployments.iter().filter(|d| d.namespace.starts_with("fork/")).map(|d| d.id.clone()).collect()
 }
 
-/// Load deployment IDs from a snapshot file (for fork-only detection).
-fn load_fork_snapshot_ids(path: &Path) -> Option<HashSet<String>> {
-    let content = std::fs::read_to_string(path).ok()?;
-    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
-    let map = value.as_object()?;
-    Some(map.keys().cloned().collect())
+fn load_snapshot_ids_from_file(path: &Path, ids: &mut HashSet<String>) -> bool {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return false;
+    };
+    let Some(map) = value.as_object() else {
+        return false;
+    };
+
+    if let Some(entries) = map.get("entries").and_then(|entries| entries.as_object()) {
+        ids.extend(entries.keys().cloned());
+        return true;
+    }
+
+    ids.extend(map.keys().filter(|key| key.as_str() != "_format").cloned());
+    true
+}
+
+fn collect_snapshot_ids_from_tree(root: &Path, ids: &mut HashSet<String>) -> bool {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return false;
+    };
+
+    let mut loaded_any = false;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
+            loaded_any |= collect_snapshot_ids_from_tree(&path, ids);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+            loaded_any |= load_snapshot_ids_from_file(&path, ids);
+        }
+    }
+    loaded_any
+}
+
+/// Load deployment IDs from a snapshot directory (for fork-only detection).
+fn load_fork_snapshot_ids(snapshot_dir: &Path) -> Option<HashSet<String>> {
+    if !snapshot_dir.exists() {
+        return None;
+    }
+
+    let mut ids = HashSet::new();
+
+    let canonical_root = snapshot_dir.join(treb_registry::DEPLOYMENTS_DIR);
+    let loaded = if canonical_root.exists() {
+        collect_snapshot_ids_from_tree(&canonical_root, &mut ids)
+    } else {
+        load_snapshot_ids_from_file(&snapshot_dir.join(treb_registry::DEPLOYMENTS_FILE), &mut ids)
+    };
+
+    if loaded { Some(ids) } else { Some(HashSet::new()) }
 }
 
 fn resolve_network_names(
@@ -287,11 +343,13 @@ fn format_chain_header_label(chain_id: u64, network_names: &BTreeMap<u64, String
 
 fn format_selected_network_label(
     selected_network: Option<&str>,
+    selected_chain_id: Option<u64>,
     network_names: &BTreeMap<u64, String>,
 ) -> Option<String> {
     let network = selected_network?;
     Some(
-        resolve_chain_id(network)
+        selected_chain_id
+            .or_else(|| resolve_chain_id(network))
             .map(|chain_id| format_chain_header_label(chain_id, network_names))
             .unwrap_or_else(|| network.to_string()),
     )
@@ -403,11 +461,11 @@ fn build_impl_name_lookup(deployments: &[&Deployment]) -> ImplNameLookup {
 
 /// Build the contract display string for column 0 of a deployment table row.
 ///
-/// Format: `TypeColored(ContractName[:Label]) [fork] (first_tag)`
+/// Format: `TypeColored(ContractName[:Label]) [queued] (first_tag)`
 fn build_contract_display(
     d: &Deployment,
     category: &DisplayCategory,
-    fork_deployment_ids: &HashSet<String>,
+    _fork_deployment_ids: &HashSet<String>,
     queued_transaction_ids: &HashSet<String>,
 ) -> String {
     let name = if d.label.is_empty() {
@@ -419,16 +477,9 @@ fn build_contract_display(
     let mut display =
         if color::is_color_enabled() { format!("{}", name.style(category.style())) } else { name };
 
-    if fork_deployment_ids.contains(&d.id) {
-        if color::is_color_enabled() {
-            write!(display, " {}", "[fork]".style(color::FORK_INDICATOR)).unwrap();
-        } else {
-            display.push_str(" [fork]");
-        }
-    }
-
-    // Show [queued] badge if the deployment's transaction is still queued
-    if !d.transaction_id.is_empty() && queued_transaction_ids.contains(&d.transaction_id) {
+    // Show [queued] badge if the deployment's execution is still queued.
+    let is_queued = deployment_is_queued(d, queued_transaction_ids);
+    if is_queued {
         if color::is_color_enabled() {
             write!(display, " {}", "[queued]".style(color::YELLOW)).unwrap();
         } else {
@@ -467,11 +518,27 @@ fn build_deployment_row(
         d.address.clone()
     };
 
-    let ver_badge = if color::is_color_enabled() {
-        badge::verification_badge_styled(&d.verification.verifiers)
+    let is_fork = fork_deployment_ids.contains(&d.id);
+    let mut ver_badge = if is_fork {
+        if color::is_color_enabled() {
+            format!("{}", "FORK".style(color::FORK_INDICATOR))
+        } else {
+            "FORK".to_string()
+        }
     } else {
-        badge::verification_badge(&d.verification.verifiers)
+        if color::is_color_enabled() {
+            badge::verification_badge_styled(&d.verification.verifiers)
+        } else {
+            badge::verification_badge(&d.verification.verifiers)
+        }
     };
+    if deployment_is_queued(d, queued_transaction_ids) {
+        if color::is_color_enabled() {
+            write!(ver_badge, " {}", "queued".style(color::YELLOW)).unwrap();
+        } else {
+            ver_badge.push_str(" queued");
+        }
+    }
 
     let timestamp = {
         let ts = d.created_at.format("%Y-%m-%d %H:%M:%S").to_string();
@@ -479,6 +546,11 @@ fn build_deployment_row(
     };
 
     vec![name, address, ver_badge, timestamp]
+}
+
+fn deployment_is_queued(d: &Deployment, queued_transaction_ids: &HashSet<String>) -> bool {
+    d.execution.as_ref().is_some_and(|execution| execution.status == ExecutionStatus::Queued)
+        || (!d.transaction_id.is_empty() && queued_transaction_ids.contains(&d.transaction_id))
 }
 
 /// Build an implementation sub-row for a proxy deployment.
@@ -657,6 +729,7 @@ pub async fn run(
     json: bool,
 ) -> anyhow::Result<()> {
     let cwd = env::current_dir().context("failed to determine current directory")?;
+    let namespace_flag_passed = namespace.is_some();
 
     if !cwd.join("foundry.toml").exists() {
         bail!(
@@ -673,6 +746,11 @@ pub async fn run(
         );
     }
 
+    let scope = super::resolve_command_scope(&cwd, namespace, network)?;
+    let namespace = if fork && !namespace_flag_passed { None } else { scope.namespace };
+    let resolved_chain_id =
+        super::resolve_chain_id_for_network(&cwd, scope.network.as_deref()).await?;
+
     let registry = Registry::open(&cwd).context("failed to open registry")?;
     let all_deployments = registry.list_deployments();
 
@@ -685,7 +763,8 @@ pub async fn run(
         .collect();
 
     let filters = DeploymentFilters {
-        network,
+        network: scope.network,
+        resolved_chain_id,
         namespace,
         deployment_type,
         tag,
@@ -704,8 +783,7 @@ pub async fn run(
         fork_mode_active = store.load().is_ok() && store.is_fork_mode_active();
         if fork_mode_active {
             if let Some(ref snap_dir) = store.data().snapshot_dir {
-                let snap_path =
-                    std::path::PathBuf::from(snap_dir).join(treb_registry::DEPLOYMENTS_FILE);
+                let snap_path = std::path::PathBuf::from(snap_dir);
                 if let Some(snapshot_ids) = load_fork_snapshot_ids(&snap_path) {
                     for d in &all_deployments {
                         if !snapshot_ids.contains(&d.id) {
@@ -721,9 +799,10 @@ pub async fn run(
 
     // When --fork is passed and fork mode is active, use snapshot-diff filtering
     // instead of the namespace-prefix filter in filter_deployments.
-    let filtered = if fork && fork_mode_active {
+    let mut filtered = if fork && fork_mode_active {
         let base_filters = DeploymentFilters {
             network: filters.network.clone(),
+            resolved_chain_id: filters.resolved_chain_id,
             namespace: filters.namespace.clone(),
             deployment_type: filters.deployment_type.clone(),
             tag: filters.tag.clone(),
@@ -740,6 +819,29 @@ pub async fn run(
         filter_deployments(&all_deployments, &filters)
     };
 
+    if filtered.is_empty() && !namespace_flag_passed && !filters.fork && !filters.no_fork {
+        let fork_fallback_filters = DeploymentFilters {
+            network: filters.network.clone(),
+            resolved_chain_id: filters.resolved_chain_id,
+            namespace: None,
+            deployment_type: filters.deployment_type.clone(),
+            tag: filters.tag.clone(),
+            contract: filters.contract.clone(),
+            label: filters.label.clone(),
+            fork: false,
+            no_fork: false,
+        };
+
+        let fork_filtered: Vec<_> = filter_deployments(&all_deployments, &fork_fallback_filters)
+            .into_iter()
+            .filter(|d| fork_deployment_ids.contains(&d.id))
+            .collect();
+
+        if !fork_filtered.is_empty() {
+            filtered = fork_filtered;
+        }
+    }
+
     // Build other_namespaces when filtered is empty and namespace filter is set
     let other_namespaces = if filtered.is_empty() {
         if let Some(ref ns) = filters.namespace {
@@ -751,8 +853,11 @@ pub async fn run(
         BTreeMap::new()
     };
     let network_names = resolve_network_names(&cwd, &filtered, filters.network.as_deref());
-    let selected_network_label =
-        format_selected_network_label(filters.network.as_deref(), &network_names);
+    let selected_network_label = format_selected_network_label(
+        filters.network.as_deref(),
+        filters.resolved_chain_id,
+        &network_names,
+    );
 
     let result =
         ListResult { deployments: filtered, other_namespaces, network_names, fork_deployment_ids };
@@ -868,8 +973,8 @@ mod tests {
     };
     use tempfile::TempDir;
     use treb_core::types::{
-        ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, ProxyInfo,
-        VerificationInfo, VerificationStatus, VerifierStatus,
+        ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, ExecutionKind,
+        ExecutionRef, ProxyInfo, VerificationInfo, VerificationStatus, VerifierStatus,
     };
 
     fn env_lock() -> MutexGuard<'static, ()> {
@@ -928,6 +1033,7 @@ mod tests {
             label: label.into(),
             address: format!("0x{:040x}", chain_id),
             deployment_type: dtype,
+            execution: None,
             transaction_id: "tx-001".into(),
             deployment_strategy: DeploymentStrategy {
                 method: DeploymentMethod::Create,
@@ -961,6 +1067,7 @@ mod tests {
     fn no_filters() -> DeploymentFilters {
         DeploymentFilters {
             network: None,
+            resolved_chain_id: None,
             namespace: None,
             deployment_type: None,
             tag: None,
@@ -1126,6 +1233,38 @@ mod tests {
         let result = filter_deployments(&refs, &filters);
         assert_eq!(result.len(), 1);
         assert!(result[0].namespace.starts_with("fork/"));
+    }
+
+    #[test]
+    fn load_fork_snapshot_ids_reads_canonical_grouped_deployments() {
+        let dir = tempfile::tempdir().unwrap();
+        let grouped = dir.path().join("deployments").join("default");
+        std::fs::create_dir_all(&grouped).unwrap();
+        std::fs::write(
+            grouped.join("1.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "_format": "treb-v1",
+                "entries": {
+                    "default/1/Counter:v1": {"address": "0x1"},
+                    "default/1/Token:v1": {"address": "0x2"}
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let ids = load_fork_snapshot_ids(dir.path()).unwrap();
+        assert!(ids.contains("default/1/Counter:v1"));
+        assert!(ids.contains("default/1/Token:v1"));
+    }
+
+    #[test]
+    fn load_fork_snapshot_ids_treats_empty_snapshot_as_empty_baseline() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path()).unwrap();
+
+        let ids = load_fork_snapshot_ids(dir.path()).unwrap();
+        assert!(ids.is_empty());
     }
 
     #[test]
@@ -1502,6 +1641,65 @@ mod tests {
     }
 
     #[test]
+    fn deployment_row_shows_queued_in_verification_column() {
+        let _lock = env_lock();
+        let _no_color = EnvVarGuard::set("NO_COLOR", "1");
+        color::color_enabled(false);
+
+        let mut d = make_deployment(
+            "mainnet/42220/FPMM",
+            "mainnet",
+            42220,
+            "FPMM",
+            "",
+            DeploymentType::Singleton,
+            None,
+        );
+        d.execution = Some(ExecutionRef {
+            status: ExecutionStatus::Queued,
+            kind: ExecutionKind::SafeProposal,
+            artifact_file: "broadcast/FPMM.s.sol/42220/run-123.json".into(),
+            tx_hash: None,
+            safe_tx_hash: Some("0xsafe".into()),
+            proposal_id: None,
+            propose_safe_tx_hash: None,
+            script_tx_index: None,
+        });
+
+        let row =
+            build_deployment_row(&d, &DisplayCategory::Singleton, &HashSet::new(), &HashSet::new());
+
+        assert!(
+            row[2].contains("UNVERIFIED queued"),
+            "verification column should include queued marker: {:?}",
+            row[2]
+        );
+    }
+
+    #[test]
+    fn deployment_row_shows_fork_in_verification_column() {
+        let _lock = env_lock();
+        let _no_color = EnvVarGuard::set("NO_COLOR", "1");
+        color::color_enabled(false);
+
+        let d = make_deployment(
+            "fork/42220/FPMM",
+            "fork/42220",
+            42220,
+            "FPMM",
+            "",
+            DeploymentType::Singleton,
+            None,
+        );
+        let mut fork_ids = HashSet::new();
+        fork_ids.insert(d.id.clone());
+
+        let row = build_deployment_row(&d, &DisplayCategory::Singleton, &fork_ids, &HashSet::new());
+
+        assert_eq!(row[2], "FORK");
+    }
+
+    #[test]
     fn implementation_row_uses_lookup_built_from_full_registry_context() {
         let _lock = env_lock();
         let _no_color = EnvVarGuard::set("NO_COLOR", "1");
@@ -1577,7 +1775,7 @@ mod tests {
     }
 
     #[test]
-    fn contract_display_includes_fork_badge() {
+    fn contract_display_omits_fork_badge() {
         let _lock = env_lock();
         let _no_color = EnvVarGuard::set("NO_COLOR", "1");
         color::color_enabled(false);
@@ -1596,7 +1794,7 @@ mod tests {
 
         let display =
             build_contract_display(&d, &DisplayCategory::Proxy, &fork_ids, &HashSet::new());
-        assert!(display.contains("[fork]"), "fork deployment display should contain [fork] badge");
+        assert!(!display.contains("[fork]"), "fork deployment display should not contain [fork]");
     }
 
     #[test]
@@ -1608,8 +1806,8 @@ mod tests {
         color::color_enabled(false);
 
         let mut d = make_deployment(
-            "fork/42220/FPMM:dev",
-            "fork/42220",
+            "mainnet/42220/FPMM:dev",
+            "mainnet",
             42220,
             "FPMM",
             "dev",
@@ -1621,9 +1819,8 @@ mod tests {
             VerifierStatus { status: "VERIFIED".into(), url: String::new(), reason: String::new() },
         );
 
-        let mut fork_ids = HashSet::new();
-        fork_ids.insert(d.id.clone());
-        let row = build_deployment_row(&d, &DisplayCategory::Proxy, &fork_ids, &HashSet::new());
+        let row =
+            build_deployment_row(&d, &DisplayCategory::Proxy, &HashSet::new(), &HashSet::new());
 
         assert!(
             row[0].contains('\x1b'),
@@ -1634,7 +1831,68 @@ mod tests {
             row[2].contains("e[✔︎]"),
             "styled verification should contain Go-format verifier text"
         );
-        assert!(row[0].contains("[fork]"), "styled row should include the fork badge text");
+        assert!(!row[0].contains("[fork]"), "styled row should not include the fork badge text");
+    }
+
+    #[test]
+    fn deployment_row_uses_yellow_queued_badge_in_verification_column() {
+        let _lock = env_lock();
+        let _no_color = EnvVarGuard::unset("NO_COLOR");
+        let _term = EnvVarGuard::set("TERM", "xterm-256color");
+        owo_colors::set_override(true);
+        color::color_enabled(false);
+
+        let mut d = make_deployment(
+            "mainnet/42220/FPMM",
+            "mainnet",
+            42220,
+            "FPMM",
+            "",
+            DeploymentType::Singleton,
+            None,
+        );
+        d.execution = Some(ExecutionRef {
+            status: ExecutionStatus::Queued,
+            kind: ExecutionKind::SafeProposal,
+            artifact_file: "broadcast/FPMM.s.sol/42220/run-123.json".into(),
+            tx_hash: None,
+            safe_tx_hash: Some("0xsafe".into()),
+            proposal_id: None,
+            propose_safe_tx_hash: None,
+            script_tx_index: None,
+        });
+
+        let row =
+            build_deployment_row(&d, &DisplayCategory::Singleton, &HashSet::new(), &HashSet::new());
+
+        assert!(row[2].contains("queued"), "verification column should include queued text");
+        assert!(row[2].contains('\x1b'), "queued badge should be ANSI styled: {:?}", row[2]);
+    }
+
+    #[test]
+    fn deployment_row_styles_fork_verification_marker() {
+        let _lock = env_lock();
+        let _no_color = EnvVarGuard::unset("NO_COLOR");
+        let _term = EnvVarGuard::set("TERM", "xterm-256color");
+        owo_colors::set_override(true);
+        color::color_enabled(false);
+
+        let d = make_deployment(
+            "fork/42220/FPMM",
+            "fork/42220",
+            42220,
+            "FPMM",
+            "",
+            DeploymentType::Singleton,
+            None,
+        );
+        let mut fork_ids = HashSet::new();
+        fork_ids.insert(d.id.clone());
+
+        let row = build_deployment_row(&d, &DisplayCategory::Singleton, &fork_ids, &HashSet::new());
+
+        assert!(row[2].contains("FORK"), "verification column should include FORK text");
+        assert!(row[2].contains('\x1b'), "fork marker should be ANSI styled: {:?}", row[2]);
     }
 
     // -----------------------------------------------------------------------
@@ -1718,6 +1976,7 @@ mod tests {
         let refs: Vec<&Deployment> = deployments.iter().collect();
         let filters = DeploymentFilters {
             network: Some("mainnet".into()),
+            resolved_chain_id: Some(1),
             namespace: Some("staging".into()),
             deployment_type: None,
             tag: None,
@@ -1770,7 +2029,7 @@ mod tests {
 
         assert_eq!(network_names.get(&42220).map(String::as_str), Some("celo"));
         assert_eq!(
-            format_selected_network_label(Some("42220"), &network_names).as_deref(),
+            format_selected_network_label(Some("42220"), Some(42220), &network_names).as_deref(),
             Some("celo (42220)")
         );
     }

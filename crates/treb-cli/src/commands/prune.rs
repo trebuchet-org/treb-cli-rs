@@ -373,14 +373,11 @@ pub async fn run(args: PruneArgs, non_interactive: bool) -> anyhow::Result<()> {
         bail!("project not initialized — .treb/ directory not found\n\nRun `treb init` first.");
     }
 
+    let scope = super::resolve_command_scope(&cwd, None, args.network.clone())?;
+
     // Resolve chain ID filter from --network argument.
-    let chain_id_filter: Option<u64> = match &args.network {
-        Some(s) => match s.parse::<u64>() {
-            Ok(id) => Some(id),
-            Err(_) => bail!("--network must be a chain ID (e.g. 1, 31337); got '{}'", s),
-        },
-        None => None,
-    };
+    let chain_id_filter =
+        super::resolve_chain_id_for_network(&cwd, scope.network.as_deref()).await?;
 
     validate_onchain_args(&args)?;
 
@@ -529,6 +526,7 @@ mod tests {
             label: "v1".to_string(),
             address: format!("0x{:040x}", 1u64),
             deployment_type: DeploymentType::Singleton,
+            execution: None,
             transaction_id: tx_id.to_string(),
             deployment_strategy: DeploymentStrategy {
                 method: DeploymentMethod::Create,

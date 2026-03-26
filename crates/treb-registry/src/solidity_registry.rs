@@ -52,9 +52,9 @@ pub struct SolidityRegistryStore {
 }
 
 impl SolidityRegistryStore {
-    /// Create a new store pointing at `<registry_dir>/registry.json`.
-    pub fn new(registry_dir: &std::path::Path) -> Self {
-        Self { path: registry_dir.join(SOLIDITY_REGISTRY_FILE) }
+    /// Create a new store pointing at `<deployments_dir>/registry.json`.
+    pub fn new(deployments_dir: &std::path::Path) -> Self {
+        Self { path: deployments_dir.join(SOLIDITY_REGISTRY_FILE) }
     }
 
     /// Rebuild the Solidity registry from the given deployments and save to disk.
@@ -96,6 +96,7 @@ mod tests {
             label: label.to_string(),
             address: address.to_string(),
             deployment_type: DeploymentType::Singleton,
+            execution: None,
             transaction_id: String::new(),
             deployment_strategy: DeploymentStrategy {
                 method: DeploymentMethod::Create,

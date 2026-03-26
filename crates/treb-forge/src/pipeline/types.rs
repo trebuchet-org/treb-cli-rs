@@ -7,7 +7,6 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use alloy_primitives::Address;
-use serde::{Deserialize, Serialize};
 use treb_core::types::{
     GovernorProposal, deployment::Deployment, safe_transaction::SafeTransaction,
     transaction::Transaction,
@@ -126,7 +125,7 @@ pub struct PipelineResult {
     pub proposed_results: Vec<ProposedResult>,
     /// Queued executions from routing (Safe multi-sig, governance proposals).
     ///
-    /// Each item represents a deferred operation that the CLI can process
+    /// Each item represents a queued operation that the CLI can process
     /// inline (prompt for simulation, poll for execution) or save to registry.
     pub queued_executions: Vec<super::routing::QueuedExecution>,
     /// Pre-rendered execution traces (shown at `-v` and `-vv`).
@@ -247,54 +246,3 @@ pub enum SessionPhase {
 
 /// Callback for session pipeline progress updates.
 pub type SessionProgressCallback = Box<dyn Fn(SessionPhase) + Send>;
-
-// ---------------------------------------------------------------------------
-// SessionState — persistent session tracking
-// ---------------------------------------------------------------------------
-
-/// Persistent state for tracking session execution progress.
-///
-/// Written to `.treb/session-state.json` after each phase completion.
-/// Used by `--resume` to skip already-completed scripts/phases.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionState {
-    /// Hash of the configuration at session start, for change detection.
-    pub config_hash: String,
-    /// Per-script progress tracking.
-    pub scripts: Vec<ScriptProgress>,
-}
-
-/// Progress of a single script in the session.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScriptProgress {
-    /// Script name (matches `ScriptEntry::name`).
-    pub name: String,
-    /// Path to the forge script file.
-    pub script_path: String,
-    /// Target chain ID.
-    pub chain_id: u64,
-    /// Script function signature.
-    pub sig: String,
-    /// Current phase of this script.
-    pub phase: ScriptPhase,
-    /// Number of deployments produced.
-    pub deployments: usize,
-    /// Number of transactions produced.
-    pub transactions: usize,
-}
-
-/// Phase of a single script in the session.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub enum ScriptPhase {
-    /// Not yet started.
-    Pending,
-    /// Simulation complete, ready for broadcast.
-    Simulated,
-    /// Broadcast complete.
-    Broadcast,
-    /// Failed during the named phase.
-    Failed { phase: String },
-}

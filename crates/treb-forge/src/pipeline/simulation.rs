@@ -108,7 +108,7 @@ pub async fn hydrate_simulation(
     let parsed_events = decode_events(&execution.raw_logs);
     let event_count = parsed_events.len();
     let extracted_deployments = extract_deployments(&parsed_events, Some(artifact_index));
-    let collisions = extract_collisions(&parsed_events);
+    let collisions = extract_collisions(&parsed_events, Some(artifact_index));
     let proxy_relationships = detect_proxy_relationships(&parsed_events);
 
     // 3. Hydrate deployments

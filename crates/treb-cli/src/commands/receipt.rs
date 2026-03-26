@@ -10,7 +10,9 @@ use alloy_primitives::{Address, B256, Bytes, Log as PrimitiveLog};
 use anyhow::{Context, bail};
 use chrono::Utc;
 use serde::Serialize;
-use treb_core::types::{ProxyUpgrade, deployment::ProxyInfo};
+use treb_core::types::{
+    ExecutionKind, ExecutionRef, ExecutionStatus, ProxyUpgrade, deployment::ProxyInfo,
+};
 use treb_forge::events::{ProxyEvent, decode_events};
 use treb_registry::Registry;
 
@@ -621,6 +623,16 @@ pub fn apply_receipt_to_registry(
                     proxy_info.history.push(ProxyUpgrade {
                         implementation_id: proxy_info.implementation.clone(),
                         upgraded_at: Utc::now(),
+                        execution: Some(ExecutionRef {
+                            status: ExecutionStatus::External,
+                            kind: ExecutionKind::ExternalTx,
+                            artifact_file: String::new(),
+                            tx_hash: Some(tx_hash.to_string()),
+                            safe_tx_hash: None,
+                            proposal_id: None,
+                            propose_safe_tx_hash: None,
+                            script_tx_index: None,
+                        }),
                         upgrade_tx_id: format!("tx-{tx_hash}"),
                     });
                 }

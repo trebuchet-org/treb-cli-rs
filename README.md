@@ -9,16 +9,21 @@ Deployment orchestration CLI for Foundry projects. treb manages the full lifecyc
 
 ### Using trebup (recommended)
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/trebuchet-org/treb-cli-rs/main/scripts/trebup | sh
+```bash
+curl -fsSL https://raw.githubusercontent.com/trebuchet-org/treb-cli-rs/main/scripts/install | bash
 ```
 
-`trebup` downloads the latest release for your platform, verifies checksums, and auto-installs shell completions for bash, zsh, and fish.
+This installs `trebup` (the version manager) to `~/.treb/bin/` and adds it to your PATH. Then use trebup to manage treb versions:
 
-| Variable | Default | Description |
-|---|---|---|
-| `TREB_VERSION` | latest | Install a specific release tag |
-| `TREB_INSTALL_DIR` | `~/.local/bin` | Installation directory |
+```bash
+trebup                                       # install latest release
+trebup --available                           # list all available releases
+trebup --install v2.0.0--foundry-v1.5.1      # install specific version
+trebup --foundry nightly                     # install with foundry nightly
+trebup --path /path/to/treb-cli-rs           # build and install from a local checkout
+trebup --list                                # list installed versions
+trebup --use <version>                       # switch between versions
+```
 
 ### Building from Source
 
@@ -27,10 +32,11 @@ Requires **Rust nightly** (a `rust-toolchain.toml` is included).
 ```sh
 git clone --recurse-submodules https://github.com/trebuchet-org/treb-cli-rs.git
 cd treb-cli-rs
-cargo build --release
+trebup --path "$(pwd)"
 ```
 
-The binary is `target/release/treb-cli` (renamed to `treb` in release packaging).
+This builds the local checkout with Cargo, installs it under `~/.treb/versions/local-<sha>`,
+and activates it as the current `treb`.
 
 ## Quick Start
 

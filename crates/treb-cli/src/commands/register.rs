@@ -11,9 +11,9 @@ use chrono::Utc;
 use serde::Serialize;
 use treb_config::{ResolveOpts, load_local_config, resolve_config};
 use treb_core::types::{
-    ArtifactInfo, Deployment, DeploymentMethod, DeploymentStrategy, DeploymentType, Operation,
-    ProxyInfo, Transaction, TransactionStatus, VerificationInfo, VerificationStatus,
-    generate_deployment_id,
+    ArtifactInfo, Deployment, DeploymentMethod, DeploymentStrategy, DeploymentType, ExecutionKind,
+    ExecutionRef, ExecutionStatus, Operation, ProxyInfo, Transaction, TransactionStatus,
+    VerificationInfo, VerificationStatus, generate_deployment_id,
 };
 use treb_registry::Registry;
 
@@ -423,6 +423,16 @@ pub async fn run(
             label: dep_label.clone(),
             address: creation.address.clone(),
             deployment_type: effective_dep_type,
+            execution: Some(ExecutionRef {
+                status: ExecutionStatus::External,
+                kind: ExecutionKind::ExternalTx,
+                artifact_file: String::new(),
+                tx_hash: Some(tx_hash.to_string()),
+                safe_tx_hash: None,
+                proposal_id: None,
+                propose_safe_tx_hash: None,
+                script_tx_index: None,
+            }),
             transaction_id: tx_id.clone(),
             deployment_strategy: DeploymentStrategy {
                 method,

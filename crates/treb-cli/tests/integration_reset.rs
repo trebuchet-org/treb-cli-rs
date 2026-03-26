@@ -38,6 +38,7 @@ fn make_deployment(
         label: "v1".to_string(),
         address: format!("0x{:040x}", 1u64),
         deployment_type: DeploymentType::Singleton,
+        execution: None,
         transaction_id: transaction_id.to_string(),
         deployment_strategy: DeploymentStrategy {
             method: DeploymentMethod::Create,

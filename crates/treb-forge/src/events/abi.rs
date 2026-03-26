@@ -141,6 +141,30 @@ mod tests {
     }
 
     #[test]
+    fn governor_broadcast_event_has_signature_hash() {
+        let hash = GovernorBroadcast::SIGNATURE_HASH;
+        assert_ne!(hash, B256::ZERO);
+    }
+
+    #[test]
+    fn governor_broadcast_encode_decode_round_trip() {
+        use alloy_sol_types::SolEvent;
+
+        let governor = address!("0000000000000000000000000000000000000099");
+        let event = GovernorBroadcast {
+            governor,
+            title: "Upgrade Token".into(),
+            description: "Migrate to v2 implementation".into(),
+        };
+
+        let log_data = event.encode_log_data();
+        let decoded = GovernorBroadcast::decode_log_data(&log_data).unwrap();
+        assert_eq!(decoded.governor, governor);
+        assert_eq!(decoded.title, "Upgrade Token");
+        assert_eq!(decoded.description, "Migrate to v2 implementation");
+    }
+
+    #[test]
     fn all_signature_hashes_are_unique() {
         let hashes = vec![
             ContractDeployed::SIGNATURE_HASH,
@@ -149,6 +173,7 @@ mod tests {
             SafeTransactionExecuted::SIGNATURE_HASH,
             DeploymentCollision::SIGNATURE_HASH,
             GovernorProposalCreated::SIGNATURE_HASH,
+            GovernorBroadcast::SIGNATURE_HASH,
             ContractCreation_0::SIGNATURE_HASH,
             ContractCreation_1::SIGNATURE_HASH,
             Create3ProxyContractCreation::SIGNATURE_HASH,

@@ -31,6 +31,9 @@ pub struct Deployment {
     pub address: String,
     #[serde(rename = "type")]
     pub deployment_type: DeploymentType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<ExecutionRef>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub transaction_id: String,
     pub deployment_strategy: DeploymentStrategy,
     pub proxy_info: Option<ProxyInfo>,
@@ -88,7 +91,57 @@ pub struct ProxyInfo {
 pub struct ProxyUpgrade {
     pub implementation_id: String,
     pub upgraded_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<ExecutionRef>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub upgrade_tx_id: String,
+}
+
+// ---------------------------------------------------------------------------
+// ExecutionRef
+// ---------------------------------------------------------------------------
+
+/// Canonical reference from a deployment to the immutable broadcast artifact or
+/// queued artifact that created or is expected to create it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionRef {
+    pub status: ExecutionStatus,
+    pub kind: ExecutionKind,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub artifact_file: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tx_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub safe_tx_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposal_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub propose_safe_tx_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script_tx_index: Option<usize>,
+}
+
+/// Lifecycle status of a deployment execution reference.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ExecutionStatus {
+    Broadcast,
+    Queued,
+    Executed,
+    Orphaned,
+    External,
+}
+
+/// The specific execution primitive a deployment is linked to.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ExecutionKind {
+    Tx,
+    SafeProposal,
+    GovernorProposal,
+    GovernorProposalViaSafe,
+    ExternalTx,
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +207,7 @@ mod tests {
             label: "v1".into(),
             address: "0x1234567890abcdef1234567890abcdef12345678".into(),
             deployment_type: DeploymentType::Singleton,
+            execution: None,
             transaction_id: "tx-001".into(),
             deployment_strategy: DeploymentStrategy {
                 method: DeploymentMethod::Create,
@@ -290,6 +344,7 @@ mod tests {
             history: vec![ProxyUpgrade {
                 implementation_id: "impl-001".into(),
                 upgraded_at: Utc.with_ymd_and_hms(2025, 1, 20, 8, 0, 0).unwrap(),
+                execution: None,
                 upgrade_tx_id: "tx-002".into(),
             }],
         });

@@ -3,7 +3,10 @@
 //! Builds `ScriptArgs` programmatically from treb's resolved configuration
 //! and drives the execution state machine through the full pipeline.
 
-use std::{collections::HashMap, str::FromStr};
+use std::{
+    collections::{BTreeSet, HashMap},
+    str::FromStr,
+};
 
 use alloy_primitives::{Address, B256, Bytes, Log};
 use forge_script::ScriptArgs;
@@ -12,6 +15,7 @@ use foundry_config::Chain;
 use foundry_evm::traces::Traces;
 use treb_config::ResolvedConfig;
 use treb_core::error::TrebError;
+use treb_registry::Registry;
 
 use crate::sender::ResolvedSender;
 
@@ -183,6 +187,7 @@ pub struct ScriptConfig {
     script_path: String,
     sig: String,
     args: Vec<String>,
+    libraries: Vec<String>,
     target_contract: Option<String>,
     sender: Option<Address>,
     rpc_url: Option<String>,
@@ -213,6 +218,7 @@ impl ScriptConfig {
             script_path: script_path.into(),
             sig: "run()".to_string(),
             args: Vec::new(),
+            libraries: Vec::new(),
             target_contract: None,
             sender: None,
             rpc_url: None,
@@ -238,6 +244,11 @@ impl ScriptConfig {
 
     pub fn args(&mut self, args: Vec<String>) -> &mut Self {
         self.args = args;
+        self
+    }
+
+    pub fn libraries(&mut self, libraries: Vec<String>) -> &mut Self {
+        self.libraries = libraries;
         self
     }
 
@@ -336,6 +347,10 @@ impl ScriptConfig {
         for arg in &self.args {
             cmd.push(arg.clone());
         }
+        for library in &self.libraries {
+            cmd.push("--libraries".to_string());
+            cmd.push(library.clone());
+        }
         if let Some(ref tc) = self.target_contract {
             cmd.push("--target-contract".to_string());
             cmd.push(tc.clone());
@@ -376,6 +391,7 @@ impl ScriptConfig {
         args.path = self.script_path;
         args.sig = self.sig;
         args.args = self.args;
+        args.build.libraries = self.libraries;
         args.target_contract = self.target_contract;
         args.broadcast = if self.dry_run { false } else { self.broadcast };
         args.slow = self.slow;
@@ -405,6 +421,51 @@ impl ScriptConfig {
 
         Ok(args)
     }
+}
+
+fn format_library_reference(path: &str, contract_name: &str, address: &str) -> String {
+    match path.rsplit_once(':') {
+        Some((_, existing_name)) if existing_name == contract_name => {
+            format!("{path}:{address}")
+        }
+        _ => format!("{path}:{contract_name}:{address}"),
+    }
+}
+
+/// Build Foundry `--libraries` linker flags from canonical deployment records.
+pub fn deployed_library_flags(registry: &Registry, namespace: &str, chain_id: u64) -> Vec<String> {
+    let mut libraries = BTreeSet::new();
+    for deployment in registry.list_deployments() {
+        if deployment.namespace != namespace
+            || deployment.chain_id != chain_id
+            || deployment.deployment_type != treb_core::types::DeploymentType::Library
+        {
+            continue;
+        }
+
+        let path = deployment.artifact.path.trim();
+        if path.is_empty() {
+            continue;
+        }
+
+        libraries.insert(format_library_reference(
+            path,
+            &deployment.contract_name,
+            &deployment.address,
+        ));
+    }
+
+    libraries.into_iter().collect()
+}
+
+/// Refresh a script config's linker flags from the current registry state.
+pub fn apply_deployed_libraries(
+    config: &mut ScriptConfig,
+    registry: &Registry,
+    namespace: &str,
+    chain_id: u64,
+) {
+    config.libraries(deployed_library_flags(registry, namespace, chain_id));
 }
 
 /// Build a `ScriptConfig` from a resolved treb configuration.
@@ -643,6 +704,7 @@ mod tests {
         let mut config = ScriptConfig::new("script/Deploy.s.sol");
         config
             .sig("deploy(uint256)")
+            .libraries(vec!["src/Lib.sol:Lib:0x1234".to_string()])
             .rpc_url("http://localhost:8545")
             .sender(ANVIL_ADDR_0)
             .broadcast(true)
@@ -652,6 +714,8 @@ mod tests {
         let cmd = config.to_forge_command();
         assert!(cmd.contains(&"--sig".to_string()));
         assert!(cmd.contains(&"deploy(uint256)".to_string()));
+        assert!(cmd.contains(&"--libraries".to_string()));
+        assert!(cmd.contains(&"src/Lib.sol:Lib:0x1234".to_string()));
         assert!(cmd.contains(&"--rpc-url".to_string()));
         assert!(cmd.contains(&"http://localhost:8545".to_string()));
         assert!(cmd.contains(&"--sender".to_string()));
@@ -726,5 +790,14 @@ mod tests {
         assert_eq!(keys.len(), 2, "should inject both wallet keys");
         assert!(keys.contains(&ANVIL_KEY_0.to_string()));
         assert!(keys.contains(&other_key.to_string()));
+    }
+
+    #[test]
+    fn into_script_args_carries_library_linker_flags() {
+        let mut config = ScriptConfig::new("script/Deploy.s.sol");
+        config.libraries(vec!["src/Lib.sol:Lib:0x1234".to_string()]);
+        let args = config.into_script_args().unwrap();
+
+        assert_eq!(args.build.libraries, vec!["src/Lib.sol:Lib:0x1234".to_string()]);
     }
 }

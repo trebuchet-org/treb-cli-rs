@@ -608,6 +608,7 @@ fn collision_events_reported_in_pipeline_result() {
             init_code_hash: b256!(
                 "4444444444444444444444444444444444444444444444444444444444444444"
             ),
+            artifact_match: None,
         },
         ExtractedCollision {
             existing_address: address!("9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"),
@@ -618,6 +619,7 @@ fn collision_events_reported_in_pipeline_result() {
             salt: B256::ZERO,
             bytecode_hash: B256::ZERO,
             init_code_hash: B256::ZERO,
+            artifact_match: None,
         },
     ];
 

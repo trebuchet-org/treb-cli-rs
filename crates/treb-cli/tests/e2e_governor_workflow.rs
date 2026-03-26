@@ -731,3 +731,107 @@ async fn governor_skip_fork_execution() {
 
     drop(anvil);
 }
+
+/// Governor proposal with title and description: deploy governance stack →
+/// fork enter → treb run DeployViaGovernorWithDescription.s.sol → verify
+/// governor-txs.json has description populated from GovernorBroadcast event.
+#[tokio::test(flavor = "multi_thread")]
+async fn governor_proposal_captures_description() {
+    // 1. Spawn Anvil
+    let Some(anvil) = spawn_anvil_or_skip().await else {
+        return;
+    };
+    let rpc_url = anvil.rpc_url().to_string();
+
+    // 2. Set up project directory
+    let tmp = tempfile::tempdir().unwrap();
+    copy_dir_recursive(&fixture_project(), tmp.path());
+
+    // 3. Deploy governance stack
+    let project_dir = tmp.path().to_path_buf();
+    let rpc = rpc_url.clone();
+    let gov = tokio::task::spawn_blocking(move || deploy_governor(&project_dir, &rpc, 1))
+        .await
+        .expect("deploy_governor should not panic");
+
+    // 4. Write treb.toml with Governor sender
+    write_governor_wallet_treb_toml(tmp.path(), &gov.governor_address, &gov.timelock_address);
+
+    // 5. Init + fork enter
+    let tmp_path = tmp.path().to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        treb().arg("init").current_dir(&tmp_path).assert().success();
+    })
+    .await
+    .unwrap();
+
+    let tmp_path = tmp.path().to_path_buf();
+    let rpc = rpc_url.clone();
+    tokio::task::spawn_blocking(move || {
+        treb()
+            .args(["fork", "enter", "--network", "anvil-31337", "--rpc-url", &rpc])
+            .current_dir(&tmp_path)
+            .assert()
+            .success();
+    })
+    .await
+    .unwrap();
+
+    // 6. Run deployment with description script
+    let timelock_env = format!("TIMELOCK_ADDRESS={}", gov.timelock_address);
+    let governor_env = format!("GOVERNOR_ADDRESS={}", gov.governor_address);
+    let tmp_path = tmp.path().to_path_buf();
+    let rpc = rpc_url.clone();
+    tokio::task::spawn_blocking(move || {
+        let output = treb()
+            .args([
+                "run",
+                "script/DeployViaGovernorWithDescription.s.sol",
+                "--network",
+                "anvil-31337",
+                "--rpc-url",
+                &rpc,
+                "--broadcast",
+                "--non-interactive",
+                "--env",
+                &timelock_env,
+                "--env",
+                &governor_env,
+            ])
+            .current_dir(&tmp_path)
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "treb run failed.\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    })
+    .await
+    .unwrap();
+
+    // 7. Verify governor-txs.json has description
+    let gov_txs = e2e::read_registry_file(tmp.path(), "governor-txs.json");
+    let gov_txs_map = gov_txs.as_object().expect("governor-txs.json must be object");
+    assert!(!gov_txs_map.is_empty(), "should have at least 1 governor proposal");
+
+    // Find the proposal with a description (the event-hydrated one)
+    let description = gov_txs_map
+        .values()
+        .filter_map(|p| p["description"].as_str())
+        .find(|d| !d.is_empty())
+        .unwrap_or("");
+
+    assert!(
+        description.contains("Deploy Counter v2"),
+        "description should contain title 'Deploy Counter v2', got: {description}"
+    );
+    assert!(
+        description.contains("deploys a new Counter contract via governance"),
+        "description should contain body text, got: {description}"
+    );
+
+    drop(anvil);
+}

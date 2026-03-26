@@ -62,8 +62,13 @@ pub fn hydrate_deployment(
     let id =
         generate_deployment_id(namespace, chain_id, &extracted.contract_name, &extracted.label);
 
-    let deployment_type =
-        if proxy.is_some() { DeploymentType::Proxy } else { DeploymentType::Singleton };
+    let deployment_type = if proxy.is_some() {
+        DeploymentType::Proxy
+    } else if extracted.artifact_match.as_ref().is_some_and(|artifact| artifact.is_library) {
+        DeploymentType::Library
+    } else {
+        DeploymentType::Singleton
+    };
 
     let deployment_strategy = DeploymentStrategy {
         method: extracted.strategy.clone(),
@@ -126,6 +131,7 @@ pub fn hydrate_deployment(
         label: extracted.label.clone(),
         address: extracted.address.to_checksum(None),
         deployment_type,
+        execution: None,
         transaction_id: format!("tx-{:#x}", extracted.transaction_id),
         deployment_strategy,
         proxy_info,
@@ -158,7 +164,16 @@ pub fn hydrate_collision(
         contract_name: collision.contract_name.clone(),
         label: collision.label.clone(),
         address: collision.existing_address.to_checksum(None),
-        deployment_type: DeploymentType::Singleton,
+        deployment_type: if collision
+            .artifact_match
+            .as_ref()
+            .is_some_and(|artifact| artifact.is_library)
+        {
+            DeploymentType::Library
+        } else {
+            DeploymentType::Singleton
+        },
+        execution: None,
         transaction_id: String::new(),
         deployment_strategy: DeploymentStrategy {
             method: collision.strategy.clone(),
@@ -169,12 +184,21 @@ pub fn hydrate_collision(
             entropy: collision.entropy.clone(),
         },
         proxy_info: None,
-        artifact: ArtifactInfo {
-            path: String::new(),
-            compiler_version: String::new(),
-            bytecode_hash: b256_to_hex(collision.bytecode_hash),
-            script_path: context.config.script_path.clone(),
-            git_commit: context.git_commit.clone(),
+        artifact: match &collision.artifact_match {
+            Some(am) => ArtifactInfo {
+                path: am.artifact_id.source.to_string_lossy().to_string(),
+                compiler_version: String::new(),
+                bytecode_hash: b256_to_hex(collision.bytecode_hash),
+                script_path: context.config.script_path.clone(),
+                git_commit: context.git_commit.clone(),
+            },
+            None => ArtifactInfo {
+                path: String::new(),
+                compiler_version: String::new(),
+                bytecode_hash: b256_to_hex(collision.bytecode_hash),
+                script_path: context.config.script_path.clone(),
+                git_commit: context.git_commit.clone(),
+            },
         },
         verification: VerificationInfo {
             status: VerificationStatus::Unverified,
@@ -770,6 +794,34 @@ mod tests {
     }
 
     #[test]
+    fn hydrate_library_deployment_uses_library_type() {
+        let ctx = test_context();
+        let mut extracted = create_deployment();
+
+        use foundry_compilers::ArtifactId;
+        let artifact_match = crate::artifacts::ArtifactMatch {
+            artifact_id: ArtifactId {
+                path: PathBuf::from("out/StringUtilsV2.sol/StringUtilsV2.json"),
+                name: "StringUtilsV2".to_string(),
+                source: PathBuf::from("src/StringUtilsV2.sol"),
+                version: foundry_config::semver::Version::new(0, 8, 24),
+                build_id: String::new(),
+                profile: "default".to_string(),
+            },
+            name: "StringUtilsV2".to_string(),
+            abi: alloy_json_abi::JsonAbi::new(),
+            has_bytecode: true,
+            has_deployed_bytecode: true,
+            is_library: true,
+        };
+        extracted.artifact_match = Some(artifact_match);
+
+        let deployment = hydrate_deployment(&extracted, None, &ctx);
+        assert_eq!(deployment.deployment_type, DeploymentType::Library);
+        assert_eq!(deployment.artifact.path, "src/StringUtilsV2.sol");
+    }
+
+    #[test]
     fn b256_zero_produces_empty_string() {
         assert!(b256_to_hex(B256::ZERO).is_empty());
     }
@@ -799,6 +851,7 @@ mod tests {
             label: "v1".to_string(),
             address: "0x5FbDB2315678afecb367f032d93F642f64180aa3".to_string(),
             deployment_type: DeploymentType::Singleton,
+            execution: None,
             transaction_id: transaction_id.to_string(),
             deployment_strategy: DeploymentStrategy {
                 method: DeploymentMethod::Create,

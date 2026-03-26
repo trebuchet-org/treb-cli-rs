@@ -515,6 +515,22 @@ enum RegistrySubcommand {
         #[arg(long)]
         json: bool,
     },
+    /// Migrate legacy registry state into canonical `deployments/` files
+    ///
+    /// Reads legacy `.treb` registry files, links deployments directly to
+    /// broadcast or queued artifacts, writes canonical deployment files under
+    /// `deployments/`, and synthesizes queued artifact files where necessary.
+    Migrate {
+        /// Write migrated files to disk (default is dry-run)
+        #[arg(long)]
+        write: bool,
+        /// Overwrite existing canonical files under `deployments/`
+        #[arg(long)]
+        force: bool,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Drop registry entries by query, network, or namespace
     ///
     /// Delete deployments, transactions, and safe transactions from the registry.
@@ -558,7 +574,8 @@ fn registry_subcommand_json_flag(subcommand: &RegistrySubcommand) -> bool {
     match subcommand {
         RegistrySubcommand::Sync { json, .. }
         | RegistrySubcommand::Tag { json, .. }
-        | RegistrySubcommand::Add { json, .. } => *json,
+        | RegistrySubcommand::Add { json, .. }
+        | RegistrySubcommand::Migrate { json, .. } => *json,
         RegistrySubcommand::Prune(args) => args.json,
         RegistrySubcommand::Drop(args) => args.json,
     }
@@ -1205,6 +1222,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                     json,
                 )
                 .await?
+            }
+            RegistrySubcommand::Migrate { write, force, json } => {
+                commands::migrate::run(write, force, json)?
             }
             RegistrySubcommand::Drop(args) => commands::reset::run(args, non_interactive).await?,
         },

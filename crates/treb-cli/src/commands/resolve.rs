@@ -164,6 +164,7 @@ mod tests {
             label: label.into(),
             address: address.into(),
             deployment_type: DeploymentType::Singleton,
+            execution: None,
             transaction_id: "tx-001".into(),
             deployment_strategy: DeploymentStrategy {
                 method: DeploymentMethod::Create,

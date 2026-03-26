@@ -161,13 +161,21 @@ fn compose_dry_run_resume_verbose() {
     let test = IntegrationTest::new("compose_dry_run_resume_verbose")
         .pre_setup_hook(|ctx| {
             copy_compose_fixture("simple.yaml", ctx);
-            fs::create_dir_all(ctx.treb_dir()).unwrap();
+            let plan_dir = ctx.path().join("broadcast").join("simple.yaml").join("1");
+            fs::create_dir_all(&plan_dir).unwrap();
             let state = serde_json::json!({
-                "compose_hash": "deadbeef",
-                "completed": ["registry"]
+                "composeFile": "simple.yaml",
+                "composeHash": "deadbeef",
+                "chainId": 1,
+                "components": [{
+                    "name": "registry",
+                    "step": 1,
+                    "script": "script/DeployRegistry.s.sol",
+                    "status": "broadcast"
+                }]
             });
             fs::write(
-                ctx.treb_dir().join("compose-state.json"),
+                plan_dir.join("compose-latest.json"),
                 serde_json::to_string_pretty(&state).unwrap(),
             )
             .unwrap();

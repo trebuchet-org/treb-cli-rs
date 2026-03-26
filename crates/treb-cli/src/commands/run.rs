@@ -17,11 +17,11 @@ use treb_forge::{
         BroadcastHook, PipelineConfig, PipelineContext, PipelineResult, RecordedTransaction,
         ScriptEntry, SessionPhase, SessionPipeline, SessionProgressCallback, resolve_git_commit,
     },
-    script::build_script_config_with_senders,
+    script::{apply_deployed_libraries, build_script_config_with_senders},
     sender::{ResolvedSender, resolve_all_senders},
     sender_config::encode_sender_configs,
 };
-use treb_registry::{ForkStateStore, Registry};
+use treb_registry::{ForkStateStore, Registry, addressbook_path, solidity_registry_path};
 
 use crate::{
     output,
@@ -629,6 +629,12 @@ pub async fn run(
     // ── Network resolution: CLI flag > local config > interactive prompt ──
     let network = resolve_network(network, &cwd, prompts_enabled, non_interactive)?;
 
+    if network.is_none() && rpc_url.is_none() {
+        bail!(
+            "no network configured; pass --network, set one with 'treb config set network <name>', or use --rpc-url"
+        );
+    }
+
     // ── Config resolution ────────────────────────────────────────────────
     let resolved = resolve_config(ResolveOpts {
         project_root: cwd.clone(),
@@ -685,13 +691,26 @@ pub async fn run(
     if let Some(ref net) = effective_network {
         unsafe { env::set_var("NETWORK", net) };
     }
+    unsafe {
+        env::set_var("REGISTRY_FILE", solidity_registry_path(&cwd));
+        env::set_var("ADDRESSBOOK_FILE", addressbook_path(&cwd));
+    }
     let encoded_senders = encode_sender_configs(&resolved_senders);
     unsafe { env::set_var("SENDER_CONFIGS", &encoded_senders) };
 
     // ── Dump command and exit ─────────────────────────────────────────
     if dump_command {
-        let script_config = build_script_config_with_senders(&resolved, script, &resolved_senders)
-            .context("failed to build script configuration")?;
+        let mut script_config =
+            build_script_config_with_senders(&resolved, script, &resolved_senders)
+                .context("failed to build script configuration")?;
+        let registry = Registry::open(&cwd).context("failed to open registry")?;
+        let chain_id = if let Some(ref network_or_url) = effective_rpc_url {
+            let actual_url = resolve_rpc_url_for_chain_id(network_or_url, &cwd);
+            if let Some(url) = actual_url { fetch_chain_id(&url).await.unwrap_or(0) } else { 0 }
+        } else {
+            0
+        };
+        apply_deployed_libraries(&mut script_config, &registry, &resolved.namespace, chain_id);
         let cmd_parts = script_config.to_forge_command();
         let cmd_str = cmd_parts
             .iter()
@@ -711,16 +730,7 @@ pub async fn run(
     // ── Auto-fund senders on fork ──────────────────────────────────────
     if active_fork.is_some() {
         if let Some(ref rpc) = effective_rpc_url {
-            let fund_results =
-                treb_forge::fund_senders_on_fork(rpc, &resolved_senders, 10_000).await;
-            let funded_count = fund_results.iter().filter(|(_, _, ok)| *ok).count();
-            if funded_count > 0 && !json {
-                eprintln!(
-                    "Funded {} sender address{} on fork",
-                    funded_count,
-                    if funded_count == 1 { "" } else { "es" },
-                );
-            }
+            let _ = treb_forge::fund_senders_on_fork(rpc, &resolved_senders, 10_000).await;
         }
     }
 
@@ -2131,6 +2141,7 @@ mod tests {
                 label: "v1".into(),
                 address: "0x1234567890abcdef1234567890abcdef12345678".into(),
                 deployment_type: DeploymentType::Singleton,
+                execution: None,
                 transaction_id: "tx-001".into(),
                 deployment_strategy: DeploymentStrategy {
                     method: DeploymentMethod::Create,
@@ -2451,6 +2462,7 @@ needs_env = "https://rpc.example/${TREB_RUN_MISSING_KEY_P3_FIX}"
             salt: B256::ZERO,
             bytecode_hash: B256::ZERO,
             init_code_hash: B256::ZERO,
+            artifact_match: None,
         };
 
         assert_eq!(

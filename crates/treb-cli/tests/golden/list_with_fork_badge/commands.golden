@@ -3,6 +3,6 @@
 └─ ⛓ chain:       celo (42220)                  
   
   SINGLETONS
-  MockToken [fork]     0xDeaDbeefdEAdbeefdEadbEEFdeadbeEFdEaDbeeF   UNVERIFIED   <TIMESTAMP>
+  MockToken     0xDeaDbeefdEAdbeefdEadbEEFdeadbeEFdEaDbeeF   FORK   <TIMESTAMP>
 
 Total deployments: 1

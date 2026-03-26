@@ -50,6 +50,7 @@ fn make_tag_deployment(
         label: label.to_string(),
         address: address.to_string(),
         deployment_type: DeploymentType::Singleton,
+        execution: None,
         transaction_id: format!("tx-{namespace}-{chain_id}-{contract_name}"),
         deployment_strategy: DeploymentStrategy {
             method: DeploymentMethod::Create,

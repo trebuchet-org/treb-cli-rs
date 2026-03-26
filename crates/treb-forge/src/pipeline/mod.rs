@@ -6,6 +6,7 @@
 
 pub mod broadcast_writer;
 pub mod compose;
+pub mod compose_plan;
 mod duplicates;
 pub mod fork_routing;
 mod hydration;
@@ -25,21 +26,21 @@ pub use hydration::{
     hydrate_transactions, hydrate_transactions_from_broadcast, populate_safe_context,
 };
 pub use orchestrator::{
-    BroadcastHook, BroadcastPhase, BroadcastProgressCallback, OnActionComplete, RoutingOutcome,
-    RunPipeline, SessionPipeline, SimulatedSession, apply_routing_results,
+    BroadcastHook, BroadcastPhase, BroadcastProgressCallback, OnActionComplete, OnScriptComplete,
+    RoutingOutcome, RunPipeline, SessionPipeline, SimulatedSession, apply_routing_results,
     apply_routing_results_with_queued,
 };
 pub use routing::{
-    GovernanceContext, GovernorAction, PlannedAction, QueuedExecution, RoutableTx, RouteContext,
-    RoutingAction, RoutingPlan, RunResult, SafeContext, TransactionRun,
+    ExecutionBundle, GovernanceContext, GovernorAction, PlannedAction, QueuedExecution, RoutableTx,
+    RouteContext, RoutingAction, RoutingPlan, RunResult, SafeContext, TransactionRun,
     compute_safe_tx_hash_for_ops, execute_single_action, flatten_receipts, reduce_queue, route_all,
     route_all_with_queued, route_all_with_resume,
 };
 pub use simulation::{HydrationOptions, SimulationOutput, hydrate_simulation};
 pub use types::{
     PipelineConfig, PipelineContext, PipelineResult, ProposedResult, RecordedDeployment,
-    RecordedTransaction, ScriptEntry, ScriptPhase, ScriptProgress, ScriptResult, SessionPhase,
-    SessionProgressCallback, SessionState, SkippedDeployment,
+    RecordedTransaction, ScriptEntry, ScriptResult, SessionPhase, SessionProgressCallback,
+    SkippedDeployment,
 };
 
 use std::process::Command;

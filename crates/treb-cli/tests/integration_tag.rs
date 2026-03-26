@@ -16,7 +16,6 @@ use treb_core::types::{
     ArtifactInfo, Deployment, DeploymentMethod, DeploymentStrategy, DeploymentType,
     VerificationInfo, VerificationStatus,
 };
-use treb_registry::{read_versioned_file, write_versioned_file};
 
 fn init_project_with_custom_deployments(
     ctx: &TestContext,
@@ -48,6 +47,7 @@ fn make_tag_deployment(
         label: label.to_string(),
         address: address.to_string(),
         deployment_type: DeploymentType::Singleton,
+        execution: None,
         transaction_id: format!("tx-{namespace}-{chain_id}-{contract_name}"),
         deployment_strategy: DeploymentStrategy {
             method: DeploymentMethod::Create,
@@ -82,12 +82,13 @@ fn make_tag_deployment(
 /// Used by remove and duplicate-add tests that need a tag already present.
 fn seed_registry_with_tag(project_root: &std::path::Path) {
     helpers::seed_registry(project_root);
-    let dep_path = project_root.join(".treb/deployments.json");
-    let mut map: serde_json::Map<String, serde_json::Value> =
-        read_versioned_file(&dep_path).unwrap();
-    let dep = map.get_mut("mainnet/42220/FPMM:v3.0.0").unwrap();
-    dep.as_object_mut().unwrap().insert("tags".to_string(), serde_json::json!(["v3-release"]));
-    write_versioned_file(&dep_path, &map).unwrap();
+    let mut registry = treb_registry::Registry::open(project_root).expect("registry should open");
+    let mut deployment = registry
+        .get_deployment("mainnet/42220/FPMM:v3.0.0")
+        .cloned()
+        .expect("seeded deployment should exist");
+    deployment.tags = Some(vec!["v3-release".to_string()]);
+    registry.update_deployment(deployment).expect("tagged deployment should update");
 }
 
 /// Show tags on a deployment with no tags displays "No tags".
@@ -132,13 +133,15 @@ fn tag_add() {
         .test(&["registry", "tag", "--add", "v3-release", "mainnet/42220/FPMM:v3.0.0"])
         .post_test_hook(|ctx| {
             // Extract tags for the modified deployment into a small deterministic artifact.
-            // deployments.json uses HashMap so key order is non-deterministic;
-            // writing just the tags avoids golden file flakiness.
-            let deployments_path = ctx.path().join(".treb/deployments.json");
-            let map: serde_json::Map<String, serde_json::Value> =
-                read_versioned_file(&deployments_path).unwrap();
-            let dep = map.get("mainnet/42220/FPMM:v3.0.0").unwrap();
-            let tags = dep.get("tags").unwrap();
+            // The registry backend now stores canonical deployments under
+            // deployments/<namespace>/<chain>.json, so use the public API to avoid
+            // coupling this test to storage layout details.
+            let registry = treb_registry::Registry::open(ctx.path()).expect("registry should open");
+            let tags = registry
+                .get_deployment("mainnet/42220/FPMM:v3.0.0")
+                .and_then(|dep| dep.tags.clone())
+                .map(serde_json::Value::from)
+                .unwrap_or(serde_json::Value::Null);
             let artifact = serde_json::json!({
                 "deploymentId": "mainnet/42220/FPMM:v3.0.0",
                 "tags": tags
@@ -179,13 +182,17 @@ fn tag_add_preserves_go_compatible_bare_deployments_file() {
         "Go-compatible deployments.json must not reintroduce the legacy wrapper"
     );
 
-    let deployment = entries
-        .get("mainnet/42220/CDPLiquidityStrategy:v3.0.0")
-        .and_then(serde_json::Value::as_object)
+    let registry = treb_registry::Registry::open(ctx.path()).expect("registry should open");
+    let deployment = registry
+        .get_deployment("mainnet/42220/CDPLiquidityStrategy:v3.0.0")
         .expect("updated deployments should preserve the tagged deployment");
 
-    assert_eq!(deployment.get("contractName"), Some(&serde_json::json!("CDPLiquidityStrategy")));
-    assert_eq!(deployment.get("tags"), Some(&serde_json::json!(["core"])));
+    assert_eq!(deployment.contract_name, "CDPLiquidityStrategy");
+    assert_eq!(deployment.tags.as_deref(), Some(&["core".to_string()][..]));
+    assert!(
+        ctx.path().join("deployments/mainnet/42220.json").exists(),
+        "tagging a legacy deployment should materialize the canonical deployment file"
+    );
 }
 
 /// Adding a tag with --json produces valid JSON with action and tag fields.
@@ -418,8 +425,11 @@ fn tag_network_scope_errors_when_the_match_is_outside_the_filter() {
             None,
         )],
     );
+    ctx.run(["config", "set", "namespace", "mainnet"]).success();
 
-    ctx.run(["registry", "tag", "--network", "1", "Counter"])
-        .failure()
-        .stderr(predicate::str::contains("no deployment found matching 'Counter' on network '1'"));
+    ctx.run(["registry", "tag", "--network", "1", "Counter"]).failure().stderr(
+        predicate::str::contains(
+            "no deployment found matching 'Counter' in namespace 'mainnet' on network '1'",
+        ),
+    );
 }

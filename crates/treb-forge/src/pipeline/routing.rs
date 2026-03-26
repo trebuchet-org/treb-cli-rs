@@ -11,7 +11,7 @@
 //!   fork)
 //!
 //! Both action types may emit **`QueuedExecution`** items that represent
-//! deferred operations (Safe multi-sig approval, governance execution).
+//! queued operations (Safe multi-sig approval, governance execution).
 //!
 //! The reduction is iterative (no recursion, no `Box::pin` futures). Governor
 //! routing pushes the `propose()` tx back onto the work queue, resolved through
@@ -25,10 +25,14 @@ use treb_core::error::TrebError;
 
 use forge_script_sequence::ScriptSequence;
 
+use alloy_network::Ethereum;
+
 use crate::{
     script::BroadcastReceipt,
     sender::{ResolvedSender, SenderCategory},
 };
+
+use super::types::RecordedTransaction;
 
 /// Maximum queue depth for routing reducer chains.
 ///
@@ -96,7 +100,7 @@ pub enum RoutingAction {
     },
 }
 
-/// A deferred execution that results from a routing action.
+/// A queued execution that results from a routing action.
 ///
 /// Processed inline by the executor after the corresponding action.
 #[derive(Debug, Clone)]
@@ -137,7 +141,7 @@ pub struct PlannedAction {
     pub run: TransactionRun,
     /// The routing action to execute.
     pub action: RoutingAction,
-    /// Optional deferred execution to handle inline after the action.
+    /// Optional queued execution to handle after the action.
     pub queued: Option<QueuedExecution>,
 }
 
@@ -165,7 +169,7 @@ pub struct TransactionRun {
 /// while enabling per-sender routing (wallet broadcast vs Safe proposal vs
 /// Governor proposal).
 pub fn partition_into_runs(
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     resolved_senders: &HashMap<String, ResolvedSender>,
     sender_labels: &HashMap<Address, String>,
 ) -> Vec<TransactionRun> {
@@ -227,6 +231,14 @@ pub enum RunResult {
     GovernorProposed { proposal_id: String, governor_address: Address, tx_count: usize },
 }
 
+/// Final routing execution output.
+pub struct ExecutionBundle {
+    /// Logical per-run results in original script order.
+    pub run_results: Vec<(TransactionRun, RunResult)>,
+    /// Queueable items that ended up queued for follow-up or fork simulation.
+    pub queued_executions: Vec<QueuedExecution>,
+}
+
 /// Callback invoked after each top-level routing run completes.
 pub type OnRunComplete = dyn Fn(&TransactionRun, &RunResult) + Send + Sync;
 
@@ -244,7 +256,7 @@ pub struct RouteContext<'a> {
     pub sender_configs: &'a HashMap<String, treb_config::SenderConfig>,
     /// Optional mutable reference to a pre-built ScriptSequence for in-place
     /// checkpoint updates during broadcast.
-    pub sequence: Option<&'a mut ScriptSequence>,
+    pub sequence: Option<&'a mut ScriptSequence<Ethereum>>,
     /// Tracks nonce offsets per Safe address across multiple `reduce_queue` calls.
     /// Each proposal increments the offset so sequential proposals get unique nonces.
     pub safe_nonce_offsets: HashMap<Address, u64>,
@@ -264,7 +276,7 @@ pub struct RouteContext<'a> {
 struct ReductionItem {
     run: TransactionRun,
     /// The broadcastable transactions (either original or synthetic for governor propose).
-    btxs: foundry_cheatcodes::BroadcastableTransactions,
+    btxs: foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     /// Governance context inherited from a parent governor reduction.
     governance: Option<GovernanceContext>,
     depth: u8,
@@ -275,7 +287,7 @@ struct ReductionItem {
 /// This is the classification step — no RPC calls for wallet/governor runs,
 /// but Safe runs query threshold/nonce to determine 1/1 vs multi-sig.
 pub async fn reduce_queue(
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     ctx: &mut RouteContext<'_>,
 ) -> Result<RoutingPlan, TrebError> {
     let runs = partition_into_runs(btxs, ctx.resolved_senders, ctx.sender_labels);
@@ -717,7 +729,7 @@ fn find_proposer_role(
 /// Reduce a Safe(1/1) run into an Exec action with full execTransaction calldata.
 async fn reduce_safe_1of1(
     run: &TransactionRun,
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     resolved_sender: &ResolvedSender,
     safe_address: Address,
     ctx: &RouteContext<'_>,
@@ -887,16 +899,11 @@ async fn reduce_safe_1of1(
 // execute_plan — uniform executor
 // ---------------------------------------------------------------------------
 
-/// Execute a single planned action, returning the result and optional queued item.
-///
-/// This is the per-action building block. The CLI can call this in a loop
-/// to drive execution with inline output (spinner control, prompts, etc.)
-/// between actions.
-pub async fn execute_single_action(
+async fn execute_action_only(
     planned: &PlannedAction,
     ctx: &mut RouteContext<'_>,
-    original_btxs: Option<&foundry_cheatcodes::BroadcastableTransactions>,
-) -> Result<(TransactionRun, RunResult, Option<QueuedExecution>), TrebError> {
+    original_btxs: Option<&foundry_cheatcodes::BroadcastableTransactions<Ethereum>>,
+) -> Result<RunResult, TrebError> {
     let result = match &planned.action {
         RoutingAction::Exec { from, transactions, safe, governance: _ } => {
             if let Some(safe_ctx) = safe {
@@ -977,6 +984,56 @@ pub async fn execute_single_action(
         }
     };
 
+    Ok(result)
+}
+
+fn safe_proposal_from_action(planned: &PlannedAction) -> Option<QueuedExecution> {
+    match (&planned.action, &planned.queued) {
+        (_, Some(QueuedExecution::SafeProposal { .. })) => planned.queued.clone(),
+        (
+            RoutingAction::Propose {
+                safe_address,
+                chain_id,
+                operations,
+                nonce,
+                inner_transactions,
+                ..
+            },
+            _,
+        ) => Some(QueuedExecution::SafeProposal {
+            safe_address: *safe_address,
+            safe_tx_hash: compute_safe_tx_hash_for_ops(
+                operations,
+                *safe_address,
+                *nonce,
+                *chain_id,
+            ),
+            nonce: *nonce,
+            inner_txs: inner_transactions.clone(),
+        }),
+        _ => None,
+    }
+}
+
+fn tx_ids_for_run(run: &TransactionRun, recorded_txs: &[RecordedTransaction]) -> Vec<String> {
+    run.tx_indices
+        .iter()
+        .filter_map(|&idx| recorded_txs.get(idx))
+        .map(|rt| rt.transaction.id.clone())
+        .collect()
+}
+
+/// Execute a single planned action, returning the result and optional queued item.
+///
+/// This remains as a building block for compose's merge path, which still
+/// handles proposal deferral separately from the default two-phase executor.
+pub async fn execute_single_action(
+    planned: &PlannedAction,
+    ctx: &mut RouteContext<'_>,
+    original_btxs: Option<&foundry_cheatcodes::BroadcastableTransactions<Ethereum>>,
+) -> Result<(TransactionRun, RunResult, Option<QueuedExecution>), TrebError> {
+    let result = execute_action_only(planned, ctx, original_btxs).await?;
+
     // Governance wrapping
     let final_result = match &planned.action {
         RoutingAction::Exec { governance: Some(gov), .. } => match &result {
@@ -1007,33 +1064,225 @@ pub async fn execute_single_action(
     ))
 }
 
-/// Execute a routing plan, producing `(TransactionRun, RunResult)` pairs.
+/// Execute a routing plan in two phases:
+/// 1. direct on-chain execution (`Exec`)
+/// 2. queued/finalization work (`Propose`, governor queue state)
 ///
-/// Sequential loop — for each planned action:
-/// 1. Execute the action (Exec → broadcast, Propose → record/propose)
-/// 2. Fire the on_run_complete callback
-/// 3. Return the result (queued items are carried in the result for the caller)
-///
-/// The caller (CLI) is responsible for inline Queued handling (prompts, simulation).
+/// Results are returned in original script order even though execution is
+/// staged as direct-first and queued-second.
 pub async fn execute_plan(
     plan: &RoutingPlan,
     ctx: &mut RouteContext<'_>,
-    original_btxs: Option<&foundry_cheatcodes::BroadcastableTransactions>,
-) -> Result<Vec<(TransactionRun, RunResult, Option<QueuedExecution>)>, TrebError> {
-    let mut results = Vec::with_capacity(plan.actions.len());
-
-    for planned in &plan.actions {
-        let (run, final_result, queued) =
-            execute_single_action(planned, ctx, original_btxs).await?;
-
-        if let Some(cb) = &ctx.on_run_complete {
-            cb(&run, &final_result);
-        }
-
-        results.push((run, final_result, queued));
+    original_btxs: Option<&foundry_cheatcodes::BroadcastableTransactions<Ethereum>>,
+    recorded_txs: &[RecordedTransaction],
+    resume: Option<&super::broadcast_writer::ResumeState>,
+    mut queued_state: Option<&mut super::broadcast_writer::QueuedOperations>,
+) -> Result<ExecutionBundle, TrebError> {
+    if let (Some(sequence), Some(queued)) = (ctx.sequence.as_deref(), queued_state.as_deref()) {
+        super::broadcast_writer::save_queued_checkpoint(sequence, queued)?;
     }
 
-    Ok(results)
+    let mut direct_results: Vec<Option<RunResult>> =
+        (0..plan.actions.len()).map(|_| None).collect();
+    let mut final_results: Vec<Option<RunResult>> = (0..plan.actions.len()).map(|_| None).collect();
+    let mut queued_executions = Vec::new();
+
+    // Phase 1: execute direct on-chain actions first.
+    for (idx, planned) in plan.actions.iter().enumerate() {
+        if !matches!(planned.action, RoutingAction::Exec { .. }) {
+            continue;
+        }
+
+        let skip_governor_direct = planned.queued.as_ref().is_some_and(|queued| {
+            matches!(queued, QueuedExecution::GovernanceProposal { governor_address, .. }
+            if queued_state.as_deref().is_some_and(|state| {
+                super::broadcast_writer::governor_proposal_completed(
+                    state,
+                    &format!("{:#x}", governor_address),
+                    &tx_ids_for_run(&planned.run, recorded_txs),
+                )
+            }))
+        });
+        if skip_governor_direct {
+            continue;
+        }
+
+        let result = if matches!(planned.run.category, SenderCategory::Wallet) {
+            if let Some(resume) = resume {
+                resume_wallet_run(
+                    &planned.run,
+                    original_btxs.expect("resume requires btxs"),
+                    ctx,
+                    resume,
+                )
+                .await?
+            } else {
+                execute_action_only(planned, ctx, original_btxs).await?
+            }
+        } else {
+            execute_action_only(planned, ctx, original_btxs).await?
+        };
+
+        if planned.queued.is_none() {
+            if let Some(cb) = &ctx.on_run_complete {
+                cb(&planned.run, &result);
+            }
+            final_results[idx] = Some(result.clone());
+        }
+
+        direct_results[idx] = Some(result);
+    }
+
+    // Phase 2: perform queueing/finalization after direct execution settles.
+    for (idx, planned) in plan.actions.iter().enumerate() {
+        match &planned.action {
+            RoutingAction::Exec { governance: Some(gov), .. } => {
+                let broadcast =
+                    direct_results[idx].clone().unwrap_or(RunResult::Broadcast(Vec::new()));
+                let tx_ids = tx_ids_for_run(&planned.run, recorded_txs);
+                let proposal_id = match &broadcast {
+                    RunResult::Broadcast(receipts) => {
+                        receipts.first().map(|r| format!("{:#x}", r.hash)).unwrap_or_default()
+                    }
+                    _ => queued_state
+                        .as_deref()
+                        .and_then(|state| {
+                            state.governor_proposals.iter().find(|proposal| {
+                                proposal
+                                    .governor_address
+                                    .eq_ignore_ascii_case(&format!("{:#x}", gov.governor_address))
+                                    && proposal.transaction_ids == tx_ids
+                            })
+                        })
+                        .map(|proposal| proposal.proposal_id.clone())
+                        .unwrap_or_default(),
+                };
+                if let Some(state) = queued_state.as_deref_mut() {
+                    if !super::broadcast_writer::governor_proposal_completed(
+                        state,
+                        &format!("{:#x}", gov.governor_address),
+                        &tx_ids,
+                    ) {
+                        super::broadcast_writer::mark_governor_proposal_queued(
+                            state,
+                            &format!("{:#x}", gov.governor_address),
+                            &tx_ids,
+                            Some(&proposal_id),
+                            Some(&proposal_id),
+                            None,
+                        )?;
+                        if let Some(sequence) = ctx.sequence.as_deref() {
+                            super::broadcast_writer::save_queued_checkpoint(sequence, state)?;
+                        }
+                    }
+                }
+
+                if let Some(queued) = planned.queued.clone() {
+                    queued_executions.push(queued);
+                }
+
+                let final_result = RunResult::GovernorProposed {
+                    proposal_id,
+                    governor_address: gov.governor_address,
+                    tx_count: planned.run.tx_indices.len(),
+                };
+                if let Some(cb) = &ctx.on_run_complete {
+                    cb(&planned.run, &final_result);
+                }
+                final_results[idx] = Some(final_result);
+            }
+            RoutingAction::Propose { safe_address, nonce, inner_transactions, .. } => {
+                let safe_queued = safe_proposal_from_action(planned)
+                    .expect("propose action must yield safe queue");
+                let safe_tx_hash = match &safe_queued {
+                    QueuedExecution::SafeProposal { safe_tx_hash, .. } => {
+                        format!("{:#x}", safe_tx_hash)
+                    }
+                    _ => unreachable!(),
+                };
+                let already_queued = queued_state.as_deref().is_some_and(|state| {
+                    super::broadcast_writer::safe_proposal_completed(state, &safe_tx_hash)
+                });
+
+                let safe_result = if already_queued {
+                    let safe_tx_hash = safe_tx_hash
+                        .parse()
+                        .map_err(|e| TrebError::Safe(format!("invalid saved safe tx hash: {e}")))?;
+                    RunResult::SafeProposed {
+                        safe_tx_hash,
+                        safe_address: *safe_address,
+                        nonce: *nonce,
+                        tx_count: inner_transactions.len(),
+                    }
+                } else {
+                    execute_action_only(planned, ctx, original_btxs).await?
+                };
+
+                if let Some(state) = queued_state.as_deref_mut() {
+                    super::broadcast_writer::mark_safe_proposal_queued(state, &safe_tx_hash)?;
+                    if let Some(sequence) = ctx.sequence.as_deref() {
+                        super::broadcast_writer::save_queued_checkpoint(sequence, state)?;
+                    }
+                }
+
+                queued_executions.push(safe_queued);
+
+                if let Some(QueuedExecution::GovernanceProposal { governor_address, .. }) =
+                    planned.queued.as_ref()
+                {
+                    let tx_ids = tx_ids_for_run(&planned.run, recorded_txs);
+                    if let Some(state) = queued_state.as_deref_mut() {
+                        if !super::broadcast_writer::governor_proposal_completed(
+                            state,
+                            &format!("{:#x}", governor_address),
+                            &tx_ids,
+                        ) {
+                            super::broadcast_writer::mark_governor_proposal_queued(
+                                state,
+                                &format!("{:#x}", governor_address),
+                                &tx_ids,
+                                None,
+                                None,
+                                Some(&safe_tx_hash),
+                            )?;
+                            if let Some(sequence) = ctx.sequence.as_deref() {
+                                super::broadcast_writer::save_queued_checkpoint(sequence, state)?;
+                            }
+                        }
+                    }
+                    queued_executions
+                        .push(planned.queued.clone().expect("governance queue exists"));
+                }
+
+                if let Some(cb) = &ctx.on_run_complete {
+                    cb(&planned.run, &safe_result);
+                }
+                final_results[idx] = Some(safe_result);
+            }
+            _ => {}
+        }
+    }
+
+    let run_results = plan
+        .actions
+        .iter()
+        .zip(final_results.into_iter())
+        .filter_map(|(planned, result)| {
+            result.map(|result| {
+                (
+                    TransactionRun {
+                        sender_role: planned.run.sender_role.clone(),
+                        category: planned.run.category,
+                        sender_address: planned.run.sender_address,
+                        tx_indices: planned.run.tx_indices.clone(),
+                    },
+                    result,
+                )
+            })
+        })
+        .collect();
+
+    Ok(ExecutionBundle { run_results, queued_executions })
 }
 
 // ---------------------------------------------------------------------------
@@ -1045,22 +1294,21 @@ pub async fn execute_plan(
 /// This is the main entry point. Reduces runs into a plan, then executes it.
 /// Returns `(TransactionRun, RunResult)` pairs for backward compatibility.
 pub async fn route_all(
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     ctx: &mut RouteContext<'_>,
 ) -> Result<Vec<(TransactionRun, RunResult)>, TrebError> {
     let plan = reduce_queue(btxs, ctx).await?;
-    let results = execute_plan(&plan, ctx, Some(btxs)).await?;
-    // Strip queued items for backward compat — caller can use route_all_with_queued instead
-    Ok(results.into_iter().map(|(run, result, _)| (run, result)).collect())
+    let results = execute_plan(&plan, ctx, Some(btxs), &[], None, None).await?;
+    Ok(results.run_results)
 }
 
 /// Route all with queued execution items returned.
 pub async fn route_all_with_queued(
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     ctx: &mut RouteContext<'_>,
-) -> Result<Vec<(TransactionRun, RunResult, Option<QueuedExecution>)>, TrebError> {
+) -> Result<ExecutionBundle, TrebError> {
     let plan = reduce_queue(btxs, ctx).await?;
-    execute_plan(&plan, ctx, Some(btxs)).await
+    execute_plan(&plan, ctx, Some(btxs), &[], None, None).await
 }
 
 /// Route with resume support — skips confirmed, polls pending, re-sends unsent.
@@ -1074,47 +1322,12 @@ pub async fn route_all_with_queued(
 /// dropped and re-broadcast. Nonce conflicts during re-broadcast produce a
 /// warning instead of a fatal error.
 pub async fn route_all_with_resume(
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     ctx: &mut RouteContext<'_>,
     resume: &super::broadcast_writer::ResumeState,
-) -> Result<Vec<(TransactionRun, RunResult)>, TrebError> {
-    let runs = partition_into_runs(btxs, ctx.resolved_senders, ctx.sender_labels);
-    let mut results = Vec::with_capacity(runs.len());
-
-    for run in runs {
-        let result = match run.category {
-            SenderCategory::Wallet => resume_wallet_run(&run, btxs, ctx, resume).await?,
-            _ => {
-                // For Safe/Governor with resume, fall through to normal routing
-                // Build a single-run plan and execute
-                let single_btxs = btxs.clone();
-                let mut temp_ctx = RouteContext {
-                    rpc_url: ctx.rpc_url,
-                    chain_id: ctx.chain_id,
-                    is_fork: ctx.is_fork,
-                    quiet: ctx.quiet,
-                    on_run_complete: None,
-                    resolved_senders: ctx.resolved_senders,
-                    sender_labels: ctx.sender_labels,
-                    sender_configs: ctx.sender_configs,
-                    sequence: None,
-                    safe_nonce_offsets: ctx.safe_nonce_offsets.clone(),
-                    defer_safe_proposals: ctx.defer_safe_proposals,
-                    safe_threshold_cache: ctx.safe_threshold_cache.clone(),
-                };
-                let plan = reduce_queue(&single_btxs, &mut temp_ctx).await?;
-                let plan_results = execute_plan(&plan, &mut temp_ctx, Some(&single_btxs)).await?;
-                if let Some((_, result, _)) = plan_results.into_iter().next() {
-                    result
-                } else {
-                    RunResult::Broadcast(Vec::new())
-                }
-            }
-        };
-        results.push((run, result));
-    }
-
-    Ok(results)
+) -> Result<ExecutionBundle, TrebError> {
+    let plan = reduce_queue(btxs, ctx).await?;
+    execute_plan(&plan, ctx, Some(btxs), &[], Some(resume), None).await
 }
 
 // ---------------------------------------------------------------------------
@@ -1209,7 +1422,7 @@ async fn poll_pending_receipt(
 /// Resume a wallet run: skip confirmed, poll pending, re-broadcast unsent.
 async fn resume_wallet_run(
     run: &TransactionRun,
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     ctx: &mut RouteContext<'_>,
     resume: &super::broadcast_writer::ResumeState,
 ) -> Result<RunResult, TrebError> {
@@ -1348,10 +1561,10 @@ pub fn flatten_receipts(results: &[(TransactionRun, RunResult)]) -> Vec<Broadcas
 pub async fn broadcast_wallet_run(
     rpc_url: &str,
     run: &TransactionRun,
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     is_fork: bool,
     resolved_senders: &HashMap<String, ResolvedSender>,
-    sequence: Option<&mut ScriptSequence>,
+    sequence: Option<&mut ScriptSequence<Ethereum>>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     if is_fork {
         broadcast_wallet_run_fork(rpc_url, run, btxs, sequence).await
@@ -1364,8 +1577,8 @@ pub async fn broadcast_wallet_run(
 async fn broadcast_wallet_run_fork(
     rpc_url: &str,
     run: &TransactionRun,
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
-    sequence: Option<&mut ScriptSequence>,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
+    sequence: Option<&mut ScriptSequence<Ethereum>>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     use alloy_rpc_types::TransactionRequest;
 
@@ -1384,18 +1597,12 @@ async fn broadcast_wallet_run_fork(
         let mut tx_req = TransactionRequest::default().from(from);
 
         if let Some(to) = btx.transaction.to() {
-            match to {
-                alloy_primitives::TxKind::Call(addr) => {
-                    tx_req = tx_req.to(addr);
-                }
-                alloy_primitives::TxKind::Create => {}
-            }
+            tx_req = tx_req.to(to);
         }
 
-        if let Some(input) = btx.transaction.input() {
-            if !input.is_empty() {
-                tx_req.input = alloy_rpc_types::TransactionInput::new(input.clone());
-            }
+        let input = btx.transaction.input().cloned().unwrap_or_default();
+        if !input.is_empty() {
+            tx_req.input = alloy_rpc_types::TransactionInput::new(input);
         }
 
         let value = btx.transaction.value().unwrap_or_default();
@@ -1435,9 +1642,9 @@ async fn broadcast_wallet_run_fork(
 async fn broadcast_wallet_run_live(
     rpc_url: &str,
     run: &TransactionRun,
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     resolved_senders: &HashMap<String, ResolvedSender>,
-    sequence: Option<&mut ScriptSequence>,
+    sequence: Option<&mut ScriptSequence<Ethereum>>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     use alloy_rpc_types::TransactionRequest;
 
@@ -1455,18 +1662,15 @@ async fn broadcast_wallet_run_live(
 
         let mut tx_req = TransactionRequest::default();
 
-        if let Some(from) = btx.transaction.from() {
-            tx_req = tx_req.from(from);
+        tx_req = tx_req.from(btx.transaction.from().unwrap_or_default());
+
+        if let Some(to) = btx.transaction.to() {
+            tx_req = tx_req.to(to);
         }
 
-        if let Some(alloy_primitives::TxKind::Call(addr)) = btx.transaction.to() {
-            tx_req = tx_req.to(addr);
-        }
-
-        if let Some(input) = btx.transaction.input() {
-            if !input.is_empty() {
-                tx_req.input = alloy_rpc_types::TransactionInput::new(input.clone());
-            }
+        let input = btx.transaction.input().cloned().unwrap_or_default();
+        if !input.is_empty() {
+            tx_req.input = alloy_rpc_types::TransactionInput::new(input);
         }
 
         let value = btx.transaction.value().unwrap_or_default();
@@ -1619,7 +1823,7 @@ pub async fn poll_safe_execution(
 #[allow(clippy::type_complexity)]
 pub fn extract_governor_tx_data(
     run: &TransactionRun,
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
 ) -> Result<(Vec<Address>, Vec<U256>, Vec<Vec<u8>>), TrebError> {
     let mut targets = Vec::with_capacity(run.tx_indices.len());
     let mut values = Vec::with_capacity(run.tx_indices.len());
@@ -1630,17 +1834,10 @@ pub fn extract_governor_tx_data(
             .get(idx)
             .ok_or_else(|| TrebError::Forge(format!("transaction index {idx} out of range")))?;
 
-        let to = btx
-            .transaction
-            .to()
-            .and_then(|kind| match kind {
-                alloy_primitives::TxKind::Call(addr) => Some(addr),
-                alloy_primitives::TxKind::Create => None,
-            })
-            .unwrap_or(Address::ZERO);
+        let to = btx.transaction.to().unwrap_or(Address::ZERO);
 
         let value = btx.transaction.value().unwrap_or_default();
-        let data = btx.transaction.input().map(|b| b.to_vec()).unwrap_or_default();
+        let data = btx.transaction.input().cloned().unwrap_or_default().to_vec();
 
         targets.push(to);
         values.push(U256::from(value));
@@ -1682,21 +1879,17 @@ fn build_single_tx_broadcast(
     from: Address,
     to: Address,
     calldata: Vec<u8>,
-) -> foundry_cheatcodes::BroadcastableTransactions {
+) -> foundry_cheatcodes::BroadcastableTransactions<Ethereum> {
+    use alloy_rpc_types::{TransactionInput, TransactionRequest};
     use foundry_cheatcodes::BroadcastableTransaction;
     use foundry_common::TransactionMaybeSigned;
 
-    let tx_json = serde_json::json!({
-        "from": format!("{:#x}", from),
-        "to": format!("{:#x}", to),
-        "data": format!("0x{}", alloy_primitives::hex::encode(&calldata)),
-    });
+    let mut tx_req = TransactionRequest::default().from(from).to(to);
+    tx_req.input = TransactionInput::new(alloy_primitives::Bytes::from(calldata));
 
-    let tx_maybe_signed: TransactionMaybeSigned =
-        serde_json::from_value(tx_json).expect("failed to build synthetic transaction");
-
-    let btx = BroadcastableTransaction { rpc: None, transaction: tx_maybe_signed };
-    let mut btxs = foundry_cheatcodes::BroadcastableTransactions::default();
+    let btx =
+        BroadcastableTransaction { rpc: None, transaction: TransactionMaybeSigned::new(tx_req) };
+    let mut btxs = foundry_cheatcodes::BroadcastableTransactions::<Ethereum>::default();
     btxs.push_back(btx);
     btxs
 }
@@ -1708,23 +1901,16 @@ fn build_single_tx_broadcast(
 /// Extract `RoutableTx` items from a run's broadcastable transactions.
 fn extract_routable_txs(
     run: &TransactionRun,
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
 ) -> Result<Vec<RoutableTx>, TrebError> {
     let mut txs = Vec::with_capacity(run.tx_indices.len());
     for &idx in &run.tx_indices {
         let btx = btxs
             .get(idx)
             .ok_or_else(|| TrebError::Forge(format!("transaction index {idx} out of range")))?;
-        let to = btx
-            .transaction
-            .to()
-            .and_then(|kind| match kind {
-                alloy_primitives::TxKind::Call(addr) => Some(addr),
-                alloy_primitives::TxKind::Create => None,
-            })
-            .unwrap_or(Address::ZERO);
+        let to = btx.transaction.to().unwrap_or(Address::ZERO);
         let value = btx.transaction.value().unwrap_or_default();
-        let data = btx.transaction.input().map(|b| b.to_vec()).unwrap_or_default();
+        let data = btx.transaction.input().cloned().unwrap_or_default().to_vec();
         txs.push(RoutableTx { to, value: U256::from(value), data });
     }
     Ok(txs)
@@ -1733,21 +1919,14 @@ fn extract_routable_txs(
 /// Build MultiSend operations from a run's broadcastable transactions.
 fn build_multisend_operations(
     run: &TransactionRun,
-    btxs: &foundry_cheatcodes::BroadcastableTransactions,
+    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
 ) -> Result<Vec<treb_safe::MultiSendOperation>, TrebError> {
     let mut ops = Vec::with_capacity(run.tx_indices.len());
     for &idx in &run.tx_indices {
         let btx = btxs
             .get(idx)
             .ok_or_else(|| TrebError::Forge(format!("transaction index {idx} out of range")))?;
-        let to = btx
-            .transaction
-            .to()
-            .and_then(|kind| match kind {
-                alloy_primitives::TxKind::Call(addr) => Some(addr),
-                alloy_primitives::TxKind::Create => None,
-            })
-            .unwrap_or(Address::ZERO);
+        let to = btx.transaction.to().unwrap_or(Address::ZERO);
         let value = btx.transaction.value().unwrap_or_default();
         let data = btx.transaction.input().cloned().unwrap_or_default();
         ops.push(treb_safe::MultiSendOperation {
@@ -1800,7 +1979,7 @@ async fn broadcast_routable_txs(
     transactions: &[RoutableTx],
     is_fork: bool,
     resolved_senders: &HashMap<String, ResolvedSender>,
-    sequence: Option<&mut ScriptSequence>,
+    sequence: Option<&mut ScriptSequence<Ethereum>>,
     tx_indices: Option<&[usize]>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     if is_fork {
@@ -1823,7 +2002,7 @@ async fn broadcast_routable_txs_fork(
     rpc_url: &str,
     from: Address,
     transactions: &[RoutableTx],
-    sequence: Option<&mut ScriptSequence>,
+    sequence: Option<&mut ScriptSequence<Ethereum>>,
     tx_indices: Option<&[usize]>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     use alloy_rpc_types::TransactionRequest;
@@ -1881,7 +2060,7 @@ async fn broadcast_routable_txs_live(
     from: Address,
     transactions: &[RoutableTx],
     resolved_senders: &HashMap<String, ResolvedSender>,
-    sequence: Option<&mut ScriptSequence>,
+    sequence: Option<&mut ScriptSequence<Ethereum>>,
     tx_indices: Option<&[usize]>,
 ) -> Result<Vec<BroadcastReceipt>, TrebError> {
     use alloy_rpc_types::TransactionRequest;
@@ -1938,19 +2117,20 @@ async fn broadcast_routable_txs_live(
 fn build_btxs_from_routable(
     from: Address,
     transactions: &[RoutableTx],
-) -> foundry_cheatcodes::BroadcastableTransactions {
-    let mut btxs = foundry_cheatcodes::BroadcastableTransactions::default();
+) -> foundry_cheatcodes::BroadcastableTransactions<Ethereum> {
+    use alloy_rpc_types::{TransactionInput, TransactionRequest};
+    use foundry_common::TransactionMaybeSigned;
+
+    let mut btxs = foundry_cheatcodes::BroadcastableTransactions::<Ethereum>::default();
     for tx in transactions {
-        let tx_json = serde_json::json!({
-            "from": format!("{:#x}", from),
-            "to": format!("{:#x}", tx.to),
-            "data": format!("0x{}", alloy_primitives::hex::encode(&tx.data)),
-        });
-        let tx_maybe_signed: foundry_common::TransactionMaybeSigned =
-            serde_json::from_value(tx_json).expect("failed to build synthetic tx");
+        let mut tx_req = TransactionRequest::default().from(from).to(tx.to);
+        tx_req.input = TransactionInput::new(alloy_primitives::Bytes::from(tx.data.clone()));
+        if !tx.value.is_zero() {
+            tx_req = tx_req.value(tx.value);
+        }
         btxs.push_back(foundry_cheatcodes::BroadcastableTransaction {
             rpc: None,
-            transaction: tx_maybe_signed,
+            transaction: TransactionMaybeSigned::new(tx_req),
         });
     }
     btxs
@@ -1985,7 +2165,7 @@ mod tests {
 
     #[test]
     fn extract_governor_tx_data_empty_run() {
-        let btxs = foundry_cheatcodes::BroadcastableTransactions::default();
+        let btxs = foundry_cheatcodes::BroadcastableTransactions::<Ethereum>::default();
         let run = TransactionRun {
             sender_role: "gov".into(),
             category: SenderCategory::Governor,
@@ -2001,7 +2181,7 @@ mod tests {
 
     #[test]
     fn extract_routable_txs_empty_run() {
-        let btxs = foundry_cheatcodes::BroadcastableTransactions::default();
+        let btxs = foundry_cheatcodes::BroadcastableTransactions::<Ethereum>::default();
         let run = TransactionRun {
             sender_role: "test".into(),
             category: SenderCategory::Wallet,
@@ -2036,7 +2216,7 @@ mod tests {
     use std::collections::VecDeque;
 
     /// Build a minimal ScriptSequence with transactions having the given hashes.
-    fn make_resume_sequence(tx_hashes: &[Option<B256>]) -> ScriptSequence {
+    fn make_resume_sequence(tx_hashes: &[Option<B256>]) -> ScriptSequence<Ethereum> {
         let from = Address::repeat_byte(0x01);
         let to = Address::repeat_byte(0x02);
         let mut transactions = VecDeque::new();
@@ -2046,7 +2226,7 @@ mod tests {
                 "to": format!("{:#x}", to),
                 "data": "0x01",
             });
-            let tx: TransactionMaybeSigned =
+            let tx: TransactionMaybeSigned<Ethereum> =
                 serde_json::from_value(tx_json).expect("build test tx");
             let mut tx_meta = TransactionWithMetadata::from_tx_request(tx);
             tx_meta.hash = *hash;
@@ -2073,7 +2253,7 @@ mod tests {
     ) -> super::super::broadcast_writer::ResumeState {
         super::super::broadcast_writer::ResumeState {
             sequence: make_resume_sequence(tx_hashes),
-            deferred: None,
+            queued: None,
             completed_tx_hashes: completed.iter().copied().collect(),
             pending_tx_hashes: pending.iter().copied().collect(),
             completed_safe_hashes: std::collections::HashSet::new(),

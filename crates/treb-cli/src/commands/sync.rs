@@ -3,7 +3,6 @@ use std::{
     time::Duration,
 };
 
-use alloy_chains::Chain;
 use anyhow::Context;
 use chrono::Utc;
 use owo_colors::OwoColorize;
@@ -39,17 +38,10 @@ struct SyncOutputJson {
 
 // ── Chain ID resolution ─────────────────────────────────────────────────
 
+#[cfg(test)]
 /// Resolve a network name or numeric chain ID to a u64 chain ID.
 fn resolve_chain_id(network: &str) -> anyhow::Result<u64> {
-    // Try parsing as a numeric chain ID first
-    if let Ok(id) = network.parse::<u64>() {
-        return Ok(id);
-    }
-
-    // Try resolving as a named chain via alloy-chains
-    let chain: Chain =
-        network.parse().map_err(|_| anyhow::anyhow!("unknown network: {network}"))?;
-    Ok(chain.id())
+    super::resolve_chain_id_arg(network)
 }
 
 // ── RPC URL resolution for governor sync ────────────────────────────────
@@ -170,13 +162,13 @@ pub async fn run(
         anyhow::bail!("no .treb/ registry found. Run `treb init` to initialize.");
     }
 
+    let scope = super::resolve_command_scope(&cwd, None, network)?;
+    let network = scope.network;
+
     let mut registry = Registry::open(&cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     // Resolve --network filter to chain_id
-    let chain_filter: Option<u64> = match &network {
-        Some(name) => Some(resolve_chain_id(name)?),
-        None => None,
-    };
+    let chain_filter = super::resolve_chain_id_for_network(&cwd, network.as_deref()).await?;
 
     // List all safe transactions, optionally filtered by chain
     let safe_txs = registry.list_safe_transactions();
@@ -481,12 +473,12 @@ pub async fn run(
         }
     }
 
-    // ── Update deferred broadcast files ────────────────────────────────
+    // ── Update queued broadcast files ──────────────────────────────────
     //
-    // After syncing registry records, scan broadcast/ for deferred files and
+    // After syncing registry records, scan broadcast/ for queued files and
     // update their status fields to reflect newly-executed proposals.
     if newly_executed_count > 0 || gov_newly_executed_count > 0 {
-        update_deferred_broadcast_files(&cwd, &registry);
+        update_queued_broadcast_files(&cwd, &registry);
     }
 
     // ── Output ──────────────────────────────────────────────────────────
@@ -551,6 +543,9 @@ pub async fn run_tx_hash(
     if !tx_hash.starts_with("0x") && !tx_hash.starts_with("0X") {
         anyhow::bail!("--tx-hash must be a hex string starting with 0x");
     }
+
+    let scope = super::resolve_command_scope(&cwd, None, network)?;
+    let network = scope.network;
 
     // Resolve RPC URL: explicit --rpc-url > active fork > network config
     let effective_rpc_url = resolve_tx_hash_rpc_url(rpc_url, network, &cwd)?;
@@ -928,8 +923,8 @@ fn format_sync_human_output(
 
 // ── Deferred broadcast file helpers ──────────────────────────────────────
 
-/// Recursively find all `.deferred.json` files under a directory.
-fn find_deferred_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+/// Recursively find all `.queued.json` or legacy `.deferred.json` files under a directory.
+fn find_queued_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut result = Vec::new();
     let Ok(entries) = std::fs::read_dir(dir) else {
         return result;
@@ -937,42 +932,44 @@ fn find_deferred_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            result.extend(find_deferred_files(&path));
-        } else if path.file_name().is_some_and(|n| n.to_string_lossy().ends_with(".deferred.json"))
-        {
+            result.extend(find_queued_files(&path));
+        } else if path.file_name().is_some_and(|n| {
+            let name = n.to_string_lossy();
+            name.ends_with(".queued.json") || name.ends_with(".deferred.json")
+        }) {
             result.push(path);
         }
     }
     result
 }
 
-// ── Deferred broadcast file updater ──────────────────────────────────────
+// ── Queued broadcast file updater ────────────────────────────────────────
 
-/// Scan `broadcast/` for `.deferred.json` files and update status fields
+/// Scan `broadcast/` for `.queued.json` files and update status fields
 /// to reflect newly-executed Safe proposals or Governor proposals.
-fn update_deferred_broadcast_files(cwd: &std::path::Path, registry: &Registry) {
-    use treb_forge::pipeline::broadcast_writer::DeferredOperations;
+fn update_queued_broadcast_files(cwd: &std::path::Path, registry: &Registry) {
+    use treb_forge::pipeline::broadcast_writer::QueuedOperations;
 
     let broadcast_dir = cwd.join("broadcast");
     if !broadcast_dir.exists() {
         return;
     }
 
-    let deferred_files = find_deferred_files(&broadcast_dir);
+    let queued_files = find_queued_files(&broadcast_dir);
 
-    for path in &deferred_files {
+    for path in &queued_files {
         let Ok(contents) = std::fs::read_to_string(path) else {
             continue;
         };
-        let Ok(mut deferred) = serde_json::from_str::<DeferredOperations>(&contents) else {
+        let Ok(mut queued) = serde_json::from_str::<QueuedOperations>(&contents) else {
             continue;
         };
 
         let mut changed = false;
 
         // Update Safe proposal statuses
-        for proposal in &mut deferred.safe_proposals {
-            if proposal.status == "proposed" {
+        for proposal in &mut queued.safe_proposals {
+            if proposal.status == "pending" || proposal.status == "queued" {
                 // Check if this safe tx hash is now executed in the registry
                 if let Some(stx) = registry.get_safe_transaction(&proposal.safe_tx_hash) {
                     if stx.status == TransactionStatus::Executed {
@@ -986,8 +983,8 @@ fn update_deferred_broadcast_files(cwd: &std::path::Path, registry: &Registry) {
         }
 
         // Update Governor proposal statuses
-        for proposal in &mut deferred.governor_proposals {
-            if proposal.status == "proposed" {
+        for proposal in &mut queued.governor_proposals {
+            if proposal.status == "pending" || proposal.status == "queued" {
                 if let Some(gp) = registry.get_governor_proposal(&proposal.proposal_id) {
                     if gp.status == treb_core::types::ProposalStatus::Executed {
                         proposal.status = "executed".into();
@@ -998,7 +995,7 @@ fn update_deferred_broadcast_files(cwd: &std::path::Path, registry: &Registry) {
         }
 
         if changed {
-            if let Ok(json) = serde_json::to_string_pretty(&deferred) {
+            if let Ok(json) = serde_json::to_string_pretty(&queued) {
                 let _ = std::fs::write(path, json);
             }
         }

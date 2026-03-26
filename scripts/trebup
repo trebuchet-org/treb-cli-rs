@@ -7,17 +7,21 @@ set -eo pipefail
 #   curl -fsSL https://raw.githubusercontent.com/trebuchet-org/treb-cli-rs/main/scripts/trebup | bash
 #
 # Version scheme:
-#   v2-nightly-{hash}--foundry-nightly-{hash}   Rust nightly + foundry nightly
-#   v2-nightly-{hash}--foundry-v1.5.1           Rust nightly + foundry stable
-#   v2.1.0--foundry-v1.5.1                      Rust stable + foundry stable
-#   v1-nightly                                   Go nightly (system forge)
+#   v2.0.0--foundry-v1.5.1                  Rust stable + foundry stable
+#   nightly-{sha}--foundry-nightly-{sha}    Rust nightly + foundry nightly
+#   nightly-{sha}--foundry-v1.5.1           Rust nightly + foundry stable
+#   v1.0.0                                  Go CLI (frozen)
 
 TREBUP_VERSION="2.0.0"
 
-TREB_DIR="${TREB_DIR:-$HOME/.treb}"
+BASE_DIR="${XDG_CONFIG_HOME:-$HOME}"
+DEFAULT_TREB_DIR="$BASE_DIR/.treb"
+TREB_DIR="${TREB_DIR:-$DEFAULT_TREB_DIR}"
 TREB_BIN_DIR="$TREB_DIR/bin"
 TREB_VERSIONS_DIR="$TREB_DIR/versions"
 TREB_ACTIVE_FILE="$TREB_DIR/.active"
+CUSTOM_TREB_DIR=0
+[ "$TREB_DIR" != "$DEFAULT_TREB_DIR" ] && CUSTOM_TREB_DIR=1
 
 RUST_REPO="trebuchet-org/treb-cli-rs"
 GO_REPO="trebuchet-org/treb-cli"
@@ -27,12 +31,10 @@ GO_REPO="trebuchet-org/treb-cli"
 # ---------------------------------------------------------------------------
 
 main() {
-  need_cmd curl
-  need_cmd tar
-
   local cmd="install"
   local install_version=""
   local foundry_channel="stable"
+  local local_path=""
 
   while [[ -n $1 ]]; do
     case $1 in
@@ -41,8 +43,10 @@ main() {
       -v|--version)     echo "trebup $TREBUP_VERSION"; exit 0;;
       -U|--update)      cmd="update"; shift; continue;;
       -l|--list)        cmd="list"; shift; continue;;
+      -a|--available)   cmd="available"; shift; continue;;
       -u|--use)         shift; cmd="use"; install_version="$1";;
       -i|--install)     shift; install_version="$1";;
+      -p|--path)        shift; local_path="$1";;
       --foundry)        shift; foundry_channel="$1";;
       *)                warn "unknown option: $1"; usage; exit 1;;
     esac
@@ -52,8 +56,9 @@ main() {
   banner
 
   case "$cmd" in
-    list)    do_list; exit 0;;
-    use)     do_use "$install_version"; exit 0;;
+    list)      do_list; exit 0;;
+    available) do_available; exit 0;;
+    use)       do_use "$install_version"; exit 0;;
     update)  do_update; exit 0;;
     install) ;;
   esac
@@ -61,44 +66,53 @@ main() {
   # Migrate old installations on first run
   migrate_if_needed
 
-  # Resolve what to install
-  local tag repo
-  resolve_install "$install_version" "$foundry_channel" tag repo
+  if [ -n "$local_path" ]; then
+    need_cmd cargo
+    install_from_local_path "$local_path" "$install_version"
+    return
+  fi
 
-  if [ -z "$tag" ]; then
+  need_cmd curl
+  need_cmd tar
+
+  # Resolve what to install
+  RESOLVED_TAG="" ; RESOLVED_REPO=""
+  resolve_install "$install_version" "$foundry_channel"
+
+  if [ -z "$RESOLVED_TAG" ]; then
     err "no release found. The nightly CI may not have published a release yet.
   Check https://github.com/${RUST_REPO}/releases for available versions,
   or install a specific tag with: trebup --install <tag>"
   fi
 
-  say "installing treb ($tag)"
+  say "installing treb ($RESOLVED_TAG)"
 
   # Detect platform
-  local platform arch
-  detect_platform platform arch
+  DETECTED_PLATFORM="" ; DETECTED_ARCH=""
+  detect_platform
 
   # Download + extract
   # Go repo uses underscores: treb_tag_platform_arch.tar.gz
   # Rust repo uses hyphens: treb-tag-platform-arch.tar.gz
   local archive checksum_file
-  case "$repo" in
+  case "$RESOLVED_REPO" in
     *treb-cli-rs)
-      archive="treb-${tag}-${platform}-${arch}.tar.gz"
-      checksum_file="treb-${tag}-${platform}-${arch}.sha256"
+      archive="treb-${RESOLVED_TAG}-${DETECTED_PLATFORM}-${DETECTED_ARCH}.tar.gz"
+      checksum_file="treb-${RESOLVED_TAG}-${DETECTED_PLATFORM}-${DETECTED_ARCH}.sha256"
       ;;
     *)
-      archive="treb_${tag}_${platform}_${arch}.tar.gz"
-      checksum_file="treb_${tag}_${platform}_${arch}.sha256"
+      archive="treb_${RESOLVED_TAG}_${DETECTED_PLATFORM}_${DETECTED_ARCH}.tar.gz"
+      checksum_file="treb_${RESOLVED_TAG}_${DETECTED_PLATFORM}_${DETECTED_ARCH}.sha256"
       ;;
   esac
-  local base_url="https://github.com/${repo}/releases/download/${tag}"
-  local version_dir="$TREB_VERSIONS_DIR/$tag"
+  local base_url="https://github.com/${RESOLVED_REPO}/releases/download/${RESOLVED_TAG}"
+  local version_dir="$TREB_VERSIONS_DIR/$RESOLVED_TAG"
 
   local tmp_dir
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 
-  say "downloading $archive..."
+  say "downloading $DETECTED_ARCHive..."
   curl -fsSL "${base_url}/${archive}" -o "${tmp_dir}/${archive}"
   if curl -fsSL "${base_url}/${checksum_file}" -o "${tmp_dir}/${checksum_file}" 2>/dev/null; then
     verify_checksum "$tmp_dir" "$checksum_file"
@@ -109,14 +123,14 @@ main() {
   ensure tar xzf "${tmp_dir}/${archive}" -C "$version_dir"
 
   # Activate
-  activate "$tag"
+  activate "$RESOLVED_TAG"
 
   # Install shell completions from archive
   if [ -d "$version_dir/completions" ]; then
     install_completions "$version_dir/completions"
   fi
 
-  say "done! treb $tag installed to $TREB_BIN_DIR/treb"
+  say "done! treb $RESOLVED_TAG installed to $TREB_BIN_DIR/treb"
   check_path
 }
 
@@ -144,7 +158,8 @@ do_list() {
     # Detect runtime from version prefix
     local info=""
     case "$v" in
-      v1*)  info=" (go, system forge)" ;;
+      v1*)  info=" (go)" ;;
+      local-*) info=" (local build)" ;;
       *--foundry-nightly*) info=" (foundry nightly)" ;;
       *--foundry-v*)
         local fv="${v##*--foundry-}"
@@ -153,6 +168,66 @@ do_list() {
 
     echo "  ${marker}${v}${info}"
   done
+}
+
+do_available() {
+  say "fetching available releases..."
+  echo ""
+
+  local active
+  active="$(cat "$TREB_ACTIVE_FILE" 2>/dev/null || echo "")"
+
+  local all_rust
+  all_rust="$(curl -fsSL "https://api.github.com/repos/${RUST_REPO}/releases?per_page=50" 2>/dev/null \
+    | grep '"tag_name"' \
+    | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
+
+  local stable_releases nightly_releases
+  stable_releases="$(echo "$all_rust" | grep -v "nightly" || true)"
+  nightly_releases="$(echo "$all_rust" | grep "nightly" | head -10 || true)"
+
+  if [ -n "$stable_releases" ]; then
+    echo "  Stable releases:"
+    for tag in $stable_releases; do
+      local marker="  "
+      [ "$tag" = "$active" ] && marker="* "
+      local installed=""
+      [ -d "$TREB_VERSIONS_DIR/$tag" ] && installed=" [installed]"
+      echo "    ${marker}${tag}${installed}"
+    done
+    echo ""
+  fi
+
+  if [ -n "$nightly_releases" ]; then
+    echo "  Nightly (latest 10):"
+    for tag in $nightly_releases; do
+      local marker="  "
+      [ "$tag" = "$active" ] && marker="* "
+      local installed=""
+      [ -d "$TREB_VERSIONS_DIR/$tag" ] && installed=" [installed]"
+      echo "    ${marker}${tag}${installed}"
+    done
+    echo ""
+  fi
+
+  # Go releases
+  local go_releases
+  go_releases="$(curl -fsSL "https://api.github.com/repos/${GO_REPO}/releases?per_page=10" 2>/dev/null \
+    | grep '"tag_name"' \
+    | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/' \
+    | grep -E "^v[0-9]" || true)"
+
+  if [ -n "$go_releases" ]; then
+    echo "  Go (frozen):"
+    for tag in $go_releases; do
+      local marker="  "
+      [ "$tag" = "$active" ] && marker="* "
+      local installed=""
+      [ -d "$TREB_VERSIONS_DIR/$tag" ] && installed=" [installed]"
+      echo "    ${marker}${tag}${installed}"
+    done
+    echo ""
+  fi
 }
 
 do_use() {
@@ -171,6 +246,7 @@ do_use() {
 }
 
 do_update() {
+  need_cmd curl
   local url="https://raw.githubusercontent.com/${RUST_REPO}/main/scripts/trebup"
   say "updating trebup..."
   ensure curl -fsSL "$url" -o "$TREB_BIN_DIR/trebup.tmp"
@@ -186,61 +262,59 @@ do_update() {
 resolve_install() {
   local version="$1"
   local foundry_channel="$2"
-  local -n _tag=$3
-  local -n _repo=$4
+  # Returns via RESOLVED_TAG and RESOLVED_REPO globals
 
-  # Default: latest Rust nightly + foundry stable
+  # Default: latest Rust release (nightly or stable)
   if [ -z "$version" ]; then
-    version="v2-nightly"
+    version="latest"
   fi
 
   # Aliases
   case "$version" in
-    nightly)      version="v2-nightly" ;;
-    go-nightly)   version="v1-nightly" ;;
+    nightly)
+      # Find latest nightly release (any foundry channel)
+      RESOLVED_REPO="$RUST_REPO"
+      local resolved
+      resolved="$(find_latest_release "$RUST_REPO" "^nightly-")"
+      if [ -z "$resolved" ]; then
+        err "no nightly releases found"
+      fi
+      RESOLVED_TAG="$resolved"
+      say "resolved nightly → $resolved"
+      return
+      ;;
+    latest)
+      # Find the latest release regardless of naming scheme
+      RESOLVED_REPO="$RUST_REPO"
+      local resolved
+      resolved="$(find_latest_release "$RUST_REPO" "^v")"
+      if [ -z "$resolved" ]; then
+        err "no releases found at $RUST_REPO"
+      fi
+      RESOLVED_TAG="$resolved"
+      say "resolved latest → $resolved"
+      return
+      ;;
   esac
 
   # Route by major version
   case "$version" in
     v1*)
-      _repo="$GO_REPO"
-      # Go has no foundry dimension — map to Go's current tag format
-      if [[ "$version" == "v1-nightly" ]]; then
-        _tag="nightly"  # Go repo uses bare "nightly" tag
-      else
-        _tag="$version"
-      fi
+      RESOLVED_REPO="$GO_REPO"
+      # Go CLI frozen at v1.0.0 — no nightly channel
+      RESOLVED_TAG="$version"
       return
       ;;
     v2*)
-      _repo="$RUST_REPO"
+      RESOLVED_REPO="$RUST_REPO"
       ;;
     *)
       err "cannot determine repo for version: $version"
       ;;
   esac
 
-  # Rust: resolve foundry channel into a full FQID tag
-  if [[ "$version" == v2-nightly* && "$version" != *--foundry-* ]]; then
-    # Try FQID format first, fall back to legacy tag format
-    local pattern resolved
-    if [ "$foundry_channel" = "nightly" ]; then
-      pattern="v2-nightly-.*--foundry-nightly-"
-    else
-      pattern="v2-nightly-.*--foundry-v"
-    fi
-
-    resolved="$(find_latest_release "$RUST_REPO" "$pattern")"
-    if [ -z "$resolved" ]; then
-      # Fall back to latest release (pre-FQID tags like v0.1.0)
-      say "no FQID release found, falling back to latest release..."
-      resolved="$(find_latest_release "$RUST_REPO" "^v")"
-    fi
-    if [ -z "$resolved" ]; then
-      err "no release found for treb v2 nightly (foundry $foundry_channel)"
-    fi
-    _tag="$resolved"
-  elif [[ "$version" == v2.* && "$version" != *--foundry-* ]]; then
+  # Rust stable: resolve foundry channel into FQID tag
+  if [[ "$version" == v2.* && "$version" != *--foundry-* ]]; then
     # Stable version — try FQID, fall back to exact tag
     local pattern resolved
     if [ "$foundry_channel" = "nightly" ]; then
@@ -254,10 +328,10 @@ resolve_install() {
       # Fall back to exact version tag (pre-FQID)
       resolved="$version"
     fi
-    _tag="$resolved"
+    RESOLVED_TAG="$resolved"
   else
     # Fully qualified — use as-is
-    _tag="$version"
+    RESOLVED_TAG="$version"
   fi
 }
 
@@ -293,6 +367,136 @@ activate() {
   fi
 
   echo "$version" > "$TREB_ACTIVE_FILE"
+}
+
+# ---------------------------------------------------------------------------
+# Local build install
+# ---------------------------------------------------------------------------
+
+install_from_local_path() {
+  local requested_path="$1"
+  local install_version="$2"
+
+  local manifest_path workspace_root version_id version_dir binary_path
+  manifest_path="$(resolve_local_manifest_path "$requested_path")"
+  workspace_root="$(resolve_local_workspace_root "$manifest_path")"
+
+  version_id="${install_version:-$(derive_local_version_id "$workspace_root")}"
+  version_dir="$TREB_VERSIONS_DIR/$version_id"
+
+  say "building treb from local checkout: $workspace_root"
+  ensure mkdir -p "$TREB_VERSIONS_DIR"
+  ensure cargo build --release --manifest-path "$workspace_root/Cargo.toml" -p treb-cli
+
+  binary_path="$(resolve_local_binary_path "$workspace_root")"
+
+  ensure rm -rf "$version_dir"
+  ensure mkdir -p "$version_dir"
+  ensure cp "$binary_path" "$version_dir/treb-cli"
+  ensure chmod +x "$version_dir/treb-cli"
+
+  generate_local_completions "$version_dir" "$version_dir/treb-cli"
+
+  activate "$version_id"
+
+  if [ -d "$version_dir/completions" ]; then
+    install_completions "$version_dir/completions"
+  fi
+
+  say "done! local treb build installed as $version_id"
+  check_path
+}
+
+resolve_local_workspace_root() {
+  local manifest_path="$1"
+  local manifest_dir workspace_root
+  manifest_dir="$(dirname "$manifest_path")"
+
+  if [ -f "$manifest_dir/crates/treb-cli/Cargo.toml" ]; then
+    echo "$manifest_dir"
+    return
+  fi
+
+  if [ "$(basename "$manifest_dir")" = "treb-cli" ] && [ "$(basename "$(dirname "$manifest_dir")")" = "crates" ]; then
+    workspace_root="$(dirname "$(dirname "$manifest_dir")")"
+    if [ -f "$workspace_root/Cargo.toml" ]; then
+      echo "$workspace_root"
+      return
+    fi
+  fi
+
+  err "failed to locate Cargo workspace for $manifest_path"
+}
+
+resolve_local_manifest_path() {
+  local requested_path="$1"
+  local path
+  if [ -d "$requested_path" ]; then
+    path="$(cd "$requested_path" 2>/dev/null && pwd -P)" || err "invalid path: $requested_path"
+  elif [ -f "$requested_path" ]; then
+    path="$(cd "$(dirname "$requested_path")" 2>/dev/null && pwd -P)/$(basename "$requested_path")" || err "invalid path: $requested_path"
+  else
+    err "path does not exist: $requested_path"
+  fi
+
+  if [ -f "$path/crates/treb-cli/Cargo.toml" ]; then
+    echo "$path/crates/treb-cli/Cargo.toml"
+    return
+  fi
+
+  if [ -f "$path/Cargo.toml" ]; then
+    if grep -q 'name = "treb-cli"' "$path/Cargo.toml" 2>/dev/null; then
+      echo "$path/Cargo.toml"
+      return
+    fi
+    if grep -q '\[workspace\]' "$path/Cargo.toml" 2>/dev/null && [ -f "$path/crates/treb-cli/Cargo.toml" ]; then
+      echo "$path/crates/treb-cli/Cargo.toml"
+      return
+    fi
+  fi
+
+  err "path must point at a treb-cli-rs checkout or crates/treb-cli manifest"
+}
+
+derive_local_version_id() {
+  local workspace_root="$1"
+  local sha="local"
+  local dirty=""
+
+  if command -v git >/dev/null 2>&1 && git -C "$workspace_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    sha="$(git -C "$workspace_root" rev-parse --short HEAD 2>/dev/null || echo local)"
+    if ! git -C "$workspace_root" diff --quiet --ignore-submodules HEAD -- 2>/dev/null; then
+      dirty="-dirty"
+    fi
+  else
+    sha="$(date +%Y%m%d%H%M%S)"
+  fi
+
+  echo "local-${sha}${dirty}"
+}
+
+resolve_local_binary_path() {
+  local workspace_root="$1"
+  if [ -f "$workspace_root/target/release/treb" ]; then
+    echo "$workspace_root/target/release/treb"
+    return
+  fi
+  if [ -f "$workspace_root/target/release/treb-cli" ]; then
+    echo "$workspace_root/target/release/treb-cli"
+    return
+  fi
+  err "local build succeeded but no treb binary was found under $workspace_root/target/release"
+}
+
+generate_local_completions() {
+  local version_dir="$1"
+  local binary_path="$2"
+  local completions_dir="$version_dir/completions"
+
+  ensure mkdir -p "$completions_dir"
+  ensure "$binary_path" completion bash > "$completions_dir/treb.bash"
+  ensure "$binary_path" completion zsh > "$completions_dir/_treb"
+  ensure "$binary_path" completion fish > "$completions_dir/treb.fish"
 }
 
 # ---------------------------------------------------------------------------
@@ -393,8 +597,7 @@ migrate_if_needed() {
 # ---------------------------------------------------------------------------
 
 detect_platform() {
-  local -n _platform=$1
-  local -n _arch=$2
+  # Returns via DETECTED_PLATFORM and DETECTED_ARCH globals
 
   local os
   os="$(uname -s)"
@@ -402,9 +605,9 @@ detect_platform() {
   machine="$(uname -m)"
 
   case "$os" in
-    Linux)   _platform="linux" ;;
-    Darwin)  _platform="darwin" ;;
-    MINGW*|MSYS*|CYGWIN*) _platform="windows" ;;
+    Linux)   DETECTED_PLATFORM="linux" ;;
+    Darwin)  DETECTED_PLATFORM="darwin" ;;
+    MINGW*|MSYS*|CYGWIN*) DETECTED_PLATFORM="windows" ;;
     *)       err "unsupported OS: $os" ;;
   esac
 
@@ -412,12 +615,12 @@ detect_platform() {
     x86_64)
       # Check for Rosetta
       if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = "1" ]; then
-        _arch="arm64"
+        DETECTED_ARCH="arm64"
       else
-        _arch="amd64"
+        DETECTED_ARCH="amd64"
       fi
       ;;
-    aarch64|arm64) _arch="arm64" ;;
+    aarch64|arm64) DETECTED_ARCH="arm64" ;;
     *)             err "unsupported architecture: $machine" ;;
   esac
 }
@@ -486,6 +689,11 @@ check_path() {
     *":${TREB_BIN_DIR}:"*) return ;;
   esac
 
+  if [ "$CUSTOM_TREB_DIR" -eq 1 ]; then
+    say "custom TREB_DIR in use; skipping shell profile PATH update for $TREB_BIN_DIR"
+    return
+  fi
+
   # Auto-add to shell profile
   local profile=""
   local shell_name
@@ -519,9 +727,23 @@ check_path() {
 install_trebup() {
   ensure mkdir -p "$TREB_BIN_DIR"
 
-  # If running from a real file (not piped), just copy it
-  if [ -f "$0" ] && [ "$0" != "bash" ] && [ "$0" != "/dev/stdin" ]; then
-    cp "$0" "$TREB_BIN_DIR/trebup"
+  local current_path target_path
+  if [ -f "$0" ]; then
+    current_path="$(realpath "$0" 2>/dev/null || echo "$0")"
+  else
+    current_path="$(command -v "$0" 2>/dev/null || echo "$0")"
+    current_path="$(realpath "$current_path" 2>/dev/null || echo "$current_path")"
+  fi
+  target_path="$(realpath "$TREB_BIN_DIR/trebup" 2>/dev/null || echo "$TREB_BIN_DIR/trebup")"
+
+  # Already installed in the right place — nothing to do
+  if [ "$current_path" = "$target_path" ]; then
+    return
+  fi
+
+  # If running from a real file (not piped), copy it
+  if [ -f "$current_path" ] && [ "$current_path" != "bash" ] && [ "$current_path" != "/dev/stdin" ]; then
+    cp "$current_path" "$TREB_BIN_DIR/trebup"
     chmod +x "$TREB_BIN_DIR/trebup"
     return
   fi
@@ -571,18 +793,21 @@ OPTIONS:
     -h, --help            Print this help message
     -v, --version         Print trebup version
     -i, --install TAG     Install a specific version
+    -p, --path PATH       Build and install treb from a local Rust checkout
     -u, --use TAG         Switch to an already-installed version
     -l, --list            List installed versions
+    -a, --available       List available releases from GitHub
     --foundry CHANNEL     Foundry channel: stable (default) or nightly
     -U, --update          Update trebup itself
 
 EXAMPLES:
-    trebup                              Install latest treb nightly (foundry stable)
-    trebup --foundry nightly            Install latest treb nightly (foundry nightly)
-    trebup --install v2.1.0             Install treb stable
-    trebup --install v1-nightly         Install Go nightly
+    trebup                              Install latest treb release
+    trebup --foundry nightly            Install with foundry nightly
+    trebup --install v2.0.0             Install specific version
+    trebup --install v1.0.0             Install Go CLI (v1, frozen)
+    trebup --path /path/to/treb-cli-rs  Build and install from a local checkout
     trebup --list                       List installed versions
-    trebup --use v2-nightly-a5f2ae0--foundry-v1.5.1
+    trebup --use v2.0.0--foundry-v1.5.1
 EOF
 }
 

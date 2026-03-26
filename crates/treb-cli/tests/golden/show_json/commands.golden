@@ -25,7 +25,6 @@
     "namespace": "mainnet",
     "proxyInfo": null,
     "tags": null,
-    "transactionId": "",
     "type": "SINGLETON",
     "updatedAt": "<TIMESTAMP>",
     "verification": {

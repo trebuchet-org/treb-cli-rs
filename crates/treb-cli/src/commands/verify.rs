@@ -79,6 +79,7 @@ impl VerifyScope {
     fn as_deployment_filters(&self) -> DeploymentFilters {
         DeploymentFilters {
             network: self.network.clone(),
+            resolved_chain_id: None,
             namespace: self.namespace.clone(),
             deployment_type: None,
             tag: None,
@@ -373,7 +374,8 @@ pub async fn run(
         );
     }
 
-    let scope = VerifyScope { namespace, network };
+    let scope = super::resolve_command_scope(&cwd, namespace, network)?;
+    let scope = VerifyScope { namespace: scope.namespace, network: scope.network };
 
     if all {
         return run_batch(
@@ -399,7 +401,9 @@ pub async fn run(
     let mut registry = Registry::open(&cwd).context("failed to open registry")?;
     let lookup = registry.load_lookup_index().context("failed to load lookup index")?;
     let all_deployments = registry.list_deployments();
-    let filters = scope.as_deployment_filters();
+    let mut filters = scope.as_deployment_filters();
+    filters.resolved_chain_id =
+        super::resolve_chain_id_for_network(&cwd, scope.network.as_deref()).await?;
     let filtered_deployments = filter_deployments(&all_deployments, &filters);
 
     let query = match deployment {
@@ -640,7 +644,9 @@ async fn run_batch(
     let mut registry = Registry::open(cwd).context("failed to open registry")?;
 
     let all_deployments = registry.list_deployments();
-    let filters = scope.as_deployment_filters();
+    let mut filters = scope.as_deployment_filters();
+    filters.resolved_chain_id =
+        super::resolve_chain_id_for_network(cwd, scope.network.as_deref()).await?;
     let filtered_deployments = filter_deployments(&all_deployments, &filters);
     let scoped_deployments: Vec<_> =
         filtered_deployments.iter().map(|deployment| (*deployment).clone()).collect();

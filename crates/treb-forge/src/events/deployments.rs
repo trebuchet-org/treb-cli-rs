@@ -59,6 +59,8 @@ pub struct ExtractedCollision {
     pub bytecode_hash: B256,
     /// The init code hash of the attempted deployment.
     pub init_code_hash: B256,
+    /// Matched compilation artifact, if an [`ArtifactIndex`] was provided.
+    pub artifact_match: Option<ArtifactMatch>,
 }
 
 /// Parse a strategy string from the event into a [`DeploymentMethod`].
@@ -117,12 +119,19 @@ pub fn extract_deployments(
 ///
 /// Iterates through `events` and converts every [`DeploymentCollision`] into
 /// an [`ExtractedCollision`].
-pub fn extract_collisions(events: &[ParsedEvent]) -> Vec<ExtractedCollision> {
+pub fn extract_collisions(
+    events: &[ParsedEvent],
+    artifacts: Option<&ArtifactIndex>,
+) -> Vec<ExtractedCollision> {
     events
         .iter()
         .filter_map(|event| {
             if let ParsedEvent::Treb(boxed) = event {
                 if let TrebEvent::DeploymentCollision(collision) = boxed.as_ref() {
+                    let artifact_match = artifacts.and_then(|idx| {
+                        idx.find_by_name(&collision.deployment.artifact).ok().flatten()
+                    });
+
                     return Some(ExtractedCollision {
                         existing_address: collision.existingContract,
                         contract_name: collision.deployment.artifact.clone(),
@@ -132,6 +141,7 @@ pub fn extract_collisions(events: &[ParsedEvent]) -> Vec<ExtractedCollision> {
                         salt: collision.deployment.salt,
                         bytecode_hash: collision.deployment.bytecodeHash,
                         init_code_hash: collision.deployment.initCodeHash,
+                        artifact_match,
                     });
                 }
             }
@@ -239,7 +249,7 @@ mod tests {
         let log = make_log(Address::ZERO, collision_event.encode_log_data());
         let parsed = decode_events(&[log]);
 
-        let collisions = extract_collisions(&parsed);
+        let collisions = extract_collisions(&parsed, None);
         assert_eq!(collisions.len(), 1);
 
         let c = &collisions[0];
@@ -305,7 +315,7 @@ mod tests {
         assert_eq!(deployments.len(), 1);
         assert_eq!(deployments[0].contract_name, "Counter");
 
-        let collisions = extract_collisions(&parsed);
+        let collisions = extract_collisions(&parsed, None);
         assert!(collisions.is_empty());
     }
 

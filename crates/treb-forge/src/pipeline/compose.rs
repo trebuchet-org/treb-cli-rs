@@ -11,7 +11,7 @@ use treb_registry::Registry;
 use crate::{
     artifacts::ArtifactIndex,
     compiler::compile_project,
-    script::{ExecutionResult, ScriptConfig},
+    script::{ExecutionResult, ScriptConfig, apply_deployed_libraries},
 };
 
 use super::{PipelineContext, types::PipelineResult};
@@ -223,6 +223,13 @@ impl ComposePipeline {
         artifact_index: &ArtifactIndex,
         registry: &mut Registry,
     ) -> Result<ComponentSimulation, TrebError> {
+        let mut script_config = script_config;
+        apply_deployed_libraries(
+            &mut script_config,
+            registry,
+            &context.config.namespace,
+            context.config.chain_id,
+        );
         let script_args = script_config.into_script_args()?;
 
         // Run forge: preprocess → compile → link → execute

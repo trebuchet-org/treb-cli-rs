@@ -17,6 +17,12 @@ fn seed_registry_from_fixture(project_root: &Path, fixture_path: &Path) {
     let registry =
         treb_registry::Registry::open(project_root).expect("registry should open after seeding");
     registry.rebuild_lookup_index().expect("lookup index rebuild should succeed");
+
+    std::fs::write(
+        project_root.join(".treb/config.local.json"),
+        "{\n  \"namespace\": \"mainnet\",\n  \"network\": \"\"\n}\n",
+    )
+    .expect("should select the fixture namespace in local config");
 }
 
 /// Seed the registry with fixture deployments from `deployments_map.json`.
