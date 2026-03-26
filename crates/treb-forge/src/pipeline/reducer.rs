@@ -14,10 +14,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use alloy_network::Ethereum;
 use alloy_primitives::{Address, U256};
-use foundry_cheatcodes::BroadcastableTransactions;
 use treb_core::error::TrebError;
+
+use crate::foundry_compat::BroadcastableTransactions;
 
 /// Default path to the built-in OZ Governor reducer script.
 const BUILTIN_GOVERNOR_REDUCER: &str = "lib/treb-sol/src/v2/reducers/GovernorReducer.sol";
@@ -128,7 +128,7 @@ pub async fn invoke_reducer(
     env_vars: HashMap<String, String>,
     fork_url: &str,
     chain_id: u64,
-) -> Result<BroadcastableTransactions<Ethereum>, TrebError> {
+) -> Result<BroadcastableTransactions, TrebError> {
     use crate::script::{ScriptConfig, execute_script};
 
     // Set TREB_REDUCER_* env vars for the duration of script execution

@@ -3,7 +3,6 @@
 
 use std::collections::HashMap;
 
-use alloy_network::Ethereum;
 use alloy_primitives::Address;
 use foundry_evm::traces::{CallTraceDecoderBuilder, identifier::TraceIdentifiers};
 use treb_core::{error::TrebError, types::GovernorProposal};
@@ -15,6 +14,7 @@ use crate::{
         ExtractedCollision, decode_events, detect_proxy_relationships, extract_collisions,
         extract_deployments,
     },
+    foundry_compat::BroadcastableTransactions,
     script::ExecutionResult,
 };
 
@@ -54,7 +54,7 @@ pub struct SimulationOutput {
     pub console_logs: Vec<String>,
     pub execution_traces: Option<String>,
     pub setup_traces: Option<String>,
-    pub broadcastable_transactions: Option<foundry_cheatcodes::BroadcastableTransactions<Ethereum>>,
+    pub broadcastable_transactions: Option<BroadcastableTransactions>,
 }
 
 /// Hydrate a raw `ExecutionResult` into structured pipeline types.
