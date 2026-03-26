@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/treb-cli", "crates/treb-core", "crates/treb-config", "crates/treb-registry", "crates/treb-forge", "crates/treb-verify", "crates/treb-safe", "crates/treb-sol"]
+members = ["crates/treb-cli", "crates/treb-core", "crates/treb-config", "crates/treb-registry", "crates/treb-forge", "crates/treb-verify", "crates/treb-safe", "crates/treb-sol", "xtask"]
 resolver = "3"
 
 [workspace.package]
