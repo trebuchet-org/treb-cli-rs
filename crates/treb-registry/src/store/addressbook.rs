@@ -16,19 +16,42 @@ use crate::{
 /// nested `HashMap<String, HashMap<String, String>>`.
 pub struct AddressbookStore {
     path: PathBuf,
+    legacy_path: Option<PathBuf>,
     data: HashMap<String, HashMap<String, String>>,
 }
 
 impl AddressbookStore {
-    /// Create a new store pointing at `<registry_dir>/addressbook.json`.
+    /// Create a new store pointing at `<deployments_dir>/addressbook.json`.
     /// Call [`load`](Self::load) to read existing data from disk.
-    pub fn new(registry_dir: &std::path::Path) -> Self {
-        Self { path: registry_dir.join(ADDRESSBOOK_FILE), data: HashMap::new() }
+    pub fn new(deployments_dir: &std::path::Path) -> Self {
+        Self {
+            path: deployments_dir.join(ADDRESSBOOK_FILE),
+            legacy_path: None,
+            data: HashMap::new(),
+        }
+    }
+
+    /// Create a new store with a fallback path for loading legacy `.treb/addressbook.json`.
+    pub fn with_legacy_path(
+        deployments_dir: &std::path::Path,
+        legacy_path: &std::path::Path,
+    ) -> Self {
+        Self {
+            path: deployments_dir.join(ADDRESSBOOK_FILE),
+            legacy_path: Some(legacy_path.to_path_buf()),
+            data: HashMap::new(),
+        }
     }
 
     /// Load addressbook entries from disk, replacing any in-memory data.
     pub fn load(&mut self) -> Result<(), TrebError> {
-        self.data = read_versioned_file(&self.path)?;
+        if self.path.exists() {
+            self.data = read_versioned_file(&self.path)?;
+        } else if let Some(legacy_path) = &self.legacy_path {
+            self.data = read_versioned_file(legacy_path)?;
+        } else {
+            self.data = HashMap::new();
+        }
         Ok(())
     }
 
@@ -46,6 +69,15 @@ impl AddressbookStore {
             .collect();
 
         write_versioned_file(&self.path, &sorted)
+    }
+
+    /// Replace the full addressbook map and persist it atomically.
+    pub fn replace_all(
+        &mut self,
+        data: HashMap<String, HashMap<String, String>>,
+    ) -> Result<(), TrebError> {
+        self.data = data;
+        self.save()
     }
 
     /// Return `true` when the given chain/name entry exists.

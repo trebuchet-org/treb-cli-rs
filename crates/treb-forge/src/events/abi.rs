@@ -148,7 +148,6 @@ mod tests {
 
     #[test]
     fn governor_broadcast_encode_decode_round_trip() {
-        use alloy_primitives::{Log, LogData};
         use alloy_sol_types::SolEvent;
 
         let governor = address!("0000000000000000000000000000000000000099");

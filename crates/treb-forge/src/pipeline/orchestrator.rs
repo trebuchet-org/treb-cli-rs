@@ -17,7 +17,13 @@ use foundry_evm::traces::{
     CallKind, CallTraceDecoderBuilder, TraceKind, Traces, decode_trace_arena,
     identifier::TraceIdentifiers, render_trace_arena,
 };
-use treb_core::{error::TrebError, types::TransactionStatus};
+use treb_core::{
+    error::TrebError,
+    types::{
+        Deployment, ExecutionKind, ExecutionRef, ExecutionStatus, GovernorProposal, ProposalStatus,
+        SafeTransaction, TransactionStatus,
+    },
+};
 use treb_registry::Registry;
 use treb_safe::{
     SafeServiceClient, SafeTx, compute_safe_tx_hash, sign_safe_tx, types::ProposeRequest,
@@ -31,7 +37,7 @@ use crate::{
         abi::SimulatedTransaction,
         decoder::{ParsedEvent, TrebEvent},
     },
-    script::{ExecutionResult, ScriptConfig},
+    script::{ExecutionResult, ScriptConfig, apply_deployed_libraries},
 };
 
 use super::{
@@ -45,6 +51,159 @@ pub type BroadcastHook = Box<dyn FnOnce(&[RecordedTransaction]) -> bool + Send>;
 
 /// Callback for pipeline progress updates.
 pub type BroadcastProgressCallback = Box<dyn Fn(BroadcastPhase) + Send>;
+
+fn tx_id_key(tx_ids: &[String]) -> String {
+    tx_ids.join("\u{1f}")
+}
+
+fn queued_artifact_file_from_broadcast_file(broadcast_file: &str) -> String {
+    super::broadcast_writer::queued_path_from(Path::new(broadcast_file))
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn direct_execution_status(status: &TransactionStatus) -> ExecutionStatus {
+    match status {
+        TransactionStatus::Executed => ExecutionStatus::Executed,
+        TransactionStatus::Queued | TransactionStatus::Simulated => ExecutionStatus::Broadcast,
+        TransactionStatus::Failed => ExecutionStatus::Orphaned,
+    }
+}
+
+fn queued_execution_status(status: &TransactionStatus) -> ExecutionStatus {
+    match status {
+        TransactionStatus::Executed => ExecutionStatus::Executed,
+        TransactionStatus::Queued | TransactionStatus::Simulated => ExecutionStatus::Queued,
+        TransactionStatus::Failed => ExecutionStatus::Orphaned,
+    }
+}
+
+fn proposal_execution_status(status: &ProposalStatus) -> ExecutionStatus {
+    match status {
+        ProposalStatus::Executed => ExecutionStatus::Executed,
+        ProposalStatus::Canceled | ProposalStatus::Defeated => ExecutionStatus::Orphaned,
+        ProposalStatus::Pending
+        | ProposalStatus::Active
+        | ProposalStatus::Succeeded
+        | ProposalStatus::Queued => ExecutionStatus::Queued,
+    }
+}
+
+fn apply_execution_candidate(
+    queued_by_tx_id: &mut HashMap<String, (u8, ExecutionRef)>,
+    tx_id: String,
+    priority: u8,
+    execution: ExecutionRef,
+) {
+    match queued_by_tx_id.get(&tx_id) {
+        Some((existing_priority, _)) if *existing_priority >= priority => {}
+        _ => {
+            queued_by_tx_id.insert(tx_id, (priority, execution));
+        }
+    }
+}
+
+fn stamp_execution_refs(
+    deployments: &mut [Deployment],
+    recorded_transactions: &[RecordedTransaction],
+    safe_transactions: &[SafeTransaction],
+    governor_proposals: &[GovernorProposal],
+) {
+    let direct_by_tx_id: HashMap<String, ExecutionRef> = recorded_transactions
+        .iter()
+        .enumerate()
+        .filter_map(|(index, recorded)| {
+            let artifact_file = recorded.transaction.broadcast_file.clone()?;
+            Some((
+                recorded.transaction.id.clone(),
+                ExecutionRef {
+                    status: direct_execution_status(&recorded.transaction.status),
+                    kind: ExecutionKind::Tx,
+                    artifact_file,
+                    tx_hash: Some(recorded.transaction.hash.clone()),
+                    safe_tx_hash: None,
+                    proposal_id: None,
+                    propose_safe_tx_hash: None,
+                    script_tx_index: Some(index),
+                },
+            ))
+        })
+        .collect();
+
+    let safe_by_tx_ids: HashMap<String, &SafeTransaction> =
+        safe_transactions.iter().map(|safe| (tx_id_key(&safe.transaction_ids), safe)).collect();
+
+    let mut queued_by_tx_id: HashMap<String, (u8, ExecutionRef)> = HashMap::new();
+    for safe_tx in safe_transactions {
+        let artifact_file = safe_tx
+            .transaction_ids
+            .iter()
+            .find_map(|tx_id| {
+                direct_by_tx_id.get(tx_id).map(|execution| execution.artifact_file.clone())
+            })
+            .map(|broadcast_file| queued_artifact_file_from_broadcast_file(&broadcast_file))
+            .unwrap_or_default();
+        let execution = ExecutionRef {
+            status: queued_execution_status(&safe_tx.status),
+            kind: ExecutionKind::SafeProposal,
+            artifact_file,
+            tx_hash: None,
+            safe_tx_hash: Some(safe_tx.safe_tx_hash.clone()),
+            proposal_id: None,
+            propose_safe_tx_hash: None,
+            script_tx_index: safe_tx.transaction_ids.iter().find_map(|tx_id| {
+                direct_by_tx_id.get(tx_id).and_then(|execution| execution.script_tx_index)
+            }),
+        };
+        for tx_id in &safe_tx.transaction_ids {
+            apply_execution_candidate(&mut queued_by_tx_id, tx_id.clone(), 1, execution.clone());
+        }
+    }
+
+    for proposal in governor_proposals {
+        let linked_safe = safe_by_tx_ids.get(&tx_id_key(&proposal.transaction_ids)).copied();
+        let artifact_file = proposal
+            .transaction_ids
+            .iter()
+            .find_map(|tx_id| {
+                direct_by_tx_id.get(tx_id).map(|execution| execution.artifact_file.clone())
+            })
+            .map(|broadcast_file| queued_artifact_file_from_broadcast_file(&broadcast_file))
+            .unwrap_or_default();
+        let execution = ExecutionRef {
+            status: proposal_execution_status(&proposal.status),
+            kind: if linked_safe.is_some() {
+                ExecutionKind::GovernorProposalViaSafe
+            } else {
+                ExecutionKind::GovernorProposal
+            },
+            artifact_file,
+            tx_hash: None,
+            safe_tx_hash: None,
+            proposal_id: (!proposal.proposal_id.is_empty()).then(|| proposal.proposal_id.clone()),
+            propose_safe_tx_hash: linked_safe.map(|safe| safe.safe_tx_hash.clone()),
+            script_tx_index: proposal.transaction_ids.iter().find_map(|tx_id| {
+                direct_by_tx_id.get(tx_id).and_then(|execution| execution.script_tx_index)
+            }),
+        };
+        for tx_id in &proposal.transaction_ids {
+            apply_execution_candidate(
+                &mut queued_by_tx_id,
+                tx_id.clone(),
+                if linked_safe.is_some() { 3 } else { 2 },
+                execution.clone(),
+            );
+        }
+    }
+
+    for deployment in deployments {
+        if let Some((_, execution)) = queued_by_tx_id.get(&deployment.transaction_id) {
+            deployment.execution = Some(execution.clone());
+        } else if let Some(execution) = direct_by_tx_id.get(&deployment.transaction_id) {
+            deployment.execution = Some(execution.clone());
+        }
+    }
+}
 
 /// Phases of the pipeline, reported via [`BroadcastProgressCallback`].
 #[derive(Debug, Clone, Copy)]
@@ -137,7 +296,7 @@ impl RunPipeline {
         let artifact_index = ArtifactIndex::from_compile_output(compilation);
 
         // 2. Build script args and execute
-        let script_config = match self.script_config {
+        let mut script_config = match self.script_config {
             Some(config) => config,
             None => {
                 let mut config = ScriptConfig::new(&self.context.config.script_path);
@@ -148,6 +307,13 @@ impl RunPipeline {
                 config
             }
         };
+
+        apply_deployed_libraries(
+            &mut script_config,
+            registry,
+            &self.context.config.namespace,
+            self.context.config.chain_id,
+        );
 
         let script_args = script_config.into_script_args()?;
         // All sender types can broadcast — routing handles Safe/Governor.
@@ -210,7 +376,7 @@ impl RunPipeline {
         let safe_transactions = sim.safe_transactions;
         let execution_traces = sim.execution_traces;
         let setup_traces = sim.setup_traces;
-        let hydrated_deployments: Vec<_> =
+        let mut hydrated_deployments: Vec<_> =
             sim.recorded_deployments.into_iter().map(|rd| rd.deployment).collect();
         let mut recorded_transactions = sim.recorded_transactions;
 
@@ -237,12 +403,13 @@ impl RunPipeline {
                         self.context.config.chain_id,
                         &self.context.config.script_sig,
                     );
-                    let mut pre_sequence = super::broadcast_writer::build_pre_routing_sequence(
+                    let mut pre_sequence = super::broadcast_writer::build_checkpoint_sequence(
                         btxs,
                         &recorded_transactions,
                         &self.context,
                         bp,
                         cp,
+                        self.resume_state.as_ref(),
                     );
                     super::broadcast_writer::ensure_broadcast_dirs(&pre_sequence)?;
 
@@ -261,18 +428,27 @@ impl RunPipeline {
                         defer_safe_proposals: false,
                         safe_threshold_cache: std::collections::HashMap::new(),
                     };
-                    let run_results = if let Some(ref resume) = self.resume_state {
-                        super::routing::route_all_with_resume(btxs, &mut ctx, resume)
-                            .await?
-                            .into_iter()
-                            .map(|(run, result)| (run, result, None))
-                            .collect()
-                    } else {
-                        super::routing::route_all_with_queued(btxs, &mut ctx).await?
-                    };
+                    let plan = super::routing::reduce_queue(btxs, &mut ctx).await?;
+                    let mut queued_state =
+                        super::broadcast_writer::build_pending_queued_operations_from_plan(
+                            &plan,
+                            &recorded_transactions,
+                            &self.context,
+                            self.resume_state.as_ref().and_then(|resume| resume.queued.as_ref()),
+                        );
+                    let execution = super::routing::execute_plan(
+                        &plan,
+                        &mut ctx,
+                        Some(btxs),
+                        &recorded_transactions,
+                        self.resume_state.as_ref(),
+                        Some(&mut queued_state),
+                    )
+                    .await?;
 
                     let outcome = apply_routing_results_with_queued(
-                        &run_results,
+                        &execution.run_results,
+                        &execution.queued_executions,
                         btxs,
                         &mut recorded_transactions,
                         &self.context,
@@ -280,6 +456,7 @@ impl RunPipeline {
                         self.context.config.chain_id,
                         &self.context.config.script_sig,
                         Some(pre_sequence),
+                        Some(&queued_state),
                     )?;
                     proposed_results = outcome.proposed_results;
                     routing_safe_transactions = outcome.safe_transactions;
@@ -298,6 +475,13 @@ impl RunPipeline {
         // Merge routing-produced safe transactions with event-hydrated ones
         let all_safe_transactions: Vec<_> =
             safe_transactions.into_iter().chain(routing_safe_transactions).collect();
+
+        stamp_execution_refs(
+            &mut hydrated_deployments,
+            &recorded_transactions,
+            &all_safe_transactions,
+            &governor_proposals,
+        );
 
         // 13. Duplicate detection
         let resolved = resolve_duplicates(hydrated_deployments, registry, DuplicateStrategy::Skip)?;
@@ -584,6 +768,7 @@ pub fn apply_routing_results(
     chain_id: u64,
     script_sig: &str,
     pre_built_sequence: Option<forge_script_sequence::ScriptSequence<Ethereum>>,
+    queued_operations: Option<&super::broadcast_writer::QueuedOperations>,
 ) -> Result<RoutingOutcome, TrebError> {
     // Build Safe/Governor records from routing results
     let (proposed_results, safe_transactions, governor_proposals) =
@@ -621,15 +806,21 @@ pub fn apply_routing_results(
             cp,
         )
     };
-    let deferred = super::broadcast_writer::build_deferred_operations(
-        run_results,
-        recorded_transactions,
-        context,
-    );
-    super::broadcast_writer::write_broadcast_artifacts(&mut sequence, &deferred)?;
+    let queued = queued_operations.cloned().unwrap_or_else(|| {
+        super::broadcast_writer::build_queued_operations(
+            run_results,
+            recorded_transactions,
+            context,
+        )
+    });
+    let artifact_paths =
+        super::broadcast_writer::write_broadcast_artifacts(&mut sequence, &queued)?;
 
     // Set broadcastFile on recorded transactions
-    let rel_path = super::broadcast_writer::relative_broadcast_path(&context.project_root, &bp);
+    let rel_path = super::broadcast_writer::relative_broadcast_path(
+        &context.project_root,
+        &artifact_paths.archived_broadcast_path,
+    );
     for rt in recorded_transactions {
         rt.transaction.broadcast_file = Some(rel_path.clone());
     }
@@ -649,11 +840,8 @@ pub fn apply_routing_results(
 /// `route_all_with_queued` and passes the queued items through.
 #[allow(clippy::too_many_arguments)]
 pub fn apply_routing_results_with_queued(
-    run_results_with_queued: &[(
-        TransactionRun,
-        RunResult,
-        Option<super::routing::QueuedExecution>,
-    )],
+    run_results: &[(TransactionRun, RunResult)],
+    queued_executions: &[super::routing::QueuedExecution],
     btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     recorded_transactions: &mut [RecordedTransaction],
     context: &PipelineContext,
@@ -661,29 +849,10 @@ pub fn apply_routing_results_with_queued(
     chain_id: u64,
     script_sig: &str,
     pre_built_sequence: Option<forge_script_sequence::ScriptSequence<Ethereum>>,
+    queued_operations: Option<&super::broadcast_writer::QueuedOperations>,
 ) -> Result<RoutingOutcome, TrebError> {
-    // Extract (run, result) pairs for the existing functions
-    let run_results: Vec<(TransactionRun, RunResult)> = run_results_with_queued
-        .iter()
-        .map(|(run, result, _)| {
-            (
-                TransactionRun {
-                    sender_role: run.sender_role.clone(),
-                    category: run.category,
-                    sender_address: run.sender_address,
-                    tx_indices: run.tx_indices.clone(),
-                },
-                result.clone(),
-            )
-        })
-        .collect();
-
-    // Collect queued items
-    let queued_executions: Vec<super::routing::QueuedExecution> =
-        run_results_with_queued.iter().filter_map(|(_, _, q)| q.clone()).collect();
-
     let mut outcome = apply_routing_results(
-        &run_results,
+        run_results,
         btxs,
         recorded_transactions,
         context,
@@ -691,8 +860,9 @@ pub fn apply_routing_results_with_queued(
         chain_id,
         script_sig,
         pre_built_sequence,
+        queued_operations,
     )?;
-    outcome.queued_executions = queued_executions;
+    outcome.queued_executions = queued_executions.to_vec();
     Ok(outcome)
 }
 
@@ -1378,10 +1548,7 @@ async fn propose_safe_transactions(
 // SessionPipeline — unified orchestrator for run (1 script) and compose (N)
 // ===========================================================================
 
-use super::types::{
-    ScriptEntry, ScriptPhase, ScriptProgress, ScriptResult, SessionPhase, SessionProgressCallback,
-    SessionState,
-};
+use super::types::{ScriptEntry, ScriptResult, SessionPhase, SessionProgressCallback};
 
 /// Unified pipeline that handles both single-script (`treb run`) and
 /// multi-script (`treb compose`) flows.
@@ -1392,12 +1559,16 @@ use super::types::{
 /// Callback fired after each routing action completes during broadcast.
 pub type OnActionComplete =
     Box<dyn Fn(&super::routing::TransactionRun, &super::routing::RunResult) + Send + Sync>;
+pub type OnScriptComplete =
+    Box<dyn FnMut(&str, &PipelineContext, &PipelineResult) -> Result<(), TrebError> + Send>;
 
 pub struct SessionPipeline {
     scripts: Vec<ScriptEntry>,
     progress: Option<SessionProgressCallback>,
     resume: bool,
     on_action_complete: Option<OnActionComplete>,
+    on_script_complete: Option<OnScriptComplete>,
+    resume_broadcast_paths: HashMap<String, PathBuf>,
 }
 
 impl Default for SessionPipeline {
@@ -1408,7 +1579,14 @@ impl Default for SessionPipeline {
 
 impl SessionPipeline {
     pub fn new() -> Self {
-        Self { scripts: Vec::new(), progress: None, resume: false, on_action_complete: None }
+        Self {
+            scripts: Vec::new(),
+            progress: None,
+            resume: false,
+            on_action_complete: None,
+            on_script_complete: None,
+            resume_broadcast_paths: HashMap::new(),
+        }
     }
 
     /// Add a script to the execution queue.
@@ -1422,7 +1600,7 @@ impl SessionPipeline {
         self
     }
 
-    /// Enable resume mode: skip already-completed scripts/phases.
+    /// Enable resume mode: resume from existing broadcast artifacts when available.
     pub fn with_resume(mut self, resume: bool) -> Self {
         self.resume = resume;
         self
@@ -1434,6 +1612,18 @@ impl SessionPipeline {
     /// print per-action status lines inline (clearing/restarting spinners, etc.)
     pub fn with_on_action_complete(mut self, cb: OnActionComplete) -> Self {
         self.on_action_complete = Some(cb);
+        self
+    }
+
+    /// Set a callback fired after each script completes during broadcast.
+    pub fn with_on_script_complete(mut self, cb: OnScriptComplete) -> Self {
+        self.on_script_complete = Some(cb);
+        self
+    }
+
+    /// Override resume broadcast files for specific scripts.
+    pub fn with_resume_broadcast_paths(mut self, paths: HashMap<String, PathBuf>) -> Self {
+        self.resume_broadcast_paths = paths;
         self
     }
 
@@ -1525,74 +1715,25 @@ impl SessionPipeline {
         };
 
         // ------------------------------------------------------------------
-        // Load session state for resume
-        // ------------------------------------------------------------------
-        let session_state = if self.resume {
-            super::broadcast_writer::load_session_state(&treb_dir)
-        } else {
-            super::broadcast_writer::delete_session_state(&treb_dir);
-            None
-        };
-
-        let script_phases: HashMap<String, ScriptPhase> = session_state
-            .as_ref()
-            .map(|ss| ss.scripts.iter().map(|sp| (sp.name.clone(), sp.phase.clone())).collect())
-            .unwrap_or_default();
-
-        // ------------------------------------------------------------------
         // Phase 2: Simulate (per-script loop)
         // ------------------------------------------------------------------
         let mut simulated: Vec<SimulatedScript> = Vec::new();
-        let mut skipped_results: Vec<ScriptResult> = Vec::new();
-
-        let config_hash =
-            session_state.as_ref().map(|ss| ss.config_hash.clone()).unwrap_or_default();
-        let mut state_scripts: Vec<ScriptProgress> = Vec::new();
 
         for entry in self.scripts {
             let ScriptEntry { name, context, config } = entry;
-            let phase = script_phases.get(&name);
-
-            // Resume: skip scripts that already broadcast
-            if phase == Some(&ScriptPhase::Broadcast) {
-                skipped_results.push(ScriptResult {
-                    name: name.clone(),
-                    result: PipelineResult {
-                        deployments: Vec::new(),
-                        transactions: Vec::new(),
-                        registry_updated: false,
-                        collisions: Vec::new(),
-                        skipped: Vec::new(),
-                        dry_run: false,
-                        success: true,
-                        gas_used: 0,
-                        event_count: 0,
-                        console_logs: Vec::new(),
-                        governor_proposals: Vec::new(),
-                        safe_transactions: Vec::new(),
-                        proposed_results: Vec::new(),
-                        queued_executions: Vec::new(),
-                        execution_traces: None,
-                        setup_traces: None,
-                    },
-                    broadcastable_transactions: None,
-                });
-                state_scripts.push(ScriptProgress {
-                    name,
-                    script_path: context.config.script_path.clone(),
-                    chain_id: context.config.chain_id,
-                    sig: context.config.script_sig.clone(),
-                    phase: ScriptPhase::Broadcast,
-                    deployments: 0,
-                    transactions: 0,
-                });
-                continue;
-            }
 
             report(&SessionPhase::Simulating(name.clone()));
 
             let deployer_is_safe =
                 context.resolved_senders.get("deployer").is_some_and(|s| s.is_safe());
+
+            let mut config = config;
+            apply_deployed_libraries(
+                &mut config,
+                registry,
+                &context.config.namespace,
+                context.config.chain_id,
+            );
 
             let script_args = match config.into_script_args() {
                 Ok(args) => args,
@@ -1601,7 +1742,7 @@ impl SessionPipeline {
                         let _ = treb_registry::restore_registry(&snapshot_dir, &treb_dir);
                         let _ = std::fs::remove_dir_all(&snapshot_dir);
                     }
-                    return Err((skipped_results, name, e));
+                    return Err((Vec::new(), name, e));
                 }
             };
 
@@ -1633,7 +1774,7 @@ impl SessionPipeline {
                         let _ = treb_registry::restore_registry(&snapshot_dir, &treb_dir);
                         let _ = std::fs::remove_dir_all(&snapshot_dir);
                     }
-                    return Err((skipped_results, name, e));
+                    return Err((Vec::new(), name, e));
                 }
             };
 
@@ -1669,7 +1810,7 @@ impl SessionPipeline {
                         let _ = treb_registry::restore_registry(&snapshot_dir, &treb_dir);
                         let _ = std::fs::remove_dir_all(&snapshot_dir);
                     }
-                    return Err((skipped_results, name, e));
+                    return Err((Vec::new(), name, e));
                 }
             };
 
@@ -1682,7 +1823,7 @@ impl SessionPipeline {
                         if let Err(e) = super::compose::replay_transactions_on_fork(url, b).await {
                             let _ = treb_registry::restore_registry(&snapshot_dir, &treb_dir);
                             let _ = std::fs::remove_dir_all(&snapshot_dir);
-                            return Err((skipped_results, name, e));
+                            return Err((Vec::new(), name, e));
                         }
                     }
                 }
@@ -1714,21 +1855,6 @@ impl SessionPipeline {
                 setup_traces: sim.setup_traces,
             };
 
-            state_scripts.push(ScriptProgress {
-                name: name.clone(),
-                script_path: context.config.script_path.clone(),
-                chain_id: context.config.chain_id,
-                sig: context.config.script_sig.clone(),
-                phase: ScriptPhase::Simulated,
-                deployments: pipeline_result.deployments.len(),
-                transactions: pipeline_result.transactions.len(),
-            });
-
-            let _ = super::broadcast_writer::save_session_state(
-                &treb_dir,
-                &SessionState { config_hash: config_hash.clone(), scripts: state_scripts.clone() },
-            );
-
             simulated.push(SimulatedScript { name, result: pipeline_result, btxs, context });
         }
 
@@ -1742,13 +1868,11 @@ impl SessionPipeline {
 
         Ok(SimulatedSession {
             scripts: simulated,
-            skipped_results,
             resume: self.resume,
             progress: self.progress,
             on_action_complete: self.on_action_complete,
-            treb_dir,
-            config_hash,
-            state_scripts,
+            on_script_complete: self.on_script_complete,
+            resume_broadcast_paths: self.resume_broadcast_paths,
         })
     }
 }
@@ -1759,13 +1883,11 @@ impl SessionPipeline {
 /// [`results()`], then either [`broadcast_all()`] or [`into_results()`].
 pub struct SimulatedSession {
     scripts: Vec<SimulatedScript>,
-    skipped_results: Vec<ScriptResult>,
     resume: bool,
     progress: Option<SessionProgressCallback>,
     on_action_complete: Option<OnActionComplete>,
-    treb_dir: PathBuf,
-    config_hash: String,
-    state_scripts: Vec<ScriptProgress>,
+    on_script_complete: Option<OnScriptComplete>,
+    resume_broadcast_paths: HashMap<String, PathBuf>,
 }
 
 struct SimulatedScript {
@@ -1786,17 +1908,21 @@ impl SimulatedSession {
         self.on_action_complete = Some(cb);
     }
 
+    /// Set a callback fired after each script completes during broadcast.
+    pub fn set_on_script_complete(&mut self, cb: OnScriptComplete) {
+        self.on_script_complete = Some(cb);
+    }
+
     /// Convert to final results without broadcasting (dry-run / user cancelled).
     pub fn into_results(self) -> Vec<ScriptResult> {
-        let mut out = self.skipped_results;
-        for s in self.scripts {
-            out.push(ScriptResult {
+        self.scripts
+            .into_iter()
+            .map(|s| ScriptResult {
                 name: s.name,
                 result: s.result,
                 broadcastable_transactions: s.btxs,
-            });
-        }
-        out
+            })
+            .collect()
     }
 
     /// Broadcast all scripts: route transactions, write registry, produce
@@ -1813,7 +1939,7 @@ impl SimulatedSession {
             }
         };
 
-        let mut results: Vec<ScriptResult> = self.skipped_results;
+        let mut results: Vec<ScriptResult> = Vec::new();
         // Persists across components so sequential Safe proposals get incrementing nonces
         let mut safe_nonce_offsets: std::collections::HashMap<alloy_primitives::Address, u64> =
             std::collections::HashMap::new();
@@ -1842,18 +1968,6 @@ impl SimulatedSession {
                                 result,
                                 broadcastable_transactions: Some(btxs.clone()),
                             });
-                            if let Some(sp) =
-                                self.state_scripts.iter_mut().find(|sp| sp.name == name)
-                            {
-                                sp.phase = ScriptPhase::Failed { phase: "broadcast".into() };
-                            }
-                            let _ = super::broadcast_writer::save_session_state(
-                                &self.treb_dir,
-                                &SessionState {
-                                    config_hash: self.config_hash.clone(),
-                                    scripts: self.state_scripts.clone(),
-                                },
-                            );
                             return Err((results, name, e));
                         }
                     };
@@ -1887,6 +2001,53 @@ impl SimulatedSession {
                         });
                     }
 
+                    let resume_state = if self.resume {
+                        let loaded = match self.resume_broadcast_paths.get(&name) {
+                            Some(path) => {
+                                super::broadcast_writer::load_resume_state_from_path(path, rpc_url)
+                                    .await
+                            }
+                            None => None,
+                        };
+                        if loaded.is_some() {
+                            loaded
+                        } else {
+                            super::broadcast_writer::load_resume_state(
+                                &context.project_root,
+                                &context.config.script_path,
+                                context.config.chain_id,
+                                &context.config.script_sig,
+                                rpc_url,
+                            )
+                            .await
+                        }
+                    } else {
+                        None
+                    };
+
+                    let (_, bp, cp) = super::broadcast_writer::compute_broadcast_paths(
+                        &context.project_root,
+                        &context.config.script_path,
+                        context.config.chain_id,
+                        &context.config.script_sig,
+                    );
+                    let mut pre_sequence = super::broadcast_writer::build_checkpoint_sequence(
+                        btxs,
+                        &result.transactions,
+                        &context,
+                        bp,
+                        cp,
+                        resume_state.as_ref(),
+                    );
+                    if let Err(e) = super::broadcast_writer::ensure_broadcast_dirs(&pre_sequence) {
+                        results.push(ScriptResult {
+                            name: name.clone(),
+                            result,
+                            broadcastable_transactions: Some(btxs.clone()),
+                        });
+                        return Err((results, name, e));
+                    }
+
                     let mut route_ctx = super::routing::RouteContext {
                         rpc_url,
                         chain_id: context.config.chain_id,
@@ -1899,33 +2060,15 @@ impl SimulatedSession {
                         resolved_senders: &context.resolved_senders,
                         sender_labels: &context.sender_labels,
                         sender_configs: &context.sender_configs,
-                        sequence: None,
+                        sequence: Some(&mut pre_sequence),
                         safe_nonce_offsets: safe_nonce_offsets.clone(),
                         defer_safe_proposals: should_merge,
                         safe_threshold_cache: safe_threshold_cache.clone(),
                     };
 
-                    let run_results = if self.resume {
-                        let resume_state = super::broadcast_writer::load_resume_state(
-                            &context.project_root,
-                            &context.config.script_path,
-                            context.config.chain_id,
-                            &context.config.script_sig,
-                            rpc_url,
-                        )
-                        .await;
-                        if let Some(ref rs) = resume_state {
-                            // Resume uses the old path (no queued items)
-                            super::routing::route_all_with_resume(btxs, &mut route_ctx, rs)
-                                .await
-                                .map(|r| {
-                                    r.into_iter().map(|(run, result)| (run, result, None)).collect()
-                                })
-                        } else {
-                            super::routing::route_all_with_queued(btxs, &mut route_ctx).await
-                        }
-                    } else if should_merge {
-                        route_with_deferred_proposals(
+                    let mut queued_state = None;
+                    let execution = if should_merge {
+                        route_with_queued_proposals(
                             btxs,
                             &mut route_ctx,
                             &result.transactions,
@@ -1937,25 +2080,65 @@ impl SimulatedSession {
                             &context.config.script_sig,
                         )
                         .await
+                        .map(|results| super::routing::ExecutionBundle {
+                            queued_executions: results
+                                .iter()
+                                .filter_map(|(_, _, queued)| queued.clone())
+                                .collect(),
+                            run_results: results
+                                .into_iter()
+                                .map(|(run, run_result, _)| (run, run_result))
+                                .collect(),
+                        })
                     } else {
-                        super::routing::route_all_with_queued(btxs, &mut route_ctx).await
+                        let plan = match super::routing::reduce_queue(btxs, &mut route_ctx).await {
+                            Ok(plan) => plan,
+                            Err(e) => {
+                                results.push(ScriptResult {
+                                    name: name.clone(),
+                                    result,
+                                    broadcastable_transactions: Some(btxs.clone()),
+                                });
+                                return Err((results, name, e));
+                            }
+                        };
+                        let mut queued_state_value =
+                            super::broadcast_writer::build_pending_queued_operations_from_plan(
+                                &plan,
+                                &result.transactions,
+                                &context,
+                                resume_state.as_ref().and_then(|resume| resume.queued.as_ref()),
+                            );
+                        let execution = super::routing::execute_plan(
+                            &plan,
+                            &mut route_ctx,
+                            Some(btxs),
+                            &result.transactions,
+                            resume_state.as_ref(),
+                            Some(&mut queued_state_value),
+                        )
+                        .await;
+                        queued_state = Some(queued_state_value);
+                        execution
                     };
 
                     // Carry nonce offsets and threshold cache forward for the next component
                     safe_nonce_offsets = route_ctx.safe_nonce_offsets;
                     safe_threshold_cache = route_ctx.safe_threshold_cache;
 
-                    match run_results {
-                        Ok(run_results) => {
+                    match execution {
+                        Ok(execution) => {
                             let outcome = apply_routing_results_with_queued(
-                                &run_results,
+                                &execution.run_results,
+                                &execution.queued_executions,
                                 btxs,
                                 &mut result.transactions,
                                 &context,
                                 &context.config.script_path,
                                 context.config.chain_id,
                                 &context.config.script_sig,
-                                None,
+                                Some(pre_sequence),
+                                queued_state.as_ref(),
                             );
 
                             match outcome {
@@ -1978,8 +2161,15 @@ impl SimulatedSession {
                             }
 
                             // Duplicate detection
-                            let hydrated_deployments: Vec<_> =
+                            let mut hydrated_deployments: Vec<_> =
                                 result.deployments.drain(..).map(|rd| rd.deployment).collect();
+
+                            stamp_execution_refs(
+                                &mut hydrated_deployments,
+                                &result.transactions,
+                                &result.safe_transactions,
+                                &result.governor_proposals,
+                            );
 
                             let resolved = match resolve_duplicates(
                                 hydrated_deployments,
@@ -2032,35 +2222,19 @@ impl SimulatedSession {
                                 result,
                                 broadcastable_transactions: Some(btxs.clone()),
                             });
-                            if let Some(sp) =
-                                self.state_scripts.iter_mut().find(|sp| sp.name == name)
-                            {
-                                sp.phase = ScriptPhase::Failed { phase: "broadcast".into() };
-                            }
-                            let _ = super::broadcast_writer::save_session_state(
-                                &self.treb_dir,
-                                &SessionState {
-                                    config_hash: self.config_hash.clone(),
-                                    scripts: self.state_scripts.clone(),
-                                },
-                            );
                             return Err((results, name, e));
                         }
                     }
                 }
             }
 
-            // Mark script as broadcast in state
-            if let Some(sp) = self.state_scripts.iter_mut().find(|sp| sp.name == name) {
-                sp.phase = ScriptPhase::Broadcast;
+            let script_name = name.clone();
+            if let Some(cb) = self.on_script_complete.as_mut() {
+                if let Err(e) = cb(&script_name, &context, &result) {
+                    results.push(ScriptResult { name, result, broadcastable_transactions: btxs });
+                    return Err((results, script_name, e));
+                }
             }
-            let _ = super::broadcast_writer::save_session_state(
-                &self.treb_dir,
-                &SessionState {
-                    config_hash: self.config_hash.clone(),
-                    scripts: self.state_scripts.clone(),
-                },
-            );
 
             results.push(ScriptResult { name, result, broadcastable_transactions: btxs });
         }
@@ -2098,7 +2272,6 @@ impl SimulatedSession {
         }
 
         report(&SessionPhase::BroadcastComplete);
-        super::broadcast_writer::delete_session_state(&self.treb_dir);
 
         Ok(results)
     }
@@ -2108,7 +2281,7 @@ impl SimulatedSession {
 // Compose Safe proposal merging
 // ---------------------------------------------------------------------------
 
-/// Collected from per-component routing, deferred for merge.
+/// Collected from per-component routing, queued for merge.
 struct PendingSafeProposal {
     safe_address: Address,
     chain_id: u64,
@@ -2184,13 +2357,13 @@ fn merge_adjacent_safe_proposals(pending: Vec<PendingSafeProposal>) -> Vec<Merge
     merged
 }
 
-/// Route a component's transactions with deferred Safe proposals.
+/// Route a component's transactions with queued Safe proposals.
 ///
 /// Uses `reduce_queue` + selective execution: Exec actions are executed
 /// normally, while Propose actions are collected into `pending` without
 /// submitting to the Safe Transaction Service.
 #[allow(clippy::too_many_arguments)]
-async fn route_with_deferred_proposals(
+async fn route_with_queued_proposals(
     btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     route_ctx: &mut super::routing::RouteContext<'_>,
     recorded_txs: &[RecordedTransaction],
@@ -2356,7 +2529,7 @@ struct SubmittedMergedProposal {
 
 /// Submit merged Safe proposals: assign nonces, compute hashes, submit
 /// to Safe TX Service (live mode), write registry records, and back-patch
-/// per-component deferred files.
+/// per-component queued files.
 async fn submit_merged_proposals(
     merged: &[MergedSafeProposal],
     registry: &mut Registry,
@@ -2435,13 +2608,13 @@ async fn submit_merged_proposals(
         };
         let _ = registry.insert_safe_transaction(safe_transaction);
 
-        // Back-patch each component's deferred file with the merged hash/nonce
+        // Back-patch each component's queued file with the merged hash/nonce
         let new_hash_str = format!("{:#x}", safe_tx_hash);
         for (orig_hash, bp) in
             proposal.original_safe_tx_hashes.iter().zip(&proposal.broadcast_paths)
         {
             let old_hash_str = format!("{:#x}", orig_hash);
-            let _ = super::broadcast_writer::update_deferred_safe_proposal(
+            let _ = super::broadcast_writer::update_queued_safe_proposal(
                 bp,
                 &old_hash_str,
                 &new_hash_str,

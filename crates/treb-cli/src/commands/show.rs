@@ -56,12 +56,16 @@ pub async fn run(
         );
     }
 
+    let scope = super::resolve_command_scope(&cwd, namespace, network)?;
+
     let registry = Registry::open(&cwd).context("failed to open registry")?;
     let lookup = registry.load_lookup_index().context("failed to load lookup index")?;
     let all_deployments = registry.list_deployments();
     let impl_lookup = build_impl_lookup(&all_deployments);
-    let scope = ShowScope { namespace, network, no_fork };
-    let filters = scope.as_deployment_filters();
+    let scope = ShowScope { namespace: scope.namespace, network: scope.network, no_fork };
+    let mut filters = scope.as_deployment_filters();
+    filters.resolved_chain_id =
+        super::resolve_chain_id_for_network(&cwd, scope.network.as_deref()).await?;
     let filtered_deployments = filter_deployments(&all_deployments, &filters);
 
     let query = match deployment_query {
@@ -112,6 +116,7 @@ impl ShowScope {
     fn as_deployment_filters(&self) -> DeploymentFilters {
         DeploymentFilters {
             network: self.network.clone(),
+            resolved_chain_id: None,
             namespace: self.namespace.clone(),
             deployment_type: None,
             tag: None,
@@ -410,6 +415,7 @@ mod tests {
             label: "v1".into(),
             address: "0x1234567890abcdef1234567890abcdef12345678".into(),
             deployment_type: DeploymentType::Singleton,
+            execution: None,
             transaction_id: String::new(),
             deployment_strategy: DeploymentStrategy {
                 method: DeploymentMethod::Create,

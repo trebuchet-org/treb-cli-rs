@@ -2,15 +2,6 @@
 {
   "deployments": [
     {
-      "address": "0xDeaDbeefdEAdbeefdEadbEEFdeadbeEFdEaDbeeF",
-      "chainId": 42220,
-      "contractName": "MockToken",
-      "fork": true,
-      "id": "fork/42220/MockToken",
-      "namespace": "fork/42220",
-      "type": "SINGLETON"
-    },
-    {
       "address": "0x42eddd7dC046da254A93659CA9b02f294606833D",
       "chainId": 42220,
       "contractName": "FPMM",

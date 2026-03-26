@@ -19,8 +19,9 @@ pub use store::{
     AddressbookStore, DeploymentStore, ForkStateStore, GovernorProposalStore, SafeTransactionStore,
     TransactionStore,
     fork_state::{remove_snapshot, restore_registry, snapshot_registry},
+    queued_index::QueuedIndexStore,
 };
-pub use types::LookupIndex;
+pub use types::{LookupIndex, QueuedIndex, QueuedIndexEntry};
 
 // ── File-name constants ────────────────────────────────────────────────────
 
@@ -29,6 +30,9 @@ pub const ADDRESSBOOK_FILE: &str = "addressbook.json";
 
 /// File storing the deployment map (`{id: Deployment}`).
 pub const DEPLOYMENTS_FILE: &str = "deployments.json";
+
+/// Directory containing canonical project deployment metadata.
+pub const DEPLOYMENTS_DIR: &str = "deployments";
 
 /// File storing the transaction map (`{id: Transaction}`).
 pub const TRANSACTIONS_FILE: &str = "transactions.json";
@@ -41,6 +45,9 @@ pub const GOVERNOR_PROPOSALS_FILE: &str = "governor-txs.json";
 
 /// File storing the lookup index.
 pub const LOOKUP_FILE: &str = "lookup.json";
+
+/// File storing the active queued-work index.
+pub const QUEUED_FILE: &str = "queued.json";
 
 /// Directory name for the registry inside the project root.
 pub const REGISTRY_DIR: &str = ".treb";
@@ -57,6 +64,31 @@ pub const STORE_FORMAT: &str = "treb-v1";
 const LEGACY_SAFE_TXS_FILE: &str = "safe_txs.json";
 const LEGACY_GOVERNOR_PROPOSALS_FILE: &str = "governor_proposals.json";
 const LEGACY_FORK_STATE_FILE: &str = "fork-state.json";
+
+/// Return the canonical deployments root for a project.
+pub fn deployments_dir(project_root: &Path) -> PathBuf {
+    project_root.join(DEPLOYMENTS_DIR)
+}
+
+/// Return the canonical addressbook path for a project.
+pub fn addressbook_path(project_root: &Path) -> PathBuf {
+    deployments_dir(project_root).join(ADDRESSBOOK_FILE)
+}
+
+/// Return the canonical Solidity registry path for a project.
+pub fn solidity_registry_path(project_root: &Path) -> PathBuf {
+    deployments_dir(project_root).join(SOLIDITY_REGISTRY_FILE)
+}
+
+/// Return the canonical queued index path for a project.
+pub fn queued_index_path(project_root: &Path) -> PathBuf {
+    deployments_dir(project_root).join(QUEUED_FILE)
+}
+
+/// Return the legacy registry directory for a project.
+pub fn registry_dir(project_root: &Path) -> PathBuf {
+    project_root.join(REGISTRY_DIR)
+}
 
 pub(crate) fn legacy_registry_store_path(path: &Path) -> Option<PathBuf> {
     let legacy_name = match path.file_name()?.to_str()? {

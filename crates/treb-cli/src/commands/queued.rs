@@ -14,6 +14,10 @@ pub async fn queued_command(network: Option<String>, json: bool) -> anyhow::Resu
         anyhow::bail!("no .treb directory found — run `treb init` first");
     }
 
+    let scope = super::resolve_command_scope(&cwd, None, network)?;
+    let network = scope.network;
+    let chain_id_filter = super::resolve_chain_id_for_network(&cwd, network.as_deref()).await?;
+
     let registry = Registry::open(&cwd)?;
 
     // Collect queued safe transactions
@@ -21,12 +25,7 @@ pub async fn queued_command(network: Option<String>, json: bool) -> anyhow::Resu
     let queued_safe: Vec<_> = all_safe_txs
         .into_iter()
         .filter(|stx| stx.status == TransactionStatus::Queued)
-        .filter(|stx| {
-            network.as_ref().is_none_or(|n| {
-                n.parse::<u64>().is_ok_and(|id| id == stx.chain_id)
-                    || *n == stx.chain_id.to_string()
-            })
-        })
+        .filter(|stx| chain_id_filter.is_none_or(|id| id == stx.chain_id))
         .collect();
 
     // Collect pending governor proposals
@@ -39,11 +38,7 @@ pub async fn queued_command(network: Option<String>, json: bool) -> anyhow::Resu
                 ProposalStatus::Executed | ProposalStatus::Canceled | ProposalStatus::Defeated
             )
         })
-        .filter(|p| {
-            network.as_ref().is_none_or(|n| {
-                n.parse::<u64>().is_ok_and(|id| id == p.chain_id) || *n == p.chain_id.to_string()
-            })
-        })
+        .filter(|p| chain_id_filter.is_none_or(|id| id == p.chain_id))
         .collect();
 
     if json {

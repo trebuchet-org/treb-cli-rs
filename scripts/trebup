@@ -15,10 +15,13 @@ set -eo pipefail
 TREBUP_VERSION="2.0.0"
 
 BASE_DIR="${XDG_CONFIG_HOME:-$HOME}"
-TREB_DIR="${TREB_DIR:-$BASE_DIR/.treb}"
+DEFAULT_TREB_DIR="$BASE_DIR/.treb"
+TREB_DIR="${TREB_DIR:-$DEFAULT_TREB_DIR}"
 TREB_BIN_DIR="$TREB_DIR/bin"
 TREB_VERSIONS_DIR="$TREB_DIR/versions"
 TREB_ACTIVE_FILE="$TREB_DIR/.active"
+CUSTOM_TREB_DIR=0
+[ "$TREB_DIR" != "$DEFAULT_TREB_DIR" ] && CUSTOM_TREB_DIR=1
 
 RUST_REPO="trebuchet-org/treb-cli-rs"
 GO_REPO="trebuchet-org/treb-cli"
@@ -28,12 +31,10 @@ GO_REPO="trebuchet-org/treb-cli"
 # ---------------------------------------------------------------------------
 
 main() {
-  need_cmd curl
-  need_cmd tar
-
   local cmd="install"
   local install_version=""
   local foundry_channel="stable"
+  local local_path=""
 
   while [[ -n $1 ]]; do
     case $1 in
@@ -45,6 +46,7 @@ main() {
       -a|--available)   cmd="available"; shift; continue;;
       -u|--use)         shift; cmd="use"; install_version="$1";;
       -i|--install)     shift; install_version="$1";;
+      -p|--path)        shift; local_path="$1";;
       --foundry)        shift; foundry_channel="$1";;
       *)                warn "unknown option: $1"; usage; exit 1;;
     esac
@@ -63,6 +65,15 @@ main() {
 
   # Migrate old installations on first run
   migrate_if_needed
+
+  if [ -n "$local_path" ]; then
+    need_cmd cargo
+    install_from_local_path "$local_path" "$install_version"
+    return
+  fi
+
+  need_cmd curl
+  need_cmd tar
 
   # Resolve what to install
   RESOLVED_TAG="" ; RESOLVED_REPO=""
@@ -148,6 +159,7 @@ do_list() {
     local info=""
     case "$v" in
       v1*)  info=" (go)" ;;
+      local-*) info=" (local build)" ;;
       *--foundry-nightly*) info=" (foundry nightly)" ;;
       *--foundry-v*)
         local fv="${v##*--foundry-}"
@@ -234,6 +246,7 @@ do_use() {
 }
 
 do_update() {
+  need_cmd curl
   local url="https://raw.githubusercontent.com/${RUST_REPO}/main/scripts/trebup"
   say "updating trebup..."
   ensure curl -fsSL "$url" -o "$TREB_BIN_DIR/trebup.tmp"
@@ -354,6 +367,136 @@ activate() {
   fi
 
   echo "$version" > "$TREB_ACTIVE_FILE"
+}
+
+# ---------------------------------------------------------------------------
+# Local build install
+# ---------------------------------------------------------------------------
+
+install_from_local_path() {
+  local requested_path="$1"
+  local install_version="$2"
+
+  local manifest_path workspace_root version_id version_dir binary_path
+  manifest_path="$(resolve_local_manifest_path "$requested_path")"
+  workspace_root="$(resolve_local_workspace_root "$manifest_path")"
+
+  version_id="${install_version:-$(derive_local_version_id "$workspace_root")}"
+  version_dir="$TREB_VERSIONS_DIR/$version_id"
+
+  say "building treb from local checkout: $workspace_root"
+  ensure mkdir -p "$TREB_VERSIONS_DIR"
+  ensure cargo build --release --manifest-path "$workspace_root/Cargo.toml" -p treb-cli
+
+  binary_path="$(resolve_local_binary_path "$workspace_root")"
+
+  ensure rm -rf "$version_dir"
+  ensure mkdir -p "$version_dir"
+  ensure cp "$binary_path" "$version_dir/treb-cli"
+  ensure chmod +x "$version_dir/treb-cli"
+
+  generate_local_completions "$version_dir" "$version_dir/treb-cli"
+
+  activate "$version_id"
+
+  if [ -d "$version_dir/completions" ]; then
+    install_completions "$version_dir/completions"
+  fi
+
+  say "done! local treb build installed as $version_id"
+  check_path
+}
+
+resolve_local_workspace_root() {
+  local manifest_path="$1"
+  local manifest_dir workspace_root
+  manifest_dir="$(dirname "$manifest_path")"
+
+  if [ -f "$manifest_dir/crates/treb-cli/Cargo.toml" ]; then
+    echo "$manifest_dir"
+    return
+  fi
+
+  if [ "$(basename "$manifest_dir")" = "treb-cli" ] && [ "$(basename "$(dirname "$manifest_dir")")" = "crates" ]; then
+    workspace_root="$(dirname "$(dirname "$manifest_dir")")"
+    if [ -f "$workspace_root/Cargo.toml" ]; then
+      echo "$workspace_root"
+      return
+    fi
+  fi
+
+  err "failed to locate Cargo workspace for $manifest_path"
+}
+
+resolve_local_manifest_path() {
+  local requested_path="$1"
+  local path
+  if [ -d "$requested_path" ]; then
+    path="$(cd "$requested_path" 2>/dev/null && pwd -P)" || err "invalid path: $requested_path"
+  elif [ -f "$requested_path" ]; then
+    path="$(cd "$(dirname "$requested_path")" 2>/dev/null && pwd -P)/$(basename "$requested_path")" || err "invalid path: $requested_path"
+  else
+    err "path does not exist: $requested_path"
+  fi
+
+  if [ -f "$path/crates/treb-cli/Cargo.toml" ]; then
+    echo "$path/crates/treb-cli/Cargo.toml"
+    return
+  fi
+
+  if [ -f "$path/Cargo.toml" ]; then
+    if grep -q 'name = "treb-cli"' "$path/Cargo.toml" 2>/dev/null; then
+      echo "$path/Cargo.toml"
+      return
+    fi
+    if grep -q '\[workspace\]' "$path/Cargo.toml" 2>/dev/null && [ -f "$path/crates/treb-cli/Cargo.toml" ]; then
+      echo "$path/crates/treb-cli/Cargo.toml"
+      return
+    fi
+  fi
+
+  err "path must point at a treb-cli-rs checkout or crates/treb-cli manifest"
+}
+
+derive_local_version_id() {
+  local workspace_root="$1"
+  local sha="local"
+  local dirty=""
+
+  if command -v git >/dev/null 2>&1 && git -C "$workspace_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    sha="$(git -C "$workspace_root" rev-parse --short HEAD 2>/dev/null || echo local)"
+    if ! git -C "$workspace_root" diff --quiet --ignore-submodules HEAD -- 2>/dev/null; then
+      dirty="-dirty"
+    fi
+  else
+    sha="$(date +%Y%m%d%H%M%S)"
+  fi
+
+  echo "local-${sha}${dirty}"
+}
+
+resolve_local_binary_path() {
+  local workspace_root="$1"
+  if [ -f "$workspace_root/target/release/treb" ]; then
+    echo "$workspace_root/target/release/treb"
+    return
+  fi
+  if [ -f "$workspace_root/target/release/treb-cli" ]; then
+    echo "$workspace_root/target/release/treb-cli"
+    return
+  fi
+  err "local build succeeded but no treb binary was found under $workspace_root/target/release"
+}
+
+generate_local_completions() {
+  local version_dir="$1"
+  local binary_path="$2"
+  local completions_dir="$version_dir/completions"
+
+  ensure mkdir -p "$completions_dir"
+  ensure "$binary_path" completion bash > "$completions_dir/treb.bash"
+  ensure "$binary_path" completion zsh > "$completions_dir/_treb"
+  ensure "$binary_path" completion fish > "$completions_dir/treb.fish"
 }
 
 # ---------------------------------------------------------------------------
@@ -546,6 +689,11 @@ check_path() {
     *":${TREB_BIN_DIR}:"*) return ;;
   esac
 
+  if [ "$CUSTOM_TREB_DIR" -eq 1 ]; then
+    say "custom TREB_DIR in use; skipping shell profile PATH update for $TREB_BIN_DIR"
+    return
+  fi
+
   # Auto-add to shell profile
   local profile=""
   local shell_name
@@ -579,14 +727,23 @@ check_path() {
 install_trebup() {
   ensure mkdir -p "$TREB_BIN_DIR"
 
+  local current_path target_path
+  if [ -f "$0" ]; then
+    current_path="$(realpath "$0" 2>/dev/null || echo "$0")"
+  else
+    current_path="$(command -v "$0" 2>/dev/null || echo "$0")"
+    current_path="$(realpath "$current_path" 2>/dev/null || echo "$current_path")"
+  fi
+  target_path="$(realpath "$TREB_BIN_DIR/trebup" 2>/dev/null || echo "$TREB_BIN_DIR/trebup")"
+
   # Already installed in the right place — nothing to do
-  if [ "$(realpath "$0" 2>/dev/null || echo "$0")" = "$(realpath "$TREB_BIN_DIR/trebup" 2>/dev/null || echo "")" ]; then
+  if [ "$current_path" = "$target_path" ]; then
     return
   fi
 
   # If running from a real file (not piped), copy it
-  if [ -f "$0" ] && [ "$0" != "bash" ] && [ "$0" != "/dev/stdin" ]; then
-    cp "$0" "$TREB_BIN_DIR/trebup"
+  if [ -f "$current_path" ] && [ "$current_path" != "bash" ] && [ "$current_path" != "/dev/stdin" ]; then
+    cp "$current_path" "$TREB_BIN_DIR/trebup"
     chmod +x "$TREB_BIN_DIR/trebup"
     return
   fi
@@ -636,6 +793,7 @@ OPTIONS:
     -h, --help            Print this help message
     -v, --version         Print trebup version
     -i, --install TAG     Install a specific version
+    -p, --path PATH       Build and install treb from a local Rust checkout
     -u, --use TAG         Switch to an already-installed version
     -l, --list            List installed versions
     -a, --available       List available releases from GitHub
@@ -647,6 +805,7 @@ EXAMPLES:
     trebup --foundry nightly            Install with foundry nightly
     trebup --install v2.0.0             Install specific version
     trebup --install v1.0.0             Install Go CLI (v1, frozen)
+    trebup --path /path/to/treb-cli-rs  Build and install from a local checkout
     trebup --list                       List installed versions
     trebup --use v2.0.0--foundry-v1.5.1
 EOF

@@ -13,18 +13,23 @@ use treb_core::{
 };
 
 use crate::{
-    DEPLOYMENTS_FILE, FORK_STATE_FILE, GOVERNOR_PROPOSALS_FILE, LOOKUP_FILE, SAFE_TXS_FILE,
-    SOLIDITY_REGISTRY_FILE, TRANSACTIONS_FILE,
+    ADDRESSBOOK_FILE, DEPLOYMENTS_DIR, DEPLOYMENTS_FILE, FORK_STATE_FILE, GOVERNOR_PROPOSALS_FILE,
+    LOOKUP_FILE, QUEUED_FILE, REGISTRY_DIR, SAFE_TXS_FILE, SOLIDITY_REGISTRY_FILE,
+    TRANSACTIONS_FILE, deployments_dir,
     io::{read_versioned_file_compat, write_versioned_file},
 };
 
-/// Registry JSON files that are snapshotted/restored during fork mode.
-const SNAPSHOT_FILES: &[&str] = &[
+/// `.treb` JSON files that are snapshotted/restored during fork mode.
+///
+/// Some of these are legacy flat files that may still exist during migration.
+const SNAPSHOT_REGISTRY_FILES: &[&str] = &[
+    ADDRESSBOOK_FILE,
     DEPLOYMENTS_FILE,
     TRANSACTIONS_FILE,
     SAFE_TXS_FILE,
     GOVERNOR_PROPOSALS_FILE,
     LOOKUP_FILE,
+    QUEUED_FILE,
     SOLIDITY_REGISTRY_FILE,
 ];
 
@@ -69,30 +74,98 @@ fn active_fork_entry_key(entry: &ForkEntry) -> String {
     active_fork_key(&entry.network, entry.instance_name.as_deref())
 }
 
-// ── Snapshot / Restore ──────────────────────────────────────────────────────
+fn project_root_for_registry_dir<'a>(registry_dir: &'a Path) -> &'a Path {
+    let is_treb_dir = registry_dir.file_name().and_then(|name| name.to_str()) == Some(REGISTRY_DIR);
+    if is_treb_dir { registry_dir.parent().unwrap_or(registry_dir) } else { registry_dir }
+}
 
-/// Copy registry JSON files from `registry_dir` to `snapshot_dir`.
-///
-/// Missing files are silently skipped. Creates `snapshot_dir` if it does not
-/// exist.
-pub fn snapshot_registry(registry_dir: &Path, snapshot_dir: &Path) -> Result<(), TrebError> {
-    fs::create_dir_all(snapshot_dir)?;
-    for &file in SNAPSHOT_FILES {
-        let src = registry_dir.join(file);
-        // Use read+write instead of fs::copy to avoid cross-user permission
-        // errors from metadata preservation (fchmod/futimens fail across users).
-        if src.exists() {
-            fs::write(snapshot_dir.join(file), fs::read(&src)?)?;
-        } else if let Some(legacy_src) = crate::legacy_registry_store_path(&src)
-            && legacy_src.exists()
-        {
-            fs::write(snapshot_dir.join(file), fs::read(&legacy_src)?)?;
+fn copy_tree(src: &Path, dst: &Path) -> Result<(), TrebError> {
+    if !src.exists() {
+        return Ok(());
+    }
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_tree(&src_path, &dst_path)?;
+        } else {
+            if let Some(parent) = dst_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            // Use read+write to avoid metadata-preservation permission issues.
+            fs::write(&dst_path, fs::read(&src_path)?)?;
         }
     }
     Ok(())
 }
 
-/// Restore all `.json` files from `snapshot_dir` back to `registry_dir`,
+fn snapshot_registry_root(snapshot_dir: &Path) -> PathBuf {
+    snapshot_dir.join(REGISTRY_DIR)
+}
+
+fn snapshot_deployments_root(snapshot_dir: &Path) -> PathBuf {
+    snapshot_dir.join(DEPLOYMENTS_DIR)
+}
+
+fn find_snapshot_registry_file(snapshot_dir: &Path, file: &str) -> Option<PathBuf> {
+    let structured = snapshot_registry_root(snapshot_dir).join(file);
+    if structured.exists() {
+        return Some(structured);
+    }
+    if let Some(legacy_structured) = crate::legacy_registry_store_path(&structured)
+        && legacy_structured.exists()
+    {
+        return Some(legacy_structured);
+    }
+
+    let flat = snapshot_dir.join(file);
+    if flat.exists() {
+        return Some(flat);
+    }
+    if let Some(legacy_flat) = crate::legacy_registry_store_path(&flat)
+        && legacy_flat.exists()
+    {
+        return Some(legacy_flat);
+    }
+
+    None
+}
+
+// ── Snapshot / Restore ──────────────────────────────────────────────────────
+
+/// Copy registry state from `registry_dir` to `snapshot_dir`.
+///
+/// This snapshots both the canonical `deployments/` tree and the remaining
+/// `.treb`-scoped JSON files used for local operational state. Missing files are
+/// silently skipped. Creates `snapshot_dir` if it does not exist.
+pub fn snapshot_registry(registry_dir: &Path, snapshot_dir: &Path) -> Result<(), TrebError> {
+    fs::create_dir_all(snapshot_dir)?;
+    fs::create_dir_all(snapshot_registry_root(snapshot_dir))?;
+
+    let project_root = project_root_for_registry_dir(registry_dir);
+    let canonical_deployments_root = deployments_dir(project_root);
+    if canonical_deployments_root.exists() {
+        copy_tree(&canonical_deployments_root, &snapshot_deployments_root(snapshot_dir))?;
+    }
+
+    for &file in SNAPSHOT_REGISTRY_FILES {
+        let src = registry_dir.join(file);
+        // Use read+write instead of fs::copy to avoid cross-user permission
+        // errors from metadata preservation (fchmod/futimens fail across users).
+        if src.exists() {
+            fs::write(snapshot_registry_root(snapshot_dir).join(file), fs::read(&src)?)?;
+        } else if let Some(legacy_src) = crate::legacy_registry_store_path(&src)
+            && legacy_src.exists()
+        {
+            fs::write(snapshot_registry_root(snapshot_dir).join(file), fs::read(&legacy_src)?)?;
+        }
+    }
+    Ok(())
+}
+
+/// Restore registry state from `snapshot_dir` back to `registry_dir`,
 /// overwriting current state.
 ///
 /// Returns `TrebError::Fork` if `snapshot_dir` does not exist.
@@ -103,22 +176,31 @@ pub fn restore_registry(snapshot_dir: &Path, registry_dir: &Path) -> Result<(), 
             snapshot_dir.display()
         )));
     }
+    let project_root = project_root_for_registry_dir(registry_dir);
+    let current_deployments_root = deployments_dir(project_root);
+    if current_deployments_root.exists() {
+        fs::remove_dir_all(&current_deployments_root)?;
+    }
+    let snapshot_deployments_root = snapshot_deployments_root(snapshot_dir);
+    if snapshot_deployments_root.exists() {
+        copy_tree(&snapshot_deployments_root, &current_deployments_root)?;
+    }
+
     // Use read+write instead of fs::copy to avoid cross-user permission
     // errors from metadata preservation (fchmod/futimens fail across users).
-    for &file in SNAPSHOT_FILES {
-        let snapshot_file = snapshot_dir.join(file);
+    for &file in SNAPSHOT_REGISTRY_FILES {
         let registry_file = registry_dir.join(file);
-        if snapshot_file.exists() {
+        if let Some(snapshot_file) = find_snapshot_registry_file(snapshot_dir, file) {
             fs::write(&registry_file, fs::read(&snapshot_file)?)?;
-        } else if let Some(legacy_snapshot_file) = crate::legacy_registry_store_path(&snapshot_file)
-        {
-            if legacy_snapshot_file.exists() {
-                fs::write(&registry_file, fs::read(&legacy_snapshot_file)?)?;
-            } else if registry_file.exists() {
+        } else {
+            if registry_file.exists() {
                 fs::remove_file(&registry_file)?;
             }
-        } else if registry_file.exists() {
-            fs::remove_file(&registry_file)?;
+            if let Some(legacy_registry_file) = crate::legacy_registry_store_path(&registry_file)
+                && legacy_registry_file.exists()
+            {
+                fs::remove_file(&legacy_registry_file)?;
+            }
         }
     }
     Ok(())
@@ -378,12 +460,17 @@ mod tests {
 
     use chrono::{TimeZone, Utc};
     use serde_json::json;
+    use std::path::{Path, PathBuf};
     use tempfile::TempDir;
 
     use crate::{
         STORE_FORMAT,
         io::{VersionedStore, read_json_file, write_json_file},
     };
+
+    fn canonical_deployment_file(root: &Path) -> PathBuf {
+        root.join(DEPLOYMENTS_DIR).join("default").join("1.json")
+    }
 
     fn sample_fork_entry(network: &str) -> ForkEntry {
         let ts = Utc.with_ymd_and_hms(2026, 3, 3, 12, 0, 0).unwrap();
@@ -425,15 +512,17 @@ mod tests {
         let snap_path = snap_dir.path().join("snapshot");
 
         // Create some registry files
-        fs::write(reg_dir.path().join(DEPLOYMENTS_FILE), r#"{"dep1": {}}"#).unwrap();
+        let deployments_file = canonical_deployment_file(reg_dir.path());
+        fs::create_dir_all(deployments_file.parent().unwrap()).unwrap();
+        fs::write(&deployments_file, r#"{"dep1": {}}"#).unwrap();
         fs::write(reg_dir.path().join(TRANSACTIONS_FILE), r#"{"tx1": {}}"#).unwrap();
 
         snapshot_registry(reg_dir.path(), &snap_path).unwrap();
 
-        assert!(snap_path.join(DEPLOYMENTS_FILE).exists());
-        assert!(snap_path.join(TRANSACTIONS_FILE).exists());
+        assert!(snap_path.join(DEPLOYMENTS_DIR).join("default/1.json").exists());
+        assert!(snap_path.join(REGISTRY_DIR).join(TRANSACTIONS_FILE).exists());
         assert_eq!(
-            fs::read_to_string(snap_path.join(DEPLOYMENTS_FILE)).unwrap(),
+            fs::read_to_string(snap_path.join(DEPLOYMENTS_DIR).join("default/1.json")).unwrap(),
             r#"{"dep1": {}}"#
         );
     }
@@ -445,13 +534,15 @@ mod tests {
         let snap_path = snap_dir.path().join("snapshot");
 
         // Only create one file
-        fs::write(reg_dir.path().join(DEPLOYMENTS_FILE), "{}").unwrap();
+        let deployments_file = canonical_deployment_file(reg_dir.path());
+        fs::create_dir_all(deployments_file.parent().unwrap()).unwrap();
+        fs::write(&deployments_file, "{}").unwrap();
 
         snapshot_registry(reg_dir.path(), &snap_path).unwrap();
 
-        assert!(snap_path.join(DEPLOYMENTS_FILE).exists());
-        assert!(!snap_path.join(TRANSACTIONS_FILE).exists());
-        assert!(!snap_path.join(SAFE_TXS_FILE).exists());
+        assert!(snap_path.join(DEPLOYMENTS_DIR).join("default/1.json").exists());
+        assert!(!snap_path.join(REGISTRY_DIR).join(TRANSACTIONS_FILE).exists());
+        assert!(!snap_path.join(REGISTRY_DIR).join(SAFE_TXS_FILE).exists());
     }
 
     #[test]
@@ -465,7 +556,7 @@ mod tests {
         snapshot_registry(reg_dir.path(), &snap_path).unwrap();
 
         assert_eq!(
-            fs::read_to_string(snap_path.join(SAFE_TXS_FILE)).unwrap(),
+            fs::read_to_string(snap_path.join(REGISTRY_DIR).join(SAFE_TXS_FILE)).unwrap(),
             r#"{"legacy": true}"#
         );
     }
@@ -476,16 +567,20 @@ mod tests {
     fn restore_overwrites_registry() {
         let reg_dir = TempDir::new().unwrap();
         let snap_dir = TempDir::new().unwrap();
+        let current_file = canonical_deployment_file(reg_dir.path());
+        let snapshot_file = canonical_deployment_file(snap_dir.path());
+        fs::create_dir_all(current_file.parent().unwrap()).unwrap();
+        fs::create_dir_all(snapshot_file.parent().unwrap()).unwrap();
 
         // Current registry state
-        fs::write(reg_dir.path().join(DEPLOYMENTS_FILE), r#"{"new": true}"#).unwrap();
+        fs::write(&current_file, r#"{"new": true}"#).unwrap();
 
         // Snapshot with old state
-        fs::write(snap_dir.path().join(DEPLOYMENTS_FILE), r#"{"old": true}"#).unwrap();
+        fs::write(&snapshot_file, r#"{"old": true}"#).unwrap();
 
         restore_registry(snap_dir.path(), reg_dir.path()).unwrap();
 
-        let content = fs::read_to_string(reg_dir.path().join(DEPLOYMENTS_FILE)).unwrap();
+        let content = fs::read_to_string(current_file).unwrap();
         assert_eq!(content, r#"{"old": true}"#);
     }
 
@@ -493,14 +588,17 @@ mod tests {
     fn restore_removes_files_missing_from_snapshot() {
         let reg_dir = TempDir::new().unwrap();
         let snap_dir = TempDir::new().unwrap();
+        let current_file = canonical_deployment_file(reg_dir.path());
+        fs::create_dir_all(current_file.parent().unwrap()).unwrap();
 
-        fs::write(reg_dir.path().join(DEPLOYMENTS_FILE), r#"{"fork_only": true}"#).unwrap();
-        fs::write(snap_dir.path().join(TRANSACTIONS_FILE), "{}").unwrap();
+        fs::write(&current_file, r#"{"fork_only": true}"#).unwrap();
+        fs::create_dir_all(snap_dir.path().join(REGISTRY_DIR)).unwrap();
+        fs::write(snap_dir.path().join(REGISTRY_DIR).join(TRANSACTIONS_FILE), "{}").unwrap();
 
         restore_registry(snap_dir.path(), reg_dir.path()).unwrap();
 
         assert!(
-            !reg_dir.path().join(DEPLOYMENTS_FILE).exists(),
+            !reg_dir.path().join(DEPLOYMENTS_DIR).exists(),
             "restore should remove registry files that were absent from the snapshot"
         );
         assert!(
@@ -830,7 +928,10 @@ mod tests {
     fn snapshot_and_restore_preserve_wrapped_registry_files() {
         let reg_dir = TempDir::new().unwrap();
         let snap_dir = TempDir::new().unwrap();
-        let deployments_path = reg_dir.path().join(DEPLOYMENTS_FILE);
+        let deployments_path = canonical_deployment_file(reg_dir.path());
+        let snapshot_deployments_path = canonical_deployment_file(snap_dir.path());
+        fs::create_dir_all(deployments_path.parent().unwrap()).unwrap();
+        fs::create_dir_all(snapshot_deployments_path.parent().unwrap()).unwrap();
 
         let wrapped = json!({
             "_format": STORE_FORMAT,
@@ -843,8 +944,7 @@ mod tests {
         write_json_file(&deployments_path, &wrapped).unwrap();
 
         snapshot_registry(reg_dir.path(), snap_dir.path()).unwrap();
-        let snap_value: serde_json::Value =
-            read_json_file(&snap_dir.path().join(DEPLOYMENTS_FILE)).unwrap();
+        let snap_value: serde_json::Value = read_json_file(&snapshot_deployments_path).unwrap();
         assert_eq!(snap_value, wrapped);
 
         write_json_file(

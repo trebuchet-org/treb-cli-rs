@@ -1,10 +1,4 @@
 === cmd 0: [ls] ===
-   ◎ namespace:   FORK/42220                    
-└─ ⛓ chain:       celo (42220)                  
-  
-  SINGLETONS
-  MockToken [fork]                            0xDeaDbeefdEAdbeefdEadbEEFdeadbeEFdEaDbeeF   UNVERIFIED        <TIMESTAMP>
-
    ◎ namespace:   MAINNET                       
 └─ ⛓ chain:       celo (42220)                  
   
@@ -18,4 +12,4 @@
   SINGLETONS
   FPMM:v<VERSION>                                 0x42eddd7dC046da254A93659CA9b02f294606833D   e[✔︎]  s[-] b[-]   <TIMESTAMP>
 
-Total deployments: 4
+Total deployments: 3

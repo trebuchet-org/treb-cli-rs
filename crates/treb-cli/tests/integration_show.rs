@@ -46,6 +46,7 @@ fn make_show_deployment(
         label: label.to_string(),
         address: address.to_string(),
         deployment_type: DeploymentType::Singleton,
+        execution: None,
         transaction_id: format!("tx-{namespace}-{chain_id}-{contract_name}"),
         deployment_strategy: DeploymentStrategy {
             method: DeploymentMethod::Create,
@@ -270,6 +271,7 @@ fn show_network_filter_scopes_resolution_and_errors_outside_scope() {
             ),
         ],
     );
+    ctx.run(["config", "set", "namespace", "mainnet"]).success();
 
     ctx.run_with_env(["show", "--network", "42220", "Counter"], [("NO_COLOR", "1")])
         .success()
@@ -278,7 +280,9 @@ fn show_network_filter_scopes_resolution_and_errors_outside_scope() {
         .stdout(predicate::str::contains("Network: 1").not());
 
     ctx.run(["show", "--network", "11155111", "Counter"]).failure().stderr(
-        predicate::str::contains("no deployment found matching 'Counter' on network '11155111'"),
+        predicate::str::contains(
+            "no deployment found matching 'Counter' in namespace 'mainnet' on network '11155111'",
+        ),
     );
 }
 
@@ -288,11 +292,13 @@ fn show_no_fork_filter_excludes_fork_deployments() {
     ctx.run(["init"]).success();
     helpers::seed_registry(ctx.path());
 
-    ctx.run(["show", "MockToken"]).success();
+    ctx.run(["show", "--namespace", "fork/42220", "MockToken"]).success();
 
-    ctx.run(["show", "--no-fork", "MockToken"]).failure().stderr(predicate::str::contains(
-        "no deployment found matching 'MockToken' excluding fork deployments",
-    ));
+    ctx.run(["show", "--namespace", "fork/42220", "--no-fork", "MockToken"])
+        .failure()
+        .stderr(predicate::str::contains(
+            "no deployment found matching 'MockToken' in namespace 'fork/42220' excluding fork deployments",
+        ));
 }
 
 #[test]

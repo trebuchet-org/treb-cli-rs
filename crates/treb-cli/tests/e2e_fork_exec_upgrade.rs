@@ -128,6 +128,7 @@ fn make_deployment(id: &str, address: &str, name: &str, admin: &str) -> Deployme
         label: String::new(),
         address: address.to_string(),
         deployment_type: DeploymentType::Proxy,
+        execution: None,
         transaction_id: format!("tx-deploy-{}", name.to_lowercase()),
         deployment_strategy: DeploymentStrategy {
             method: DeploymentMethod::Create,

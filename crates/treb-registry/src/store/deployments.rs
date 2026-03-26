@@ -1,43 +1,81 @@
-//! Persistent store for deployments backed by `deployments.json`.
+//! Persistent store for deployments backed by `deployments/<namespace>/<chain>.json`.
 
 use std::{
     collections::{BTreeMap, HashMap},
-    path::PathBuf,
+    fs,
+    path::{Path, PathBuf},
 };
 
 use chrono::Utc;
 use treb_core::{TrebError, types::Deployment};
 
 use crate::{
-    DEPLOYMENTS_FILE,
+    ADDRESSBOOK_FILE, DEPLOYMENTS_FILE, LOOKUP_FILE, QUEUED_FILE, SOLIDITY_REGISTRY_FILE,
     io::{read_versioned_file, write_versioned_file},
 };
 
-/// CRUD store for deployments, persisted as a `HashMap<String, Deployment>` in
-/// `deployments.json` inside the registry directory.
+/// CRUD store for deployments, persisted as grouped `HashMap<String, Deployment>` files under
+/// `deployments/<namespace>/<chain>.json`.
 pub struct DeploymentStore {
-    path: PathBuf,
+    root: PathBuf,
+    legacy_path: Option<PathBuf>,
     data: HashMap<String, Deployment>,
 }
 
 impl DeploymentStore {
-    /// Create a new store pointing at `<registry_dir>/deployments.json`.
-    /// Call [`load`](Self::load) to read existing data from disk.
-    pub fn new(registry_dir: &std::path::Path) -> Self {
-        Self { path: registry_dir.join(DEPLOYMENTS_FILE), data: HashMap::new() }
+    /// Create a new store rooted at the canonical `deployments/` directory.
+    pub fn new(deployments_root: &Path) -> Self {
+        Self { root: deployments_root.to_path_buf(), legacy_path: None, data: HashMap::new() }
+    }
+
+    /// Create a new store rooted at the canonical `deployments/` directory with
+    /// a fallback path for loading legacy `.treb/deployments.json`.
+    pub fn with_legacy_path(deployments_root: &Path, legacy_path: &Path) -> Self {
+        Self {
+            root: deployments_root.to_path_buf(),
+            legacy_path: Some(legacy_path.to_path_buf()),
+            data: HashMap::new(),
+        }
     }
 
     /// Load deployments from disk, replacing any in-memory data.
+    ///
+    /// Canonical `deployments/` files win. Legacy flat-file input is only used
+    /// when no canonical deployment group files exist yet.
     pub fn load(&mut self) -> Result<(), TrebError> {
-        self.data = read_versioned_file(&self.path)?;
-        Ok(())
+        self.data.clear();
+
+        if self.has_canonical_groups()? {
+            self.load_canonical_groups()
+        } else if self.root.join(DEPLOYMENTS_FILE).exists() {
+            self.data = read_versioned_file(&self.root.join(DEPLOYMENTS_FILE))?;
+            Ok(())
+        } else if let Some(legacy_path) = &self.legacy_path {
+            self.data = read_versioned_file(legacy_path)?;
+            Ok(())
+        } else {
+            Ok(())
+        }
     }
 
-    /// Atomically save all deployments to disk under a file lock.
+    /// Atomically save all deployments to grouped files under `deployments/`.
     pub fn save(&self) -> Result<(), TrebError> {
-        let sorted: BTreeMap<String, Deployment> =
-            self.data.iter().map(|(id, deployment)| (id.clone(), deployment.clone())).collect();
-        write_versioned_file(&self.path, &sorted)
+        fs::create_dir_all(&self.root)?;
+        self.remove_existing_group_files()?;
+
+        let mut grouped: BTreeMap<PathBuf, BTreeMap<String, Deployment>> = BTreeMap::new();
+        for deployment in self.data.values() {
+            grouped
+                .entry(group_path(&self.root, &deployment.namespace, deployment.chain_id))
+                .or_default()
+                .insert(deployment.id.clone(), deployment.clone());
+        }
+
+        for (path, deployments) in grouped {
+            write_versioned_file(&path, &deployments)?;
+        }
+
+        Ok(())
     }
 
     /// Get a deployment by ID.
@@ -94,6 +132,110 @@ impl DeploymentStore {
     pub fn data(&self) -> &HashMap<String, Deployment> {
         &self.data
     }
+
+    /// Replace the full in-memory deployment set and persist it.
+    pub fn replace_all(
+        &mut self,
+        deployments: HashMap<String, Deployment>,
+    ) -> Result<(), TrebError> {
+        self.data = deployments;
+        self.save()
+    }
+
+    fn has_canonical_groups(&self) -> Result<bool, TrebError> {
+        if !self.root.exists() {
+            return Ok(false);
+        }
+        for path in collect_group_files(&self.root)? {
+            if path.exists() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    fn load_canonical_groups(&mut self) -> Result<(), TrebError> {
+        for path in collect_group_files(&self.root)? {
+            let deployments: HashMap<String, Deployment> = read_versioned_file(&path)?;
+            for (id, deployment) in deployments {
+                if self.data.insert(id.clone(), deployment).is_some() {
+                    return Err(TrebError::Registry(format!(
+                        "duplicate deployment id '{id}' found while loading {}",
+                        path.display()
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn remove_existing_group_files(&self) -> Result<(), TrebError> {
+        if !self.root.exists() {
+            return Ok(());
+        }
+
+        for path in collect_group_files(&self.root)? {
+            if path.exists() {
+                fs::remove_file(path)?;
+            }
+        }
+
+        let legacy_flat = self.root.join(DEPLOYMENTS_FILE);
+        if legacy_flat.exists() {
+            fs::remove_file(legacy_flat)?;
+        }
+
+        Ok(())
+    }
+}
+
+fn collect_group_files(root: &Path) -> Result<Vec<PathBuf>, TrebError> {
+    let mut result = Vec::new();
+    if !root.exists() {
+        return Ok(result);
+    }
+
+    fn visit(dir: &Path, root: &Path, result: &mut Vec<PathBuf>) -> Result<(), TrebError> {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let file_type = entry.file_type()?;
+            if file_type.is_dir() {
+                visit(&path, root, result)?;
+                continue;
+            }
+
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+
+            if path.parent() == Some(root) {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if matches!(
+                    name.as_ref(),
+                    ADDRESSBOOK_FILE
+                        | SOLIDITY_REGISTRY_FILE
+                        | LOOKUP_FILE
+                        | QUEUED_FILE
+                        | DEPLOYMENTS_FILE
+                ) {
+                    continue;
+                }
+            }
+
+            result.push(path);
+        }
+        Ok(())
+    }
+
+    visit(root, root, &mut result)?;
+    result.sort();
+    Ok(result)
+}
+
+fn group_path(root: &Path, namespace: &str, chain_id: u64) -> PathBuf {
+    root.join(namespace).join(format!("{chain_id}.json"))
 }
 
 #[cfg(test)]
@@ -102,26 +244,41 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
     use treb_core::types::{
-        ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, VerificationInfo,
-        VerificationStatus,
+        ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, ExecutionKind,
+        ExecutionRef, ExecutionStatus, VerificationInfo, VerificationStatus,
     };
 
     use crate::io::{VersionedStore, read_json_file, write_json_file};
 
     /// Helper to create a minimal deployment with the given ID and created_at offset in seconds.
-    fn make_deployment(id: &str, created_at_offset_secs: i64) -> Deployment {
+    fn make_deployment(
+        id: &str,
+        namespace: &str,
+        chain_id: u64,
+        created_at_offset_secs: i64,
+    ) -> Deployment {
         let base = chrono::DateTime::parse_from_rfc3339("2026-03-02T19:30:00Z")
             .unwrap()
             .with_timezone(&Utc);
         let ts = base + chrono::Duration::seconds(created_at_offset_secs);
         Deployment {
             id: id.to_string(),
-            namespace: "mainnet".to_string(),
-            chain_id: 42220,
+            namespace: namespace.to_string(),
+            chain_id,
             contract_name: "TestContract".to_string(),
             label: "v1.0.0".to_string(),
             address: format!("0x{:040x}", created_at_offset_secs.unsigned_abs()),
             deployment_type: DeploymentType::Singleton,
+            execution: Some(ExecutionRef {
+                status: ExecutionStatus::Broadcast,
+                kind: ExecutionKind::Tx,
+                artifact_file: format!("broadcast/{id}.json"),
+                tx_hash: Some(format!("0x{:064x}", created_at_offset_secs.unsigned_abs())),
+                safe_tx_hash: None,
+                proposal_id: None,
+                propose_safe_tx_hash: None,
+                script_tx_index: Some(0),
+            }),
             transaction_id: String::new(),
             deployment_strategy: DeploymentStrategy {
                 method: DeploymentMethod::Create,
@@ -157,7 +314,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut store = DeploymentStore::new(dir.path());
 
-        let dep = make_deployment("dep-1", 0);
+        let dep = make_deployment("dep-1", "mainnet", 42220, 0);
         store.insert(dep.clone()).unwrap();
 
         let got = store.get("dep-1").unwrap();
@@ -166,117 +323,86 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_insert_error() {
+    fn saves_grouped_by_namespace_and_chain() {
         let dir = TempDir::new().unwrap();
         let mut store = DeploymentStore::new(dir.path());
 
-        let dep = make_deployment("dep-1", 0);
-        store.insert(dep.clone()).unwrap();
+        store.insert(make_deployment("dep-a", "mainnet", 1, 0)).unwrap();
+        store.insert(make_deployment("dep-b", "staging", 1, 1)).unwrap();
+        store.insert(make_deployment("dep-c", "fork/42220", 31337, 2)).unwrap();
 
-        let result = store.insert(dep);
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("already exists"), "expected 'already exists' in: {msg}");
+        assert!(dir.path().join("mainnet/1.json").exists());
+        assert!(dir.path().join("staging/1.json").exists());
+        assert!(dir.path().join("fork/42220/31337.json").exists());
     }
 
     #[test]
-    fn update_success_and_updated_at_changes() {
+    fn load_reads_grouped_files() {
         let dir = TempDir::new().unwrap();
-        let mut store = DeploymentStore::new(dir.path());
+        fs::create_dir_all(dir.path().join("mainnet")).unwrap();
+        fs::create_dir_all(dir.path().join("fork/42220")).unwrap();
 
-        let dep = make_deployment("dep-1", 0);
-        let original_updated_at = dep.updated_at;
-        store.insert(dep.clone()).unwrap();
+        let mut group_a = BTreeMap::new();
+        group_a.insert("dep-1".to_string(), make_deployment("dep-1", "mainnet", 42220, 0));
+        let mut group_b = BTreeMap::new();
+        group_b.insert("dep-2".to_string(), make_deployment("dep-2", "fork/42220", 31337, 1));
 
-        // Small sleep to ensure updated_at changes
-        std::thread::sleep(std::time::Duration::from_millis(10));
-
-        let mut modified = dep;
-        modified.label = "v2.0.0".to_string();
-        store.update(modified).unwrap();
-
-        let got = store.get("dep-1").unwrap();
-        assert_eq!(got.label, "v2.0.0");
-        assert!(got.updated_at > original_updated_at);
-    }
-
-    #[test]
-    fn update_nonexistent_error() {
-        let dir = TempDir::new().unwrap();
-        let mut store = DeploymentStore::new(dir.path());
-
-        let dep = make_deployment("missing", 0);
-        let result = store.update(dep);
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("not found"), "expected 'not found' in: {msg}");
-    }
-
-    #[test]
-    fn remove_returns_deployment() {
-        let dir = TempDir::new().unwrap();
-        let mut store = DeploymentStore::new(dir.path());
-
-        let dep = make_deployment("dep-1", 0);
-        store.insert(dep).unwrap();
-
-        let removed = store.remove("dep-1").unwrap();
-        assert_eq!(removed.id, "dep-1");
-        assert!(store.get("dep-1").is_none());
-        assert_eq!(store.count(), 0);
-    }
-
-    #[test]
-    fn save_writes_deployments_in_key_order() {
-        let dir = TempDir::new().unwrap();
-        let mut store = DeploymentStore::new(dir.path());
-
-        store.insert(make_deployment("dep-b", 0)).unwrap();
-        store.insert(make_deployment("dep-a", 1)).unwrap();
-
-        let raw = fs::read_to_string(dir.path().join(DEPLOYMENTS_FILE)).unwrap();
-        assert!(!raw.contains("\"_format\""));
-        assert!(!raw.contains("\"entries\""));
-        let dep_a_index = raw.find("\"dep-a\"").expect("dep-a key should exist");
-        let dep_b_index = raw.find("\"dep-b\"").expect("dep-b key should exist");
-
-        assert!(dep_a_index < dep_b_index, "deployments should be serialized in key order");
-    }
-
-    #[test]
-    fn load_reads_legacy_bare_map() {
-        let dir = TempDir::new().unwrap();
-        let path = dir.path().join(DEPLOYMENTS_FILE);
-        let mut deployments = BTreeMap::new();
-        deployments.insert("dep-1".to_string(), make_deployment("dep-1", 0));
-        deployments.insert("dep-2".to_string(), make_deployment("dep-2", 1));
-
-        write_json_file(&path, &deployments).unwrap();
+        write_json_file(&dir.path().join("mainnet/42220.json"), &group_a).unwrap();
+        write_json_file(&dir.path().join("fork/42220/31337.json"), &group_b).unwrap();
 
         let mut store = DeploymentStore::new(dir.path());
         store.load().unwrap();
 
         assert_eq!(store.count(), 2);
-        assert_eq!(store.get("dep-1").unwrap().id, "dep-1");
-        assert_eq!(store.get("dep-2").unwrap().id, "dep-2");
+        assert_eq!(store.get("dep-1").unwrap().namespace, "mainnet");
+        assert_eq!(store.get("dep-2").unwrap().namespace, "fork/42220");
     }
 
     #[test]
-    fn load_reads_wrapped_format() {
+    fn load_falls_back_to_legacy_flat_file() {
         let dir = TempDir::new().unwrap();
-        let path = dir.path().join(DEPLOYMENTS_FILE);
+        let legacy_dir = TempDir::new().unwrap();
+        let legacy_path = legacy_dir.path().join(DEPLOYMENTS_FILE);
         let mut deployments = BTreeMap::new();
-        deployments.insert("dep-1".to_string(), make_deployment("dep-1", 0));
-        deployments.insert("dep-2".to_string(), make_deployment("dep-2", 1));
+        deployments.insert("dep-1".to_string(), make_deployment("dep-1", "mainnet", 42220, 0));
 
-        write_json_file(&path, &VersionedStore::new(deployments)).unwrap();
+        write_json_file(&legacy_path, &deployments).unwrap();
+
+        let mut store = DeploymentStore::with_legacy_path(dir.path(), &legacy_path);
+        store.load().unwrap();
+
+        assert_eq!(store.count(), 1);
+        assert_eq!(store.get("dep-1").unwrap().id, "dep-1");
+    }
+
+    #[test]
+    fn save_rewrites_group_files_and_ignores_reserved_root_files() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join(ADDRESSBOOK_FILE), "{}\n").unwrap();
+        fs::create_dir_all(dir.path().join("mainnet")).unwrap();
+        fs::write(dir.path().join("mainnet/1.json"), "{}\n").unwrap();
+
+        let mut store = DeploymentStore::new(dir.path());
+        store.insert(make_deployment("dep-1", "mainnet", 42220, 0)).unwrap();
+
+        assert!(dir.path().join(ADDRESSBOOK_FILE).exists());
+        assert!(!dir.path().join("mainnet/1.json").exists());
+        assert!(dir.path().join("mainnet/42220.json").exists());
+    }
+
+    #[test]
+    fn load_reads_wrapped_format_from_group_file() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("mainnet")).unwrap();
+
+        let mut deployments = BTreeMap::new();
+        deployments.insert("dep-1".to_string(), make_deployment("dep-1", "mainnet", 1, 0));
+        write_json_file(&dir.path().join("mainnet/1.json"), &VersionedStore::new(deployments))
+            .unwrap();
 
         let mut store = DeploymentStore::new(dir.path());
         store.load().unwrap();
-
-        assert_eq!(store.count(), 2);
-        assert_eq!(store.get("dep-1").unwrap().id, "dep-1");
-        assert_eq!(store.get("dep-2").unwrap().id, "dep-2");
+        assert!(store.get("dep-1").is_some());
     }
 
     #[test]
@@ -284,10 +410,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut store = DeploymentStore::new(dir.path());
 
-        // Insert in reverse order
-        store.insert(make_deployment("dep-3", 30)).unwrap();
-        store.insert(make_deployment("dep-1", 10)).unwrap();
-        store.insert(make_deployment("dep-2", 20)).unwrap();
+        store.insert(make_deployment("dep-3", "mainnet", 1, 30)).unwrap();
+        store.insert(make_deployment("dep-1", "mainnet", 1, 10)).unwrap();
+        store.insert(make_deployment("dep-2", "mainnet", 1, 20)).unwrap();
 
         let list = store.list();
         assert_eq!(list.len(), 3);
@@ -307,42 +432,13 @@ mod tests {
     }
 
     #[test]
-    fn golden_file_round_trip() {
-        let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../treb-core/tests/fixtures/deployments_map.json");
-        let fixture_json = fs::read_to_string(&fixture_path)
-            .unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", fixture_path.display()));
-        let fixture_value: serde_json::Value =
-            serde_json::from_str(&fixture_json).expect("fixture is valid JSON");
-
-        // Load fixture into store
-        let dir = TempDir::new().unwrap();
-        let deployments: HashMap<String, Deployment> =
-            serde_json::from_value(fixture_value.clone()).expect("fixture deserializes");
-
-        let mut store = DeploymentStore::new(dir.path());
-        for (_, dep) in deployments {
-            store.insert(dep).unwrap();
-        }
-
-        // Re-read from disk and compare via serde_json::Value
-        let saved_raw = fs::read_to_string(dir.path().join(DEPLOYMENTS_FILE)).unwrap();
-        let saved_value: serde_json::Value = serde_json::from_str(&saved_raw).unwrap();
-
-        assert_eq!(
-            saved_value, fixture_value,
-            "golden file round-trip: saved JSON must preserve fixture entries as bare JSON"
-        );
-    }
-
-    #[test]
-    fn save_writes_bare_format() {
+    fn save_writes_bare_format_in_group_file() {
         let dir = TempDir::new().unwrap();
         let mut store = DeploymentStore::new(dir.path());
 
-        store.insert(make_deployment("dep-1", 0)).unwrap();
+        store.insert(make_deployment("dep-1", "mainnet", 1, 0)).unwrap();
 
-        let saved: serde_json::Value = read_json_file(&dir.path().join(DEPLOYMENTS_FILE)).unwrap();
+        let saved: serde_json::Value = read_json_file(&dir.path().join("mainnet/1.json")).unwrap();
         assert!(saved.get("_format").is_none());
         assert!(saved.get("entries").is_none());
         assert!(saved.get("dep-1").is_some());

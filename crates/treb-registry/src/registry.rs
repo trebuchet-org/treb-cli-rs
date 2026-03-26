@@ -11,14 +11,15 @@ use treb_core::{
 };
 
 use crate::{
-    REGISTRY_DIR,
-    lookup::LookupStore,
+    deployments_dir,
+    lookup::build_lookup_index,
+    registry_dir,
     solidity_registry::SolidityRegistryStore,
     store::{
-        AddressbookStore, DeploymentStore, GovernorProposalStore, SafeTransactionStore,
-        TransactionStore,
+        AddressbookStore, DeploymentStore, GovernorProposalStore, QueuedIndexStore,
+        SafeTransactionStore, TransactionStore,
     },
-    types::LookupIndex,
+    types::{LookupIndex, QueuedIndex},
 };
 
 // ── Registry ─────────────────────────────────────────────────────────────
@@ -26,8 +27,9 @@ use crate::{
 /// Unified facade for the `.treb/` registry directory.
 ///
 /// Holds all stores (deployments, transactions, safe transactions, governor
-/// proposals, lookup index) and provides delegate methods for CRUD operations.
-/// Deployment mutations automatically trigger a lookup index rebuild.
+/// proposals) and provides delegate methods for CRUD operations.
+/// Deployment mutations automatically rebuild the Solidity registry; lookup is
+/// derived on demand from the loaded deployments.
 pub struct Registry {
     addressbook: AddressbookStore,
     addressbook_loaded: bool,
@@ -35,7 +37,7 @@ pub struct Registry {
     transactions: TransactionStore,
     safe_transactions: SafeTransactionStore,
     governor_proposals: GovernorProposalStore,
-    lookup: LookupStore,
+    queued_index: QueuedIndexStore,
     solidity_registry: SolidityRegistryStore,
 }
 
@@ -46,15 +48,22 @@ impl Registry {
     /// `registry.json`. Returns `Ok` even if the `.treb/` directory doesn't
     /// exist (stores will simply be empty).
     pub fn open(project_root: &Path) -> Result<Self, TrebError> {
-        let registry_dir = project_root.join(REGISTRY_DIR);
+        let registry_dir = registry_dir(project_root);
+        let deployments_root = deployments_dir(project_root);
 
-        let addressbook = AddressbookStore::new(&registry_dir);
-        let mut deployments = DeploymentStore::new(&registry_dir);
+        let addressbook = AddressbookStore::with_legacy_path(
+            &deployments_root,
+            &registry_dir.join(crate::ADDRESSBOOK_FILE),
+        );
+        let mut deployments = DeploymentStore::with_legacy_path(
+            &deployments_root,
+            &registry_dir.join(crate::DEPLOYMENTS_FILE),
+        );
         let mut transactions = TransactionStore::new(&registry_dir);
         let mut safe_transactions = SafeTransactionStore::new(&registry_dir);
         let mut governor_proposals = GovernorProposalStore::new(&registry_dir);
-        let lookup = LookupStore::new(&registry_dir);
-        let solidity_registry = SolidityRegistryStore::new(&registry_dir);
+        let mut queued_index = QueuedIndexStore::new(&deployments_root);
+        let solidity_registry = SolidityRegistryStore::new(&deployments_root);
 
         // Load existing data (no-ops if files don't exist).
         // Addressbook is loaded lazily so malformed optional data does not
@@ -63,6 +72,7 @@ impl Registry {
         transactions.load()?;
         safe_transactions.load()?;
         governor_proposals.load()?;
+        queued_index.load()?;
 
         Ok(Self {
             addressbook,
@@ -71,7 +81,7 @@ impl Registry {
             transactions,
             safe_transactions,
             governor_proposals,
-            lookup,
+            queued_index,
             solidity_registry,
         })
     }
@@ -81,8 +91,8 @@ impl Registry {
     /// Creates the directory if it doesn't already exist, then delegates to
     /// [`open`](Self::open).
     pub fn init(project_root: &Path) -> Result<Self, TrebError> {
-        let registry_dir = project_root.join(REGISTRY_DIR);
-        std::fs::create_dir_all(&registry_dir)?;
+        std::fs::create_dir_all(registry_dir(project_root))?;
+        std::fs::create_dir_all(deployments_dir(project_root))?;
 
         Self::open(project_root)
     }
@@ -174,6 +184,18 @@ impl Registry {
     /// Return the number of deployments.
     pub fn deployment_count(&self) -> usize {
         self.deployments.count()
+    }
+
+    // ── Queued index delegates ────────────────────────────────────────────
+
+    /// Return the active queued-work index.
+    pub fn queued_index(&self) -> &QueuedIndex {
+        self.queued_index.data()
+    }
+
+    /// Replace the active queued-work index and persist it.
+    pub fn replace_queued_index(&mut self, index: QueuedIndex) -> Result<(), TrebError> {
+        self.queued_index.replace_all(index)
     }
 
     // ── Transaction delegates ────────────────────────────────────────────
@@ -283,9 +305,9 @@ impl Registry {
 
     // ── Lookup index ─────────────────────────────────────────────────────
 
-    /// Rebuild the lookup index from the current deployments and persist it.
+    /// Rebuild the lookup index from the current deployments in memory.
     pub fn rebuild_lookup_index(&self) -> Result<LookupIndex, TrebError> {
-        self.lookup.rebuild(self.deployments.data())
+        Ok(build_lookup_index(self.deployments.data()))
     }
 
     /// Rebuild the Solidity registry (`registry.json`) from the current deployments.
@@ -293,16 +315,15 @@ impl Registry {
         self.solidity_registry.rebuild(self.deployments.data())
     }
 
-    /// Rebuild all derived indexes (lookup + solidity registry) after deployment changes.
+    /// Rebuild derived outputs after deployment changes.
     fn rebuild_derived_indexes(&self) -> Result<(), TrebError> {
-        self.rebuild_lookup_index()?;
         self.rebuild_solidity_registry()?;
         Ok(())
     }
 
-    /// Load the current lookup index from disk.
+    /// Build the current lookup index on demand from loaded deployments.
     pub fn load_lookup_index(&self) -> Result<LookupIndex, TrebError> {
-        self.lookup.load()
+        self.rebuild_lookup_index()
     }
 
     fn ensure_addressbook_loaded(&mut self) -> Result<(), TrebError> {
@@ -328,7 +349,10 @@ mod tests {
         TransactionStatus, VerificationInfo, VerificationStatus,
     };
 
-    use crate::io::{VersionedStore, write_json_file};
+    use crate::{
+        REGISTRY_DIR,
+        io::{VersionedStore, write_json_file},
+    };
 
     // ── Test helpers ─────────────────────────────────────────────────────
 
@@ -345,6 +369,7 @@ mod tests {
             label: "v1.0.0".to_string(),
             address: format!("0x{:040x}", created_at_offset_secs.unsigned_abs()),
             deployment_type: DeploymentType::Singleton,
+            execution: None,
             transaction_id: String::new(),
             deployment_strategy: DeploymentStrategy {
                 method: DeploymentMethod::Create,

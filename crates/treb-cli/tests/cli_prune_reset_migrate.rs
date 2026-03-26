@@ -6,8 +6,8 @@ use std::{collections::HashMap, fs};
 
 use chrono::Utc;
 use treb_core::types::{
-    ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, TransactionStatus,
-    VerificationInfo, VerificationStatus,
+    ArtifactInfo, DeploymentMethod, DeploymentStrategy, DeploymentType, GovernorProposal,
+    ProposalStatus, SafeTransaction, TransactionStatus, VerificationInfo, VerificationStatus,
 };
 
 fn treb() -> assert_cmd::Command {
@@ -33,6 +33,7 @@ fn make_deployment(
         label: "v1".to_string(),
         address: format!("0x{:040x}", chain_id),
         deployment_type: DeploymentType::Singleton,
+        execution: None,
         transaction_id: tx_id.to_string(),
         deployment_strategy: DeploymentStrategy {
             method: DeploymentMethod::Create,
@@ -93,6 +94,59 @@ fn init_project(tmp: &tempfile::TempDir) -> treb_registry::Registry {
     treb_registry::Registry::init(tmp.path()).expect("registry init should succeed")
 }
 
+fn make_safe_transaction(hash: &str, tx_ids: &[&str], chain_id: u64) -> SafeTransaction {
+    SafeTransaction {
+        safe_tx_hash: hash.to_string(),
+        safe_address: "0x0000000000000000000000000000000000000001".to_string(),
+        chain_id,
+        status: TransactionStatus::Queued,
+        nonce: 7,
+        transactions: vec![],
+        transaction_ids: tx_ids.iter().map(|id| (*id).to_string()).collect(),
+        proposed_by: "0x0000000000000000000000000000000000000002".to_string(),
+        proposed_at: Utc::now(),
+        confirmations: vec![],
+        executed_at: None,
+        execution_tx_hash: String::new(),
+        fork_executed_at: None,
+    }
+}
+
+fn make_governor_proposal(id: &str, tx_ids: &[&str], chain_id: u64) -> GovernorProposal {
+    GovernorProposal {
+        proposal_id: id.to_string(),
+        governor_address: "0x0000000000000000000000000000000000000003".to_string(),
+        timelock_address: String::new(),
+        chain_id,
+        status: ProposalStatus::Pending,
+        transaction_ids: tx_ids.iter().map(|id| (*id).to_string()).collect(),
+        proposed_by: "0x0000000000000000000000000000000000000004".to_string(),
+        proposed_at: Utc::now(),
+        description: String::new(),
+        executed_at: None,
+        execution_tx_hash: String::new(),
+        fork_executed_at: None,
+        actions: vec![],
+    }
+}
+
+fn read_json(path: &std::path::Path) -> serde_json::Value {
+    serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+}
+
+fn find_backup_dir(root: &std::path::Path, prefix: &str) -> Vec<std::path::PathBuf> {
+    let dir = root.join(".treb/backups");
+    if !dir.exists() {
+        return Vec::new();
+    }
+    fs::read_dir(dir)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with(prefix))
+        .map(|entry| entry.path())
+        .collect()
+}
+
 // ── treb prune ────────────────────────────────────────────────────────────────
 
 #[test]
@@ -103,7 +157,8 @@ fn prune_dry_run_outputs_candidates_and_does_not_modify_files() {
     // Insert a deployment with a broken transaction reference.
     registry.insert_deployment(make_deployment("dep-broken", "tx-missing", 1, "default")).unwrap();
 
-    let orig_deployments = fs::read_to_string(tmp.path().join(".treb/deployments.json")).unwrap();
+    let orig_deployments =
+        fs::read_to_string(tmp.path().join("deployments/default/1.json")).unwrap();
 
     treb()
         .args(["registry", "prune", "--dry-run"])
@@ -113,8 +168,12 @@ fn prune_dry_run_outputs_candidates_and_does_not_modify_files() {
         .stdout(predicate::str::contains("dep-broken"));
 
     // Deployments file must be unchanged.
-    let after_deployments = fs::read_to_string(tmp.path().join(".treb/deployments.json")).unwrap();
-    assert_eq!(orig_deployments, after_deployments, "dry-run must not modify deployments.json");
+    let after_deployments =
+        fs::read_to_string(tmp.path().join("deployments/default/1.json")).unwrap();
+    assert_eq!(
+        orig_deployments, after_deployments,
+        "dry-run must not modify canonical deployments/default/1.json"
+    );
 
     // No prune backup should have been created.
     let backups_dir = tmp.path().join(".treb/backups");
@@ -336,4 +395,114 @@ fn reset_namespace_removes_only_matching_namespace() {
         registry_after.get_deployment("dep-staging").is_some(),
         "dep-staging should remain (different namespace)"
     );
+}
+
+#[test]
+fn migrate_write_promotes_latest_broadcast_and_writes_canonical_deployments() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
+    fs::create_dir_all(tmp.path().join(".treb")).unwrap();
+
+    let deployment = make_deployment("default/1/TestContract:v1", "tx-1", 1, "default");
+    let transaction = make_transaction("tx-1", vec![deployment.id.clone()], 1);
+
+    treb_registry::write_versioned_file(
+        &tmp.path().join(".treb/deployments.json"),
+        &HashMap::from([(deployment.id.clone(), deployment)]),
+    )
+    .unwrap();
+    treb_registry::write_versioned_file(
+        &tmp.path().join(".treb/transactions.json"),
+        &HashMap::from([("tx-1".to_string(), transaction)]),
+    )
+    .unwrap();
+
+    let broadcast_dir = tmp.path().join("broadcast/Deploy.s.sol/1");
+    fs::create_dir_all(&broadcast_dir).unwrap();
+    fs::write(
+        broadcast_dir.join("run-latest.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "timestamp": 123,
+            "transactions": [
+                { "hash": format!("0x{:064x}", 0u64) }
+            ]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    treb()
+        .args(["registry", "migrate", "--write"])
+        .current_dir(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Migration complete."));
+
+    let deployments = read_json(&tmp.path().join("deployments/default/1.json"));
+    let deployment = &deployments["default/1/TestContract:v1"];
+    assert_eq!(deployment["execution"]["artifactFile"], "broadcast/Deploy.s.sol/1/run-123.json");
+    assert_eq!(deployment["execution"]["kind"], "tx");
+    assert!(deployment.get("transactionId").is_none(), "legacy transactionId should be omitted");
+
+    assert!(
+        tmp.path().join("broadcast/Deploy.s.sol/1/run-123.json").exists(),
+        "latest broadcast should be promoted to archived run-123.json"
+    );
+    assert!(
+        tmp.path().join("deployments/registry.json").exists(),
+        "solidity registry should be rebuilt under deployments/"
+    );
+    assert_eq!(find_backup_dir(tmp.path(), "migrate-").len(), 1);
+}
+
+#[test]
+fn migrate_write_synthesizes_queued_index_and_artifact_from_legacy_safe_governor_state() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
+    fs::create_dir_all(tmp.path().join(".treb")).unwrap();
+
+    let deployment = make_deployment("default/1/TestContract:v1", "tx-1", 1, "default");
+    let transaction = make_transaction("tx-1", vec![deployment.id.clone()], 1);
+    let safe_tx = make_safe_transaction("0xsafe", &["tx-1"], 1);
+    let governor = make_governor_proposal("", &["tx-1"], 1);
+
+    treb_registry::write_versioned_file(
+        &tmp.path().join(".treb/deployments.json"),
+        &HashMap::from([(deployment.id.clone(), deployment)]),
+    )
+    .unwrap();
+    treb_registry::write_versioned_file(
+        &tmp.path().join(".treb/transactions.json"),
+        &HashMap::from([("tx-1".to_string(), transaction)]),
+    )
+    .unwrap();
+    treb_registry::write_versioned_file(
+        &tmp.path().join(".treb/safe-txs.json"),
+        &HashMap::from([("0xsafe".to_string(), safe_tx)]),
+    )
+    .unwrap();
+    treb_registry::write_versioned_file(
+        &tmp.path().join(".treb/governor-txs.json"),
+        &HashMap::from([("proposal".to_string(), governor)]),
+    )
+    .unwrap();
+
+    treb().args(["registry", "migrate", "--write"]).current_dir(tmp.path()).assert().success();
+
+    let queued_index = read_json(&tmp.path().join("deployments/queued.json"));
+    let entries = queued_index["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 2, "safe and governor entries should both be indexed");
+    assert!(entries.iter().any(|entry| entry["kind"] == "safeProposal"));
+    assert!(entries.iter().any(|entry| entry["kind"] == "governorProposalViaSafe"));
+
+    let queued_artifact_rel = entries[0]["artifactFile"].as_str().unwrap();
+    assert!(
+        tmp.path().join(queued_artifact_rel).exists(),
+        "queued artifact referenced by deployments/queued.json should exist"
+    );
+
+    let deployments = read_json(&tmp.path().join("deployments/default/1.json"));
+    let deployment = &deployments["default/1/TestContract:v1"];
+    assert_eq!(deployment["execution"]["kind"], "governorProposalViaSafe");
+    assert_eq!(deployment["execution"]["proposeSafeTxHash"], "0xsafe");
 }

@@ -180,6 +180,7 @@ mod tests {
             label: "v1".to_string(),
             address: address.to_string(),
             deployment_type: DeploymentType::Singleton,
+            execution: None,
             transaction_id: String::new(),
             deployment_strategy: DeploymentStrategy {
                 method: DeploymentMethod::Create,

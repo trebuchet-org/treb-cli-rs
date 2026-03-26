@@ -1660,10 +1660,13 @@ mod tests {
     use super::ForkSubcommand;
     use chrono::Utc;
     use clap::{Parser, Subcommand};
-    use std::{fs, path::PathBuf};
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+    };
     use tempfile::TempDir;
     use treb_core::types::fork::{ForkEntry, ForkHistoryEntry};
-    use treb_registry::{DEPLOYMENTS_FILE, ForkStateStore, restore_registry, snapshot_registry};
+    use treb_registry::{ForkStateStore, deployments_dir, restore_registry, snapshot_registry};
 
     // ── Minimal test CLI for clap parsing ─────────────────────────────────
 
@@ -1688,6 +1691,10 @@ mod tests {
         match cli.command {
             TestCommands::Fork { subcommand } => Ok(subcommand),
         }
+    }
+
+    fn canonical_deployments_file(project_root: &Path) -> PathBuf {
+        deployments_dir(project_root).join("default").join("1.json")
     }
 
     // ── clap parsing tests ────────────────────────────────────────────────
@@ -1914,20 +1921,22 @@ mod tests {
     fn registry_snapshot_restore_round_trip() {
         let (_root, treb_dir) = make_treb_dir();
         let snapshot_dir = treb_dir.join("priv/snapshots/holistic");
+        let deployments_file = canonical_deployments_file(_root.path());
+        fs::create_dir_all(deployments_file.parent().unwrap()).unwrap();
 
         // Write initial registry state
-        fs::write(treb_dir.join(DEPLOYMENTS_FILE), r#"{"original": true}"#).unwrap();
+        fs::write(&deployments_file, r#"{"original": true}"#).unwrap();
 
         // Snapshot
         snapshot_registry(&treb_dir, &snapshot_dir).unwrap();
 
         // Overwrite registry (simulate deployments during fork session)
-        fs::write(treb_dir.join(DEPLOYMENTS_FILE), r#"{"modified": true}"#).unwrap();
+        fs::write(&deployments_file, r#"{"modified": true}"#).unwrap();
 
         // Restore
         restore_registry(&snapshot_dir, &treb_dir).unwrap();
 
-        let content = fs::read_to_string(treb_dir.join(DEPLOYMENTS_FILE)).unwrap();
+        let content = fs::read_to_string(deployments_file).unwrap();
         assert_eq!(content, r#"{"original": true}"#);
     }
 
@@ -2047,23 +2056,26 @@ mod tests {
 
     #[test]
     fn diff_detects_changes() {
-        let (_root, treb_dir) = make_treb_dir();
+        let (root, treb_dir) = make_treb_dir();
         let snapshot_dir = treb_dir.join("priv/snapshots/holistic");
-        fs::create_dir_all(&snapshot_dir).unwrap();
+        let current_file = canonical_deployments_file(root.path());
+        let snapshot_file = snapshot_dir.join("deployments").join("default").join("1.json");
+        fs::create_dir_all(current_file.parent().unwrap()).unwrap();
+        fs::create_dir_all(snapshot_file.parent().unwrap()).unwrap();
 
         // Write matching state to both locations first.
         let deployments_json = r#"{"Counter_1": {"address": "0xaaa"}}"#;
-        fs::write(treb_dir.join(DEPLOYMENTS_FILE), deployments_json).unwrap();
-        fs::write(snapshot_dir.join(DEPLOYMENTS_FILE), deployments_json).unwrap();
+        fs::write(&current_file, deployments_json).unwrap();
+        fs::write(&snapshot_file, deployments_json).unwrap();
 
         // Simulate a new deployment added to the current registry.
         let current_json =
             r#"{"Counter_1": {"address": "0xaaa"}, "Token_2": {"address": "0xbbb"}}"#;
-        fs::write(treb_dir.join(DEPLOYMENTS_FILE), current_json).unwrap();
+        fs::write(&current_file, current_json).unwrap();
 
         // Diff
-        let current_map = super::load_json_map(&treb_dir.join(DEPLOYMENTS_FILE)).unwrap();
-        let snapshot_map = super::load_json_map(&snapshot_dir.join(DEPLOYMENTS_FILE)).unwrap();
+        let current_map = super::load_json_map(&current_file).unwrap();
+        let snapshot_map = super::load_json_map(&snapshot_file).unwrap();
 
         let added: Vec<_> = current_map.keys().filter(|k| !snapshot_map.contains_key(*k)).collect();
         assert_eq!(added.len(), 1);
@@ -2078,16 +2090,19 @@ mod tests {
 
     #[test]
     fn diff_shows_clean_when_matching() {
-        let (_root, treb_dir) = make_treb_dir();
+        let (root, treb_dir) = make_treb_dir();
         let snapshot_dir = treb_dir.join("priv/snapshots/holistic");
-        fs::create_dir_all(&snapshot_dir).unwrap();
+        let current_file = canonical_deployments_file(root.path());
+        let snapshot_file = snapshot_dir.join("deployments").join("default").join("1.json");
+        fs::create_dir_all(current_file.parent().unwrap()).unwrap();
+        fs::create_dir_all(snapshot_file.parent().unwrap()).unwrap();
 
         let deployments_json = r#"{"Counter_1": {"address": "0xaaa"}}"#;
-        fs::write(treb_dir.join(DEPLOYMENTS_FILE), deployments_json).unwrap();
-        fs::write(snapshot_dir.join(DEPLOYMENTS_FILE), deployments_json).unwrap();
+        fs::write(&current_file, deployments_json).unwrap();
+        fs::write(&snapshot_file, deployments_json).unwrap();
 
-        let current_map = super::load_json_map(&treb_dir.join(DEPLOYMENTS_FILE)).unwrap();
-        let snapshot_map = super::load_json_map(&snapshot_dir.join(DEPLOYMENTS_FILE)).unwrap();
+        let current_map = super::load_json_map(&current_file).unwrap();
+        let snapshot_map = super::load_json_map(&snapshot_file).unwrap();
 
         let changes: Vec<_> = current_map
             .keys()

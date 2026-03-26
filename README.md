@@ -20,6 +20,7 @@ trebup                                       # install latest release
 trebup --available                           # list all available releases
 trebup --install v2.0.0--foundry-v1.5.1      # install specific version
 trebup --foundry nightly                     # install with foundry nightly
+trebup --path /path/to/treb-cli-rs           # build and install from a local checkout
 trebup --list                                # list installed versions
 trebup --use <version>                       # switch between versions
 ```
@@ -31,10 +32,11 @@ Requires **Rust nightly** (a `rust-toolchain.toml` is included).
 ```sh
 git clone --recurse-submodules https://github.com/trebuchet-org/treb-cli-rs.git
 cd treb-cli-rs
-cargo build --release
+trebup --path "$(pwd)"
 ```
 
-The binary is `target/release/treb-cli` (renamed to `treb` in release packaging).
+This builds the local checkout with Cargo, installs it under `~/.treb/versions/local-<sha>`,
+and activates it as the current `treb`.
 
 ## Quick Start
 

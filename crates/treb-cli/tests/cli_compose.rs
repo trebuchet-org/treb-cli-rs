@@ -37,6 +37,29 @@ fn copy_fixture_to(name: &str, dst: &Path) {
     fs::copy(src, dst.join(name)).unwrap();
 }
 
+fn write_compose_plan(
+    project_root: &Path,
+    compose_file: &str,
+    chain_id: u64,
+    compose_hash: &str,
+    components: serde_json::Value,
+) {
+    let compose_name = Path::new(compose_file).file_name().unwrap().to_string_lossy().to_string();
+    let plan_dir = project_root.join("broadcast").join(compose_name).join(chain_id.to_string());
+    fs::create_dir_all(&plan_dir).unwrap();
+    fs::write(
+        plan_dir.join("compose-latest.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "composeFile": compose_file,
+            "composeHash": compose_hash,
+            "chainId": chain_id,
+            "components": components,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+}
+
 // ── Help and argument parsing ─────────────────────────────────────────
 
 #[test]
@@ -76,6 +99,25 @@ fn compose_missing_file_fails() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("compose file not found"));
+}
+
+#[test]
+fn compose_requires_network_or_rpc_url_when_not_configured() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
+    treb().arg("init").current_dir(tmp.path()).assert().success();
+    fs::write(
+        tmp.path().join("simple.yaml"),
+        "group: test\ncomponents:\n  deploy:\n    script: script/Deploy.s.sol\n",
+    )
+    .unwrap();
+
+    treb()
+        .args(["compose", "simple.yaml", "--non-interactive"])
+        .current_dir(tmp.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no network configured"));
 }
 
 // ── Invalid YAML ──────────────────────────────────────────────────────
@@ -401,18 +443,22 @@ fn compose_resume_flag_accepted() {
 #[test]
 fn compose_resume_json_error_stderr_remains_valid_json_when_state_hash_is_stale() {
     let tmp = tempfile::tempdir().unwrap();
-    fs::create_dir_all(tmp.path().join(".treb")).unwrap();
     copy_fixture_to("simple.yaml", tmp.path());
 
-    fs::write(
-        tmp.path().join(".treb").join("compose-state.json"),
-        serde_json::to_string_pretty(&serde_json::json!({
-            "compose_hash": "0000000000000000",
-            "completed": ["registry"]
-        }))
-        .unwrap(),
-    )
-    .unwrap();
+    write_compose_plan(
+        tmp.path(),
+        "simple.yaml",
+        1,
+        "0000000000000000",
+        serde_json::json!([
+            {
+                "name": "registry",
+                "step": 1,
+                "script": "script/DeployRegistry.s.sol",
+                "status": "broadcast"
+            }
+        ]),
+    );
 
     let output = treb()
         .args([
@@ -569,17 +615,26 @@ fn compose_resume_failure_shows_resume_banner_and_step_start() {
     let mut hasher = DefaultHasher::new();
     compose_contents.hash(&mut hasher);
     let compose_hash = format!("{:016x}", hasher.finish());
-
-    fs::write(
-        tmp.path().join(".treb").join("compose-state.json"),
-        serde_json::to_string_pretty(&serde_json::json!({
-            "compose_hash": compose_hash,
-            "completed": ["done"],
-            "deployment_total": 2
-        }))
-        .unwrap(),
-    )
-    .unwrap();
+    write_compose_plan(
+        tmp.path(),
+        "resume.yaml",
+        1,
+        &compose_hash,
+        serde_json::json!([
+            {
+                "name": "done",
+                "step": 1,
+                "script": "script/AlreadyDone.s.sol",
+                "status": "broadcast"
+            },
+            {
+                "name": "missing",
+                "step": 2,
+                "script": "script/NonExistent.s.sol",
+                "status": "pending"
+            }
+        ]),
+    );
 
     let output = treb()
         .args([

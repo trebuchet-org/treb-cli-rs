@@ -6,8 +6,8 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
     env,
-    hash::{DefaultHasher, Hash, Hasher},
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
 };
 
 use anyhow::{Context, bail};
@@ -15,12 +15,16 @@ use owo_colors::{OwoColorize, Style};
 use serde::{Deserialize, Serialize};
 use treb_config::{ResolveOpts, resolve_config};
 use treb_forge::{
-    pipeline::{PipelineConfig, PipelineContext, resolve_git_commit},
-    script::build_script_config_with_senders,
+    pipeline::{
+        self, PipelineConfig, PipelineContext, PipelineResult,
+        compose_plan::{self, ComponentStatus as PlanComponentStatus, ComposePlan},
+        resolve_git_commit,
+    },
+    script::{apply_deployed_libraries, build_script_config_with_senders},
     sender::resolve_all_senders,
     sender_config::encode_sender_configs,
 };
-use treb_registry::Registry;
+use treb_registry::{Registry, addressbook_path, solidity_registry_path};
 
 use crate::{
     output,
@@ -125,58 +129,60 @@ pub fn validate_compose_file(compose: &ComposeFile) -> anyhow::Result<()> {
     Ok(())
 }
 
-// ── Resume state tracking ────────────────────────────────────────────────
+// ── Resume plan helpers ─────────────────────────────────────────────────
 
-/// State file for tracking compose execution progress.
-const COMPOSE_STATE_FILE: &str = ".treb/compose-state.json";
-
-/// Persistent state for resume support.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ComposeState {
-    /// Hash of the compose file contents at the start of the run.
-    pub compose_hash: String,
-    /// Names of components that completed successfully.
-    pub completed: Vec<String>,
-    /// Aggregate deployments created by previously completed components.
-    #[serde(default)]
-    pub deployment_total: usize,
+fn queued_file_for_broadcast_path(path: &str) -> Option<String> {
+    let path = Path::new(path);
+    let stem = path.file_stem()?.to_string_lossy();
+    Some(path.with_file_name(format!("{stem}.queued.json")).to_string_lossy().to_string())
 }
 
-/// Compute a hash of file contents for change detection.
-fn compute_file_hash(contents: &str) -> String {
-    let mut hasher = DefaultHasher::new();
-    contents.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
-}
-
-/// Load the compose state file, returning `None` if it doesn't exist.
-pub fn load_compose_state() -> anyhow::Result<Option<ComposeState>> {
-    let path = Path::new(COMPOSE_STATE_FILE);
-    if !path.exists() {
-        return Ok(None);
+async fn resolve_resume_chain_id(
+    cwd: &Path,
+    network: Option<&str>,
+    rpc_url: Option<&str>,
+) -> Option<u64> {
+    if let Some(url) = rpc_url {
+        return super::run::fetch_chain_id(url).await.ok();
     }
-    let contents = std::fs::read_to_string(path)
-        .with_context(|| format!("failed to read compose state file: {}", path.display()))?;
-    let state: ComposeState = serde_json::from_str(&contents)
-        .with_context(|| format!("failed to parse compose state file: {}", path.display()))?;
-    Ok(Some(state))
-}
-
-/// Save the compose state file.
-fn save_compose_state(state: &ComposeState) -> anyhow::Result<()> {
-    let path = Path::new(COMPOSE_STATE_FILE);
-    let contents = serde_json::to_string_pretty(state)?;
-    std::fs::write(path, contents)
-        .with_context(|| format!("failed to write compose state file: {}", path.display()))?;
-    Ok(())
-}
-
-/// Delete the compose state file if it exists.
-fn delete_compose_state() {
-    let path = Path::new(COMPOSE_STATE_FILE);
-    if path.exists() {
-        let _ = std::fs::remove_file(path);
+    if let Some(net) = network {
+        if let Some(url) = super::run::resolve_rpc_url_for_chain_id(net, cwd) {
+            return super::run::fetch_chain_id(&url).await.ok();
+        }
     }
+    None
+}
+
+fn load_resume_plan(
+    project_root: &Path,
+    compose_file: &str,
+    preferred_chain_id: Option<u64>,
+) -> Option<ComposePlan> {
+    if let Some(chain_id) = preferred_chain_id {
+        if let Some(plan) = compose_plan::load_plan(project_root, compose_file, chain_id) {
+            return Some(plan);
+        }
+    }
+
+    let plans_dir =
+        project_root.join("broadcast").join(compose_plan::compose_artifact_dir_name(compose_file));
+
+    let mut plans = Vec::new();
+    for entry in std::fs::read_dir(plans_dir).ok()? {
+        let entry = entry.ok()?;
+        if !entry.file_type().ok()?.is_dir() {
+            continue;
+        }
+        let path = entry.path().join("compose-latest.json");
+        if !path.exists() {
+            continue;
+        }
+        let contents = std::fs::read_to_string(&path).ok()?;
+        let plan: ComposePlan = serde_json::from_str(&contents).ok()?;
+        plans.push(plan);
+    }
+
+    if plans.len() == 1 { plans.pop() } else { None }
 }
 
 // ── Dependency graph and execution order ─────────────────────────────────
@@ -722,6 +728,10 @@ async fn setup_component(
     if let Some(ref net) = effective_network {
         unsafe { env::set_var("NETWORK", net) };
     }
+    unsafe {
+        env::set_var("REGISTRY_FILE", solidity_registry_path(params.cwd));
+        env::set_var("ADDRESSBOOK_FILE", addressbook_path(params.cwd));
+    }
     let encoded_senders = encode_sender_configs(&resolved_senders);
     unsafe { env::set_var("SENDER_CONFIGS", &encoded_senders) };
 
@@ -819,26 +829,57 @@ pub async fn run(
     // Build execution order (topological sort).
     let order = build_execution_order(&compose)?;
 
-    // ── Resume state handling ─────────────────────────────────────────
+    let cwd = env::current_dir().context("failed to determine current directory")?;
+    let scope = super::resolve_command_scope(&cwd, namespace, network)?;
+    let namespace = scope.namespace;
+    let network = scope.network;
+
+    if network.is_none() && rpc_url.is_none() {
+        bail!(
+            "no network configured; pass --network, set one with 'treb config set network <name>', or use --rpc-url"
+        );
+    }
+
+    // ── Resume plan handling ──────────────────────────────────────────
     let compose_contents = std::fs::read_to_string(&file)
         .with_context(|| format!("failed to read compose file: {}", file))?;
-    let compose_hash = compute_file_hash(&compose_contents);
+    let compose_hash = compose_plan::compute_compose_hash(&compose_contents);
 
-    let (skip_set, resumed_deployments): (HashSet<String>, usize) = if resume {
-        if let Some(state) = load_compose_state()? {
-            // Warn if compose file changed since the state was saved.
-            if state.compose_hash != compose_hash && !json {
-                eprintln!("Warning: compose file has changed since the last run; resuming anyway");
-            }
-            (state.completed.into_iter().collect(), state.deployment_total)
-        } else {
-            (HashSet::new(), 0)
-        }
+    let resume_plan = if resume {
+        let preferred_chain_id =
+            resolve_resume_chain_id(&cwd, network.as_deref(), rpc_url.as_deref()).await;
+        load_resume_plan(&cwd, &file, preferred_chain_id)
     } else {
-        // Fresh start: clear any existing state file.
-        delete_compose_state();
-        (HashSet::new(), 0)
+        None
     };
+
+    let skip_set: HashSet<String> = if let Some(ref plan) = resume_plan {
+        if !compose_plan::plan_matches_compose(plan, &compose_hash) && !json {
+            eprintln!("Warning: compose file changed since last run; resuming anyway");
+        }
+        plan.components
+            .iter()
+            .filter(|component| component.status == PlanComponentStatus::Broadcast)
+            .map(|component| component.name.clone())
+            .collect()
+    } else {
+        HashSet::new()
+    };
+
+    let resume_broadcast_paths: HashMap<String, PathBuf> = resume_plan
+        .as_ref()
+        .map(|plan| {
+            plan.components
+                .iter()
+                .filter_map(|component| {
+                    component
+                        .broadcast_file
+                        .as_ref()
+                        .map(|path| (component.name.clone(), cwd.join(path)))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
 
     // ── Verbose resume context ────────────────────────────────────────
     if verbose > 0 && !json && resume && !skip_set.is_empty() {
@@ -870,11 +911,11 @@ pub async fn run(
     }
 
     // ── Project initialization check ──────────────────────────────────
-    let cwd = env::current_dir().context("failed to determine current directory")?;
     super::run::ensure_initialized(&cwd)?;
 
     // ── Dump command: print per-component forge commands and exit ─────
     if dump_command {
+        let registry = Registry::open(&cwd).context("failed to open registry")?;
         let dump_params = ComposeParams {
             cwd: &cwd,
             namespace: &namespace,
@@ -898,9 +939,16 @@ pub async fn run(
                 continue;
             }
 
-            let setup = setup_component(name, component, &dump_params)
+            let mut setup = setup_component(name, component, &dump_params)
                 .await
                 .with_context(|| format!("failed to set up component '{}'", name))?;
+
+            apply_deployed_libraries(
+                &mut setup.script_config,
+                &registry,
+                &setup.pipeline_context.config.namespace,
+                setup.pipeline_context.config.chain_id,
+            );
 
             let cmd_parts = setup.script_config.to_forge_command();
             let cmd_str = cmd_parts
@@ -942,13 +990,6 @@ pub async fn run(
 
     // ── Open registry ─────────────────────────────────────────────────
     let mut registry = Registry::open(&cwd).context("failed to open registry")?;
-
-    // ── Initialize state tracking ─────────────────────────────────────
-    let mut state = ComposeState {
-        compose_hash: compose_hash.clone(),
-        completed: skip_set.iter().cloned().collect(),
-        deployment_total: resumed_deployments,
-    };
 
     // ── Execute components in topological order ───────────────────────
     let total = order.len();
@@ -1000,15 +1041,7 @@ pub async fn run(
     // Auto-fund senders on fork
     if banner_is_fork {
         if let Some(ref rpc) = banner_rpc_url {
-            let fund_results = treb_forge::fund_senders_on_fork(rpc, &banner_senders, 10_000).await;
-            let funded_count = fund_results.iter().filter(|(_, _, ok)| *ok).count();
-            if funded_count > 0 && !json {
-                eprintln!(
-                    "Funded {} sender address{} on fork",
-                    funded_count,
-                    if funded_count == 1 { "" } else { "es" },
-                );
-            }
+            let _ = treb_forge::fund_senders_on_fork(rpc, &banner_senders, 10_000).await;
         }
     }
 
@@ -1075,6 +1108,8 @@ pub async fn run(
 
     let mut session = SessionPipeline::new();
     let mut components_to_run: Vec<String> = Vec::new();
+    let mut components_for_plan: Vec<(String, String)> = Vec::new();
+    let mut plan_chain_id: Option<u64> = None;
     for name in &order {
         if skip_set.contains(name) {
             continue;
@@ -1084,6 +1119,8 @@ pub async fn run(
             .await
             .with_context(|| format!("failed to set up component '{}'", name))?;
 
+        plan_chain_id.get_or_insert(setup.pipeline_context.config.chain_id);
+        components_for_plan.push((name.clone(), component.script.clone()));
         session.add_script(ScriptEntry {
             name: name.clone(),
             context: setup.pipeline_context,
@@ -1093,7 +1130,7 @@ pub async fn run(
     }
 
     if resume {
-        session = session.with_resume(true);
+        session = session.with_resume(true).with_resume_broadcast_paths(resume_broadcast_paths);
     }
 
     // Simulation progress spinner
@@ -1144,8 +1181,6 @@ pub async fn run(
                         gas_used: sr.result.gas_used,
                         error: None,
                     });
-                    state.completed.push(sr.name.clone());
-                    state.deployment_total += sr.result.deployments.len();
                 }
             }
             let full = format!("{:#}", err);
@@ -1196,14 +1231,10 @@ pub async fn run(
             let totals = compute_totals(&component_results);
             let _success = false;
             if !json {
-                let human_totals = ComposeTotals {
-                    deployments: totals.deployments + resumed_deployments,
-                    ..totals
-                };
                 display_compose_human(
                     &compose.group,
                     &component_results,
-                    &human_totals,
+                    &totals,
                     completed,
                     total,
                     &failed_component,
@@ -1380,13 +1411,27 @@ pub async fn run(
             let confirmed = crate::ui::prompt::confirm("Broadcast these transactions?", false);
             if !confirmed {
                 eprintln!("Broadcast cancelled.");
-                delete_compose_state();
                 return Ok(());
             }
         }
         if !json {
             let network_label = network.as_deref().or(banner_network).unwrap_or("network");
             eprintln!("\n{}", styled(&format!("Broadcasting to {network_label}..."), color::CYAN),);
+        }
+
+        let compose_plan_state = Arc::new(Mutex::new(resume_plan.clone().unwrap_or_else(|| {
+            compose_plan::create_plan(
+                &file,
+                &compose_hash,
+                plan_chain_id.unwrap_or(banner_chain_id),
+                &components_for_plan,
+            )
+        })));
+        {
+            let plan = compose_plan_state
+                .lock()
+                .map_err(|_| anyhow::anyhow!("compose plan lock poisoned"))?;
+            compose_plan::save_plan(&cwd, &plan)?;
         }
 
         // Pre-broadcast fork snapshot (if in fork mode)
@@ -1407,6 +1452,45 @@ pub async fn run(
 
         // Broadcast with inline output via BroadcastDisplay
         let broadcast_display = crate::ui::broadcast_display::BroadcastDisplay::new(json);
+        let cwd_for_plan = cwd.clone();
+        let compose_plan_state_for_updates = Arc::clone(&compose_plan_state);
+        simulated.set_on_script_complete(Box::new(
+            move |name: &str, context: &PipelineContext, result: &PipelineResult| {
+                let (broadcast_file, queued_file) = if let Some(broadcast_file) =
+                    result.transactions.iter().find_map(|tx| tx.transaction.broadcast_file.clone())
+                {
+                    let queued_file = queued_file_for_broadcast_path(&broadcast_file);
+                    (Some(broadcast_file), queued_file)
+                } else if result.transactions.is_empty() {
+                    (None, None)
+                } else {
+                    let (_, broadcast_path, _) =
+                        pipeline::broadcast_writer::compute_broadcast_paths(
+                            &context.project_root,
+                            &context.config.script_path,
+                            context.config.chain_id,
+                            &context.config.script_sig,
+                        );
+                    let broadcast_file = pipeline::broadcast_writer::relative_broadcast_path(
+                        &context.project_root,
+                        &broadcast_path,
+                    );
+                    let queued_file = queued_file_for_broadcast_path(&broadcast_file);
+                    (Some(broadcast_file), queued_file)
+                };
+                let mut plan = compose_plan_state_for_updates.lock().map_err(|_| {
+                    treb_core::error::TrebError::Forge("compose plan lock poisoned".into())
+                })?;
+                compose_plan::update_component(
+                    &mut plan,
+                    name,
+                    PlanComponentStatus::Broadcast,
+                    broadcast_file,
+                    queued_file,
+                );
+                compose_plan::save_plan(&cwd_for_plan, &plan).map(|_| ())
+            },
+        ));
         if !json {
             broadcast_display.start_spinner("Broadcasting");
             simulated.set_on_action_complete(broadcast_display.build_callback());
@@ -1420,10 +1504,27 @@ pub async fn run(
         };
 
         match broadcast_result {
-            Ok(results) => results,
+            Ok(results) => {
+                let plan = compose_plan_state
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("compose plan lock poisoned"))?;
+                compose_plan::save_plan(&cwd, &plan)?;
+                compose_plan::save_plan_archive(&cwd, &plan)?;
+                results
+            }
             Err((partial_results, failed_name, err)) => {
+                if let Ok(mut plan) = compose_plan_state.lock() {
+                    compose_plan::update_component(
+                        &mut plan,
+                        &failed_name,
+                        PlanComponentStatus::Failed,
+                        None,
+                        None,
+                    );
+                    let _ = compose_plan::save_plan(&cwd, &plan);
+                }
                 for sr in &partial_results {
-                    if components_to_run.contains(&sr.name) {
+                    if components_to_run.contains(&sr.name) && sr.name != failed_name {
                         completed += 1;
                         component_results.push(ComponentResultEntry {
                             component: sr.name.clone(),
@@ -1433,8 +1534,6 @@ pub async fn run(
                             gas_used: sr.result.gas_used,
                             error: None,
                         });
-                        state.completed.push(sr.name.clone());
-                        state.deployment_total += sr.result.deployments.len();
                     }
                 }
                 let error_msg = format!("{err}");
@@ -1502,10 +1601,7 @@ pub async fn run(
                 gas_used: sr.result.gas_used,
                 error: None,
             });
-            state.completed.push(sr.name.clone());
-            state.deployment_total += sr.result.deployments.len();
         }
-        save_compose_state(&state)?;
 
         // Per-component broadcast results were already shown inline
         // by the on_action_complete callback. No duplicate summary needed.
@@ -1524,19 +1620,10 @@ pub async fn run(
     });
 
     if !json {
-        let human_totals = ComposeTotals {
-            deployments: totals.deployments + resumed_deployments,
-            transactions: totals.transactions,
-            gas_used: totals.gas_used,
-            succeeded: totals.succeeded,
-            skipped: totals.skipped,
-            failed: totals.failed,
-            not_executed: totals.not_executed,
-        };
         display_compose_human(
             &compose.group,
             &component_results,
-            &human_totals,
+            &totals,
             completed,
             total,
             &failed_component,
@@ -1545,11 +1632,6 @@ pub async fn run(
         // In JSON mode, execution failures bubble up to the top-level JSON
         // error wrapper instead of mixing a result payload with stderr errors.
         display_compose_json(&compose.group, component_results, totals, success)?;
-    }
-
-    // Full successful completion: delete the state file.
-    if success {
-        delete_compose_state();
     }
 
     if let Some(err) = failure_error {
@@ -2160,73 +2242,72 @@ components:
         assert_eq!(value, "my_value");
     }
 
-    // ── Resume state tests ───────────────────────────────────────────
+    // ── Resume plan tests ────────────────────────────────────────────
 
     #[test]
-    fn compute_file_hash_deterministic() {
+    fn compose_hash_deterministic() {
         let content = "group: test\ncomponents:\n  a:\n    script: A.s.sol\n";
-        let hash1 = compute_file_hash(content);
-        let hash2 = compute_file_hash(content);
+        let hash1 = compose_plan::compute_compose_hash(content);
+        let hash2 = compose_plan::compute_compose_hash(content);
         assert_eq!(hash1, hash2);
         assert_eq!(hash1.len(), 16); // 16 hex chars
     }
 
     #[test]
-    fn compute_file_hash_changes_on_different_content() {
-        let hash1 = compute_file_hash("content A");
-        let hash2 = compute_file_hash("content B");
+    fn compose_hash_changes_on_different_content() {
+        let hash1 = compose_plan::compute_compose_hash("content A");
+        let hash2 = compose_plan::compute_compose_hash("content B");
         assert_ne!(hash1, hash2);
     }
 
     #[test]
-    fn compose_state_serialization_roundtrip() {
-        let state = ComposeState {
-            compose_hash: "abc123".to_string(),
-            completed: vec!["libs".to_string(), "core".to_string()],
-            deployment_total: 3,
-        };
-        let json = serde_json::to_string_pretty(&state).unwrap();
-        let parsed: ComposeState = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.compose_hash, "abc123");
-        assert_eq!(parsed.completed, vec!["libs", "core"]);
-        assert_eq!(parsed.deployment_total, 3);
+    fn queued_file_for_broadcast_path_appends_queued_suffix() {
+        let queued =
+            queued_file_for_broadcast_path("broadcast/Deploy.s.sol/1/run-latest.json").unwrap();
+        assert_eq!(queued, "broadcast/Deploy.s.sol/1/run-latest.queued.json");
+
+        let archived =
+            queued_file_for_broadcast_path("broadcast/Deploy.s.sol/1/run-1234567890.json").unwrap();
+        assert_eq!(archived, "broadcast/Deploy.s.sol/1/run-1234567890.queued.json");
     }
 
     #[test]
-    fn compose_state_legacy_json_defaults_deployment_total_to_zero() {
-        let parsed: ComposeState = serde_json::from_str(
-            r#"{
-                "compose_hash": "abc123",
-                "completed": ["libs", "core"]
-            }"#,
-        )
-        .unwrap();
-        assert_eq!(parsed.deployment_total, 0);
-    }
-
-    #[test]
-    fn compose_state_save_and_load() {
+    fn load_resume_plan_uses_single_plan_fallback() {
         let dir = tempfile::tempdir().unwrap();
-        let state_path = dir.path().join(".treb");
-        std::fs::create_dir_all(&state_path).unwrap();
-        let state_file = state_path.join("compose-state.json");
+        let plan = compose_plan::create_plan(
+            "compose/simple.yaml",
+            "hash123",
+            1,
+            &[("registry".into(), "script/DeployRegistry.s.sol".into())],
+        );
+        compose_plan::save_plan(dir.path(), &plan).unwrap();
 
-        let state = ComposeState {
-            compose_hash: "test_hash".to_string(),
-            completed: vec!["alpha".to_string(), "bravo".to_string()],
-            deployment_total: 5,
-        };
+        let loaded = load_resume_plan(dir.path(), "compose/simple.yaml", None).unwrap();
+        assert_eq!(loaded.chain_id, 1);
+        assert_eq!(loaded.compose_hash, "hash123");
+    }
 
-        // Write state
-        let contents = serde_json::to_string_pretty(&state).unwrap();
-        std::fs::write(&state_file, &contents).unwrap();
+    #[test]
+    fn load_resume_plan_prefers_matching_chain() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = compose_plan::create_plan(
+            "compose/simple.yaml",
+            "hash-one",
+            1,
+            &[("registry".into(), "script/DeployRegistry.s.sol".into())],
+        );
+        let second = compose_plan::create_plan(
+            "compose/simple.yaml",
+            "hash-two",
+            2,
+            &[("registry".into(), "script/DeployRegistry.s.sol".into())],
+        );
+        compose_plan::save_plan(dir.path(), &first).unwrap();
+        compose_plan::save_plan(dir.path(), &second).unwrap();
 
-        // Read state back
-        let loaded: ComposeState =
-            serde_json::from_str(&std::fs::read_to_string(&state_file).unwrap()).unwrap();
-        assert_eq!(loaded.compose_hash, "test_hash");
-        assert_eq!(loaded.completed, vec!["alpha", "bravo"]);
-        assert_eq!(loaded.deployment_total, 5);
+        let loaded = load_resume_plan(dir.path(), "compose/simple.yaml", Some(2)).unwrap();
+        assert_eq!(loaded.chain_id, 2);
+        assert_eq!(loaded.compose_hash, "hash-two");
     }
 
     #[test]
@@ -2269,12 +2350,6 @@ components:
         assert_eq!(arr[0]["skipped"], true);
         // 'b' should not have skipped field (skip_serializing_if)
         assert!(arr[1].get("skipped").is_none());
-    }
-
-    #[test]
-    fn delete_compose_state_no_error_when_missing() {
-        // Should not panic or error when file doesn't exist
-        delete_compose_state();
     }
 
     // ── Result aggregation tests ─────────────────────────────────────

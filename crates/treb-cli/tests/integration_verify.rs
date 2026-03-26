@@ -35,6 +35,7 @@ fn make_verified_deployment(id: &str, tx_id: &str, chain_id: u64) -> treb_core::
         label: "v1".to_string(),
         address: format!("0x{:040x}", 1u64),
         deployment_type: DeploymentType::Singleton,
+        execution: None,
         transaction_id: tx_id.to_string(),
         deployment_strategy: DeploymentStrategy {
             method: DeploymentMethod::Create,
@@ -168,6 +169,7 @@ fn make_scoped_verify_deployment(
         label: label.to_string(),
         address: address.to_string(),
         deployment_type: DeploymentType::Singleton,
+        execution: None,
         transaction_id: format!("tx-{namespace}-{chain_id}-{contract_name}"),
         deployment_strategy: DeploymentStrategy {
             method: DeploymentMethod::Create,
@@ -553,8 +555,9 @@ fn verify_scope_errors_include_context_suffix() {
             VerificationStatus::Verified,
         )],
     );
+    ctx.run(["config", "set", "namespace", "mainnet"]).success();
 
-    ctx.run(["verify", "--network", "1", "Counter"])
-        .failure()
-        .stderr(predicate::str::contains("no deployment found matching 'Counter' on network '1'"));
+    ctx.run(["verify", "--network", "1", "Counter"]).failure().stderr(predicate::str::contains(
+        "no deployment found matching 'Counter' in namespace 'mainnet' on network '1'",
+    ));
 }

@@ -14,8 +14,8 @@ pub use contract::{
     Contract, Network,
 };
 pub use deployment::{
-    ArtifactInfo, Deployment, DeploymentStrategy, ProxyInfo, ProxyUpgrade, VerificationInfo,
-    VerifierStatus,
+    ArtifactInfo, Deployment, DeploymentStrategy, ExecutionKind, ExecutionRef, ExecutionStatus,
+    ProxyInfo, ProxyUpgrade, VerificationInfo, VerifierStatus,
 };
 pub use enums::{
     DeploymentMethod, DeploymentType, ProposalStatus, TransactionStatus, VerificationStatus,

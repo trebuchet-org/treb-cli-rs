@@ -486,7 +486,7 @@ fn full_pipeline_end_to_end() {
     assert_eq!(deployments[2].contract_name, "MyProxy");
 
     // Step 3: Extract collisions (none in this fixture)
-    let collisions = extract_collisions(&events);
+    let collisions = extract_collisions(&events, None);
     assert!(collisions.is_empty());
 
     // Step 4: Detect proxy relationships
@@ -519,7 +519,7 @@ fn collision_fixture_round_trip() {
     assert!(deployments.is_empty());
 
     // One collision
-    let collisions = extract_collisions(&events);
+    let collisions = extract_collisions(&events, None);
     assert_eq!(collisions.len(), 1);
     assert_eq!(
         collisions[0].existing_address,

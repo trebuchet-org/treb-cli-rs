@@ -20,6 +20,11 @@ const MINIMAL_FOUNDRY_TOML: &str = "[profile.default]\n";
 fn init_project_with_deployments(tmp: &tempfile::TempDir) {
     fs::write(tmp.path().join("foundry.toml"), MINIMAL_FOUNDRY_TOML).unwrap();
     treb().arg("init").current_dir(tmp.path()).assert().success();
+    treb()
+        .args(["config", "set", "namespace", "mainnet"])
+        .current_dir(tmp.path())
+        .assert()
+        .success();
 
     // Read fixture deployments from treb-core test fixtures.
     let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -64,6 +69,7 @@ fn make_list_deployment(namespace: &str, chain_id: u64, contract_name: &str) -> 
         label: label.to_string(),
         address: format!("0x{chain_id:040x}"),
         deployment_type: DeploymentType::Singleton,
+        execution: None,
         transaction_id: format!("tx-{chain_id}"),
         deployment_strategy: DeploymentStrategy {
             method: DeploymentMethod::Create,
@@ -111,6 +117,7 @@ fn make_show_deployment(
         label: label.to_string(),
         address: address.to_string(),
         deployment_type: DeploymentType::Singleton,
+        execution: None,
         transaction_id: format!("tx-{namespace}-{chain_id}-{contract_name}"),
         deployment_strategy: DeploymentStrategy {
             method: DeploymentMethod::Create,
@@ -186,6 +193,11 @@ fn list_adds_separator_between_chains_in_same_namespace() {
         &tmp,
         [make_list_deployment("shared", 1, "Alpha"), make_list_deployment("shared", 42220, "Beta")],
     );
+    treb()
+        .args(["config", "set", "namespace", "shared"])
+        .current_dir(tmp.path())
+        .assert()
+        .success();
 
     let output = treb().arg("list").current_dir(tmp.path()).output().unwrap();
 
@@ -212,7 +224,7 @@ fn list_json_outputs_wrapped_object() {
         serde_json::from_slice(&output.stdout).expect("output is not valid JSON");
     assert!(json.is_object(), "JSON output should be a wrapper object");
     let arr = json["deployments"].as_array().expect("should have deployments array");
-    assert_eq!(arr.len(), 4);
+    assert_eq!(arr.len(), 3);
 
     // Verify deployment entries have the Go schema fields.
     let first = &arr[0];
@@ -281,6 +293,54 @@ fn list_empty_registry_with_namespace_filter_shows_generic_empty_state() {
 
     assert!(output.status.success());
     assert_eq!(String::from_utf8_lossy(&output.stdout), "No deployments found\n");
+}
+
+#[test]
+fn list_uses_configured_network_and_namespace_defaults() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_custom_deployments(
+        &tmp,
+        [
+            make_list_deployment("default", 42220, "Counter"),
+            make_list_deployment("default", 11155111, "Counter"),
+            make_list_deployment("staging", 11155111, "Counter"),
+        ],
+    );
+
+    treb()
+        .args(["config", "set", "network", "11155111"])
+        .current_dir(tmp.path())
+        .assert()
+        .success();
+    treb()
+        .args(["config", "set", "namespace", "staging"])
+        .current_dir(tmp.path())
+        .assert()
+        .success();
+
+    let output = treb().args(["ls", "--json"]).current_dir(tmp.path()).output().unwrap();
+
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let deployments = json["deployments"].as_array().expect("should have deployments array");
+    assert_eq!(deployments.len(), 1);
+    assert_eq!(deployments[0]["id"], "staging/11155111/Counter:v1");
+}
+
+#[test]
+fn list_falls_back_to_fork_deployments_when_selected_namespace_is_empty() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project_with_custom_deployments(
+        &tmp,
+        [make_list_deployment("fork/42220", 42220, "MockToken")],
+    );
+
+    let output = treb().arg("list").current_dir(tmp.path()).output().unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("FORK"), "expected fork verification marker, got:\n{stdout}");
+    assert!(stdout.contains("MockToken"), "expected fork deployment, got:\n{stdout}");
 }
 
 #[test]
@@ -420,7 +480,7 @@ fn show_fork_badge_stays_in_header_only() {
     init_project_with_deployments(&tmp);
 
     let output = treb()
-        .args(["show", "fork/42220/MockToken"])
+        .args(["show", "--namespace", "fork/42220", "fork/42220/MockToken"])
         .env("NO_COLOR", "1")
         .current_dir(tmp.path())
         .output()
@@ -476,7 +536,7 @@ fn show_json_sets_fork_flag_only_for_fork_namespaces() {
     init_project_with_deployments(&tmp);
 
     let output = treb()
-        .args(["show", "fork/42220/MockToken", "--json"])
+        .args(["show", "--namespace", "fork/42220", "fork/42220/MockToken", "--json"])
         .current_dir(tmp.path())
         .output()
         .unwrap();
@@ -638,6 +698,11 @@ fn show_network_filter_scopes_ambiguous_contract_lookup() {
             ),
         ],
     );
+    treb()
+        .args(["config", "set", "namespace", "mainnet"])
+        .current_dir(tmp.path())
+        .assert()
+        .success();
 
     treb()
         .args(["show", "--network", "42220", "Counter"])
@@ -672,6 +737,11 @@ fn show_no_fork_filter_excludes_fork_deployments() {
             ),
         ],
     );
+    treb()
+        .args(["config", "set", "namespace", "mainnet"])
+        .current_dir(tmp.path())
+        .assert()
+        .success();
 
     treb()
         .args(["show", "--no-fork", "Counter"])

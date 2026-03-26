@@ -85,6 +85,19 @@ fn run_without_treb_init_fails() {
 }
 
 #[test]
+fn run_requires_network_or_rpc_url_when_not_configured() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_project(&tmp);
+
+    treb()
+        .args(["run", "script/Deploy.s.sol", "--non-interactive"])
+        .current_dir(tmp.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no network configured"));
+}
+
+#[test]
 fn run_bad_env_var_format_fails() {
     let tmp = tempfile::tempdir().unwrap();
     init_project(&tmp);

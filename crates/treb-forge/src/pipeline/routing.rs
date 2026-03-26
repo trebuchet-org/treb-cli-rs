@@ -11,7 +11,7 @@
 //!   fork)
 //!
 //! Both action types may emit **`QueuedExecution`** items that represent
-//! deferred operations (Safe multi-sig approval, governance execution).
+//! queued operations (Safe multi-sig approval, governance execution).
 //!
 //! The reduction is iterative (no recursion, no `Box::pin` futures). Governor
 //! routing pushes the `propose()` tx back onto the work queue, resolved through
@@ -31,6 +31,8 @@ use crate::{
     script::BroadcastReceipt,
     sender::{ResolvedSender, SenderCategory},
 };
+
+use super::types::RecordedTransaction;
 
 /// Maximum queue depth for routing reducer chains.
 ///
@@ -98,7 +100,7 @@ pub enum RoutingAction {
     },
 }
 
-/// A deferred execution that results from a routing action.
+/// A queued execution that results from a routing action.
 ///
 /// Processed inline by the executor after the corresponding action.
 #[derive(Debug, Clone)]
@@ -139,7 +141,7 @@ pub struct PlannedAction {
     pub run: TransactionRun,
     /// The routing action to execute.
     pub action: RoutingAction,
-    /// Optional deferred execution to handle inline after the action.
+    /// Optional queued execution to handle after the action.
     pub queued: Option<QueuedExecution>,
 }
 
@@ -227,6 +229,14 @@ pub enum RunResult {
     SafeProposed { safe_tx_hash: B256, safe_address: Address, nonce: u64, tx_count: usize },
     /// Txs were submitted as a Governor proposal (live mode).
     GovernorProposed { proposal_id: String, governor_address: Address, tx_count: usize },
+}
+
+/// Final routing execution output.
+pub struct ExecutionBundle {
+    /// Logical per-run results in original script order.
+    pub run_results: Vec<(TransactionRun, RunResult)>,
+    /// Queueable items that ended up queued for follow-up or fork simulation.
+    pub queued_executions: Vec<QueuedExecution>,
 }
 
 /// Callback invoked after each top-level routing run completes.
@@ -889,16 +899,11 @@ async fn reduce_safe_1of1(
 // execute_plan — uniform executor
 // ---------------------------------------------------------------------------
 
-/// Execute a single planned action, returning the result and optional queued item.
-///
-/// This is the per-action building block. The CLI can call this in a loop
-/// to drive execution with inline output (spinner control, prompts, etc.)
-/// between actions.
-pub async fn execute_single_action(
+async fn execute_action_only(
     planned: &PlannedAction,
     ctx: &mut RouteContext<'_>,
     original_btxs: Option<&foundry_cheatcodes::BroadcastableTransactions<Ethereum>>,
-) -> Result<(TransactionRun, RunResult, Option<QueuedExecution>), TrebError> {
+) -> Result<RunResult, TrebError> {
     let result = match &planned.action {
         RoutingAction::Exec { from, transactions, safe, governance: _ } => {
             if let Some(safe_ctx) = safe {
@@ -979,6 +984,56 @@ pub async fn execute_single_action(
         }
     };
 
+    Ok(result)
+}
+
+fn safe_proposal_from_action(planned: &PlannedAction) -> Option<QueuedExecution> {
+    match (&planned.action, &planned.queued) {
+        (_, Some(QueuedExecution::SafeProposal { .. })) => planned.queued.clone(),
+        (
+            RoutingAction::Propose {
+                safe_address,
+                chain_id,
+                operations,
+                nonce,
+                inner_transactions,
+                ..
+            },
+            _,
+        ) => Some(QueuedExecution::SafeProposal {
+            safe_address: *safe_address,
+            safe_tx_hash: compute_safe_tx_hash_for_ops(
+                operations,
+                *safe_address,
+                *nonce,
+                *chain_id,
+            ),
+            nonce: *nonce,
+            inner_txs: inner_transactions.clone(),
+        }),
+        _ => None,
+    }
+}
+
+fn tx_ids_for_run(run: &TransactionRun, recorded_txs: &[RecordedTransaction]) -> Vec<String> {
+    run.tx_indices
+        .iter()
+        .filter_map(|&idx| recorded_txs.get(idx))
+        .map(|rt| rt.transaction.id.clone())
+        .collect()
+}
+
+/// Execute a single planned action, returning the result and optional queued item.
+///
+/// This remains as a building block for compose's merge path, which still
+/// handles proposal deferral separately from the default two-phase executor.
+pub async fn execute_single_action(
+    planned: &PlannedAction,
+    ctx: &mut RouteContext<'_>,
+    original_btxs: Option<&foundry_cheatcodes::BroadcastableTransactions<Ethereum>>,
+) -> Result<(TransactionRun, RunResult, Option<QueuedExecution>), TrebError> {
+    let result = execute_action_only(planned, ctx, original_btxs).await?;
+
     // Governance wrapping
     let final_result = match &planned.action {
         RoutingAction::Exec { governance: Some(gov), .. } => match &result {
@@ -1009,33 +1064,225 @@ pub async fn execute_single_action(
     ))
 }
 
-/// Execute a routing plan, producing `(TransactionRun, RunResult)` pairs.
+/// Execute a routing plan in two phases:
+/// 1. direct on-chain execution (`Exec`)
+/// 2. queued/finalization work (`Propose`, governor queue state)
 ///
-/// Sequential loop — for each planned action:
-/// 1. Execute the action (Exec → broadcast, Propose → record/propose)
-/// 2. Fire the on_run_complete callback
-/// 3. Return the result (queued items are carried in the result for the caller)
-///
-/// The caller (CLI) is responsible for inline Queued handling (prompts, simulation).
+/// Results are returned in original script order even though execution is
+/// staged as direct-first and queued-second.
 pub async fn execute_plan(
     plan: &RoutingPlan,
     ctx: &mut RouteContext<'_>,
     original_btxs: Option<&foundry_cheatcodes::BroadcastableTransactions<Ethereum>>,
-) -> Result<Vec<(TransactionRun, RunResult, Option<QueuedExecution>)>, TrebError> {
-    let mut results = Vec::with_capacity(plan.actions.len());
-
-    for planned in &plan.actions {
-        let (run, final_result, queued) =
-            execute_single_action(planned, ctx, original_btxs).await?;
-
-        if let Some(cb) = &ctx.on_run_complete {
-            cb(&run, &final_result);
-        }
-
-        results.push((run, final_result, queued));
+    recorded_txs: &[RecordedTransaction],
+    resume: Option<&super::broadcast_writer::ResumeState>,
+    mut queued_state: Option<&mut super::broadcast_writer::QueuedOperations>,
+) -> Result<ExecutionBundle, TrebError> {
+    if let (Some(sequence), Some(queued)) = (ctx.sequence.as_deref(), queued_state.as_deref()) {
+        super::broadcast_writer::save_queued_checkpoint(sequence, queued)?;
     }
 
-    Ok(results)
+    let mut direct_results: Vec<Option<RunResult>> =
+        (0..plan.actions.len()).map(|_| None).collect();
+    let mut final_results: Vec<Option<RunResult>> = (0..plan.actions.len()).map(|_| None).collect();
+    let mut queued_executions = Vec::new();
+
+    // Phase 1: execute direct on-chain actions first.
+    for (idx, planned) in plan.actions.iter().enumerate() {
+        if !matches!(planned.action, RoutingAction::Exec { .. }) {
+            continue;
+        }
+
+        let skip_governor_direct = planned.queued.as_ref().is_some_and(|queued| {
+            matches!(queued, QueuedExecution::GovernanceProposal { governor_address, .. }
+            if queued_state.as_deref().is_some_and(|state| {
+                super::broadcast_writer::governor_proposal_completed(
+                    state,
+                    &format!("{:#x}", governor_address),
+                    &tx_ids_for_run(&planned.run, recorded_txs),
+                )
+            }))
+        });
+        if skip_governor_direct {
+            continue;
+        }
+
+        let result = if matches!(planned.run.category, SenderCategory::Wallet) {
+            if let Some(resume) = resume {
+                resume_wallet_run(
+                    &planned.run,
+                    original_btxs.expect("resume requires btxs"),
+                    ctx,
+                    resume,
+                )
+                .await?
+            } else {
+                execute_action_only(planned, ctx, original_btxs).await?
+            }
+        } else {
+            execute_action_only(planned, ctx, original_btxs).await?
+        };
+
+        if planned.queued.is_none() {
+            if let Some(cb) = &ctx.on_run_complete {
+                cb(&planned.run, &result);
+            }
+            final_results[idx] = Some(result.clone());
+        }
+
+        direct_results[idx] = Some(result);
+    }
+
+    // Phase 2: perform queueing/finalization after direct execution settles.
+    for (idx, planned) in plan.actions.iter().enumerate() {
+        match &planned.action {
+            RoutingAction::Exec { governance: Some(gov), .. } => {
+                let broadcast =
+                    direct_results[idx].clone().unwrap_or(RunResult::Broadcast(Vec::new()));
+                let tx_ids = tx_ids_for_run(&planned.run, recorded_txs);
+                let proposal_id = match &broadcast {
+                    RunResult::Broadcast(receipts) => {
+                        receipts.first().map(|r| format!("{:#x}", r.hash)).unwrap_or_default()
+                    }
+                    _ => queued_state
+                        .as_deref()
+                        .and_then(|state| {
+                            state.governor_proposals.iter().find(|proposal| {
+                                proposal
+                                    .governor_address
+                                    .eq_ignore_ascii_case(&format!("{:#x}", gov.governor_address))
+                                    && proposal.transaction_ids == tx_ids
+                            })
+                        })
+                        .map(|proposal| proposal.proposal_id.clone())
+                        .unwrap_or_default(),
+                };
+                if let Some(state) = queued_state.as_deref_mut() {
+                    if !super::broadcast_writer::governor_proposal_completed(
+                        state,
+                        &format!("{:#x}", gov.governor_address),
+                        &tx_ids,
+                    ) {
+                        super::broadcast_writer::mark_governor_proposal_queued(
+                            state,
+                            &format!("{:#x}", gov.governor_address),
+                            &tx_ids,
+                            Some(&proposal_id),
+                            Some(&proposal_id),
+                            None,
+                        )?;
+                        if let Some(sequence) = ctx.sequence.as_deref() {
+                            super::broadcast_writer::save_queued_checkpoint(sequence, state)?;
+                        }
+                    }
+                }
+
+                if let Some(queued) = planned.queued.clone() {
+                    queued_executions.push(queued);
+                }
+
+                let final_result = RunResult::GovernorProposed {
+                    proposal_id,
+                    governor_address: gov.governor_address,
+                    tx_count: planned.run.tx_indices.len(),
+                };
+                if let Some(cb) = &ctx.on_run_complete {
+                    cb(&planned.run, &final_result);
+                }
+                final_results[idx] = Some(final_result);
+            }
+            RoutingAction::Propose { safe_address, nonce, inner_transactions, .. } => {
+                let safe_queued = safe_proposal_from_action(planned)
+                    .expect("propose action must yield safe queue");
+                let safe_tx_hash = match &safe_queued {
+                    QueuedExecution::SafeProposal { safe_tx_hash, .. } => {
+                        format!("{:#x}", safe_tx_hash)
+                    }
+                    _ => unreachable!(),
+                };
+                let already_queued = queued_state.as_deref().is_some_and(|state| {
+                    super::broadcast_writer::safe_proposal_completed(state, &safe_tx_hash)
+                });
+
+                let safe_result = if already_queued {
+                    let safe_tx_hash = safe_tx_hash
+                        .parse()
+                        .map_err(|e| TrebError::Safe(format!("invalid saved safe tx hash: {e}")))?;
+                    RunResult::SafeProposed {
+                        safe_tx_hash,
+                        safe_address: *safe_address,
+                        nonce: *nonce,
+                        tx_count: inner_transactions.len(),
+                    }
+                } else {
+                    execute_action_only(planned, ctx, original_btxs).await?
+                };
+
+                if let Some(state) = queued_state.as_deref_mut() {
+                    super::broadcast_writer::mark_safe_proposal_queued(state, &safe_tx_hash)?;
+                    if let Some(sequence) = ctx.sequence.as_deref() {
+                        super::broadcast_writer::save_queued_checkpoint(sequence, state)?;
+                    }
+                }
+
+                queued_executions.push(safe_queued);
+
+                if let Some(QueuedExecution::GovernanceProposal { governor_address, .. }) =
+                    planned.queued.as_ref()
+                {
+                    let tx_ids = tx_ids_for_run(&planned.run, recorded_txs);
+                    if let Some(state) = queued_state.as_deref_mut() {
+                        if !super::broadcast_writer::governor_proposal_completed(
+                            state,
+                            &format!("{:#x}", governor_address),
+                            &tx_ids,
+                        ) {
+                            super::broadcast_writer::mark_governor_proposal_queued(
+                                state,
+                                &format!("{:#x}", governor_address),
+                                &tx_ids,
+                                None,
+                                None,
+                                Some(&safe_tx_hash),
+                            )?;
+                            if let Some(sequence) = ctx.sequence.as_deref() {
+                                super::broadcast_writer::save_queued_checkpoint(sequence, state)?;
+                            }
+                        }
+                    }
+                    queued_executions
+                        .push(planned.queued.clone().expect("governance queue exists"));
+                }
+
+                if let Some(cb) = &ctx.on_run_complete {
+                    cb(&planned.run, &safe_result);
+                }
+                final_results[idx] = Some(safe_result);
+            }
+            _ => {}
+        }
+    }
+
+    let run_results = plan
+        .actions
+        .iter()
+        .zip(final_results.into_iter())
+        .filter_map(|(planned, result)| {
+            result.map(|result| {
+                (
+                    TransactionRun {
+                        sender_role: planned.run.sender_role.clone(),
+                        category: planned.run.category,
+                        sender_address: planned.run.sender_address,
+                        tx_indices: planned.run.tx_indices.clone(),
+                    },
+                    result,
+                )
+            })
+        })
+        .collect();
+
+    Ok(ExecutionBundle { run_results, queued_executions })
 }
 
 // ---------------------------------------------------------------------------
@@ -1051,18 +1298,17 @@ pub async fn route_all(
     ctx: &mut RouteContext<'_>,
 ) -> Result<Vec<(TransactionRun, RunResult)>, TrebError> {
     let plan = reduce_queue(btxs, ctx).await?;
-    let results = execute_plan(&plan, ctx, Some(btxs)).await?;
-    // Strip queued items for backward compat — caller can use route_all_with_queued instead
-    Ok(results.into_iter().map(|(run, result, _)| (run, result)).collect())
+    let results = execute_plan(&plan, ctx, Some(btxs), &[], None, None).await?;
+    Ok(results.run_results)
 }
 
 /// Route all with queued execution items returned.
 pub async fn route_all_with_queued(
     btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     ctx: &mut RouteContext<'_>,
-) -> Result<Vec<(TransactionRun, RunResult, Option<QueuedExecution>)>, TrebError> {
+) -> Result<ExecutionBundle, TrebError> {
     let plan = reduce_queue(btxs, ctx).await?;
-    execute_plan(&plan, ctx, Some(btxs)).await
+    execute_plan(&plan, ctx, Some(btxs), &[], None, None).await
 }
 
 /// Route with resume support — skips confirmed, polls pending, re-sends unsent.
@@ -1079,44 +1325,9 @@ pub async fn route_all_with_resume(
     btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
     ctx: &mut RouteContext<'_>,
     resume: &super::broadcast_writer::ResumeState,
-) -> Result<Vec<(TransactionRun, RunResult)>, TrebError> {
-    let runs = partition_into_runs(btxs, ctx.resolved_senders, ctx.sender_labels);
-    let mut results = Vec::with_capacity(runs.len());
-
-    for run in runs {
-        let result = match run.category {
-            SenderCategory::Wallet => resume_wallet_run(&run, btxs, ctx, resume).await?,
-            _ => {
-                // For Safe/Governor with resume, fall through to normal routing
-                // Build a single-run plan and execute
-                let single_btxs = btxs.clone();
-                let mut temp_ctx = RouteContext {
-                    rpc_url: ctx.rpc_url,
-                    chain_id: ctx.chain_id,
-                    is_fork: ctx.is_fork,
-                    quiet: ctx.quiet,
-                    on_run_complete: None,
-                    resolved_senders: ctx.resolved_senders,
-                    sender_labels: ctx.sender_labels,
-                    sender_configs: ctx.sender_configs,
-                    sequence: None,
-                    safe_nonce_offsets: ctx.safe_nonce_offsets.clone(),
-                    defer_safe_proposals: ctx.defer_safe_proposals,
-                    safe_threshold_cache: ctx.safe_threshold_cache.clone(),
-                };
-                let plan = reduce_queue(&single_btxs, &mut temp_ctx).await?;
-                let plan_results = execute_plan(&plan, &mut temp_ctx, Some(&single_btxs)).await?;
-                if let Some((_, result, _)) = plan_results.into_iter().next() {
-                    result
-                } else {
-                    RunResult::Broadcast(Vec::new())
-                }
-            }
-        };
-        results.push((run, result));
-    }
-
-    Ok(results)
+) -> Result<ExecutionBundle, TrebError> {
+    let plan = reduce_queue(btxs, ctx).await?;
+    execute_plan(&plan, ctx, Some(btxs), &[], Some(resume), None).await
 }
 
 // ---------------------------------------------------------------------------
@@ -2042,7 +2253,7 @@ mod tests {
     ) -> super::super::broadcast_writer::ResumeState {
         super::super::broadcast_writer::ResumeState {
             sequence: make_resume_sequence(tx_hashes),
-            deferred: None,
+            queued: None,
             completed_tx_hashes: completed.iter().copied().collect(),
             pending_tx_hashes: pending.iter().copied().collect(),
             completed_safe_hashes: std::collections::HashSet::new(),

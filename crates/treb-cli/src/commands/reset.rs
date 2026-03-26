@@ -131,14 +131,12 @@ pub async fn run(args: DropArgs, non_interactive: bool) -> anyhow::Result<()> {
         );
     }
 
+    let scope = super::resolve_command_scope(&cwd, args.namespace.clone(), args.network.clone())?;
+    let namespace = scope.namespace;
+    let network = scope.network;
+
     // Resolve chain ID filter.
-    let chain_id_filter: Option<u64> = match &args.network {
-        Some(s) => match s.parse::<u64>() {
-            Ok(id) => Some(id),
-            Err(_) => bail!("--network must be a chain ID (e.g. 1, 31337); got '{}'", s),
-        },
-        None => None,
-    };
+    let chain_id_filter = super::resolve_chain_id_for_network(&cwd, network.as_deref()).await?;
 
     let mut registry = Registry::open(&cwd).context("failed to open registry")?;
 
@@ -148,8 +146,7 @@ pub async fn run(args: DropArgs, non_interactive: bool) -> anyhow::Result<()> {
         .iter()
         .filter(|d| {
             let chain_ok = chain_id_filter.is_none_or(|id| d.chain_id == id);
-            let ns_ok =
-                args.namespace.as_deref().is_none_or(|ns| d.namespace.eq_ignore_ascii_case(ns));
+            let ns_ok = namespace.as_deref().is_none_or(|ns| d.namespace.eq_ignore_ascii_case(ns));
             let query_ok = args.query.as_deref().is_none_or(|q| deployment_matches_query(d, q));
             chain_ok && ns_ok && query_ok
         })
@@ -160,7 +157,7 @@ pub async fn run(args: DropArgs, non_interactive: bool) -> anyhow::Result<()> {
 
     // Orphan cascade: transactions are only removed when ALL their linked
     // deployments are being dropped.
-    let has_scoping = args.query.is_some() || args.namespace.is_some();
+    let has_scoping = args.query.is_some() || namespace.is_some();
     let transactions_to_remove: Vec<String> = registry
         .list_transactions()
         .iter()
@@ -261,7 +258,7 @@ pub async fn run(args: DropArgs, non_interactive: bool) -> anyhow::Result<()> {
     // Summary header with aligned per-type counts.
     let scope = describe_drop_scope(
         args.query.as_deref(),
-        args.namespace.as_deref(),
+        namespace.as_deref(),
         chain_id_filter,
         &targeted_chain_ids,
     );
@@ -422,6 +419,7 @@ mod tests {
             label: label.to_string(),
             address: format!("0x{:040x}", 1u64),
             deployment_type: DeploymentType::Singleton,
+            execution: None,
             transaction_id: String::new(),
             deployment_strategy: DeploymentStrategy {
                 method: DeploymentMethod::Create,

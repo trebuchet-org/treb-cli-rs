@@ -16,7 +16,7 @@
         "result": {}
       }
     ],
-    "broadcastFile": "broadcast/Deploy.s.sol/31337/run-latest.json",
+    "broadcastFile": "broadcast/Deploy.s.sol/31337/run-<TIMESTAMP>.json",
     "environment": "default",
     "createdAt": "<TIMESTAMP>"
   }
