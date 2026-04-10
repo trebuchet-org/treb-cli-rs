@@ -245,6 +245,7 @@ mod tests {
             label: "v1".into(),
             address: "0x1234567890abcdef1234567890abcdef12345678".into(),
             deployment_type: DeploymentType::Singleton,
+            execution: None,
             transaction_id: "tx-001".into(),
             deployment_strategy: DeploymentStrategy {
                 method: DeploymentMethod::Create,

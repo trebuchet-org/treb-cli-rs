@@ -48,6 +48,7 @@ pub fn seed_registry(project_root: &Path) {
 ///
 /// Writes the bare JSON map from `treb-registry/tests/fixtures/go-compat/`
 /// into `.treb/deployments.json` and rebuilds the lookup index.
+/// Sets namespace to `mainnet` in local config (matching 5 of 13 fixture entries).
 pub fn seed_go_compat_registry(project_root: &Path) {
     let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../treb-registry/tests/fixtures/go-compat/deployments.json");

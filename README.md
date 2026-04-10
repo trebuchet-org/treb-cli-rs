@@ -38,19 +38,45 @@ trebup --path "$(pwd)"
 This builds the local checkout with Cargo, installs it under `~/.treb/versions/local-<sha>`,
 and activates it as the current `treb`.
 
-To compile the repo against a specific Foundry backend from source:
+## Foundry Backend Compatibility
+
+treb builds against multiple Foundry versions using feature flags and per-backend manifests. Each release is tagged with the Foundry backend it was built against:
+
+| Backend | Feature Flag | Foundry | Alloy |
+|---------|-------------|---------|-------|
+| `nightly` (default) | `foundry-nightly` | nightly | 2.x |
+| `v1.6.0-rc1` | `foundry-v1-5-1` | v1.6.0-rc1 | 1.4.x |
+| `v1.5.1` | `foundry-v1-5-1` | v1.5.1 | 1.1.x |
+
+Release artifacts follow the naming convention `treb-<tag>+foundry-<backend>-<os_arch>`.
+
+### Building a specific backend
 
 ```sh
-cargo run -p xtask -- foundry --backend nightly -- check -p treb-cli --tests
-cargo run -p xtask -- foundry --backend v1.5.1 -- check -p treb-cli --tests
+# Default (nightly)
+cargo build -p treb-cli
+
+# Single alternate backend via xtask
+cargo xtask foundry --backend v1.5.1 -- build -p treb-cli
+cargo xtask foundry --backend v1.6.0-rc1 -- check -p treb-cli --tests
+
+# Check all backends
+cargo xtask foundry-all -- check -p treb-cli --tests
 ```
 
-The `v1.5.1` backend uses the vetted root manifest and lockfile from the
-`release/foundry-v1.5.1` git ref. If that ref is missing locally, fetch it once:
+### How backends work
 
-```sh
-git fetch origin release/foundry-v1.5.1:refs/remotes/origin/release/foundry-v1.5.1
-```
+Each backend has its own `Cargo.toml` + `Cargo.lock` under `backends/<version>/`. These pin the foundry and alloy dependency versions for that backend. The xtask temporarily swaps these into the workspace root during the build because Cargo only supports one workspace manifest at a time.
+
+The compatibility seam is in `crates/treb-forge/src/foundry_compat.rs` — a thin module that uses `#[cfg(feature = ...)]` to abstract API differences between Foundry versions (mainly generic type parameters added in the alloy 2.x migration).
+
+### Adding a new backend
+
+1. Create `backends/<version>/` with a `Cargo.toml` and `Cargo.lock`
+2. The `Cargo.toml` should use root-relative paths (`crates/treb-cli`, not `../../crates/treb-cli`) since it gets swapped into the workspace root
+3. Pin foundry and alloy deps to the versions matching that release
+4. Add a `Backend` variant in `xtask/src/main.rs`
+5. If the Foundry API shape differs, add a new feature flag and cfg branches in `foundry_compat.rs`
 
 ## Quick Start
 

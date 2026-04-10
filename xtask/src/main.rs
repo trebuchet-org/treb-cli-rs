@@ -20,11 +20,18 @@ struct Cli {
 enum Commands {
     /// Run Cargo against a specific Foundry backend.
     Foundry(FoundryArgs),
+    /// Run Cargo against all Foundry backends sequentially.
+    FoundryAll(FoundryAllArgs),
 }
+
+const ALL_BACKENDS: [Backend; 3] = [Backend::Nightly, Backend::V1_6_0_Rc1, Backend::V1_5_1];
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 enum Backend {
     Nightly,
+    #[value(name = "v1.6.0-rc1")]
+    #[allow(non_camel_case_types)]
+    V1_6_0_Rc1,
     #[value(name = "v1.5.1")]
     V1_5_1,
 }
@@ -33,7 +40,26 @@ impl Backend {
     fn feature_name(self) -> &'static str {
         match self {
             Self::Nightly => "foundry-nightly",
-            Self::V1_5_1 => "foundry-v1-5-1",
+            // rc1 uses the same alloy 1.x non-generic API as v1.5.1
+            Self::V1_6_0_Rc1 | Self::V1_5_1 => "foundry-v1-5-1",
+        }
+    }
+
+    /// Directory under `backends/` containing this backend's manifest.
+    /// Returns `None` for nightly (uses root workspace directly).
+    fn backend_dir(self) -> Option<&'static str> {
+        match self {
+            Self::Nightly => None,
+            Self::V1_6_0_Rc1 => Some("v1.6.0-rc1"),
+            Self::V1_5_1 => Some("v1.5.1"),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Nightly => "nightly",
+            Self::V1_6_0_Rc1 => "v1.6.0-rc1",
+            Self::V1_5_1 => "v1.5.1",
         }
     }
 }
@@ -43,10 +69,14 @@ struct FoundryArgs {
     /// Foundry backend to build against.
     #[arg(long, value_enum, default_value = "nightly")]
     backend: Backend,
-    /// Git ref containing the vetted root manifest/lock for the alternate backend.
-    #[arg(long, default_value = "release/foundry-v1.5.1")]
-    release_ref: String,
     /// Cargo arguments to run after the backend has been selected.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    cargo_args: Vec<String>,
+}
+
+#[derive(Args)]
+struct FoundryAllArgs {
+    /// Cargo arguments to run against each backend.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     cargo_args: Vec<String>,
 }
@@ -54,37 +84,88 @@ struct FoundryArgs {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Foundry(args) => run_foundry(args),
+        Commands::Foundry(args) => run_foundry_single(args.backend, args.cargo_args),
+        Commands::FoundryAll(args) => run_foundry_all(args.cargo_args),
     }
 }
 
-fn run_foundry(args: FoundryArgs) -> Result<()> {
+fn run_foundry_all(cargo_args: Vec<String>) -> Result<()> {
+    let mut failed: Vec<&str> = Vec::new();
+
+    for backend in ALL_BACKENDS {
+        eprintln!("\n{}", "=".repeat(60));
+        eprintln!("  Backend: {}", backend.label());
+        eprintln!("{}\n", "=".repeat(60));
+
+        if let Err(e) = run_foundry_single(backend, cargo_args.clone()) {
+            eprintln!("FAILED [{}]: {e:#}", backend.label());
+            failed.push(backend.label());
+        }
+    }
+
+    eprintln!("\n{}", "=".repeat(60));
+    if failed.is_empty() {
+        eprintln!("  All {} backends passed", ALL_BACKENDS.len());
+        eprintln!("{}", "=".repeat(60));
+        Ok(())
+    } else {
+        eprintln!(
+            "  {}/{} backends failed: {}",
+            failed.len(),
+            ALL_BACKENDS.len(),
+            failed.join(", ")
+        );
+        eprintln!("{}", "=".repeat(60));
+        bail!("{} backend(s) failed", failed.len());
+    }
+}
+
+fn run_foundry_single(backend: Backend, cargo_args: Vec<String>) -> Result<()> {
     let root = workspace_root()?;
+
+    // Acquire workspace lock to prevent concurrent manifest swaps
     let _workspace_lock = WorkspaceLock::acquire(&root)?;
 
-    let _manifest_guard = match args.backend {
-        Backend::Nightly => None,
-        Backend::V1_5_1 => Some(WorkspaceFilesGuard::apply_git_ref(&root, &args.release_ref)?),
+    // For alternate backends, swap in the backend's Cargo.toml + Cargo.lock
+    let _manifest_guard = match backend.backend_dir() {
+        None => None,
+        Some(dir) => {
+            let backend_dir = root.join("backends").join(dir);
+            if !backend_dir.exists() {
+                bail!(
+                    "backend directory not found: {}\n\
+                     Available backends are in the backends/ directory.",
+                    backend_dir.display()
+                );
+            }
+            Some(WorkspaceFilesGuard::apply_from_dir(&root, &backend_dir)?)
+        }
     };
 
-    let mut cargo_args = if args.cargo_args.is_empty() {
+    let cargo_args = if cargo_args.is_empty() {
         vec!["check".to_string(), "-p".to_string(), "treb-cli".to_string(), "--tests".to_string()]
     } else {
-        args.cargo_args
+        cargo_args
     };
 
-    cargo_args.push("--no-default-features".to_string());
-    cargo_args.push("--features".to_string());
-    cargo_args.push(args.backend.feature_name().to_string());
+    // Insert --no-default-features --features <backend> before any `--` separator
+    // so they're treated as cargo flags, not test-binary flags.
+    let separator_pos = cargo_args.iter().position(|a| a == "--");
+    let mut final_args = Vec::with_capacity(cargo_args.len() + 3);
+    let (before, after) = match separator_pos {
+        Some(pos) => (&cargo_args[..pos], Some(&cargo_args[pos..])),
+        None => (cargo_args.as_slice(), None),
+    };
+    final_args.extend_from_slice(before);
+    final_args.push("--no-default-features".to_string());
+    final_args.push("--features".to_string());
+    final_args.push(backend.feature_name().to_string());
+    if let Some(rest) = after {
+        final_args.extend_from_slice(rest);
+    }
+    let cargo_args = final_args;
 
-    eprintln!(
-        "xtask: cargo {} [{}]",
-        cargo_args.join(" "),
-        match args.backend {
-            Backend::Nightly => "nightly",
-            Backend::V1_5_1 => "v1.5.1",
-        }
-    );
+    eprintln!("xtask: cargo {} [{}]", cargo_args.join(" "), backend.label());
 
     let status = Command::new("cargo")
         .args(&cargo_args)
@@ -109,6 +190,8 @@ fn workspace_root() -> Result<PathBuf> {
     Ok(root.to_path_buf())
 }
 
+/// RAII guard that swaps the workspace Cargo.toml and Cargo.lock with a
+/// backend's versions, then restores the originals on drop.
 struct WorkspaceFilesGuard {
     cargo_toml_path: PathBuf,
     cargo_lock_path: PathBuf,
@@ -117,7 +200,9 @@ struct WorkspaceFilesGuard {
 }
 
 impl WorkspaceFilesGuard {
-    fn apply_git_ref(root: &Path, git_ref: &str) -> Result<Self> {
+    /// Read Cargo.toml + Cargo.lock from `backend_dir` and swap them into the
+    /// workspace root.
+    fn apply_from_dir(root: &Path, backend_dir: &Path) -> Result<Self> {
         let cargo_toml_path = root.join("Cargo.toml");
         let cargo_lock_path = root.join("Cargo.lock");
 
@@ -126,10 +211,10 @@ impl WorkspaceFilesGuard {
         let original_cargo_lock =
             fs::read(&cargo_lock_path).context("failed to read workspace Cargo.lock")?;
 
-        let backend_cargo_toml = git_show(root, git_ref, "Cargo.toml")
-            .with_context(|| format!("failed to load Cargo.toml from git ref {git_ref}"))?;
-        let backend_cargo_lock = git_show(root, git_ref, "Cargo.lock")
-            .with_context(|| format!("failed to load Cargo.lock from git ref {git_ref}"))?;
+        let backend_cargo_toml = fs::read(backend_dir.join("Cargo.toml"))
+            .with_context(|| format!("failed to read {}/Cargo.toml", backend_dir.display()))?;
+        let backend_cargo_lock = fs::read(backend_dir.join("Cargo.lock"))
+            .with_context(|| format!("failed to read {}/Cargo.lock", backend_dir.display()))?;
 
         fs::write(&cargo_toml_path, backend_cargo_toml)
             .context("failed to write backend Cargo.toml")?;
@@ -147,21 +232,8 @@ impl Drop for WorkspaceFilesGuard {
     }
 }
 
-fn git_show(root: &Path, git_ref: &str, path: &str) -> Result<Vec<u8>> {
-    let output = Command::new("git")
-        .args(["show", &format!("{git_ref}:{path}")])
-        .current_dir(root)
-        .stderr(Stdio::inherit())
-        .output()
-        .with_context(|| format!("failed to run git show for {git_ref}:{path}"))?;
-
-    if !output.status.success() {
-        bail!("git show failed for {git_ref}:{path}");
-    }
-
-    Ok(output.stdout)
-}
-
+/// Workspace-level lock to prevent concurrent xtask runs from stepping on
+/// each other's manifest swaps.
 struct WorkspaceLock {
     _file: fs::File,
 }

@@ -1,0 +1,147 @@
+# Foundry v1.6.0-rc1 backend manifest
+#
+# RC1 was released before the alloy 2.x migration, so it uses alloy 1.x
+# and the non-generic type API (foundry-v1-5-1 feature flag).
+# Unlike v1.5.1, the rc needs alloy ~1.6-1.8, not 1.1.1.
+#
+# Usage:
+#   cargo xtask foundry --backend v1.6.0-rc1 -- check -p treb-cli --tests
+
+[workspace]
+members = ["crates/treb-cli", "crates/treb-core", "crates/treb-config", "crates/treb-registry", "crates/treb-forge", "crates/treb-verify", "crates/treb-safe", "crates/treb-sol"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["treb contributors"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+treb-core = { path = "crates/treb-core" }
+treb-config = { path = "crates/treb-config" }
+treb-registry = { path = "crates/treb-registry" }
+treb-forge = { path = "crates/treb-forge" }
+treb-verify = { path = "crates/treb-verify" }
+treb-safe = { path = "crates/treb-safe" }
+treb-sol = { path = "crates/treb-sol" }
+
+# === Foundry v1.6.0-rc1 ===
+foundry-config = { git = "https://github.com/foundry-rs/foundry", tag = "v1.6.0-rc1" }
+foundry-common = { git = "https://github.com/foundry-rs/foundry", tag = "v1.6.0-rc1" }
+foundry-compilers = "0.19.14"
+forge-script = { git = "https://github.com/foundry-rs/foundry", tag = "v1.6.0-rc1" }
+forge-script-sequence = { git = "https://github.com/foundry-rs/foundry", tag = "v1.6.0-rc1" }
+foundry-evm = { git = "https://github.com/foundry-rs/foundry", tag = "v1.6.0-rc1" }
+foundry-cheatcodes = { git = "https://github.com/foundry-rs/foundry", tag = "v1.6.0-rc1" }
+foundry-wallets = { git = "https://github.com/foundry-rs/foundry", tag = "v1.6.0-rc1" }
+foundry-linking = { git = "https://github.com/foundry-rs/foundry", tag = "v1.6.0-rc1" }
+foundry-cli = { git = "https://github.com/foundry-rs/foundry", tag = "v1.6.0-rc1" }
+forge-verify = { git = "https://github.com/foundry-rs/foundry", tag = "v1.6.0-rc1" }
+anvil = { git = "https://github.com/foundry-rs/foundry", tag = "v1.6.0-rc1" }
+revm-inspectors = "0.33.2"
+
+# Alloy — versions aligned with foundry v1.6.0-rc1 (alloy 1.4.x)
+alloy-chains = "0.2"
+alloy-primitives = "1.4.1"
+alloy-json-abi = "0.8"
+alloy-signer = "1.4"
+alloy-signer-ledger = "1.4"
+alloy-signer-trezor = "1.4"
+alloy-sol-types = "1.5"
+alloy-provider = { version = "1.4", default-features = false, features = ["reqwest-rustls-tls"] }
+alloy-consensus = "1.4"
+alloy-network = "1.4"
+alloy-rpc-types = "1.4"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+toml = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+comfy-table = "7"
+nucleo-matcher = "0.3"
+dialoguer = { version = "0.11", features = ["fuzzy-select"] }
+console = "0.15"
+owo-colors = { version = "4", features = ["supports-colors"] }
+unicode-width = "0.2"
+
+# URL parsing
+url = "2"
+
+# Environment
+dotenvy = "0.15"
+
+# File locking
+fs2 = "0.4"
+
+# Testing
+num_cpus = "1"
+tempfile = "3"
+assert_cmd = "2"
+predicates = "3"
+regex = "1"
+similar = "2"
+
+# Error handling & async
+thiserror = "2"
+anyhow = "1"
+eyre = "0.6"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+handlebars = "6"
+
+# System (background anvil subprocess management)
+libc = "0.2"
+ureq = "3"
+
+[patch.crates-io]
+svm-rs-builds = { git = "https://github.com/alloy-rs/svm-rs", tag = "v0.5.24" }
+
+# Patch: solar crates must match foundry v1.6.0-rc1's pinned revision
+solar = { package = "solar-compiler", git = "https://github.com/paradigmxyz/solar.git", rev = "1f28069" }
+solar-interface = { package = "solar-interface", git = "https://github.com/paradigmxyz/solar.git", rev = "1f28069" }
+solar-ast = { package = "solar-ast", git = "https://github.com/paradigmxyz/solar.git", rev = "1f28069" }
+solar-sema = { package = "solar-sema", git = "https://github.com/paradigmxyz/solar.git", rev = "1f28069" }
+
+# Patch: pin alloy-chains to 0.2.29 to match foundry v1.6.0-rc1
+alloy-chains = { git = "https://github.com/alloy-rs/chains", tag = "v0.2.29" }
+
+# Patch: pin alloy crates to v1.4.3 to match foundry v1.6.0-rc1's expected versions.
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-consensus-any = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-contract = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-eip5792 = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-ens = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-network = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-network-primitives = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-provider = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-pubsub = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-rpc-types-any = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-rpc-types-debug = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-rpc-types-txpool = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-serde = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-signer-ledger = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-signer-local = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-signer-trezor = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-transport = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }
+alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", tag = "v1.4.3" }

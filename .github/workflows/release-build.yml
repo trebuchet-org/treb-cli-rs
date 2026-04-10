@@ -17,11 +17,21 @@ env:
 
 jobs:
   release-build:
-    name: Build ${{ matrix.target }}
+    name: Build ${{ matrix.backend }} / ${{ matrix.os_arch }}
     strategy:
       fail-fast: false
       matrix:
-        include:
+        backend:
+          - name: nightly
+            feature: foundry-nightly
+            manifest: ""
+          - name: v1.6.0-rc1
+            feature: foundry-v1-5-1
+            manifest: backends/v1.6.0-rc1
+          - name: v1.5.1
+            feature: foundry-v1-5-1
+            manifest: backends/v1.5.1
+        platform:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             os_arch: linux-amd64
@@ -38,7 +48,7 @@ jobs:
             os: macos-latest
             os_arch: darwin-arm64
             use_cross: false
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.platform.os }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -56,32 +66,45 @@ jobs:
           fi
 
       - name: Install cross
-        if: matrix.use_cross
+        if: matrix.platform.use_cross
         run: cargo install cross --locked
 
       - name: Add target (macOS)
-        if: matrix.use_cross == false
-        run: rustup target add ${{ matrix.target }}
+        if: matrix.platform.use_cross == false
+        run: rustup target add ${{ matrix.platform.target }}
+
+      - name: Swap manifest for backend
+        if: matrix.backend.manifest != ''
+        run: |
+          cp "${{ matrix.backend.manifest }}/Cargo.toml" Cargo.toml
+          cp "${{ matrix.backend.manifest }}/Cargo.lock" Cargo.lock
 
       - name: Build
         shell: bash
         run: |
-          if [ "${{ matrix.use_cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }} --bin treb-cli
-          else
-            cargo build --release --target ${{ matrix.target }} --bin treb-cli
+          BUILD_CMD="cargo"
+          if [ "${{ matrix.platform.use_cross }}" = "true" ]; then
+            BUILD_CMD="cross"
           fi
+          $BUILD_CMD build --release \
+            --target ${{ matrix.platform.target }} \
+            --bin treb-cli \
+            --no-default-features \
+            --features ${{ matrix.backend.feature }}
+
+      - name: Restore manifest
+        if: matrix.backend.manifest != ''
+        run: git checkout Cargo.toml Cargo.lock
 
       - name: Package
         shell: bash
         run: |
-          # Use workflow_call input tag if available, otherwise git tag
           TAG="${{ inputs.tag || github.ref_name }}"
-          ARCHIVE_NAME="treb-${TAG}-${{ matrix.os_arch }}"
+          ARCHIVE_NAME="treb-${TAG}+foundry-${{ matrix.backend.name }}-${{ matrix.platform.os_arch }}"
           STAGING="staging-${ARCHIVE_NAME}"
-          TARGET_DIR="target/${{ matrix.target }}/release/build"
+          TARGET_DIR="target/${{ matrix.platform.target }}/release/build"
           mkdir -p "${STAGING}/completions"
-          cp "target/${{ matrix.target }}/release/treb-cli" "${STAGING}/treb"
+          cp "target/${{ matrix.platform.target }}/release/treb-cli" "${STAGING}/treb"
           export TARGET_DIR
           BUILD_DIR=$(python3 - <<'PY'
           import glob
@@ -110,6 +133,7 @@ jobs:
             grep '^cargo:rustc-env=TREB_FOUNDRY_VERSION=' "$BUILD_OUTPUT"
             grep '^cargo:rustc-env=TREB_SOL_COMMIT=' "$BUILD_OUTPUT"
             grep '^cargo:rustc-env=TREB_RUST_VERSION=' "$BUILD_OUTPUT"
+            echo "FOUNDRY_BACKEND=${{ matrix.backend.name }}"
           } > "${ARCHIVE_NAME}.build-metadata"
           echo "ARCHIVE_NAME=${ARCHIVE_NAME}" >> "$GITHUB_ENV"
 
