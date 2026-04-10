@@ -304,11 +304,18 @@ pub fn read_registry_file(project_root: &Path, filename: &str) -> serde_json::Va
         .unwrap_or(value)
 }
 
-/// Read `.treb/deployments.json` and return the parsed map.
+/// Read all deployments from the registry and return as a JSON map.
 ///
 /// The returned value is a JSON object mapping deployment ID → deployment record.
 pub fn read_deployments(project_root: &Path) -> serde_json::Value {
-    read_registry_file(project_root, "deployments.json")
+    let registry =
+        treb_registry::Registry::open(project_root).expect("open registry for read_deployments");
+    let deployments = registry.list_deployments();
+    let mut map = serde_json::Map::new();
+    for dep in deployments {
+        map.insert(dep.id.clone(), serde_json::to_value(dep).unwrap());
+    }
+    serde_json::Value::Object(map)
 }
 
 /// Read `.treb/transactions.json` and return the parsed map.
@@ -316,6 +323,17 @@ pub fn read_deployments(project_root: &Path) -> serde_json::Value {
 /// The returned value is a JSON object mapping transaction ID → transaction record.
 pub fn read_transactions(project_root: &Path) -> serde_json::Value {
     read_registry_file(project_root, "transactions.json")
+}
+
+/// Build the lookup index from current deployments and return as JSON.
+///
+/// Uses the registry API to compute the index in-memory rather than reading
+/// `lookup.json` from disk (which may not be persisted after mutations).
+pub fn read_lookup_index(project_root: &Path) -> serde_json::Value {
+    let registry =
+        treb_registry::Registry::open(project_root).expect("open registry for read_lookup_index");
+    let lookup = registry.rebuild_lookup_index().expect("rebuild lookup index");
+    serde_json::to_value(&lookup).expect("serialize lookup index")
 }
 
 /// Assert that broadcast artifacts exist and contain valid data after a broadcast.
@@ -379,9 +397,12 @@ pub fn deployment_count(project_root: &Path) -> usize {
 /// - Every ID referenced in lookup.json actually exists in deployments.json
 pub fn assert_registry_consistent(project_root: &Path) {
     let deps_json = read_deployments(project_root);
-    let deps = deps_json.as_object().expect("deployments.json must be an object");
+    let deps = deps_json.as_object().expect("deployments must be an object");
 
-    let lookup_json = read_registry_file(project_root, "lookup.json");
+    let registry =
+        treb_registry::Registry::open(project_root).expect("open registry for consistency check");
+    let lookup = registry.rebuild_lookup_index().expect("rebuild lookup index");
+    let lookup_json = serde_json::to_value(&lookup).expect("serialize lookup index");
     let by_name = lookup_json["byName"].as_object().expect("lookup must have byName");
     let by_address = lookup_json["byAddress"].as_object().expect("lookup must have byAddress");
     let by_tag = lookup_json["byTag"].as_object().expect("lookup must have byTag");
