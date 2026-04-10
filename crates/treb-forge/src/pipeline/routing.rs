@@ -2207,8 +2207,8 @@ mod tests {
     // -----------------------------------------------------------------------
 
     use alloy_primitives::map::HashMap as AlloyHashMap;
-    use forge_script_sequence::{ScriptSequence, TransactionWithMetadata};
-    use foundry_common::TransactionMaybeSigned;
+    use crate::foundry_compat::{ScriptSequence, TransactionMaybeSigned};
+    use forge_script_sequence::TransactionWithMetadata;
     use std::collections::VecDeque;
 
     /// Build a minimal ScriptSequence with transactions having the given hashes.

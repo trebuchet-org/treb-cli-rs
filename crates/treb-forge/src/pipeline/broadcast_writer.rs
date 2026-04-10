@@ -1392,7 +1392,7 @@ mod tests {
 
     use alloy_primitives::Address;
     use foundry_cheatcodes::BroadcastableTransaction;
-    use foundry_common::TransactionMaybeSigned;
+    use crate::foundry_compat::TransactionMaybeSigned;
     use treb_core::types::{
         enums::TransactionStatus,
         transaction::{Operation, Transaction},
