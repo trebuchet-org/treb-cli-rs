@@ -68,8 +68,7 @@ impl Backend {
     fn patches_dir(self) -> Option<&'static str> {
         match self {
             Self::Nightly => Some("foundry-nightly"),
-            Self::V1_6_0_Rc1 => Some("foundry-v1.6.0-rc1"),
-            Self::V1_5_1 => Some("foundry-v1.5.1"),
+            Self::V1_6_0_Rc1 | Self::V1_5_1 => None,
         }
     }
 }
