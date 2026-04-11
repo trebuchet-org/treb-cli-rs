@@ -23,7 +23,7 @@ use alloy_primitives::map::HashMap as AlloyHashMap;
 
 use alloy_primitives::B256;
 use forge_script_sequence::{TransactionWithMetadata, sig_to_file_name};
-use foundry_evm::traces::CallKind;
+use crate::foundry_compat::CallKind;
 use serde::{Deserialize, Serialize};
 use treb_core::error::TrebError;
 
@@ -569,7 +569,10 @@ pub fn build_pre_routing_sequence(
 
         // Determine opcode (Create vs Call)
         let is_create = broadcast_tx_is_create(btx);
-        tx_meta.opcode = if is_create { CallKind::Create } else { CallKind::Call };
+        crate::foundry_compat::set_tx_meta_call_kind(
+            &mut tx_meta,
+            if is_create { CallKind::Create } else { CallKind::Call },
+        );
 
         // Set contract metadata from recorded transaction
         if let Some(rt) = recorded_txs.get(i) {
@@ -680,7 +683,10 @@ pub fn build_script_sequence(
 
                 // Determine opcode (Create vs Call)
                 let is_create = broadcast_tx_is_create(btx);
-                tx_meta.opcode = if is_create { CallKind::Create } else { CallKind::Call };
+                crate::foundry_compat::set_tx_meta_call_kind(
+            &mut tx_meta,
+            if is_create { CallKind::Create } else { CallKind::Call },
+        );
 
                 // Set contract metadata from recorded transaction
                 if let Some(rt) = rt_by_index.get(&tx_idx) {
@@ -1571,13 +1577,13 @@ mod tests {
         let deploy_tx = &seq.transactions[0];
         assert_eq!(deploy_tx.contract_name.as_deref(), Some("Counter"));
         assert!(deploy_tx.contract_address.is_some());
-        assert_eq!(deploy_tx.opcode, CallKind::Create);
+        assert_eq!(crate::foundry_compat::tx_meta_call_kind(deploy_tx), CallKind::Create);
 
         // Second tx: call → should have function name, no contract name
         let call_tx = &seq.transactions[1];
         assert_eq!(call_tx.function.as_deref(), Some("setNumber"));
         assert!(call_tx.contract_name.is_none());
-        assert_eq!(call_tx.opcode, CallKind::Call);
+        assert_eq!(crate::foundry_compat::tx_meta_call_kind(call_tx), CallKind::Call);
     }
 
     #[test]

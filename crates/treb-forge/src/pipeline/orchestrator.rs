@@ -321,8 +321,7 @@ impl RunPipeline {
 
         // Run forge: preprocess → compile → link → prepare → execute
         report(BroadcastPhase::Executing);
-        let preprocessed = script_args
-            .preprocess()
+        let preprocessed = crate::foundry_compat::preprocess_script(script_args)
             .await
             .map_err(|e| TrebError::Forge(format!("forge preprocessing failed: {e}")))?;
         let compiled = preprocessed
@@ -1745,8 +1744,7 @@ impl SessionPipeline {
             };
 
             let executed = match async {
-                let preprocessed = script_args
-                    .preprocess()
+                let preprocessed = crate::foundry_compat::preprocess_script(script_args)
                     .await
                     .map_err(|e| TrebError::Forge(format!("forge preprocessing failed: {e}")))?;
                 let compiled = preprocessed

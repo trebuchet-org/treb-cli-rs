@@ -1,0 +1,13 @@
+diff --git a/crates/script/src/lib.rs b/crates/script/src/lib.rs
+index 763d61cea..ad9a5875a 100644
+--- a/crates/script/src/lib.rs
++++ b/crates/script/src/lib.rs
+@@ -58,7 +58,7 @@
+ use std::path::PathBuf;
+ 
+ mod broadcast;
+-mod build;
++pub mod build;
+ mod execute;
+ mod multi_sequence;
+ mod progress;

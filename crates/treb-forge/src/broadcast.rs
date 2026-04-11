@@ -44,7 +44,7 @@ impl BroadcastData {
                 contract_name: tx.contract_name.clone(),
                 contract_address: tx.contract_address.map(|a| a.to_string()),
                 function: tx.function.clone(),
-                tx_type: format!("{:?}", tx.opcode),
+                tx_type: format!("{:?}", crate::foundry_compat::tx_meta_call_kind(tx)),
             })
             .collect()
     }
