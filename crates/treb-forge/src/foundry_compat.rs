@@ -66,30 +66,32 @@ pub fn broadcast_tx_is_create(tx: &BroadcastableTransaction) -> bool {
 // specialize on `EthEvmNetwork` here (Tempo network support will be added
 // when treb's pipeline is made network-generic).
 
-/// Preprocess a `ScriptArgs` into a `PreprocessedState`, abstracting over
-/// the signature differences between foundry backends.
+/// Preprocess `ScriptArgs` into a `PreprocessedState`.
 ///
-/// The return type is inferred — callers chain `.compile()` etc. without
-/// needing to name the `PreprocessedState` type directly (which lives in
-/// a private module in both old and new foundry).
-#[cfg(feature = "foundry-nightly")]
-pub async fn preprocess_script(
-    args: forge_script::ScriptArgs,
-) -> Result<
-    forge_script::build::PreprocessedState<foundry_evm::core::evm::EthEvmNetwork>,
-    eyre::Report,
-> {
-    use foundry_cli::utils::LoadConfig;
-    let (config, evm_opts) = args.load_config_and_evm_opts()?;
-    args.preprocess(config, evm_opts).await
+/// This macro abstracts over the API differences between foundry backends:
+/// - **Nightly**: `preprocess()` is private and takes `(config, evm_opts)` +
+///   a `FoundryEvmNetwork` generic. We resolve config via `LoadConfig` and
+///   specialize on `EthEvmNetwork`.
+/// - **v1.5.1 / v1.6.0-rc1**: `preprocess()` is public on `ScriptArgs`, so
+///   we call it directly. Using a macro avoids naming the `PreprocessedState`
+///   type which lives in a private module.
+macro_rules! preprocess_script {
+    ($args:expr) => {{
+        #[cfg(feature = "foundry-nightly")]
+        {
+            use foundry_cli::utils::LoadConfig as _;
+            async {
+                let (config, evm_opts) = $args.load_config_and_evm_opts()?;
+                $args.preprocess::<foundry_evm::core::evm::EthEvmNetwork>(config, evm_opts).await
+            }.await
+        }
+        #[cfg(feature = "foundry-v1-5-1")]
+        {
+            $args.preprocess().await
+        }
+    }};
 }
-
-#[cfg(feature = "foundry-v1-5-1")]
-pub async fn preprocess_script(
-    args: forge_script::ScriptArgs,
-) -> Result<forge_script::build::PreprocessedState, eyre::Report> {
-    args.preprocess().await
-}
+pub(crate) use preprocess_script;
 
 // ---------------------------------------------------------------------------
 // Transaction metadata: opcode → call_kind rename
