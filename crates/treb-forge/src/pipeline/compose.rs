@@ -234,8 +234,7 @@ impl ComposePipeline {
         let script_args = script_config.into_script_args()?;
 
         // Run forge: preprocess → compile → link → execute
-        let preprocessed = script_args
-            .preprocess()
+        let preprocessed = crate::foundry_compat::preprocess_script(script_args)
             .await
             .map_err(|e| TrebError::Forge(format!("forge preprocessing failed: {e}")))?;
         let compiled = preprocessed

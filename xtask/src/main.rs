@@ -62,6 +62,16 @@ impl Backend {
             Self::V1_5_1 => "v1.5.1",
         }
     }
+
+    /// Directory under `patches/` containing source patches for this backend.
+    /// Returns `None` if no patches are needed.
+    fn patches_dir(self) -> Option<&'static str> {
+        match self {
+            Self::Nightly => Some("foundry-nightly"),
+            Self::V1_6_0_Rc1 => Some("foundry-v1.6.0-rc1"),
+            Self::V1_5_1 => Some("foundry-v1.5.1"),
+        }
+    }
 }
 
 #[derive(Args)]
@@ -141,6 +151,12 @@ fn run_foundry_single(backend: Backend, cargo_args: Vec<String>) -> Result<()> {
             Some(WorkspaceFilesGuard::apply_from_dir(&root, &backend_dir)?)
         }
     };
+
+    // Apply source patches to cargo git checkouts (after manifest swap so the
+    // foundry tag in Cargo.toml matches the backend being built).
+    if let Some(patches_dir) = backend.patches_dir() {
+        apply_cargo_source_patches(&root, patches_dir)?;
+    }
 
     let cargo_args = if cargo_args.is_empty() {
         vec!["check".to_string(), "-p".to_string(), "treb-cli".to_string(), "--tests".to_string()]
@@ -253,4 +269,169 @@ impl WorkspaceLock {
         file.lock_exclusive().with_context(|| format!("failed to lock {}", lock_path.display()))?;
         Ok(Self { _file: file })
     }
+}
+
+// ---------------------------------------------------------------------------
+// Cargo source patching
+// ---------------------------------------------------------------------------
+
+/// Apply `.patch` files from `patches/<dir>/` to the cargo git checkouts.
+///
+/// Patches are applied idempotently: if a patch is already applied (detected by
+/// checking whether the reverse patch applies cleanly), it is skipped.
+///
+/// The patches target the cargo git checkout of the `foundry-rs/foundry` repo
+/// located under `$CARGO_HOME/git/checkouts/foundry-*/`. The correct checkout
+/// subdirectory is identified by matching the foundry git tag from the active
+/// workspace `Cargo.toml`.
+fn apply_cargo_source_patches(root: &Path, patches_dir: &str) -> Result<()> {
+    let patches_path = root.join("patches").join(patches_dir);
+    if !patches_path.exists() {
+        return Ok(());
+    }
+
+    let mut patches: Vec<_> = fs::read_dir(&patches_path)
+        .with_context(|| format!("failed to read patches dir {}", patches_path.display()))?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map_or(false, |ext| ext == "patch"))
+        .map(|e| e.path())
+        .collect();
+    patches.sort();
+
+    if patches.is_empty() {
+        return Ok(());
+    }
+
+    let checkout_dir = find_foundry_checkout(root)?;
+
+    for patch_path in &patches {
+        let patch_name = patch_path.file_name().unwrap().to_string_lossy();
+
+        // Check if already applied (reverse patch applies cleanly)
+        let reverse_check = Command::new("git")
+            .args(["apply", "-R", "--check"])
+            .arg(patch_path)
+            .current_dir(&checkout_dir)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+
+        if reverse_check.map_or(false, |s| s.success()) {
+            eprintln!("xtask: patch already applied: {patch_name}");
+            // Touch patched files so cargo knows to recompile
+            invalidate_forge_script_cache(root)?;
+            continue;
+        }
+
+        // Check if patch applies forward
+        let forward_check = Command::new("git")
+            .args(["apply", "--check"])
+            .arg(patch_path)
+            .current_dir(&checkout_dir)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+
+        if !forward_check.map_or(false, |s| s.success()) {
+            bail!("patch does not apply cleanly: {patch_name}");
+        }
+
+        // Apply the patch
+        let status = Command::new("git")
+            .args(["apply"])
+            .arg(patch_path)
+            .current_dir(&checkout_dir)
+            .stderr(Stdio::inherit())
+            .status()
+            .with_context(|| format!("failed to run git apply for {patch_name}"))?;
+
+        if !status.success() {
+            bail!("git apply failed for {patch_name}");
+        }
+
+        eprintln!("xtask: applied patch: {patch_name}");
+        invalidate_forge_script_cache(root)?;
+    }
+
+    Ok(())
+}
+
+/// Invalidate cargo's fingerprint for the forge-script crate after patching.
+/// Cargo fingerprints git dependency builds by source hash; we need to remove
+/// the cached compilation artifacts so the patched source gets recompiled.
+fn invalidate_forge_script_cache(root: &Path) -> Result<()> {
+    // Remove incremental compilation artifacts for forge-script from
+    // all target directories that might be in use.
+    for target_dir in &["target", "target/v1.5.1", "target/v1.6.0-rc1"] {
+        let deps_dir = root.join(target_dir).join("debug/.fingerprint");
+        if !deps_dir.exists() {
+            continue;
+        }
+        for entry in fs::read_dir(&deps_dir).into_iter().flatten().flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("forge-script-") {
+                let _ = fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Locate the cargo git checkout for `foundry-rs/foundry` matching the tag in
+/// the (possibly swapped) workspace `Cargo.toml`.
+///
+/// Cargo stores git checkouts at `$CARGO_HOME/git/checkouts/foundry-<db-hash>/<short-rev>/`.
+/// We resolve the tag to a commit hash via `Cargo.lock` (which records the
+/// exact `#<hash>` in the source URL) and match against subdirectory names.
+fn find_foundry_checkout(root: &Path) -> Result<PathBuf> {
+    let cargo_home = std::env::var("CARGO_HOME")
+        .unwrap_or_else(|_| format!("{}/.cargo", std::env::var("HOME").unwrap_or_default()));
+    let checkouts_dir = Path::new(&cargo_home).join("git/checkouts");
+
+    let foundry_parent = fs::read_dir(&checkouts_dir)
+        .context("failed to read cargo git checkouts")?
+        .filter_map(|e| e.ok())
+        .find(|e| e.file_name().to_string_lossy().starts_with("foundry-"))
+        .ok_or_else(|| anyhow!("no foundry checkout found in {}", checkouts_dir.display()))?
+        .path();
+
+    // Extract the resolved foundry commit hash from Cargo.lock.
+    // Lock entries look like: source = "git+https://...foundry?tag=...#<full-hash>"
+    let cargo_lock = fs::read_to_string(root.join("Cargo.lock"))
+        .context("failed to read Cargo.lock")?;
+
+    let resolved_hash = cargo_lock
+        .lines()
+        .find(|l| l.contains("foundry-rs/foundry") && l.contains('#'))
+        .and_then(|l| l.rsplit('#').next())
+        .map(|h| h.trim_end_matches('"').to_string())
+        .ok_or_else(|| anyhow!("could not extract foundry commit hash from Cargo.lock"))?;
+
+    // Cargo checkout dirs are named by short (7-char) commit hash
+    let short = &resolved_hash[..7.min(resolved_hash.len())];
+
+    let checkout_dir = foundry_parent.join(short);
+    if checkout_dir.is_dir() {
+        return Ok(checkout_dir);
+    }
+
+    // Fallback: scan subdirectories for a matching HEAD
+    for entry in fs::read_dir(&foundry_parent)
+        .context("failed to read foundry checkout directory")?
+        .filter_map(|e| e.ok())
+    {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        if resolved_hash.starts_with(&entry.file_name().to_string_lossy().to_string()) {
+            return Ok(dir);
+        }
+    }
+
+    bail!(
+        "no matching checkout found for commit {} in {}",
+        short,
+        foundry_parent.display()
+    )
 }

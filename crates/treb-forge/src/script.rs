@@ -76,8 +76,7 @@ pub async fn execute_script(
     args: ScriptArgs,
     confirm: Option<Box<dyn FnOnce(&ExecutionResult) -> bool + Send>>,
 ) -> treb_core::Result<ExecutionResult> {
-    let preprocessed = args
-        .preprocess()
+    let preprocessed = crate::foundry_compat::preprocess_script(args)
         .await
         .map_err(|e| TrebError::Forge(format!("forge preprocessing failed: {e}")))?;
 
