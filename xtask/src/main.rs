@@ -185,6 +185,7 @@ fn run_foundry_single(backend: Backend, cargo_args: Vec<String>) -> Result<()> {
     let status = Command::new("cargo")
         .args(&cargo_args)
         .current_dir(&root)
+        .env("TREB_FOUNDRY_BACKEND", backend.label())
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
