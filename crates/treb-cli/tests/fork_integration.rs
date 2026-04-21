@@ -462,8 +462,12 @@ async fn signal_handling_sigterm_shuts_down_anvil_cleanly() {
             .unwrap();
     }
 
-    // Use port 38247 — a high port that is very unlikely to be in use.
-    let anvil_port: u16 = 38247;
+    // Bind to port 0 to get an OS-assigned free port, then release it for
+    // Anvil to bind.  This avoids hardcoding a port that may already be in use.
+    let anvil_port: u16 = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind to port 0");
+        listener.local_addr().unwrap().port()
+    };
 
     // Resolve the treb-cli binary path at runtime (set by Cargo during tests).
     #[allow(deprecated)]

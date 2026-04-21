@@ -6,7 +6,6 @@
   "label": "v3.0.0",
   "address": "0x42eddd7dC046da254A93659CA9b02f294606833D",
   "type": "SINGLETON",
-  "transactionId": "",
   "deploymentStrategy": {
     "method": "CREATE3",
     "salt": "0x32cb58b145d3f7e28c45ce4b2cc31fa94248b23f00a2e3014050467acb6c25eb",

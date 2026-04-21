@@ -311,15 +311,25 @@ async fn run_multi_operation() {
 ///
 /// Verifies `--verbose --json` does not print key/value verbose lines that
 /// would break machine-readable JSON output.
-#[test]
-fn run_verbose_json() {
-    let ctx = TestContext::new("project");
+#[tokio::test(flavor = "multi_thread")]
+async fn run_verbose_json() {
+    let Some(ctx) = run_test_context().await else {
+        return;
+    };
 
     let path_normalizer = PathNormalizer::new(vec![ctx.path().display().to_string()]);
 
     let test = IntegrationTest::new("run_verbose_json")
         .setup(&["init"])
-        .test(&["run", "script/Deploy.s.sol", "--non-interactive", "--verbose", "--json"])
+        .test(&[
+            "run",
+            "script/Deploy.s.sol",
+            "--network",
+            "anvil-31337",
+            "--non-interactive",
+            "--verbose",
+            "--json",
+        ])
         .extra_normalizer(Box::new(path_normalizer))
         .extra_normalizer(Box::new(CompilerOutputNormalizer))
         .extra_normalizer(Box::new(GasNormalizer))

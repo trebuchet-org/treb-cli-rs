@@ -132,6 +132,7 @@ impl ComposePipeline {
                     .unwrap_or_else(|| url.clone())
             };
             let anvil = crate::anvil::AnvilConfig::new()
+                .port(0)
                 .fork_url(&resolved)
                 .spawn()
                 .await
