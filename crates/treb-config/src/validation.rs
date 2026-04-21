@@ -18,11 +18,7 @@ pub fn validate_config(config: &ResolvedConfig) -> Result<Vec<ConfigWarning>> {
     let mut warnings = Vec::new();
 
     for (name, sender) in &config.senders {
-        let result = validate_sender(name, sender, &config.senders, &config.config_source);
-        match result {
-            Ok(w) => warnings.extend(w),
-            Err(e) => return Err(e),
-        }
+        warnings.extend(validate_sender(name, sender, &config.senders, &config.config_source)?);
     }
 
     Ok(warnings)
