@@ -29,6 +29,7 @@ jobs:
           else
             echo "sccache unavailable, building without cache"
           fi
+      - uses: foundry-rs/foundry-toolchain@v1
       - uses: taiki-e/install-action@nextest
       - name: Run tests (retry failed only)
         run: cargo xtask foundry --backend nightly -- nextest run --workspace --all-targets --retries 2
