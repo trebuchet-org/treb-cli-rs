@@ -1,13 +1,13 @@
-=== cmd 0: [run script/Deploy.s.sol --non-interactive --verbose --json] ===
+=== cmd 0: [run script/Deploy.s.sol --network anvil-31337 --non-interactive --verbose --json] ===
 {
   "consoleLogs": [],
   "deployments": [
     {
-      "address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
-      "chainId": 0,
+      "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+      "chainId": 31337,
       "contractName": "Counter",
       "deploymentType": "SINGLETON",
-      "id": "default/0/Counter:Counter",
+      "id": "default/31337/Counter:Counter",
       "namespace": "default"
     }
   ],

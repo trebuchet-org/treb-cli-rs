@@ -1,5 +1,5 @@
 === cmd 0: [version] ===
-treb nightly-<SHORT_HASH>--foundry-nightly-<SHORT_HASH>-11-g<COMMIT>-dirty
+treb nightly-<SHORT_HASH>--foundry-nightly-<SHORT_HASH>-12-g<COMMIT>-dirty
 
 commit: <COMMIT>
 built:  <DATE>
