@@ -2206,8 +2206,8 @@ mod tests {
     // Resume helper tests
     // -----------------------------------------------------------------------
 
-    use alloy_primitives::map::HashMap as AlloyHashMap;
     use crate::foundry_compat::{ScriptSequence, TransactionMaybeSigned};
+    use alloy_primitives::map::HashMap as AlloyHashMap;
     use forge_script_sequence::TransactionWithMetadata;
     use std::collections::VecDeque;
 

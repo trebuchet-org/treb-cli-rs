@@ -397,8 +397,8 @@ fn find_foundry_checkout(root: &Path) -> Result<PathBuf> {
 
     // Extract the resolved foundry commit hash from Cargo.lock.
     // Lock entries look like: source = "git+https://...foundry?tag=...#<full-hash>"
-    let cargo_lock = fs::read_to_string(root.join("Cargo.lock"))
-        .context("failed to read Cargo.lock")?;
+    let cargo_lock =
+        fs::read_to_string(root.join("Cargo.lock")).context("failed to read Cargo.lock")?;
 
     let resolved_hash = cargo_lock
         .lines()
@@ -429,9 +429,5 @@ fn find_foundry_checkout(root: &Path) -> Result<PathBuf> {
         }
     }
 
-    bail!(
-        "no matching checkout found for commit {} in {}",
-        short,
-        foundry_parent.display()
-    )
+    bail!("no matching checkout found for commit {} in {}", short, foundry_parent.display())
 }

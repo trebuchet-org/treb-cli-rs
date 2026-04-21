@@ -69,12 +69,10 @@ pub fn broadcast_tx_is_create(tx: &BroadcastableTransaction) -> bool {
 /// Preprocess `ScriptArgs` into a `PreprocessedState`.
 ///
 /// This macro abstracts over the API differences between foundry backends:
-/// - **Nightly**: `preprocess()` is private and takes `(config, evm_opts)` +
-///   a `FoundryEvmNetwork` generic. We resolve config via `LoadConfig` and
-///   specialize on `EthEvmNetwork`.
-/// - **v1.5.1 / v1.6.0-rc1**: `preprocess()` is public on `ScriptArgs`, so
-///   we call it directly. Using a macro avoids naming the `PreprocessedState`
-///   type which lives in a private module.
+/// - **Nightly**: `preprocess()` is private and takes `(config, evm_opts)` + a `FoundryEvmNetwork`
+///   generic. We resolve config via `LoadConfig` and specialize on `EthEvmNetwork`.
+/// - **v1.5.1 / v1.6.0-rc1**: `preprocess()` is public on `ScriptArgs`, so we call it directly.
+///   Using a macro avoids naming the `PreprocessedState` type which lives in a private module.
 macro_rules! preprocess_script {
     ($args:expr) => {{
         #[cfg(feature = "foundry-nightly")]
@@ -83,7 +81,8 @@ macro_rules! preprocess_script {
             async {
                 let (config, evm_opts) = $args.load_config_and_evm_opts()?;
                 $args.preprocess::<foundry_evm::core::evm::EthEvmNetwork>(config, evm_opts).await
-            }.await
+            }
+            .await
         }
         #[cfg(feature = "foundry-v1-5-1")]
         {
