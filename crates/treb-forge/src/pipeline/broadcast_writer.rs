@@ -21,9 +21,9 @@ use std::{
 // Alloy's HashMap (FxBuildHasher-based) is used by ScriptSequence fields.
 use alloy_primitives::map::HashMap as AlloyHashMap;
 
+use crate::foundry_compat::CallKind;
 use alloy_primitives::B256;
 use forge_script_sequence::{TransactionWithMetadata, sig_to_file_name};
-use crate::foundry_compat::CallKind;
 use serde::{Deserialize, Serialize};
 use treb_core::error::TrebError;
 
@@ -684,9 +684,9 @@ pub fn build_script_sequence(
                 // Determine opcode (Create vs Call)
                 let is_create = broadcast_tx_is_create(btx);
                 crate::foundry_compat::set_tx_meta_call_kind(
-            &mut tx_meta,
-            if is_create { CallKind::Create } else { CallKind::Call },
-        );
+                    &mut tx_meta,
+                    if is_create { CallKind::Create } else { CallKind::Call },
+                );
 
                 // Set contract metadata from recorded transaction
                 if let Some(rt) = rt_by_index.get(&tx_idx) {
@@ -1396,9 +1396,9 @@ mod tests {
     // build_pre_routing_sequence tests
     // -----------------------------------------------------------------------
 
+    use crate::foundry_compat::TransactionMaybeSigned;
     use alloy_primitives::Address;
     use foundry_cheatcodes::BroadcastableTransaction;
-    use crate::foundry_compat::TransactionMaybeSigned;
     use treb_core::types::{
         enums::TransactionStatus,
         transaction::{Operation, Transaction},

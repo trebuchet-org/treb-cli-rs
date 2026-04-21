@@ -17,11 +17,7 @@ fn foundry_backend_suffix() -> Option<String> {
         return Some(backend.replace('.', "-"));
     }
     // Fallback to feature flag
-    if cfg!(feature = "foundry-v1-5-1") {
-        Some("v1-5-1".to_string())
-    } else {
-        None
-    }
+    if cfg!(feature = "foundry-v1-5-1") { Some("v1-5-1".to_string()) } else { None }
 }
 
 // ---------------------------------------------------------------------------
