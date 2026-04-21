@@ -135,7 +135,11 @@ impl Normalizer for VersionNormalizer {
         let treb_short = Regex::new(r"(?m:^treb [a-z0-9]{7}$)").unwrap();
         let result = treb_short.replace_all(&result, "treb v<VERSION>");
 
-        // Git commit in version strings: -g6a2e70e
+        // Git describe commit count + hash: -12-g6a2e70e or -12-g6a2e70e-dirty
+        let git_describe = Regex::new(r"-\d+-g[a-f0-9]{7,}(-dirty)?").unwrap();
+        let result = git_describe.replace_all(&result, "-<N>-g<COMMIT>");
+
+        // Standalone git commit refs: -g6a2e70e (without preceding count)
         let git_commit = Regex::new(r"-g[a-f0-9]{7,}").unwrap();
         git_commit.replace_all(&result, "-g<COMMIT>").into_owned()
     }
