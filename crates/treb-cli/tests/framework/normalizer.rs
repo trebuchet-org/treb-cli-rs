@@ -127,13 +127,15 @@ pub struct VersionNormalizer;
 
 impl Normalizer for VersionNormalizer {
     fn normalize(&self, input: &str) -> String {
-        // Treb version: v1.0.0-beta.1-95-g6a2e70e
-        let semver = Regex::new(r"v\d+\.\d+\.\d+(-[a-zA-Z0-9.\-]+)?").unwrap();
-        let result = semver.replace_all(input, "v<VERSION>");
+        // Normalize the entire "treb <version-string>" line.  The version
+        // string varies between local (git describe with dirty suffix) and
+        // CI (clean checkout, semver tag), so collapse the whole line.
+        let treb_line = Regex::new(r"(?m)^treb .+$").unwrap();
+        let result = treb_line.replace_all(input, "treb <VERSION>");
 
-        // Treb short version: "treb abcdef0" (7 char hex on its own line)
-        let treb_short = Regex::new(r"(?m:^treb [a-z0-9]{7}$)").unwrap();
-        let result = treb_short.replace_all(&result, "treb v<VERSION>");
+        // Semver versions elsewhere: v1.0.0-beta.1-95-g6a2e70e
+        let semver = Regex::new(r"v\d+\.\d+\.\d+(-[a-zA-Z0-9.\-]+)?").unwrap();
+        let result = semver.replace_all(&result, "v<VERSION>");
 
         // Git commit in version strings: -g6a2e70e
         let git_commit = Regex::new(r"-g[a-f0-9]{7,}").unwrap();
@@ -560,26 +562,29 @@ mod tests {
     }
 
     #[test]
-    fn version_normalizer_v_prefixed_semver() {
+    fn version_normalizer_treb_line() {
         let n = VersionNormalizer;
-        assert_eq!(n.normalize("treb v0.1.0 (forge v0.2.0)"), "treb v<VERSION> (forge v<VERSION>)");
+        // Entire "treb ..." line is collapsed regardless of format
+        assert_eq!(n.normalize("treb v0.1.0 (forge v0.2.0)"), "treb <VERSION>");
+        assert_eq!(n.normalize("treb abcdef0"), "treb <VERSION>");
+        assert_eq!(
+            n.normalize("treb nightly-abc1234--foundry-nightly-def5678-12-g1234567-dirty"),
+            "treb <VERSION>"
+        );
+    }
+
+    #[test]
+    fn version_normalizer_semver_elsewhere() {
+        let n = VersionNormalizer;
+        // Semver versions not on "treb" line are still normalized
+        assert_eq!(n.normalize("forge v0.2.0"), "forge v<VERSION>");
         // Non-v-prefixed is NOT matched
         assert_eq!(n.normalize("forge 0.2.0"), "forge 0.2.0");
     }
 
     #[test]
-    fn version_normalizer_treb_short_version() {
-        let n = VersionNormalizer;
-        assert_eq!(n.normalize("treb abcdef0"), "treb v<VERSION>");
-        // Only matches standalone lines
-        assert_eq!(n.normalize("treb abcdef0 extra"), "treb abcdef0 extra");
-    }
-
-    #[test]
     fn version_normalizer_git_commit_suffix() {
         let n = VersionNormalizer;
-        // Full version with prerelease and git describe suffix
-        assert_eq!(n.normalize("v1.0.0-beta.1-95-g6a2e70e"), "v<VERSION>");
         // Standalone git commit suffix (not part of semver)
         assert_eq!(n.normalize("built from -g6a2e70e"), "built from -g<COMMIT>");
     }

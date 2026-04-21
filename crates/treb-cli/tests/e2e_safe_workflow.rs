@@ -154,7 +154,7 @@ async fn safe_1of1_broadcast_on_fork() {
     // 8. Verify registry records
 
     // 8a. Check deployments exist
-    let deps = e2e::read_registry_file(tmp.path(), "deployments.json");
+    let deps = e2e::read_deployments(tmp.path());
     let deps_map = deps.as_object().expect("deployments.json must be object");
     assert_eq!(deps_map.len(), 1, "should have exactly 1 deployment, got {}", deps_map.len());
 

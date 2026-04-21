@@ -223,10 +223,10 @@ fn make_governor_proposal(id: &str, actions: Vec<GovernorAction>) -> GovernorPro
 }
 
 fn read_deployment(tmp: &std::path::Path, dep_id: &str) -> serde_json::Value {
-    let content =
-        fs::read_to_string(tmp.join(".treb").join("deployments.json")).expect("read deployments");
-    let map: serde_json::Value = serde_json::from_str(&content).expect("parse deployments");
-    map.get(dep_id).cloned().unwrap_or_else(|| panic!("deployment {dep_id} not found"))
+    let registry = Registry::open(tmp).expect("open registry");
+    let dep =
+        registry.get_deployment(dep_id).unwrap_or_else(|| panic!("deployment {dep_id} not found"));
+    serde_json::to_value(dep).expect("serialize deployment")
 }
 
 fn read_safe_tx(tmp: &std::path::Path, hash: &str) -> serde_json::Value {

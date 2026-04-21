@@ -3,15 +3,16 @@
 //! Reads forge broadcast JSON files to recover past deployment transactions
 //! and contract addresses as a supplementary data source.
 
-use alloy_network::Ethereum;
-use forge_script_sequence::{BroadcastReader as FoundryBroadcastReader, ScriptSequence};
+use forge_script_sequence::BroadcastReader as FoundryBroadcastReader;
 use foundry_config::Config;
 use treb_core::error::TrebError;
+
+use crate::foundry_compat::ScriptSequence;
 
 /// Data from a forge broadcast file representing a deployment sequence.
 pub struct BroadcastData {
     /// The underlying forge script sequence.
-    pub sequence: ScriptSequence<Ethereum>,
+    pub sequence: ScriptSequence,
     /// The chain ID this broadcast was executed on.
     pub chain_id: u64,
     /// Unix timestamp (milliseconds) of when this broadcast was executed.
@@ -43,7 +44,7 @@ impl BroadcastData {
                 contract_name: tx.contract_name.clone(),
                 contract_address: tx.contract_address.map(|a| a.to_string()),
                 function: tx.function.clone(),
-                tx_type: format!("{:?}", tx.opcode),
+                tx_type: format!("{:?}", crate::foundry_compat::tx_meta_call_kind(tx)),
             })
             .collect()
     }

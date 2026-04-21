@@ -4,6 +4,22 @@ use similar::TextDiff;
 
 use super::normalizer::{Normalizer, NormalizerChain};
 
+/// Return a suffix for backend-specific golden files based on the
+/// `TREB_FOUNDRY_BACKEND` env var (set by xtask) or the active feature flag.
+/// Returns `None` for the default (nightly) backend so that existing golden
+/// files work unchanged.
+fn foundry_backend_suffix() -> Option<String> {
+    // Prefer explicit env var from xtask (distinguishes v1.5.1 from v1.6.0-rc1)
+    if let Ok(backend) = std::env::var("TREB_FOUNDRY_BACKEND") {
+        if backend == "nightly" || backend.is_empty() {
+            return None;
+        }
+        return Some(backend.replace('.', "-"));
+    }
+    // Fallback to feature flag
+    if cfg!(feature = "foundry-v1-5-1") { Some("v1-5-1".to_string()) } else { None }
+}
+
 // ---------------------------------------------------------------------------
 // GoldenFile
 // ---------------------------------------------------------------------------
@@ -20,8 +36,31 @@ impl GoldenFile {
     }
 
     /// Build the path: `{golden_dir}/{test_name}/{case_name}.golden`
+    ///
+    /// If a backend-specific golden file exists (e.g. `commands.v1-5-1.golden`),
+    /// it takes precedence over the default. This allows different foundry
+    /// backends to maintain separate snapshots where output differs (e.g.
+    /// transaction hashes from different Anvil versions).
     fn path(&self, test_name: &str, case_name: &str) -> PathBuf {
-        self.golden_dir.join(test_name).join(format!("{case_name}.golden"))
+        let dir = self.golden_dir.join(test_name);
+        if let Some(suffix) = foundry_backend_suffix() {
+            let backend_path = dir.join(format!("{case_name}.{suffix}.golden"));
+            if backend_path.exists() {
+                return backend_path;
+            }
+        }
+        dir.join(format!("{case_name}.golden"))
+    }
+
+    /// Build the backend-specific path for writing new golden files.
+    /// Used by UPDATE_GOLDEN to write to the correct variant.
+    fn write_path(&self, test_name: &str, case_name: &str) -> PathBuf {
+        let dir = self.golden_dir.join(test_name);
+        if let Some(suffix) = foundry_backend_suffix() {
+            dir.join(format!("{case_name}.{suffix}.golden"))
+        } else {
+            dir.join(format!("{case_name}.golden"))
+        }
     }
 
     /// Compare `actual` against the golden file at
@@ -39,9 +78,8 @@ impl GoldenFile {
     /// Core comparison logic, parameterised on `update` to avoid env-var
     /// races in parallel unit tests.
     fn compare_inner(&self, test_name: &str, case_name: &str, actual: &str, update: bool) {
-        let path = self.path(test_name, case_name);
-
         if update {
+            let path = self.write_path(test_name, case_name);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).expect("failed to create golden file directory");
             }
@@ -49,6 +87,7 @@ impl GoldenFile {
             return;
         }
 
+        let path = self.path(test_name, case_name);
         if !path.exists() {
             panic!(
                 "Golden file not found: {}\n\
@@ -108,10 +147,10 @@ impl GoldenFile {
         normalize_fn: &dyn Fn(&str) -> String,
         update: bool,
     ) {
-        let path = self.path(test_name, case_name);
         let normalized_actual = normalize_fn(actual);
 
         if update {
+            let path = self.write_path(test_name, case_name);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).expect("failed to create golden file directory");
             }
@@ -119,6 +158,7 @@ impl GoldenFile {
             return;
         }
 
+        let path = self.path(test_name, case_name);
         if !path.exists() {
             panic!(
                 "Golden file not found: {}\n\
@@ -167,7 +207,7 @@ mod tests {
         golden.compare_inner("mytest", "output", "hello world\n", false);
 
         // Verify the file exists at the expected path
-        let path = tmp.path().join("mytest").join("output.golden");
+        let path = golden.write_path("mytest", "output");
         assert!(path.exists());
         assert_eq!(fs::read_to_string(&path).unwrap(), "hello world\n");
     }
@@ -238,7 +278,7 @@ mod tests {
         // Update mode: write normalized actual
         golden.compare_with_normalizer_inner("norm_test", "output", actual, &normalize, true);
 
-        let path = tmp.path().join("norm_test").join("output.golden");
+        let path = golden.write_path("norm_test", "output");
         assert_eq!(fs::read_to_string(&path).unwrap(), "deployed <TIME_AGO>\n");
     }
 

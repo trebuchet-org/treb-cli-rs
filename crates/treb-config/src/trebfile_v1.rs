@@ -65,18 +65,18 @@ pub fn convert_v1_to_resolved(v1: &TrebFileConfigV1, namespace: &str) -> Resolve
     }
 
     // Override with namespace-specific config if it exists and isn't "default".
-    if namespace != "default" {
-        if let Some(ns_config) = v1.ns.get(namespace) {
-            if let Some(ref profile) = ns_config.profile {
-                resolved.profile = profile.clone();
-            }
-            if let Some(slow) = ns_config.slow {
-                resolved.slow = slow;
-            }
-            // Merge senders: namespace-specific overrides default.
-            for (role, sender) in &ns_config.senders {
-                resolved.senders.insert(role.clone(), sender.clone());
-            }
+    if namespace != "default"
+        && let Some(ns_config) = v1.ns.get(namespace)
+    {
+        if let Some(ref profile) = ns_config.profile {
+            resolved.profile = profile.clone();
+        }
+        if let Some(slow) = ns_config.slow {
+            resolved.slow = slow;
+        }
+        // Merge senders: namespace-specific overrides default.
+        for (role, sender) in &ns_config.senders {
+            resolved.senders.insert(role.clone(), sender.clone());
         }
     }
 

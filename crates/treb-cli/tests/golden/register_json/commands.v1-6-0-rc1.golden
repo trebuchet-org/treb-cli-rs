@@ -1,0 +1,11 @@
+=== cmd 0: [registry add --tx-hash 0x89b704af71a50e645fe6b348731ed229cafccd8441295bf8d6391dd2ff5f0cc6 --network anvil-31337 --json] ===
+{
+  "deployments": [
+    {
+      "address": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+      "contractName": "Unknown",
+      "deploymentId": "default/31337/Unknown",
+      "label": ""
+    }
+  ]
+}

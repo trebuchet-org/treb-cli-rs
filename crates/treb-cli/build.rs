@@ -709,10 +709,10 @@ fn main() {
     if std::fs::create_dir_all(&completions_dir).is_ok() {
         for shell in [Shell::Bash, Shell::Zsh, Shell::Fish, Shell::Elvish] {
             let mut cmd = build_cli();
-            if let Ok(path) = generate_to(shell, &mut cmd, "treb", &completions_dir) {
-                if matches!(shell, Shell::Bash) {
-                    assert_bash_completion_contains_legacy_subcommand(&path);
-                }
+            if let Ok(path) = generate_to(shell, &mut cmd, "treb", &completions_dir)
+                && matches!(shell, Shell::Bash)
+            {
+                assert_bash_completion_contains_legacy_subcommand(&path);
             }
         }
     }

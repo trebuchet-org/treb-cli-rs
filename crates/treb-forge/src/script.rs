@@ -8,17 +8,15 @@ use std::{
     str::FromStr,
 };
 
-use alloy_network::Ethereum;
 use alloy_primitives::{Address, B256, Bytes, Log};
 use forge_script::ScriptArgs;
-use foundry_cheatcodes::BroadcastableTransactions;
 use foundry_config::Chain;
 use foundry_evm::traces::Traces;
 use treb_config::ResolvedConfig;
 use treb_core::error::TrebError;
 use treb_registry::Registry;
 
-use crate::sender::ResolvedSender;
+use crate::{foundry_compat::BroadcastableTransactions, sender::ResolvedSender};
 
 /// Receipt from a successfully broadcast transaction.
 #[derive(Debug, Clone)]
@@ -54,7 +52,7 @@ pub struct ExecutionResult {
     /// Map of addresses to human-readable labels discovered during execution.
     pub labeled_addresses: HashMap<Address, String>,
     /// Broadcast-ready transactions collected during script execution.
-    pub transactions: Option<BroadcastableTransactions<Ethereum>>,
+    pub transactions: Option<BroadcastableTransactions>,
     /// Execution traces from the script run.
     pub traces: Traces,
     /// Receipts from broadcast transactions.
@@ -78,9 +76,8 @@ pub async fn execute_script(
     args: ScriptArgs,
     confirm: Option<Box<dyn FnOnce(&ExecutionResult) -> bool + Send>>,
 ) -> treb_core::Result<ExecutionResult> {
-    let preprocessed = args
-        .preprocess()
-        .await
+    use crate::foundry_compat::preprocess_script;
+    let preprocessed = preprocess_script!(args)
         .map_err(|e| TrebError::Forge(format!("forge preprocessing failed: {e}")))?;
 
     let compiled = preprocessed

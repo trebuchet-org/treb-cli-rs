@@ -21,10 +21,9 @@ use std::{
 // Alloy's HashMap (FxBuildHasher-based) is used by ScriptSequence fields.
 use alloy_primitives::map::HashMap as AlloyHashMap;
 
-use alloy_network::Ethereum;
+use crate::foundry_compat::CallKind;
 use alloy_primitives::B256;
-use forge_script_sequence::{ScriptSequence, TransactionWithMetadata, sig_to_file_name};
-use foundry_evm::traces::CallKind;
+use forge_script_sequence::{TransactionWithMetadata, sig_to_file_name};
 use serde::{Deserialize, Serialize};
 use treb_core::error::TrebError;
 
@@ -36,22 +35,26 @@ use super::{
     },
     types::RecordedTransaction,
 };
+use crate::foundry_compat::{
+    BroadcastableTransaction, BroadcastableTransactions, ScriptSequence, broadcast_tx_is_create,
+    broadcast_tx_to_address, make_tx_maybe_signed,
+};
 
 // ---------------------------------------------------------------------------
 // BroadcastableTransaction → TransactionRequest helper
 // ---------------------------------------------------------------------------
 
-/// Convert a `BroadcastableTransaction` (network-agnostic) into an Ethereum
-/// `TransactionRequest` suitable for wrapping in `TransactionMaybeSigned`.
+/// Convert a `BroadcastableTransaction` into a `TransactionRequest` suitable
+/// for wrapping in the backend-specific `TransactionMaybeSigned`.
 fn btx_to_transaction_request(
-    btx: &foundry_cheatcodes::BroadcastableTransaction,
+    btx: &BroadcastableTransaction,
 ) -> alloy_rpc_types::TransactionRequest {
     use alloy_rpc_types::{TransactionInput, TransactionRequest};
 
     let from = btx.transaction.from().unwrap_or_default();
     let mut tx = TransactionRequest::default().from(from);
 
-    if let Some(to) = btx.transaction.to() {
+    if let Some(to) = broadcast_tx_to_address(btx) {
         tx = tx.to(to);
     }
 
@@ -134,7 +137,7 @@ pub type DeferredGovernorProposal = QueuedGovernorProposal;
 
 /// State loaded from existing broadcast files for `--resume`.
 pub struct ResumeState {
-    pub sequence: ScriptSequence<Ethereum>,
+    pub sequence: ScriptSequence,
     pub queued: Option<QueuedOperations>,
     /// Tx hashes of wallet txs that already have on-chain receipts.
     pub completed_tx_hashes: std::collections::HashSet<B256>,
@@ -354,7 +357,7 @@ pub fn build_pending_queued_operations_from_plan(
 /// Sets the hash on the transaction at `tx_idx` and appends the raw receipt
 /// (if available) to the sequence's receipts list.
 pub fn update_sequence_checkpoint(
-    sequence: &mut ScriptSequence<Ethereum>,
+    sequence: &mut ScriptSequence,
     tx_idx: usize,
     receipt: &crate::script::BroadcastReceipt,
 ) {
@@ -372,7 +375,7 @@ pub fn update_sequence_checkpoint(
 ///
 /// Must be called before the first `save_sequence_checkpoint()` so that
 /// Foundry's `ScriptSequence::save()` can write to the expected locations.
-pub fn ensure_broadcast_dirs(sequence: &ScriptSequence<Ethereum>) -> Result<(), TrebError> {
+pub fn ensure_broadcast_dirs(sequence: &ScriptSequence) -> Result<(), TrebError> {
     if let Some((ref broadcast_path, ref cache_path)) = sequence.paths {
         if let Some(parent) = broadcast_path.parent() {
             fs::create_dir_all(parent).map_err(|e| {
@@ -399,7 +402,7 @@ pub fn ensure_broadcast_dirs(sequence: &ScriptSequence<Ethereum>) -> Result<(), 
 /// Called after each confirmed receipt so that a crash mid-broadcast preserves
 /// all prior progress. The timestamped copy is only written by the final
 /// `write_broadcast_artifacts()` call.
-pub fn save_sequence_checkpoint(sequence: &mut ScriptSequence<Ethereum>) -> Result<(), TrebError> {
+pub fn save_sequence_checkpoint(sequence: &mut ScriptSequence) -> Result<(), TrebError> {
     let Some((broadcast_path, cache_path)) = sequence.paths.clone() else {
         return Ok(());
     };
@@ -445,7 +448,7 @@ fn write_queued_latest(
 
 /// Write the mutable queued checkpoint alongside `run-latest.json`.
 pub fn save_queued_checkpoint(
-    sequence: &ScriptSequence<Ethereum>,
+    sequence: &ScriptSequence,
     queued: &QueuedOperations,
 ) -> Result<(), TrebError> {
     let Some((broadcast_path, _cache_path)) = sequence.paths.clone() else {
@@ -515,10 +518,7 @@ pub fn mark_governor_proposal_queued(
     Ok(())
 }
 
-fn write_sequence_latest(
-    path: &Path,
-    sequence: &ScriptSequence<Ethereum>,
-) -> Result<(), TrebError> {
+fn write_sequence_latest(path: &Path, sequence: &ScriptSequence) -> Result<(), TrebError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| {
             TrebError::Forge(format!(
@@ -550,26 +550,29 @@ fn write_sequence_latest(
 /// so the sequence can be updated in-place as each transaction is confirmed
 /// during broadcast.
 pub fn build_pre_routing_sequence(
-    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
+    btxs: &BroadcastableTransactions,
     recorded_txs: &[RecordedTransaction],
     ctx: &PipelineContext,
     broadcast_path: PathBuf,
     cache_path: PathBuf,
-) -> ScriptSequence<Ethereum> {
+) -> ScriptSequence {
     let mut transactions = VecDeque::new();
     let rpc_url = ctx.config.rpc_url.as_deref().unwrap_or_default();
 
     for (i, btx) in btxs.iter().enumerate() {
         let tx_request = btx_to_transaction_request(btx);
-        let tx_maybe_signed = foundry_common::TransactionMaybeSigned::new(tx_request);
+        let tx_maybe_signed = make_tx_maybe_signed(tx_request);
         let mut tx_meta = TransactionWithMetadata::from_tx_request(tx_maybe_signed);
         tx_meta.rpc = rpc_url.to_string();
 
         // hash is None — not yet broadcast
 
         // Determine opcode (Create vs Call)
-        let is_create = btx.transaction.to().is_none();
-        tx_meta.opcode = if is_create { CallKind::Create } else { CallKind::Call };
+        let is_create = broadcast_tx_is_create(btx);
+        crate::foundry_compat::set_tx_meta_call_kind(
+            &mut tx_meta,
+            if is_create { CallKind::Create } else { CallKind::Call },
+        );
 
         // Set contract metadata from recorded transaction
         if let Some(rt) = recorded_txs.get(i) {
@@ -613,13 +616,13 @@ pub fn build_pre_routing_sequence(
 /// already-confirmed hashes survive another mid-broadcast failure. Otherwise
 /// build a fresh pre-routing sequence from the current script transactions.
 pub fn build_checkpoint_sequence(
-    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
+    btxs: &BroadcastableTransactions,
     recorded_txs: &[RecordedTransaction],
     ctx: &PipelineContext,
     broadcast_path: PathBuf,
     cache_path: PathBuf,
     resume: Option<&ResumeState>,
-) -> ScriptSequence<Ethereum> {
+) -> ScriptSequence {
     if let Some(resume) = resume.filter(|resume| resume.sequence.transactions.len() == btxs.len()) {
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
@@ -640,13 +643,13 @@ pub fn build_checkpoint_sequence(
 /// Only includes transactions that were actually broadcast on-chain (wallet
 /// direct or Safe 1/1 execution). Deferred operations go to the companion file.
 pub fn build_script_sequence(
-    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
+    btxs: &BroadcastableTransactions,
     run_results: &[(TransactionRun, RunResult)],
     recorded_txs: &[RecordedTransaction],
     ctx: &PipelineContext,
     broadcast_path: PathBuf,
     cache_path: PathBuf,
-) -> ScriptSequence<Ethereum> {
+) -> ScriptSequence {
     let mut transactions = VecDeque::new();
     let mut receipts = Vec::new();
     let rpc_url = ctx.config.rpc_url.as_deref().unwrap_or_default();
@@ -669,7 +672,7 @@ pub fn build_script_sequence(
 
                 // Build TransactionWithMetadata
                 let tx_request = btx_to_transaction_request(btx);
-                let tx_maybe_signed = foundry_common::TransactionMaybeSigned::new(tx_request);
+                let tx_maybe_signed = make_tx_maybe_signed(tx_request);
                 let mut tx_meta = TransactionWithMetadata::from_tx_request(tx_maybe_signed);
                 tx_meta.rpc = rpc_url.to_string();
 
@@ -679,8 +682,11 @@ pub fn build_script_sequence(
                 }
 
                 // Determine opcode (Create vs Call)
-                let is_create = btx.transaction.to().is_none();
-                tx_meta.opcode = if is_create { CallKind::Create } else { CallKind::Call };
+                let is_create = broadcast_tx_is_create(btx);
+                crate::foundry_compat::set_tx_meta_call_kind(
+                    &mut tx_meta,
+                    if is_create { CallKind::Create } else { CallKind::Call },
+                );
 
                 // Set contract metadata from recorded transaction
                 if let Some(rt) = rt_by_index.get(&tx_idx) {
@@ -812,7 +818,7 @@ pub fn build_queued_operations(
 /// Uses Foundry's built-in `ScriptSequence::save()` for the main file,
 /// then writes the queued companion file alongside it.
 pub fn write_broadcast_artifacts(
-    sequence: &mut ScriptSequence<Ethereum>,
+    sequence: &mut ScriptSequence,
     queued: &QueuedOperations,
 ) -> Result<BroadcastArtifactPaths, TrebError> {
     let Some((broadcast_path, _cache_path)) = sequence.paths.clone() else {
@@ -887,7 +893,7 @@ pub fn write_broadcast_artifacts(
     }
 
     Ok(BroadcastArtifactPaths {
-        latest_broadcast_path: broadcast_path,
+        latest_broadcast_path: broadcast_path.to_path_buf(),
         archived_broadcast_path,
         latest_queued_path,
         archived_queued_path,
@@ -970,7 +976,7 @@ pub async fn load_resume_state_from_path(
     }
 
     // Load ScriptSequence
-    let sequence: ScriptSequence<Ethereum> = {
+    let sequence: ScriptSequence = {
         let contents = fs::read_to_string(&broadcast_path).ok()?;
         serde_json::from_str(&contents).ok()?
     };
@@ -1390,9 +1396,9 @@ mod tests {
     // build_pre_routing_sequence tests
     // -----------------------------------------------------------------------
 
+    use crate::foundry_compat::TransactionMaybeSigned;
     use alloy_primitives::Address;
     use foundry_cheatcodes::BroadcastableTransaction;
-    use foundry_common::TransactionMaybeSigned;
     use treb_core::types::{
         enums::TransactionStatus,
         transaction::{Operation, Transaction},
@@ -1408,7 +1414,7 @@ mod tests {
         if !data.is_empty() {
             tx_req.input = TransactionInput::new(alloy_primitives::Bytes::from(data.to_vec()));
         }
-        BroadcastableTransaction { rpc: None, transaction: TransactionMaybeSigned::new(tx_req) }
+        BroadcastableTransaction { rpc: None, transaction: make_tx_maybe_signed(tx_req) }
     }
 
     /// Build a minimal RecordedTransaction with an optional DEPLOY operation.
@@ -1571,13 +1577,13 @@ mod tests {
         let deploy_tx = &seq.transactions[0];
         assert_eq!(deploy_tx.contract_name.as_deref(), Some("Counter"));
         assert!(deploy_tx.contract_address.is_some());
-        assert_eq!(deploy_tx.opcode, CallKind::Create);
+        assert_eq!(crate::foundry_compat::tx_meta_call_kind(deploy_tx), CallKind::Create);
 
         // Second tx: call → should have function name, no contract name
         let call_tx = &seq.transactions[1];
         assert_eq!(call_tx.function.as_deref(), Some("setNumber"));
         assert!(call_tx.contract_name.is_none());
-        assert_eq!(call_tx.opcode, CallKind::Call);
+        assert_eq!(crate::foundry_compat::tx_meta_call_kind(call_tx), CallKind::Call);
     }
 
     #[test]
@@ -1718,15 +1724,14 @@ mod tests {
         for hash in tx_hashes {
             let btx = make_btx(from, Some(to), &[0x01]);
             let tx_request = btx_to_transaction_request(&btx);
-            let tx_maybe_signed: foundry_common::TransactionMaybeSigned<Ethereum> =
-                foundry_common::TransactionMaybeSigned::new(tx_request);
+            let tx_maybe_signed: TransactionMaybeSigned = make_tx_maybe_signed(tx_request);
             let mut tx_meta = TransactionWithMetadata::from_tx_request(tx_maybe_signed);
             tx_meta.hash = *hash;
             tx_meta.rpc = "http://localhost:8545".into();
             transactions.push_back(tx_meta);
         }
 
-        let seq: ScriptSequence<Ethereum> = ScriptSequence {
+        let seq: ScriptSequence = ScriptSequence {
             transactions,
             receipts: Vec::new(),
             libraries: Vec::new(),

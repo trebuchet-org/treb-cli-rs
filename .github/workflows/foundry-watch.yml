@@ -50,7 +50,7 @@ jobs:
           FOUNDRY_TAG="nightly-${LATEST_HASH}"
           FOUNDRY_SHORT="${LATEST_HASH:0:8}"
           TREB_SHORT="$(git rev-parse --short HEAD)"
-          RELEASE_TAG="nightly-${TREB_SHORT}--foundry-nightly-${FOUNDRY_SHORT}"
+          RELEASE_TAG="nightly-${TREB_SHORT}+foundry-nightly-${FOUNDRY_SHORT}"
 
           echo "New foundry nightly: $FOUNDRY_TAG"
           echo "updated=true" >> "$GITHUB_OUTPUT"
@@ -136,4 +136,3 @@ jobs:
               body: `The foundry nightly watch detected a new foundry nightly that fails treb tests.\n\nFoundry tag: \`${tag}\`\nWorkflow run: ${runUrl}`,
               labels: ['foundry-compat']
             });
-

@@ -6,11 +6,16 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[features]
+default = ["foundry-nightly"]
+foundry-nightly = ["treb-forge/foundry-nightly"]
+foundry-v1-5-1 = ["treb-forge/foundry-v1-5-1"]
+
 [dependencies]
 treb-core = { workspace = true }
 treb-config = { workspace = true }
 treb-registry = { workspace = true }
-treb-forge = { workspace = true }
+treb-forge = { path = "../treb-forge", default-features = false }
 treb-safe = { workspace = true }
 treb-verify = { workspace = true }
 foundry-common = { workspace = true }

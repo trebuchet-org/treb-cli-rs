@@ -292,7 +292,13 @@ async fn e2e_reset_scoped_by_namespace() {
     let (staging_tx_hash, _) = deploy_contract_on_anvil(&rpc_url).await;
     register_deployment(tmp.path().to_path_buf(), staging_tx_hash, rpc_url.clone(), "staging")
         .await;
-    assert_deployment_count(tmp.path().to_path_buf(), 2).await;
+    // Count all deployments across namespaces (not scoped by active namespace).
+    let all_deps = read_deployments(tmp.path());
+    assert_eq!(
+        all_deps.as_object().map(|m| m.len()).unwrap_or(0),
+        2,
+        "should have 2 deployments across namespaces"
+    );
 
     let deployments_before = read_deployments(tmp.path());
     let transactions_before = read_transactions(tmp.path());

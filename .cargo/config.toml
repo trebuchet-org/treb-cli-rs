@@ -1,2 +1,5 @@
 [install]
 root = "/home/workspace"
+
+[alias]
+xtask = "run --package xtask --"

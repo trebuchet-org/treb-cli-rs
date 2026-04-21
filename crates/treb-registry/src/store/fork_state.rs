@@ -74,7 +74,7 @@ fn active_fork_entry_key(entry: &ForkEntry) -> String {
     active_fork_key(&entry.network, entry.instance_name.as_deref())
 }
 
-fn project_root_for_registry_dir<'a>(registry_dir: &'a Path) -> &'a Path {
+fn project_root_for_registry_dir(registry_dir: &Path) -> &Path {
     let is_treb_dir = registry_dir.file_name().and_then(|name| name.to_str()) == Some(REGISTRY_DIR);
     if is_treb_dir { registry_dir.parent().unwrap_or(registry_dir) } else { registry_dir }
 }
