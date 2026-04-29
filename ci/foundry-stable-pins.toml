@@ -6,8 +6,8 @@
 # that can't resolve deps cleanly.
 
 [targets]
+v1.7.0 = true
 v1.5.1 = true
-v1.4.4 = true
 v1.6.0-rc1 = true
 
 [patches."v1.5.1"]
