@@ -1,0 +1,14 @@
+# nextest configuration.
+#
+# `slow-timeout` defaults to 60s with no auto-kill — slow tests are merely
+# logged, so a single hung test can keep the whole job alive for hours
+# (we hit this once when an Anvil-using e2e test deadlocked and burned
+# 75min of CI before manual cancellation). Set `terminate-after` so any
+# test that exceeds 4 × 90s = 6 min is force-killed; the job then fails
+# fast with the test name in the output instead of timing out the runner.
+[profile.default]
+slow-timeout = { period = "90s", terminate-after = 4 }
+
+# The CI workflow uses `nextest run ... --retries 2`. Retries don't change
+# the per-attempt timeout, so a deadlocked test still terminates after
+# ~6 min per attempt rather than running indefinitely.
