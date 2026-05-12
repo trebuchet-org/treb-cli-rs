@@ -382,12 +382,12 @@ fn print_deployment_details(d: &Deployment, impl_lookup: &ImplLookup) {
     }
 
     // Tags (only when present)
-    if let Some(ref tags) = d.tags {
-        if !tags.is_empty() {
-            print_section("Tags");
-            for tag in tags {
-                println!("  - {}", tag);
-            }
+    if let Some(ref tags) = d.tags
+        && !tags.is_empty()
+    {
+        print_section("Tags");
+        for tag in tags {
+            println!("  - {}", tag);
         }
     }
 

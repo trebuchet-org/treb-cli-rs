@@ -3,8 +3,8 @@
   "commit": "<SHORT_HASH>",
   "date": "<DATE>",
   "forgeVersion": "forge v<VERSION> (<SHORT_HASH>)",
-  "foundryVersion": "nightly-c360e23eb0b2b40165f38146a49c9c5d940f64ca",
+  "foundryVersion": "nightly-1b7d0bf1ee503555a4f4f03d0a3966fbe4b864b2",
   "rustVersion": "rustc <RUSTC_VERSION> (<SHORT_HASH> <DATE>)",
   "trebSolCommit": "<SHORT_HASH>",
-  "version": "nightly-<SHORT_HASH>--foundry-nightly-<SHORT_HASH>"
+  "version": "nightly-<SHORT_HASH>--foundry-nightly-<SHORT_HASH>-16-g<COMMIT>-dirty"
 }

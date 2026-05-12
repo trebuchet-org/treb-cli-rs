@@ -21,8 +21,7 @@
     "history": [
       {
         "implementationId": "testnet-v2-rc5/11142220/ReserveLiquidityStrategy:v3.0.0",
-        "upgradedAt": "2026-03-01T18:59:51.430468Z",
-        "upgradeTxId": ""
+        "upgradedAt": "2026-03-01T18:59:51.430468Z"
       }
     ]
   },

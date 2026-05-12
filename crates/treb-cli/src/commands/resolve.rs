@@ -49,20 +49,19 @@ fn resolve_deployment_with_scope<'a>(
         |deployment_id: &str| allowed_ids.is_none_or(|ids| ids.contains(deployment_id));
 
     // 1. Exact full ID
-    if let Some(d) = registry.get_deployment(query) {
-        if is_allowed(&d.id) {
-            return Ok(d);
-        }
+    if let Some(d) = registry.get_deployment(query)
+        && is_allowed(&d.id)
+    {
+        return Ok(d);
     }
 
     // 2. Address (starts with 0x)
     if query.starts_with("0x") || query.starts_with("0X") {
-        if let Some(id) = lookup.find_by_address(query) {
-            if is_allowed(id) {
-                if let Some(d) = registry.get_deployment(id) {
-                    return Ok(d);
-                }
-            }
+        if let Some(id) = lookup.find_by_address(query)
+            && is_allowed(id)
+            && let Some(d) = registry.get_deployment(id)
+        {
+            return Ok(d);
         }
         bail!(
             "no deployment found with address '{query}'\n\nRun `treb list` to see available deployments."

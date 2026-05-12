@@ -145,10 +145,10 @@ async fn resolve_resume_chain_id(
     if let Some(url) = rpc_url {
         return super::run::fetch_chain_id(url).await.ok();
     }
-    if let Some(net) = network {
-        if let Some(url) = super::run::resolve_rpc_url_for_chain_id(net, cwd) {
-            return super::run::fetch_chain_id(&url).await.ok();
-        }
+    if let Some(net) = network
+        && let Some(url) = super::run::resolve_rpc_url_for_chain_id(net, cwd)
+    {
+        return super::run::fetch_chain_id(&url).await.ok();
     }
     None
 }
@@ -158,10 +158,10 @@ fn load_resume_plan(
     compose_file: &str,
     preferred_chain_id: Option<u64>,
 ) -> Option<ComposePlan> {
-    if let Some(chain_id) = preferred_chain_id {
-        if let Some(plan) = compose_plan::load_plan(project_root, compose_file, chain_id) {
-            return Some(plan);
-        }
+    if let Some(chain_id) = preferred_chain_id
+        && let Some(plan) = compose_plan::load_plan(project_root, compose_file, chain_id)
+    {
+        return Some(plan);
     }
 
     let plans_dir =
@@ -465,13 +465,9 @@ fn print_execution_plan(compose: &ComposeFile, plan: &[PlanEntry]) {
         eprintln!();
         if let Some(env) =
             compose.components.get(&entry.component).and_then(|component| component.env.as_ref())
+            && !env.is_empty()
         {
-            if !env.is_empty() {
-                eprintln!(
-                    "   {}",
-                    styled(&format!("Env: {}", format_env_map(env)), color::WARNING)
-                );
-            }
+            eprintln!("   {}", styled(&format!("Env: {}", format_env_map(env)), color::WARNING));
         }
     }
     eprintln!();
@@ -619,12 +615,11 @@ fn display_compose_human(
         // completed count excludes the failed step (Go behavior)
         eprintln!("  • Steps completed: {}/{}", completed, total);
         // Show the error message from the failed component
-        if let Some(failed) = failed_component {
-            if let Some(entry) = results.iter().find(|r| &r.component == failed) {
-                if let Some(ref err) = entry.error {
-                    eprintln!("  • Error: {}", err);
-                }
-            }
+        if let Some(failed) = failed_component
+            && let Some(entry) = results.iter().find(|r| &r.component == failed)
+            && let Some(ref err) = entry.error
+        {
+            eprintln!("  • Error: {}", err);
         }
     }
 }
@@ -701,14 +696,12 @@ async fn setup_component(
         if store.load().is_ok() {
             if let Some(fork_entry) = net.and_then(|n| store.get_active_fork(n).cloned()) {
                 effective_rpc_url = Some(fork_entry.rpc_url.clone());
-                if let Some(ref net) = effective_network {
-                    if let Ok(endpoints) = treb_config::resolve_rpc_endpoints(params.cwd) {
-                        if let Some(endpoint) = endpoints.get(net.as_str()) {
-                            if let Some(var) = super::run::extract_env_var_name(&endpoint.raw_url) {
-                                unsafe { env::set_var(var, &fork_entry.rpc_url) };
-                            }
-                        }
-                    }
+                if let Some(ref net) = effective_network
+                    && let Ok(endpoints) = treb_config::resolve_rpc_endpoints(params.cwd)
+                    && let Some(endpoint) = endpoints.get(net.as_str())
+                    && let Some(var) = super::run::extract_env_var_name(&endpoint.raw_url)
+                {
+                    unsafe { env::set_var(var, &fork_entry.rpc_url) };
                 }
                 true
             } else {
@@ -1039,10 +1032,8 @@ pub async fn run(
     };
 
     // Auto-fund senders on fork
-    if banner_is_fork {
-        if let Some(ref rpc) = banner_rpc_url {
-            let _ = treb_forge::fund_senders_on_fork(rpc, &banner_senders, 10_000).await;
-        }
+    if banner_is_fork && let Some(ref rpc) = banner_rpc_url {
+        let _ = treb_forge::fund_senders_on_fork(rpc, &banner_senders, 10_000).await;
     }
 
     // Build sorted sender list for banner
@@ -1065,10 +1056,8 @@ pub async fn run(
             dry_run,
             &banner_sender_list,
         );
-        if resume {
-            if let Some(step) = resume_step {
-                print_resume_banner(step, total);
-            }
+        if resume && let Some(step) = resume_step {
+            print_resume_banner(step, total);
         }
     }
 

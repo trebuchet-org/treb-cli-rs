@@ -71,10 +71,10 @@ pub(crate) async fn resolve_chain_id_for_network(
 
     let treb_dir = cwd.join(".treb");
     let mut fork_store = treb_registry::ForkStateStore::new(&treb_dir);
-    if fork_store.load().is_ok() {
-        if let Some(fork) = fork_store.get_active_fork(network) {
-            return Ok(Some(fork.chain_id));
-        }
+    if fork_store.load().is_ok()
+        && let Some(fork) = fork_store.get_active_fork(network)
+    {
+        return Ok(Some(fork.chain_id));
     }
 
     if let Some(url) = crate::commands::run::resolve_rpc_url_for_chain_id(network, cwd) {

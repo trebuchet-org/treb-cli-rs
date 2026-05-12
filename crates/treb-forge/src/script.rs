@@ -8,17 +8,15 @@ use std::{
     str::FromStr,
 };
 
-use alloy_network::Ethereum;
 use alloy_primitives::{Address, B256, Bytes, Log};
 use forge_script::ScriptArgs;
-use foundry_cheatcodes::BroadcastableTransactions;
 use foundry_config::Chain;
 use foundry_evm::traces::Traces;
 use treb_config::ResolvedConfig;
 use treb_core::error::TrebError;
 use treb_registry::Registry;
 
-use crate::sender::ResolvedSender;
+use crate::{foundry_compat::BroadcastableTransactions, sender::ResolvedSender};
 
 /// Receipt from a successfully broadcast transaction.
 #[derive(Debug, Clone)]
@@ -54,7 +52,7 @@ pub struct ExecutionResult {
     /// Map of addresses to human-readable labels discovered during execution.
     pub labeled_addresses: HashMap<Address, String>,
     /// Broadcast-ready transactions collected during script execution.
-    pub transactions: Option<BroadcastableTransactions<Ethereum>>,
+    pub transactions: Option<BroadcastableTransactions>,
     /// Execution traces from the script run.
     pub traces: Traces,
     /// Receipts from broadcast transactions.
@@ -78,9 +76,8 @@ pub async fn execute_script(
     args: ScriptArgs,
     confirm: Option<Box<dyn FnOnce(&ExecutionResult) -> bool + Send>>,
 ) -> treb_core::Result<ExecutionResult> {
-    let preprocessed = args
-        .preprocess()
-        .await
+    use crate::foundry_compat::preprocess_script;
+    let preprocessed = preprocess_script!(args)
         .map_err(|e| TrebError::Forge(format!("forge preprocessing failed: {e}")))?;
 
     let compiled = preprocessed
@@ -386,7 +383,7 @@ impl ScriptConfig {
     /// Constructs `ScriptArgs` from `Default::default()` and sets all fields
     /// including EVM args (fork URL, sender, chain ID).
     pub fn into_script_args(self) -> treb_core::Result<ScriptArgs> {
-        // fork_url takes precedence over rpc_url; they both map to EvmArgs.fork_url
+        // fork_url takes precedence over rpc_url; they both map to EvmArgs.rpc.rpc_url
         let fork_url = self.fork_url.or(self.rpc_url);
 
         let mut args = ScriptArgs::default();
@@ -406,7 +403,14 @@ impl ScriptConfig {
         args.batch_size = 100;
 
         // EVM args
-        args.evm.fork_url = fork_url;
+        #[cfg(any(feature = "foundry-nightly", feature = "foundry-v1-7-1"))]
+        {
+            args.evm.rpc.rpc_url = fork_url;
+        }
+        #[cfg(feature = "foundry-v1-5-1")]
+        {
+            args.evm.fork_url = fork_url;
+        }
         args.evm.sender = self.sender;
         if let Some(id) = self.chain_id {
             args.evm.env.chain = Some(Chain::from(id));
@@ -530,10 +534,10 @@ pub fn build_script_config_with_senders(
     let mut all_keys: Vec<String> = Vec::new();
     for (role, sender) in resolved_senders {
         let key = crate::sender::extract_signing_key(role, sender, &resolved.senders);
-        if let Some(k) = key {
-            if !all_keys.contains(&k.to_string()) {
-                all_keys.push(k.to_string());
-            }
+        if let Some(k) = key
+            && !all_keys.contains(&k.to_string())
+        {
+            all_keys.push(k.to_string());
         }
     }
 
@@ -590,6 +594,9 @@ mod tests {
         assert!(!args.broadcast);
         assert!(!args.slow);
         assert!(!args.legacy);
+        #[cfg(any(feature = "foundry-nightly", feature = "foundry-v1-7-1"))]
+        assert!(args.evm.rpc.rpc_url.is_none());
+        #[cfg(feature = "foundry-v1-5-1")]
         assert!(args.evm.fork_url.is_none());
         assert!(args.evm.sender.is_none());
     }

@@ -10,7 +10,6 @@
 //!
 //! This gives fork-mode the same `msg.sender` semantics as production.
 
-use alloy_network::Ethereum;
 use alloy_primitives::{Address, B256, Bytes, U256, keccak256};
 use alloy_provider::Provider;
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
@@ -18,7 +17,13 @@ use alloy_sol_types::{SolCall, SolValue, sol};
 use treb_core::error::TrebError;
 
 use super::routing::TransactionRun;
-use crate::script::BroadcastReceipt;
+use crate::{
+    foundry_compat::{
+        BroadcastableTransactions, broadcast_tx_is_create, broadcast_tx_to_address,
+        make_tx_maybe_signed,
+    },
+    script::BroadcastReceipt,
+};
 
 // ---------------------------------------------------------------------------
 // ABI definitions (sol! macro)
@@ -275,7 +280,7 @@ const CREATE_CALL_BYTECODE: &str = "608060405234801561000f575f5ffd5b506004361061
 pub async fn execute_safe_on_fork(
     provider: &impl Provider,
     run: &TransactionRun,
-    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
+    btxs: &BroadcastableTransactions,
     safe_address: Address,
     chain_id: u64,
     quiet: bool,
@@ -283,11 +288,8 @@ pub async fn execute_safe_on_fork(
     // Check if any transactions are CREATE (contract deployment).
     // Safe.execTransaction cannot directly deploy contracts — CREATE txs
     // must be routed through a CreateCall helper via DelegateCall.
-    let has_creates = run
-        .tx_indices
-        .iter()
-        .filter_map(|&idx| btxs.get(idx))
-        .any(|btx| btx.transaction.to().is_none());
+    let has_creates =
+        run.tx_indices.iter().filter_map(|&idx| btxs.get(idx)).any(broadcast_tx_is_create);
 
     if has_creates {
         // Deploy CreateCall helper at a deterministic address
@@ -303,7 +305,7 @@ pub async fn execute_safe_on_fork(
         .iter()
         .filter_map(|&idx| btxs.get(idx))
         .map(|btx| {
-            let is_create = btx.transaction.to().is_none();
+            let is_create = broadcast_tx_is_create(btx);
             let value = btx.transaction.value().unwrap_or_default();
             let input = btx.transaction.input().cloned().unwrap_or_default();
 
@@ -319,7 +321,7 @@ pub async fn execute_safe_on_fork(
                     data: calldata.into(),
                 }
             } else {
-                let to = btx.transaction.to().unwrap_or(Address::ZERO);
+                let to = broadcast_tx_to_address(btx).unwrap_or(Address::ZERO);
                 treb_safe::MultiSendOperation {
                     operation: 0, // Call
                     to,
@@ -558,7 +560,7 @@ fn build_pre_approved_signatures(owners: &[Address]) -> Vec<u8> {
 pub async fn execute_governor_on_fork(
     provider: &impl Provider,
     run: &TransactionRun,
-    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
+    btxs: &BroadcastableTransactions,
     governor_address: Address,
     timelock_address: Option<Address>,
     quiet: bool,
@@ -574,7 +576,7 @@ pub async fn execute_governor_on_fork(
         let btx = btxs
             .get(idx)
             .ok_or_else(|| TrebError::Forge(format!("transaction index {idx} out of range")))?;
-        let to = btx.transaction.to().unwrap_or(Address::ZERO);
+        let to = broadcast_tx_to_address(btx).unwrap_or(Address::ZERO);
         let value = U256::from(btx.transaction.value().unwrap_or_default());
         let data = btx.transaction.input().cloned().unwrap_or_default().to_vec();
         targets.push(to);
@@ -791,7 +793,7 @@ pub async fn exec_safe_from_registry(
     };
 
     // Build synthetic broadcastable transactions
-    let mut btxs = foundry_cheatcodes::BroadcastableTransactions::<Ethereum>::default();
+    let mut btxs = BroadcastableTransactions::default();
     for op in &operations {
         let mut tx_req = TransactionRequest::default().from(safe_address).to(op.to);
         if !op.data.is_empty() {
@@ -799,7 +801,7 @@ pub async fn exec_safe_from_registry(
         }
         btxs.push_back(foundry_cheatcodes::BroadcastableTransaction {
             rpc: None,
-            transaction: foundry_common::TransactionMaybeSigned::new(tx_req),
+            transaction: make_tx_maybe_signed(tx_req),
         });
     }
 

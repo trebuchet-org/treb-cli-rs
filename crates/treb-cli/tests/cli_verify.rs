@@ -31,6 +31,13 @@ fn init_project_with_deployments(tmp: &tempfile::TempDir) {
 
     fs::write(tmp.path().join(".treb/deployments.json"), &fixture_json).unwrap();
 
+    // Set the namespace to mainnet so scoped queries find the fixture deployments.
+    fs::write(
+        tmp.path().join(".treb/config.local.json"),
+        "{\n  \"namespace\": \"mainnet\",\n  \"network\": \"\"\n}\n",
+    )
+    .unwrap();
+
     let registry = treb_registry::Registry::open(tmp.path()).expect("registry should open");
     registry.rebuild_lookup_index().expect("lookup index rebuild should succeed");
 }

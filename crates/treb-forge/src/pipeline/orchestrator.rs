@@ -9,7 +9,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use alloy_network::Ethereum;
 use alloy_primitives::{Address, B256, U256};
 use alloy_signer::Signer;
 use foundry_config::Config;
@@ -37,6 +36,7 @@ use crate::{
         abi::SimulatedTransaction,
         decoder::{ParsedEvent, TrebEvent},
     },
+    foundry_compat::{BroadcastableTransactions, ScriptSequence, broadcast_tx_to_address},
     script::{ExecutionResult, ScriptConfig, apply_deployed_libraries},
 };
 
@@ -321,10 +321,11 @@ impl RunPipeline {
 
         // Run forge: preprocess → compile → link → prepare → execute
         report(BroadcastPhase::Executing);
-        let preprocessed = script_args
-            .preprocess()
-            .await
-            .map_err(|e| TrebError::Forge(format!("forge preprocessing failed: {e}")))?;
+        let preprocessed = {
+            use crate::foundry_compat::preprocess_script;
+            preprocess_script!(script_args)
+                .map_err(|e| TrebError::Forge(format!("forge preprocessing failed: {e}")))?
+        };
         let compiled = preprocessed
             .compile()
             .map_err(|e| TrebError::Forge(format!("forge compilation failed: {e}")))?;
@@ -563,7 +564,7 @@ use treb_core::types::safe_transaction::SafeTxData;
 /// appropriate registry records so they can be persisted.
 fn build_proposed_records_from_routing(
     run_results: &[(TransactionRun, RunResult)],
-    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
+    btxs: &BroadcastableTransactions,
     context: &PipelineContext,
     recorded_transactions: &[RecordedTransaction],
 ) -> (
@@ -649,9 +650,7 @@ fn build_proposed_records_from_routing(
                     .iter()
                     .filter_map(|&idx| btxs.get(idx))
                     .map(|btx| {
-                        let to = btx
-                            .transaction
-                            .to()
+                        let to = broadcast_tx_to_address(btx)
                             .map(|addr| format!("{:#x}", addr))
                             .unwrap_or_default();
                         let value = format!("{}", btx.transaction.value().unwrap_or_default());
@@ -718,7 +717,7 @@ fn build_proposed_records_from_routing(
 fn update_transaction_statuses_from_routing(
     recorded_transactions: &mut [RecordedTransaction],
     run_results: &[(TransactionRun, RunResult)],
-    _btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
+    _btxs: &BroadcastableTransactions,
 ) {
     for (run, result) in run_results {
         let is_proposed =
@@ -761,13 +760,13 @@ pub struct RoutingOutcome {
 #[allow(clippy::too_many_arguments)]
 pub fn apply_routing_results(
     run_results: &[(TransactionRun, RunResult)],
-    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
+    btxs: &BroadcastableTransactions,
     recorded_transactions: &mut [RecordedTransaction],
     context: &PipelineContext,
     script_path: &str,
     chain_id: u64,
     script_sig: &str,
-    pre_built_sequence: Option<forge_script_sequence::ScriptSequence<Ethereum>>,
+    pre_built_sequence: Option<ScriptSequence>,
     queued_operations: Option<&super::broadcast_writer::QueuedOperations>,
 ) -> Result<RoutingOutcome, TrebError> {
     // Build Safe/Governor records from routing results
@@ -842,13 +841,13 @@ pub fn apply_routing_results(
 pub fn apply_routing_results_with_queued(
     run_results: &[(TransactionRun, RunResult)],
     queued_executions: &[super::routing::QueuedExecution],
-    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
+    btxs: &BroadcastableTransactions,
     recorded_transactions: &mut [RecordedTransaction],
     context: &PipelineContext,
     script_path: &str,
     chain_id: u64,
     script_sig: &str,
-    pre_built_sequence: Option<forge_script_sequence::ScriptSequence<Ethereum>>,
+    pre_built_sequence: Option<ScriptSequence>,
     queued_operations: Option<&super::broadcast_writer::QueuedOperations>,
 ) -> Result<RoutingOutcome, TrebError> {
     let mut outcome = apply_routing_results(
@@ -1119,7 +1118,7 @@ fn collect_recorded_transaction_metadata(
 /// Same logic as `build_recorded_transaction_metadata` but driven by
 /// `BroadcastableTransactions` instead of `TransactionSimulated` events.
 pub(super) fn build_v2_recorded_transaction_metadata(
-    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
+    btxs: &BroadcastableTransactions,
     extracted_deployments: &[ExtractedDeployment],
     traces: &Traces,
     context: &PipelineContext,
@@ -1148,7 +1147,7 @@ pub(super) fn build_v2_recorded_transaction_metadata(
         .map(|(idx, btx)| {
             let tx_id = super::hydration::broadcast_tx_id(&context.config.script_path, idx);
             let from_addr = btx.transaction.from().unwrap_or_default();
-            let to_addr = btx.transaction.to();
+            let to_addr = broadcast_tx_to_address(btx);
             let input = btx.transaction.input().cloned().unwrap_or_default();
             let value = btx.transaction.value().unwrap_or_default();
 
@@ -1288,21 +1287,23 @@ pub(super) fn collapse_decoded_bytecode_args(
         // renderer falls back to showing raw trace.data. Try to match
         // the raw data as creation code and inject a DecodedCallData so
         // the renderer shows a human-readable form instead.
-        if decoded.call_data.is_none() && node.trace.data.len() >= BYTECODE_COLLAPSE_THRESHOLD {
-            if let Some(replacement) = try_collapse_raw_data(&node.trace.data, artifact_index) {
-                decoded.call_data = Some(replacement);
-            }
+        if decoded.call_data.is_none()
+            && node.trace.data.len() >= BYTECODE_COLLAPSE_THRESHOLD
+            && let Some(replacement) = try_collapse_raw_data(&node.trace.data, artifact_index)
+        {
+            decoded.call_data = Some(replacement);
         }
 
         // Check for raw hex "selector" calls — when the signature has no
         // parentheses it means foundry couldn't decode the call and is
         // showing the first 4 bytes as a fake selector.
         if let Some(ref mut call_data) = decoded.call_data {
-            if !call_data.signature.contains('(') && !call_data.args.is_empty() {
-                if let Some(replacement) = try_collapse_raw_create(call_data, artifact_index) {
-                    *call_data = replacement;
-                    continue;
-                }
+            if !call_data.signature.contains('(')
+                && !call_data.args.is_empty()
+                && let Some(replacement) = try_collapse_raw_create(call_data, artifact_index)
+            {
+                *call_data = replacement;
+                continue;
             }
 
             // Normal case: collapse any long hex args individually
@@ -1382,19 +1383,15 @@ pub(super) fn collapse_decoded_bytecode_args(
         }
 
         let byte_count = hex_str.len() / 2;
-        if let Ok(bytes) = hex::decode(hex_str) {
-            if let Some((matched, ctor_args)) = artifact_index.decode_creation_code(&bytes) {
-                if ctor_args.is_empty() {
-                    *s = format!("new {}() ({byte_count} bytes)", matched.name);
-                } else {
-                    *s = format!(
-                        "new {}({}) ({byte_count} bytes)",
-                        matched.name,
-                        ctor_args.join(", ")
-                    );
-                }
-                return;
+        if let Ok(bytes) = hex::decode(hex_str)
+            && let Some((matched, ctor_args)) = artifact_index.decode_creation_code(&bytes)
+        {
+            if ctor_args.is_empty() {
+                *s = format!("new {}() ({byte_count} bytes)", matched.name);
+            } else {
+                *s = format!("new {}({}) ({byte_count} bytes)", matched.name, ctor_args.join(", "));
             }
+            return;
         }
 
         // No match — truncate
@@ -1682,6 +1679,7 @@ impl SessionPipeline {
                         .unwrap_or_else(|| url.clone())
                 };
                 let anvil = crate::anvil::AnvilConfig::new()
+                    .port(0)
                     .fork_url(&resolved)
                     .spawn()
                     .await
@@ -1747,10 +1745,11 @@ impl SessionPipeline {
             };
 
             let executed = match async {
-                let preprocessed = script_args
-                    .preprocess()
-                    .await
-                    .map_err(|e| TrebError::Forge(format!("forge preprocessing failed: {e}")))?;
+                let preprocessed = {
+                    use crate::foundry_compat::preprocess_script;
+                    preprocess_script!(script_args)
+                        .map_err(|e| TrebError::Forge(format!("forge preprocessing failed: {e}")))?
+                };
                 let compiled = preprocessed
                     .compile()
                     .map_err(|e| TrebError::Forge(format!("forge compilation failed: {e}")))?;
@@ -1818,14 +1817,13 @@ impl SessionPipeline {
 
             // Multi-script: replay on ephemeral Anvil + write intermediate deployments
             if is_multi {
-                if let Some(ref b) = btxs {
-                    if let Some(ref url) = ephemeral_url {
-                        if let Err(e) = super::compose::replay_transactions_on_fork(url, b).await {
-                            let _ = treb_registry::restore_registry(&snapshot_dir, &treb_dir);
-                            let _ = std::fs::remove_dir_all(&snapshot_dir);
-                            return Err((Vec::new(), name, e));
-                        }
-                    }
+                if let Some(ref b) = btxs
+                    && let Some(ref url) = ephemeral_url
+                    && let Err(e) = super::compose::replay_transactions_on_fork(url, b).await
+                {
+                    let _ = treb_registry::restore_registry(&snapshot_dir, &treb_dir);
+                    let _ = std::fs::remove_dir_all(&snapshot_dir);
+                    return Err((Vec::new(), name, e));
                 }
                 for rd in &sim.recorded_deployments {
                     let _ = registry.insert_deployment(rd.deployment.clone());
@@ -1893,7 +1891,7 @@ pub struct SimulatedSession {
 struct SimulatedScript {
     name: String,
     result: PipelineResult,
-    btxs: Option<foundry_cheatcodes::BroadcastableTransactions<Ethereum>>,
+    btxs: Option<BroadcastableTransactions>,
     context: PipelineContext,
 }
 
@@ -1957,89 +1955,11 @@ impl SimulatedSession {
 
             let wants_broadcast = context.config.broadcast && !result.transactions.is_empty();
 
-            if wants_broadcast {
-                if let Some(ref btxs) = btxs {
-                    let rpc_url = match context.config.rpc_url.as_deref() {
-                        Some(url) => url,
-                        None => {
-                            let e = TrebError::Forge("RPC URL required for broadcast".into());
-                            results.push(ScriptResult {
-                                name: name.clone(),
-                                result,
-                                broadcastable_transactions: Some(btxs.clone()),
-                            });
-                            return Err((results, name, e));
-                        }
-                    };
-
-                    report(&SessionPhase::Broadcasting(name.clone()));
-                    // Capture sender info for Phase C merge submission
-                    if should_merge && merge_sender_info.is_none() {
-                        let mut sender_signing = HashMap::new();
-                        for (role, sender) in &context.resolved_senders {
-                            if sender.is_safe() {
-                                let key = crate::sender::extract_signing_key(
-                                    role,
-                                    sender,
-                                    &context.sender_configs,
-                                )
-                                .map(|s| s.to_string());
-                                let proposed_by = sender
-                                    .sub_signer()
-                                    .wallet_signer()
-                                    .map(|ws| Signer::address(ws).to_checksum(None))
-                                    .unwrap_or_default();
-                                if let Some(key) = key {
-                                    sender_signing.insert(role.clone(), (key, proposed_by));
-                                }
-                            }
-                        }
-                        merge_sender_info = Some(MergeSenderInfo {
-                            sender_signing,
-                            is_fork: context.config.is_fork,
-                            rpc_url: context.config.rpc_url.clone(),
-                        });
-                    }
-
-                    let resume_state = if self.resume {
-                        let loaded = match self.resume_broadcast_paths.get(&name) {
-                            Some(path) => {
-                                super::broadcast_writer::load_resume_state_from_path(path, rpc_url)
-                                    .await
-                            }
-                            None => None,
-                        };
-                        if loaded.is_some() {
-                            loaded
-                        } else {
-                            super::broadcast_writer::load_resume_state(
-                                &context.project_root,
-                                &context.config.script_path,
-                                context.config.chain_id,
-                                &context.config.script_sig,
-                                rpc_url,
-                            )
-                            .await
-                        }
-                    } else {
-                        None
-                    };
-
-                    let (_, bp, cp) = super::broadcast_writer::compute_broadcast_paths(
-                        &context.project_root,
-                        &context.config.script_path,
-                        context.config.chain_id,
-                        &context.config.script_sig,
-                    );
-                    let mut pre_sequence = super::broadcast_writer::build_checkpoint_sequence(
-                        btxs,
-                        &result.transactions,
-                        &context,
-                        bp,
-                        cp,
-                        resume_state.as_ref(),
-                    );
-                    if let Err(e) = super::broadcast_writer::ensure_broadcast_dirs(&pre_sequence) {
+            if wants_broadcast && let Some(ref btxs) = btxs {
+                let rpc_url = match context.config.rpc_url.as_deref() {
+                    Some(url) => url,
+                    None => {
+                        let e = TrebError::Forge("RPC URL required for broadcast".into());
                         results.push(ScriptResult {
                             name: name.clone(),
                             result,
@@ -2047,175 +1967,129 @@ impl SimulatedSession {
                         });
                         return Err((results, name, e));
                     }
+                };
 
-                    let mut route_ctx = super::routing::RouteContext {
-                        rpc_url,
-                        chain_id: context.config.chain_id,
+                report(&SessionPhase::Broadcasting(name.clone()));
+                // Capture sender info for Phase C merge submission
+                if should_merge && merge_sender_info.is_none() {
+                    let mut sender_signing = HashMap::new();
+                    for (role, sender) in &context.resolved_senders {
+                        if sender.is_safe() {
+                            let key = crate::sender::extract_signing_key(
+                                role,
+                                sender,
+                                &context.sender_configs,
+                            )
+                            .map(|s| s.to_string());
+                            let proposed_by = sender
+                                .sub_signer()
+                                .wallet_signer()
+                                .map(|ws| Signer::address(ws).to_checksum(None))
+                                .unwrap_or_default();
+                            if let Some(key) = key {
+                                sender_signing.insert(role.clone(), (key, proposed_by));
+                            }
+                        }
+                    }
+                    merge_sender_info = Some(MergeSenderInfo {
+                        sender_signing,
                         is_fork: context.config.is_fork,
-                        quiet: context.config.quiet,
-                        on_run_complete: self
-                            .on_action_complete
-                            .as_ref()
-                            .map(|cb| &**cb as &super::routing::OnRunComplete),
-                        resolved_senders: &context.resolved_senders,
-                        sender_labels: &context.sender_labels,
-                        sender_configs: &context.sender_configs,
-                        sequence: Some(&mut pre_sequence),
-                        safe_nonce_offsets: safe_nonce_offsets.clone(),
-                        defer_safe_proposals: should_merge,
-                        safe_threshold_cache: safe_threshold_cache.clone(),
-                    };
+                        rpc_url: context.config.rpc_url.clone(),
+                    });
+                }
 
-                    let mut queued_state = None;
-                    let execution = if should_merge {
-                        route_with_queued_proposals(
-                            btxs,
-                            &mut route_ctx,
-                            &result.transactions,
-                            &mut pending_proposals,
-                            &name,
+                let resume_state = if self.resume {
+                    let loaded = match self.resume_broadcast_paths.get(&name) {
+                        Some(path) => {
+                            super::broadcast_writer::load_resume_state_from_path(path, rpc_url)
+                                .await
+                        }
+                        None => None,
+                    };
+                    if loaded.is_some() {
+                        loaded
+                    } else {
+                        super::broadcast_writer::load_resume_state(
                             &context.project_root,
                             &context.config.script_path,
                             context.config.chain_id,
                             &context.config.script_sig,
+                            rpc_url,
                         )
                         .await
-                        .map(|results| super::routing::ExecutionBundle {
-                            queued_executions: results
-                                .iter()
-                                .filter_map(|(_, _, queued)| queued.clone())
-                                .collect(),
-                            run_results: results
-                                .into_iter()
-                                .map(|(run, run_result, _)| (run, run_result))
-                                .collect(),
-                        })
-                    } else {
-                        let plan = match super::routing::reduce_queue(btxs, &mut route_ctx).await {
-                            Ok(plan) => plan,
-                            Err(e) => {
-                                results.push(ScriptResult {
-                                    name: name.clone(),
-                                    result,
-                                    broadcastable_transactions: Some(btxs.clone()),
-                                });
-                                return Err((results, name, e));
-                            }
-                        };
-                        let mut queued_state_value =
-                            super::broadcast_writer::build_pending_queued_operations_from_plan(
-                                &plan,
-                                &result.transactions,
-                                &context,
-                                resume_state.as_ref().and_then(|resume| resume.queued.as_ref()),
-                            );
-                        let execution = super::routing::execute_plan(
-                            &plan,
-                            &mut route_ctx,
-                            Some(btxs),
-                            &result.transactions,
-                            resume_state.as_ref(),
-                            Some(&mut queued_state_value),
-                        )
-                        .await;
-                        queued_state = Some(queued_state_value);
-                        execution
-                    };
+                    }
+                } else {
+                    None
+                };
 
-                    // Carry nonce offsets and threshold cache forward for the next component
-                    safe_nonce_offsets = route_ctx.safe_nonce_offsets;
-                    safe_threshold_cache = route_ctx.safe_threshold_cache;
+                let (_, bp, cp) = super::broadcast_writer::compute_broadcast_paths(
+                    &context.project_root,
+                    &context.config.script_path,
+                    context.config.chain_id,
+                    &context.config.script_sig,
+                );
+                let mut pre_sequence = super::broadcast_writer::build_checkpoint_sequence(
+                    btxs,
+                    &result.transactions,
+                    &context,
+                    bp,
+                    cp,
+                    resume_state.as_ref(),
+                );
+                if let Err(e) = super::broadcast_writer::ensure_broadcast_dirs(&pre_sequence) {
+                    results.push(ScriptResult {
+                        name: name.clone(),
+                        result,
+                        broadcastable_transactions: Some(btxs.clone()),
+                    });
+                    return Err((results, name, e));
+                }
 
-                    match execution {
-                        Ok(execution) => {
-                            let outcome = apply_routing_results_with_queued(
-                                &execution.run_results,
-                                &execution.queued_executions,
-                                btxs,
-                                &mut result.transactions,
-                                &context,
-                                &context.config.script_path,
-                                context.config.chain_id,
-                                &context.config.script_sig,
-                                Some(pre_sequence),
-                                queued_state.as_ref(),
-                            );
+                let mut route_ctx = super::routing::RouteContext {
+                    rpc_url,
+                    chain_id: context.config.chain_id,
+                    is_fork: context.config.is_fork,
+                    quiet: context.config.quiet,
+                    on_run_complete: self
+                        .on_action_complete
+                        .as_ref()
+                        .map(|cb| &**cb as &super::routing::OnRunComplete),
+                    resolved_senders: &context.resolved_senders,
+                    sender_labels: &context.sender_labels,
+                    sender_configs: &context.sender_configs,
+                    sequence: Some(&mut pre_sequence),
+                    safe_nonce_offsets: safe_nonce_offsets.clone(),
+                    defer_safe_proposals: should_merge,
+                    safe_threshold_cache: safe_threshold_cache.clone(),
+                };
 
-                            match outcome {
-                                Ok(outcome) => {
-                                    result.proposed_results = outcome.proposed_results;
-                                    result.queued_executions = outcome.queued_executions;
-                                    let routing_safe_txs = outcome.safe_transactions;
-                                    let routing_gov_proposals = outcome.governor_proposals;
-                                    let all_safe_txs: Vec<_> = result
-                                        .safe_transactions
-                                        .drain(..)
-                                        .chain(routing_safe_txs)
-                                        .collect();
-                                    result.safe_transactions = all_safe_txs;
-                                    result.governor_proposals.extend(routing_gov_proposals);
-                                }
-                                Err(e) => {
-                                    eprintln!("warning: apply_routing_results failed: {e}");
-                                }
-                            }
-
-                            // Duplicate detection
-                            let mut hydrated_deployments: Vec<_> =
-                                result.deployments.drain(..).map(|rd| rd.deployment).collect();
-
-                            stamp_execution_refs(
-                                &mut hydrated_deployments,
-                                &result.transactions,
-                                &result.safe_transactions,
-                                &result.governor_proposals,
-                            );
-
-                            let resolved = match resolve_duplicates(
-                                hydrated_deployments,
-                                registry,
-                                DuplicateStrategy::Skip,
-                            ) {
-                                Ok(r) => r,
-                                Err(e) => {
-                                    return Err((results, name, e));
-                                }
-                            };
-                            result.skipped = resolved.skipped;
-
-                            // Registry writes
-                            let mut recorded_deployments = Vec::new();
-                            for dep in resolved.to_insert {
-                                let _ = registry.insert_deployment(dep.clone());
-                                recorded_deployments.push(RecordedDeployment {
-                                    deployment: dep,
-                                    safe_transaction: None,
-                                });
-                            }
-                            for dep in resolved.to_update {
-                                let _ = registry.update_deployment(dep.clone());
-                                recorded_deployments.push(RecordedDeployment {
-                                    deployment: dep,
-                                    safe_transaction: None,
-                                });
-                            }
-                            for rt in &result.transactions {
-                                let _ = registry.insert_transaction(rt.transaction.clone());
-                            }
-                            // When merging, safe_tx registry writes are deferred to Phase C
-                            if !should_merge {
-                                for safe_tx in &result.safe_transactions {
-                                    let _ = registry.insert_safe_transaction(safe_tx.clone());
-                                }
-                            }
-                            for proposal in &result.governor_proposals {
-                                let _ = registry.insert_governor_proposal(proposal.clone());
-                            }
-
-                            result.deployments = recorded_deployments;
-                            result.registry_updated = true;
-                            result.dry_run = false;
-                        }
+                let mut queued_state = None;
+                let execution = if should_merge {
+                    route_with_queued_proposals(
+                        btxs,
+                        &mut route_ctx,
+                        &result.transactions,
+                        &mut pending_proposals,
+                        &name,
+                        &context.project_root,
+                        &context.config.script_path,
+                        context.config.chain_id,
+                        &context.config.script_sig,
+                    )
+                    .await
+                    .map(|results| super::routing::ExecutionBundle {
+                        queued_executions: results
+                            .iter()
+                            .filter_map(|(_, _, queued)| queued.clone())
+                            .collect(),
+                        run_results: results
+                            .into_iter()
+                            .map(|(run, run_result, _)| (run, run_result))
+                            .collect(),
+                    })
+                } else {
+                    let plan = match super::routing::reduce_queue(btxs, &mut route_ctx).await {
+                        Ok(plan) => plan,
                         Err(e) => {
                             results.push(ScriptResult {
                                 name: name.clone(),
@@ -2224,16 +2098,138 @@ impl SimulatedSession {
                             });
                             return Err((results, name, e));
                         }
+                    };
+                    let mut queued_state_value =
+                        super::broadcast_writer::build_pending_queued_operations_from_plan(
+                            &plan,
+                            &result.transactions,
+                            &context,
+                            resume_state.as_ref().and_then(|resume| resume.queued.as_ref()),
+                        );
+                    let execution = super::routing::execute_plan(
+                        &plan,
+                        &mut route_ctx,
+                        Some(btxs),
+                        &result.transactions,
+                        resume_state.as_ref(),
+                        Some(&mut queued_state_value),
+                    )
+                    .await;
+                    queued_state = Some(queued_state_value);
+                    execution
+                };
+
+                // Carry nonce offsets and threshold cache forward for the next component
+                safe_nonce_offsets = route_ctx.safe_nonce_offsets;
+                safe_threshold_cache = route_ctx.safe_threshold_cache;
+
+                match execution {
+                    Ok(execution) => {
+                        let outcome = apply_routing_results_with_queued(
+                            &execution.run_results,
+                            &execution.queued_executions,
+                            btxs,
+                            &mut result.transactions,
+                            &context,
+                            &context.config.script_path,
+                            context.config.chain_id,
+                            &context.config.script_sig,
+                            Some(pre_sequence),
+                            queued_state.as_ref(),
+                        );
+
+                        match outcome {
+                            Ok(outcome) => {
+                                result.proposed_results = outcome.proposed_results;
+                                result.queued_executions = outcome.queued_executions;
+                                let routing_safe_txs = outcome.safe_transactions;
+                                let routing_gov_proposals = outcome.governor_proposals;
+                                let all_safe_txs: Vec<_> = result
+                                    .safe_transactions
+                                    .drain(..)
+                                    .chain(routing_safe_txs)
+                                    .collect();
+                                result.safe_transactions = all_safe_txs;
+                                result.governor_proposals.extend(routing_gov_proposals);
+                            }
+                            Err(e) => {
+                                eprintln!("warning: apply_routing_results failed: {e}");
+                            }
+                        }
+
+                        // Duplicate detection
+                        let mut hydrated_deployments: Vec<_> =
+                            result.deployments.drain(..).map(|rd| rd.deployment).collect();
+
+                        stamp_execution_refs(
+                            &mut hydrated_deployments,
+                            &result.transactions,
+                            &result.safe_transactions,
+                            &result.governor_proposals,
+                        );
+
+                        let resolved = match resolve_duplicates(
+                            hydrated_deployments,
+                            registry,
+                            DuplicateStrategy::Skip,
+                        ) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                return Err((results, name, e));
+                            }
+                        };
+                        result.skipped = resolved.skipped;
+
+                        // Registry writes
+                        let mut recorded_deployments = Vec::new();
+                        for dep in resolved.to_insert {
+                            let _ = registry.insert_deployment(dep.clone());
+                            recorded_deployments.push(RecordedDeployment {
+                                deployment: dep,
+                                safe_transaction: None,
+                            });
+                        }
+                        for dep in resolved.to_update {
+                            let _ = registry.update_deployment(dep.clone());
+                            recorded_deployments.push(RecordedDeployment {
+                                deployment: dep,
+                                safe_transaction: None,
+                            });
+                        }
+                        for rt in &result.transactions {
+                            let _ = registry.insert_transaction(rt.transaction.clone());
+                        }
+                        // When merging, safe_tx registry writes are deferred to Phase C
+                        if !should_merge {
+                            for safe_tx in &result.safe_transactions {
+                                let _ = registry.insert_safe_transaction(safe_tx.clone());
+                            }
+                        }
+                        for proposal in &result.governor_proposals {
+                            let _ = registry.insert_governor_proposal(proposal.clone());
+                        }
+
+                        result.deployments = recorded_deployments;
+                        result.registry_updated = true;
+                        result.dry_run = false;
+                    }
+                    Err(e) => {
+                        results.push(ScriptResult {
+                            name: name.clone(),
+                            result,
+                            broadcastable_transactions: Some(btxs.clone()),
+                        });
+                        return Err((results, name, e));
                     }
                 }
             }
 
             let script_name = name.clone();
-            if let Some(cb) = self.on_script_complete.as_mut() {
-                if let Err(e) = cb(&script_name, &context, &result) {
-                    results.push(ScriptResult { name, result, broadcastable_transactions: btxs });
-                    return Err((results, script_name, e));
-                }
+            if let Some(cb) = self.on_script_complete.as_mut()
+                && let Err(e) = cb(&script_name, &context, &result)
+            {
+                results.push(ScriptResult { name, result, broadcastable_transactions: btxs });
+                return Err((results, script_name, e));
             }
 
             results.push(ScriptResult { name, result, broadcastable_transactions: btxs });
@@ -2364,7 +2360,7 @@ fn merge_adjacent_safe_proposals(pending: Vec<PendingSafeProposal>) -> Vec<Merge
 /// submitting to the Safe Transaction Service.
 #[allow(clippy::too_many_arguments)]
 async fn route_with_queued_proposals(
-    btxs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
+    btxs: &BroadcastableTransactions,
     route_ctx: &mut super::routing::RouteContext<'_>,
     recorded_txs: &[RecordedTransaction],
     pending: &mut Vec<PendingSafeProposal>,
@@ -2990,20 +2986,12 @@ mod tests {
                 success: true,
                 caller: address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
                 address: deployed,
-                maybe_precompile: None,
-                selfdestruct_address: None,
-                selfdestruct_refund_target: None,
-                selfdestruct_transferred_value: None,
                 kind: CallKind::Create,
                 value: U256::ZERO,
                 data: Bytes::from(vec![1, 2, 3, 4]),
-                output: Bytes::new(),
                 gas_used: 987_654,
                 gas_limit: 1_000_000,
-                gas_refund_counter: 0,
-                status: None,
-                steps: Vec::new(),
-                decoded: None,
+                ..Default::default()
             },
             logs: Vec::new(),
             ordering: Vec::new(),

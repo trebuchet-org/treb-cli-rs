@@ -1,0 +1,34 @@
+diff --git a/crates/script/src/lib.rs b/crates/script/src/lib.rs
+--- a/crates/script/src/lib.rs
++++ b/crates/script/src/lib.rs
+@@ -67,9 +67,9 @@
+ use serde::Serialize;
+ use std::path::PathBuf;
+
+-mod broadcast;
+-mod build;
+-mod execute;
++pub mod broadcast;
++pub mod build;
++pub mod execute;
+ mod multi_sequence;
+ mod progress;
+ mod providers;
+@@ -250,7 +250,7 @@ pub struct ScriptArgs {
+
+ impl ScriptArgs {
+     /// Loads config, resolves evm_opts (including network inference from fork), and returns them.
+-    async fn resolved_evm_opts(&self) -> Result<(Config, EvmOpts)> {
++    pub async fn resolved_evm_opts(&self) -> Result<(Config, EvmOpts)> {
+         let (config, mut evm_opts) = self.load_config_and_evm_opts()?;
+
+         if self.tempo.is_tempo() {
+@@ -264,7 +264,7 @@ async fn resolved_evm_opts(&self) -> Result<(Config, EvmOpts)> {
+         Ok((config, evm_opts))
+     }
+
+-    async fn preprocess<FEN: FoundryEvmNetwork>(
++    pub async fn preprocess<FEN: FoundryEvmNetwork>(
+         self,
+         config: Config,
+         mut evm_opts: EvmOpts,

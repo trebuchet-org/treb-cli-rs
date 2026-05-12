@@ -8,8 +8,8 @@ mod e2e;
 
 use e2e::{
     assert_deployment_count, assert_registry_consistent, get_deployment_id, read_deployments,
-    read_registry_file, read_transactions, run_deployment, run_json, setup_project,
-    spawn_anvil_or_skip, treb,
+    read_lookup_index, read_registry_file, read_transactions, run_deployment, run_json,
+    setup_project, spawn_anvil_or_skip, treb,
 };
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -61,7 +61,7 @@ async fn e2e_registry_consistency_after_deployment() {
     }
 
     // Verify lookup.json byName key matches contractName (lowercase)
-    let lookup = read_registry_file(tmp.path(), "lookup.json");
+    let lookup = read_lookup_index(tmp.path());
     let by_name = lookup["byName"].as_object().unwrap();
     for (dep_id, dep) in deps_obj {
         let name = dep["contractName"].as_str().unwrap();
@@ -126,7 +126,7 @@ async fn e2e_registry_consistency_after_tag() {
     assert_registry_consistent(tmp.path());
 
     // Verify byTag has both tags with the correct deployment ID
-    let lookup = read_registry_file(tmp.path(), "lookup.json");
+    let lookup = read_lookup_index(tmp.path());
     let by_tag = lookup["byTag"].as_object().unwrap();
     assert_eq!(by_tag.len(), 2, "exactly 2 tags should exist");
 
@@ -153,7 +153,7 @@ async fn e2e_registry_consistency_after_tag() {
     assert_registry_consistent(tmp.path());
 
     // byTag should now have only "stable"
-    let lookup = read_registry_file(tmp.path(), "lookup.json");
+    let lookup = read_lookup_index(tmp.path());
     let by_tag = lookup["byTag"].as_object().unwrap();
     assert!(
         by_tag.get("production").is_none()
@@ -214,7 +214,7 @@ async fn e2e_registry_consistency_after_reset() {
     }
 
     // Lookup index must be empty (deployments were all removed)
-    let lookup = read_registry_file(tmp.path(), "lookup.json");
+    let lookup = read_lookup_index(tmp.path());
     let by_name = lookup["byName"].as_object().expect("lookup must have byName");
     let by_address = lookup["byAddress"].as_object().expect("lookup must have byAddress");
     let by_tag = lookup["byTag"].as_object().expect("lookup must have byTag");

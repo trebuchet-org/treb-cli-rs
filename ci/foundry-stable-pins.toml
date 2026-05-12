@@ -8,7 +8,8 @@
 [targets]
 v1.7.1 = true
 v1.5.1 = true
-v1.6.0-rc1 = true
+
+[patches."v1.7.1"]
 
 [patches."v1.5.1"]
 

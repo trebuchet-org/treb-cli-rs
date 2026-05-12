@@ -749,18 +749,18 @@ fn resolve_log_file_path(
 ) -> anyhow::Result<PathBuf> {
     // Try to find the log file from fork state entries.
     let mut store = ForkStateStore::new(treb_dir);
-    if store.load().is_ok() {
-        if let Ok(entries) = resolve_named_anvil_entries(&store, network, instance_name) {
-            if network.is_none() && entries.len() > 1 {
-                bail!(
-                    "Anvil instance '{}' is tracked on multiple networks; pass --network to disambiguate",
-                    instance_name
-                );
-            }
-            let entry = entries[0];
-            if !entry.log_file.is_empty() {
-                return Ok(PathBuf::from(&entry.log_file));
-            }
+    if store.load().is_ok()
+        && let Ok(entries) = resolve_named_anvil_entries(&store, network, instance_name)
+    {
+        if network.is_none() && entries.len() > 1 {
+            bail!(
+                "Anvil instance '{}' is tracked on multiple networks; pass --network to disambiguate",
+                instance_name
+            );
+        }
+        let entry = entries[0];
+        if !entry.log_file.is_empty() {
+            return Ok(PathBuf::from(&entry.log_file));
         }
     }
 
@@ -955,12 +955,12 @@ fn try_kill_pid_file(pid_file: &str) {
     if pid_file.is_empty() {
         return;
     }
-    if let Ok(content) = fs::read_to_string(pid_file) {
-        if let Ok(pid) = content.trim().parse::<u32>() {
-            #[cfg(unix)]
-            {
-                let _ = std::process::Command::new("kill").arg(pid.to_string()).output();
-            }
+    if let Ok(content) = fs::read_to_string(pid_file)
+        && let Ok(pid) = content.trim().parse::<u32>()
+    {
+        #[cfg(unix)]
+        {
+            let _ = std::process::Command::new("kill").arg(pid.to_string()).output();
         }
     }
 }
@@ -1057,17 +1057,17 @@ pub(crate) fn store_fork_state_snapshot(
     snapshot_id: String,
 ) {
     let mut store = ForkStateStore::new(treb_dir);
-    if store.load().is_ok() {
-        if let Some(mut entry) = store.get_active_fork_instance(network, instance_name).cloned() {
-            let next_index = entry.snapshots.len() as u32;
-            entry.snapshots.push(treb_core::types::fork::SnapshotEntry {
-                index: next_index,
-                snapshot_id,
-                command: "enter".into(),
-                timestamp: chrono::Utc::now(),
-            });
-            store.upsert_active_fork(entry).ok();
-        }
+    if store.load().is_ok()
+        && let Some(mut entry) = store.get_active_fork_instance(network, instance_name).cloned()
+    {
+        let next_index = entry.snapshots.len() as u32;
+        entry.snapshots.push(treb_core::types::fork::SnapshotEntry {
+            index: next_index,
+            snapshot_id,
+            command: "enter".into(),
+            timestamp: chrono::Utc::now(),
+        });
+        store.upsert_active_fork(entry).ok();
     }
 }
 

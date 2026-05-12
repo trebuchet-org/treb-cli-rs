@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use alloy_primitives::{Address, Bytes, U256};
 use anvil::{AccountGenerator, NodeConfig, NodeHandle};
+#[cfg(any(feature = "foundry-v1-5-1", feature = "foundry-v1-7-1"))]
 use tokio::task::AbortHandle;
 use treb_core::error::TrebError;
 
@@ -137,15 +138,21 @@ impl AnvilConfig {
         // naming the concrete `FoundryNetwork` type from `foundry-primitives`.
         drop(api);
 
-        // Collect abort handles from the public task fields so we can cancel them on drop.
-        let node_abort = handle.node_service.abort_handle();
-        let server_aborts: Vec<AbortHandle> =
-            handle.servers.iter().map(|h| h.abort_handle()).collect();
-        let mut abort_handles = vec![node_abort];
-        abort_handles.extend(server_aborts);
+        // On v1.5.1 / v1.7.1, NodeHandle::Drop only signals shutdown — it does
+        // NOT abort the server tasks, so the listening port stays bound. Collect
+        // the abort handles from the public fields and abort them explicitly in
+        // our own Drop impl. On nightly, those fields are private and Drop
+        // aborts the tasks itself, so we skip this dance.
+        #[cfg(any(feature = "foundry-v1-5-1", feature = "foundry-v1-7-1"))]
+        let abort_handles: Vec<AbortHandle> = {
+            let node_abort = handle.node_service.abort_handle();
+            let server_aborts = handle.servers.iter().map(|h| h.abort_handle());
+            std::iter::once(node_abort).chain(server_aborts).collect()
+        };
 
         Ok(AnvilInstance {
             _handle: handle,
+            #[cfg(any(feature = "foundry-v1-5-1", feature = "foundry-v1-7-1"))]
             _abort_handles: abort_handles,
             rpc_url,
             port,
@@ -162,13 +169,16 @@ impl AnvilConfig {
 
 /// A running in-process Anvil node.
 ///
-/// Dropping this struct:
-/// 1. Fires the graceful shutdown signal (via [`NodeHandle`]'s `Drop` impl).
-/// 2. Aborts the underlying tokio tasks, releasing the listening port immediately.
+/// Dropping this struct fires the graceful shutdown signal and (on backends
+/// that need it) aborts the underlying tokio tasks, releasing the listening
+/// port immediately.
 pub struct AnvilInstance {
-    /// Held for its `Drop` impl which fires the graceful shutdown signal.
+    /// Held for its `Drop` impl which signals shutdown (and, on nightly, also
+    /// aborts the underlying tasks).
     _handle: NodeHandle,
-    /// Abort handles for the server tasks — aborted before the handle is dropped.
+    /// v1.5.1 / v1.7.1's `NodeHandle::Drop` does not abort the server tasks,
+    /// so we keep the abort handles around and fire them in our own Drop impl.
+    #[cfg(any(feature = "foundry-v1-5-1", feature = "foundry-v1-7-1"))]
     _abort_handles: Vec<AbortHandle>,
     rpc_url: String,
     port: u16,
@@ -177,9 +187,10 @@ pub struct AnvilInstance {
     fork_block_number: Option<u64>,
 }
 
+#[cfg(any(feature = "foundry-v1-5-1", feature = "foundry-v1-7-1"))]
 impl Drop for AnvilInstance {
     fn drop(&mut self) {
-        // Explicitly abort the server tasks so the TcpListener is dropped and the port freed.
+        // Abort the server tasks so the TcpListener is dropped and the port freed.
         // AbortHandle does not abort on drop — this call is required.
         for handle in &self._abort_handles {
             handle.abort();

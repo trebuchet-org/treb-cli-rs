@@ -6,6 +6,12 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[features]
+default = ["foundry-nightly"]
+foundry-nightly = []
+foundry-v1-7-1 = []
+foundry-v1-5-1 = []
+
 [dependencies]
 treb-core = { workspace = true }
 treb-config = { workspace = true }
@@ -24,6 +30,7 @@ revm-inspectors = { workspace = true }
 foundry-cheatcodes = { workspace = true }
 foundry-wallets = { workspace = true }
 foundry-linking = { workspace = true }
+foundry-cli = { workspace = true }
 anvil = { workspace = true }
 
 # Alloy

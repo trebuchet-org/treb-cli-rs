@@ -519,10 +519,11 @@ pub async fn run(
         match result {
             Ok(()) => {
                 // Keep etherscan_url reserved for successful etherscan verification only.
-                if verifier == "etherscan" && dep.verification.etherscan_url.is_empty() {
-                    if let Some(ref url) = explorer_url {
-                        dep.verification.etherscan_url = url.clone();
-                    }
+                if verifier == "etherscan"
+                    && dep.verification.etherscan_url.is_empty()
+                    && let Some(ref url) = explorer_url
+                {
+                    dep.verification.etherscan_url = url.clone();
                 }
                 if dep.verification.verified_at.is_none() {
                     dep.verification.verified_at = Some(Utc::now());
@@ -782,10 +783,11 @@ async fn run_batch(
             match result {
                 Ok(()) => {
                     // Keep etherscan_url reserved for successful etherscan verification only.
-                    if verifier == "etherscan" && dep_owned.verification.etherscan_url.is_empty() {
-                        if let Some(ref url) = explorer_url {
-                            dep_owned.verification.etherscan_url = url.clone();
-                        }
+                    if verifier == "etherscan"
+                        && dep_owned.verification.etherscan_url.is_empty()
+                        && let Some(ref url) = explorer_url
+                    {
+                        dep_owned.verification.etherscan_url = url.clone();
                     }
                     if dep_owned.verification.verified_at.is_none() {
                         dep_owned.verification.verified_at = Some(Utc::now());

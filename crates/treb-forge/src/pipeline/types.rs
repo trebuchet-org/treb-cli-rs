@@ -6,7 +6,6 @@
 
 use std::{collections::HashMap, path::PathBuf};
 
-use alloy_network::Ethereum;
 use alloy_primitives::Address;
 use treb_core::types::{
     GovernorProposal, deployment::Deployment, safe_transaction::SafeTransaction,
@@ -14,7 +13,9 @@ use treb_core::types::{
 };
 
 use super::routing::RunResult;
-use crate::{events::ExtractedCollision, sender::ResolvedSender};
+use crate::{
+    events::ExtractedCollision, foundry_compat::BroadcastableTransactions, sender::ResolvedSender,
+};
 
 // ---------------------------------------------------------------------------
 // PipelineConfig
@@ -221,7 +222,7 @@ pub struct ScriptResult {
     pub result: PipelineResult,
     /// Raw broadcastable transactions from simulation.
     /// Retained for compose replay between scripts.
-    pub broadcastable_transactions: Option<foundry_cheatcodes::BroadcastableTransactions<Ethereum>>,
+    pub broadcastable_transactions: Option<BroadcastableTransactions>,
 }
 
 // ---------------------------------------------------------------------------

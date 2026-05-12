@@ -88,27 +88,26 @@ pub fn extract_deployments(
     events
         .iter()
         .filter_map(|event| {
-            if let ParsedEvent::Treb(boxed) = event {
-                if let TrebEvent::ContractDeployed(deployed) = boxed.as_ref() {
-                    let artifact_match = artifacts.and_then(|idx| {
-                        idx.find_by_name(&deployed.deployment.artifact).ok().flatten()
-                    });
+            if let ParsedEvent::Treb(boxed) = event
+                && let TrebEvent::ContractDeployed(deployed) = boxed.as_ref()
+            {
+                let artifact_match = artifacts
+                    .and_then(|idx| idx.find_by_name(&deployed.deployment.artifact).ok().flatten());
 
-                    return Some(ExtractedDeployment {
-                        address: deployed.location,
-                        deployer: deployed.deployer,
-                        transaction_id: deployed.transactionId,
-                        contract_name: deployed.deployment.artifact.clone(),
-                        label: deployed.deployment.label.clone(),
-                        strategy: parse_strategy(&deployed.deployment.createStrategy),
-                        salt: deployed.deployment.salt,
-                        bytecode_hash: deployed.deployment.bytecodeHash,
-                        init_code_hash: deployed.deployment.initCodeHash,
-                        constructor_args: deployed.deployment.constructorArgs.clone(),
-                        entropy: deployed.deployment.entropy.clone(),
-                        artifact_match,
-                    });
-                }
+                return Some(ExtractedDeployment {
+                    address: deployed.location,
+                    deployer: deployed.deployer,
+                    transaction_id: deployed.transactionId,
+                    contract_name: deployed.deployment.artifact.clone(),
+                    label: deployed.deployment.label.clone(),
+                    strategy: parse_strategy(&deployed.deployment.createStrategy),
+                    salt: deployed.deployment.salt,
+                    bytecode_hash: deployed.deployment.bytecodeHash,
+                    init_code_hash: deployed.deployment.initCodeHash,
+                    constructor_args: deployed.deployment.constructorArgs.clone(),
+                    entropy: deployed.deployment.entropy.clone(),
+                    artifact_match,
+                });
             }
             None
         })
@@ -126,24 +125,24 @@ pub fn extract_collisions(
     events
         .iter()
         .filter_map(|event| {
-            if let ParsedEvent::Treb(boxed) = event {
-                if let TrebEvent::DeploymentCollision(collision) = boxed.as_ref() {
-                    let artifact_match = artifacts.and_then(|idx| {
-                        idx.find_by_name(&collision.deployment.artifact).ok().flatten()
-                    });
+            if let ParsedEvent::Treb(boxed) = event
+                && let TrebEvent::DeploymentCollision(collision) = boxed.as_ref()
+            {
+                let artifact_match = artifacts.and_then(|idx| {
+                    idx.find_by_name(&collision.deployment.artifact).ok().flatten()
+                });
 
-                    return Some(ExtractedCollision {
-                        existing_address: collision.existingContract,
-                        contract_name: collision.deployment.artifact.clone(),
-                        label: collision.deployment.label.clone(),
-                        entropy: collision.deployment.entropy.clone(),
-                        strategy: parse_strategy(&collision.deployment.createStrategy),
-                        salt: collision.deployment.salt,
-                        bytecode_hash: collision.deployment.bytecodeHash,
-                        init_code_hash: collision.deployment.initCodeHash,
-                        artifact_match,
-                    });
-                }
+                return Some(ExtractedCollision {
+                    existing_address: collision.existingContract,
+                    contract_name: collision.deployment.artifact.clone(),
+                    label: collision.deployment.label.clone(),
+                    entropy: collision.deployment.entropy.clone(),
+                    strategy: parse_strategy(&collision.deployment.createStrategy),
+                    salt: collision.deployment.salt,
+                    bytecode_hash: collision.deployment.bytecodeHash,
+                    init_code_hash: collision.deployment.initCodeHash,
+                    artifact_match,
+                });
             }
             None
         })

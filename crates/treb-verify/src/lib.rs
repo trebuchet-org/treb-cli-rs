@@ -67,6 +67,15 @@ pub fn build_verify_args(deployment: &Deployment, opts: &VerifyOpts) -> Result<V
         chain: Some(Chain::from_id(deployment.chain_id)),
     };
 
+    #[cfg(any(feature = "foundry-nightly", feature = "foundry-v1-7-1"))]
+    let rpc = RpcOpts {
+        common: foundry_cli::opts::RpcCommonOpts {
+            rpc_url: opts.rpc_url.clone(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    #[cfg(feature = "foundry-v1-5-1")]
     let rpc = RpcOpts { url: opts.rpc_url.clone(), ..Default::default() };
 
     Ok(VerifyArgs {
@@ -132,7 +141,11 @@ pub fn format_verify_command(args: &VerifyArgs) -> String {
     if let Some(chain) = args.etherscan.chain {
         push_flag_value(&mut command, "--chain", chain.to_string());
     }
-    if let Some(rpc_url) = &args.rpc.url {
+    #[cfg(any(feature = "foundry-nightly", feature = "foundry-v1-7-1"))]
+    let rpc_url_opt = args.rpc.common.rpc_url.as_ref();
+    #[cfg(feature = "foundry-v1-5-1")]
+    let rpc_url_opt = args.rpc.url.as_ref();
+    if let Some(rpc_url) = rpc_url_opt {
         push_flag_value(&mut command, "--rpc-url", rpc_url.as_str());
     }
     push_flag_value(&mut command, "--retries", args.retry.retries.to_string());
@@ -245,6 +258,7 @@ mod tests {
             label: "v1".into(),
             address: "0x1234567890abcdef1234567890abcdef12345678".into(),
             deployment_type: DeploymentType::Singleton,
+            execution: None,
             transaction_id: "tx-001".into(),
             deployment_strategy: DeploymentStrategy {
                 method: DeploymentMethod::Create,
@@ -554,6 +568,9 @@ mod tests {
         let d = make_deployment();
         let opts = VerifyOpts { rpc_url: Some("https://rpc.example.com".into()), ..default_opts() };
         let args = build_verify_args(&d, &opts).unwrap();
+        #[cfg(any(feature = "foundry-nightly", feature = "foundry-v1-7-1"))]
+        assert_eq!(args.rpc.common.rpc_url, Some("https://rpc.example.com".into()));
+        #[cfg(feature = "foundry-v1-5-1")]
         assert_eq!(args.rpc.url, Some("https://rpc.example.com".into()));
     }
 

@@ -25,18 +25,18 @@ pub fn clean_workspace(workdir: &Path) {
 
     // Clean script/deploy/ but preserve .gitkeep.
     let deploy_dir = workdir.join("script").join("deploy");
-    if deploy_dir.is_dir() {
-        if let Ok(entries) = fs::read_dir(&deploy_dir) {
-            for entry in entries.flatten() {
-                if entry.file_name() == ".gitkeep" {
-                    continue;
-                }
-                let path = entry.path();
-                if path.is_dir() {
-                    let _ = fs::remove_dir_all(&path);
-                } else {
-                    let _ = fs::remove_file(&path);
-                }
+    if deploy_dir.is_dir()
+        && let Ok(entries) = fs::read_dir(&deploy_dir)
+    {
+        for entry in entries.flatten() {
+            if entry.file_name() == ".gitkeep" {
+                continue;
+            }
+            let path = entry.path();
+            if path.is_dir() {
+                let _ = fs::remove_dir_all(&path);
+            } else {
+                let _ = fs::remove_file(&path);
             }
         }
     }

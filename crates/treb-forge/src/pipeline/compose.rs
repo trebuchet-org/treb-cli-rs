@@ -5,13 +5,13 @@
 //! After all scripts simulate, the caller can broadcast all collected
 //! transactions in order.
 
-use alloy_network::Ethereum;
 use treb_core::error::TrebError;
 use treb_registry::Registry;
 
 use crate::{
     artifacts::ArtifactIndex,
     compiler::compile_project,
+    foundry_compat::{BroadcastableTransactions, broadcast_tx_to_address},
     script::{ExecutionResult, ScriptConfig, apply_deployed_libraries},
 };
 
@@ -43,7 +43,7 @@ pub struct ComponentSimulation {
     pub result: PipelineResult,
     /// Raw broadcastable transactions from the script execution.
     /// Used to replay state on the shared Anvil fork between compose steps.
-    pub result_transactions: Option<foundry_cheatcodes::BroadcastableTransactions<Ethereum>>,
+    pub result_transactions: Option<BroadcastableTransactions>,
 }
 
 /// Compose orchestrator — executes multiple scripts with shared EVM state.
@@ -132,6 +132,7 @@ impl ComposePipeline {
                     .unwrap_or_else(|| url.clone())
             };
             let anvil = crate::anvil::AnvilConfig::new()
+                .port(0)
                 .fork_url(&resolved)
                 .spawn()
                 .await
@@ -173,15 +174,13 @@ impl ComposePipeline {
                 Ok(sim) => {
                     // Replay broadcastable transactions on the ephemeral Anvil
                     // so the next script sees this script's state changes.
-                    if let Some(ref btxs) = sim.result_transactions {
-                        if let Some(ref url) = ephemeral_url {
-                            if let Err(e) = replay_transactions_on_fork(url, btxs).await {
-                                let _ =
-                                    treb_registry::restore_registry(&snapshot_dir, &registry_dir);
-                                let _ = std::fs::remove_dir_all(&snapshot_dir);
-                                return Err((results, name, e));
-                            }
-                        }
+                    if let Some(ref btxs) = sim.result_transactions
+                        && let Some(ref url) = ephemeral_url
+                        && let Err(e) = replay_transactions_on_fork(url, btxs).await
+                    {
+                        let _ = treb_registry::restore_registry(&snapshot_dir, &registry_dir);
+                        let _ = std::fs::remove_dir_all(&snapshot_dir);
+                        return Err((results, name, e));
                     }
 
                     // Write deployments AND collisions to registry between steps
@@ -234,10 +233,11 @@ impl ComposePipeline {
         let script_args = script_config.into_script_args()?;
 
         // Run forge: preprocess → compile → link → execute
-        let preprocessed = script_args
-            .preprocess()
-            .await
-            .map_err(|e| TrebError::Forge(format!("forge preprocessing failed: {e}")))?;
+        let preprocessed = {
+            use crate::foundry_compat::preprocess_script;
+            preprocess_script!(script_args)
+                .map_err(|e| TrebError::Forge(format!("forge preprocessing failed: {e}")))?
+        };
         let compiled = preprocessed
             .compile()
             .map_err(|e| TrebError::Forge(format!("forge compilation failed: {e}")))?;
@@ -315,7 +315,7 @@ impl ComposePipeline {
 /// Anvil mines each tx immediately, persisting the state for the next script.
 pub async fn replay_transactions_on_fork(
     rpc_url: &str,
-    txs: &foundry_cheatcodes::BroadcastableTransactions<Ethereum>,
+    txs: &BroadcastableTransactions,
 ) -> Result<(), TrebError> {
     use super::fork_routing::{anvil_impersonate, anvil_stop_impersonating};
     use alloy_primitives::U256;
@@ -354,7 +354,7 @@ pub async fn replay_transactions_on_fork(
         let mut tx = TransactionRequest::default().from(from);
         tx.gas = Some(30_000_000);
 
-        if let Some(to) = btx.transaction.to() {
+        if let Some(to) = broadcast_tx_to_address(btx) {
             tx = tx.to(to);
         }
 
