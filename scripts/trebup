@@ -820,31 +820,44 @@ check_path() {
 install_trebup() {
   ensure mkdir -p "$TREB_BIN_DIR"
 
-  local current_path target_path
-  if [ -f "$0" ]; then
-    current_path="$(realpath "$0" 2>/dev/null || echo "$0")"
-  else
-    current_path="$(command -v "$0" 2>/dev/null || echo "$0")"
-    current_path="$(realpath "$current_path" 2>/dev/null || echo "$current_path")"
-  fi
+  local target_path
   target_path="$(realpath "$TREB_BIN_DIR/trebup" 2>/dev/null || echo "$TREB_BIN_DIR/trebup")"
 
-  # Already installed in the right place — nothing to do
-  if [ "$current_path" = "$target_path" ]; then
+  # Detect whether we're running from a real script file or piped through
+  # bash (curl | bash). Prefer BASH_SOURCE — under `curl | bash`, $0 is
+  # "bash" and the previous heuristic resolved that via `command -v` to
+  # the bash binary path, then tried to cp /usr/bin/bash over the
+  # installed trebup. That copy was silently failing on many systems (no
+  # error handling around it), leaving the previous trebup in place — so
+  # users never got upgrades from the standard curl-pipe install command.
+  local script_path=""
+  if [ -n "${BASH_SOURCE-}" ] && [ -n "${BASH_SOURCE[0]-}" ] \
+     && [ -f "${BASH_SOURCE[0]}" ] \
+     && [ "${BASH_SOURCE[0]}" != "bash" ]; then
+    script_path="$(realpath "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+  fi
+
+  # Already installed in the right place — nothing to do.
+  if [ -n "$script_path" ] && [ "$script_path" = "$target_path" ]; then
     return
   fi
 
-  # If running from a real file (not piped), copy it
-  if [ -f "$current_path" ] && [ "$current_path" != "bash" ] && [ "$current_path" != "/dev/stdin" ]; then
-    cp "$current_path" "$TREB_BIN_DIR/trebup"
-    chmod +x "$TREB_BIN_DIR/trebup"
-    return
+  # Running from a real file (e.g. `bash ./trebup`, `./trebup`) — copy
+  # the script into place. Use `install` for an atomic replace so we
+  # don't get ETXTBSY when overwriting a trebup that's currently exec'ing.
+  if [ -n "$script_path" ]; then
+    install -m 0755 "$script_path" "$TREB_BIN_DIR/trebup" || {
+      warn "failed to install trebup from $script_path; trying download"
+      script_path=""
+    }
+    [ -n "$script_path" ] && return
   fi
 
-  # Piped from curl — download trebup to ~/.treb/bin/
+  # Piped from curl — download trebup to $TREB_BIN_DIR/.
   local url="https://raw.githubusercontent.com/${RUST_REPO}/main/scripts/trebup"
-  curl -fsSL "$url" -o "$TREB_BIN_DIR/trebup"
-  chmod +x "$TREB_BIN_DIR/trebup"
+  ensure curl -fsSL "$url" -o "$TREB_BIN_DIR/trebup.tmp"
+  ensure chmod +x "$TREB_BIN_DIR/trebup.tmp"
+  ensure mv "$TREB_BIN_DIR/trebup.tmp" "$TREB_BIN_DIR/trebup"
 }
 
 # ---------------------------------------------------------------------------
