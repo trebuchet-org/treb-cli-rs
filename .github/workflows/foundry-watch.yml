@@ -48,9 +48,13 @@ jobs:
           fi
 
           FOUNDRY_TAG="nightly-${LATEST_HASH}"
-          FOUNDRY_SHORT="${LATEST_HASH:0:8}"
           TREB_SHORT="$(git rev-parse --short HEAD)"
-          RELEASE_TAG="nightly-${TREB_SHORT}+foundry-nightly-${FOUNDRY_SHORT}"
+          # Tag identifies the treb commit only. Each release contains
+          # archives for every backend in the matrix (foundry-nightly,
+          # foundry-v1.7.1, foundry-v1.5.1) suffixed with `+foundry-X` in
+          # their filenames, so the tag itself shouldn't pin one specific
+          # foundry rev.
+          RELEASE_TAG="nightly-${TREB_SHORT}"
 
           echo "New foundry nightly: $FOUNDRY_TAG"
           echo "updated=true" >> "$GITHUB_OUTPUT"
