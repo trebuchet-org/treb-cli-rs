@@ -133,6 +133,16 @@ impl Normalizer for VersionNormalizer {
         let treb_line = Regex::new(r"(?m)^treb .+$").unwrap();
         let result = treb_line.replace_all(input, "treb <VERSION>");
 
+        // JSON `"version": "..."` field: collapse to a single placeholder.
+        // build.rs reads `git describe --tags --always --dirty`, which yields
+        // wildly different forms across environments — full
+        // `nightly-X--foundry-nightly-Y-N-gZ(-dirty)?` on a tagged dev tree,
+        // bare `<short_hash>` on a shallow CI checkout with no tags, semver
+        // on a release build. Collapse them all so goldens are stable.
+        let json_version =
+            Regex::new(r#""version":\s*"[^"]*""#).unwrap();
+        let result = json_version.replace_all(&result, r#""version": "<TREB_VERSION>""#);
+
         // Foundry nightly hash embedded in JSON: "nightly-<40 hex>".
         // The pinned hash bumps every nightly so it shouldn't show up in
         // goldens — collapse to a stable placeholder.
