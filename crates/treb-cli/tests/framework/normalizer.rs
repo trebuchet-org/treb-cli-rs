@@ -139,8 +139,7 @@ impl Normalizer for VersionNormalizer {
         // `nightly-X--foundry-nightly-Y-N-gZ(-dirty)?` on a tagged dev tree,
         // bare `<short_hash>` on a shallow CI checkout with no tags, semver
         // on a release build. Collapse them all so goldens are stable.
-        let json_version =
-            Regex::new(r#""version":\s*"[^"]*""#).unwrap();
+        let json_version = Regex::new(r#""version":\s*"[^"]*""#).unwrap();
         let result = json_version.replace_all(&result, r#""version": "<TREB_VERSION>""#);
 
         // Foundry nightly hash embedded in JSON: "nightly-<40 hex>".
