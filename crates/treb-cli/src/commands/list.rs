@@ -44,26 +44,26 @@ pub fn filter_deployments<'a>(
         .iter()
         .copied()
         .filter(|d| {
-            if let Some(ref ns) = filters.namespace {
-                if !d.namespace.eq_ignore_ascii_case(ns) {
-                    return false;
-                }
+            if let Some(ref ns) = filters.namespace
+                && !d.namespace.eq_ignore_ascii_case(ns)
+            {
+                return false;
             }
 
             if let Some(resolved_chain_id) = filters.resolved_chain_id {
                 if d.chain_id != resolved_chain_id {
                     return false;
                 }
-            } else if let Some(ref network) = filters.network {
-                if !network_matches(d.chain_id, network) {
-                    return false;
-                }
+            } else if let Some(ref network) = filters.network
+                && !network_matches(d.chain_id, network)
+            {
+                return false;
             }
 
-            if let Some(ref dtype) = filters.deployment_type {
-                if !d.deployment_type.to_string().eq_ignore_ascii_case(dtype) {
-                    return false;
-                }
+            if let Some(ref dtype) = filters.deployment_type
+                && !d.deployment_type.to_string().eq_ignore_ascii_case(dtype)
+            {
+                return false;
             }
 
             if let Some(ref tag) = filters.tag {
@@ -77,16 +77,16 @@ pub fn filter_deployments<'a>(
                 }
             }
 
-            if let Some(ref contract) = filters.contract {
-                if !d.contract_name.eq_ignore_ascii_case(contract) {
-                    return false;
-                }
+            if let Some(ref contract) = filters.contract
+                && !d.contract_name.eq_ignore_ascii_case(contract)
+            {
+                return false;
             }
 
-            if let Some(ref label) = filters.label {
-                if d.label != *label {
-                    return false;
-                }
+            if let Some(ref label) = filters.label
+                && d.label != *label
+            {
+                return false;
             }
 
             if filters.fork && !d.namespace.starts_with("fork/") {
@@ -315,13 +315,13 @@ fn resolve_network_names(
         }
     }
 
-    if let Some(network) = selected_network {
-        if let Some(chain_id) = resolve_chain_id(network) {
-            if network.parse::<u64>().is_err() {
-                network_names.insert(chain_id, network.to_string());
-            } else if let Some(named_chain) = Chain::from_id(chain_id).named() {
-                network_names.entry(chain_id).or_insert_with(|| named_chain.to_string());
-            }
+    if let Some(network) = selected_network
+        && let Some(chain_id) = resolve_chain_id(network)
+    {
+        if network.parse::<u64>().is_err() {
+            network_names.insert(chain_id, network.to_string());
+        } else if let Some(named_chain) = Chain::from_id(chain_id).named() {
+            network_names.entry(chain_id).or_insert_with(|| named_chain.to_string());
         }
     }
 
@@ -487,14 +487,14 @@ fn build_contract_display(
         }
     }
 
-    if let Some(tags) = &d.tags {
-        if let Some(first_tag) = tags.first() {
-            let tag_str = format!("({first_tag})");
-            if color::is_color_enabled() {
-                write!(display, " {}", tag_str.style(color::TAGS)).unwrap();
-            } else {
-                write!(display, " {tag_str}").unwrap();
-            }
+    if let Some(tags) = &d.tags
+        && let Some(first_tag) = tags.first()
+    {
+        let tag_str = format!("({first_tag})");
+        if color::is_color_enabled() {
+            write!(display, " {}", tag_str.style(color::TAGS)).unwrap();
+        } else {
+            write!(display, " {tag_str}").unwrap();
         }
     }
 
@@ -781,14 +781,12 @@ pub async fn run(
         let treb_dir = cwd.join(".treb");
         let mut store = treb_registry::ForkStateStore::new(&treb_dir);
         fork_mode_active = store.load().is_ok() && store.is_fork_mode_active();
-        if fork_mode_active {
-            if let Some(ref snap_dir) = store.data().snapshot_dir {
-                let snap_path = std::path::PathBuf::from(snap_dir);
-                if let Some(snapshot_ids) = load_fork_snapshot_ids(&snap_path) {
-                    for d in &all_deployments {
-                        if !snapshot_ids.contains(&d.id) {
-                            fork_deployment_ids.insert(d.id.clone());
-                        }
+        if fork_mode_active && let Some(ref snap_dir) = store.data().snapshot_dir {
+            let snap_path = std::path::PathBuf::from(snap_dir);
+            if let Some(snapshot_ids) = load_fork_snapshot_ids(&snap_path) {
+                for d in &all_deployments {
+                    if !snapshot_ids.contains(&d.id) {
+                        fork_deployment_ids.insert(d.id.clone());
                     }
                 }
             }

@@ -90,6 +90,9 @@ pub fn truncate_address(address: &str) -> String {
 }
 
 /// Format a number with comma-separated thousands (e.g., `1234567` → `"1,234,567"`).
+// `.is_multiple_of()` exists on nightly but stabilized in Rust 1.87, after the
+// v1.5.1 backend's pinned MSRV (1.85). The `% 3 == 0` form works on both.
+#[allow(clippy::manual_is_multiple_of)]
 pub fn format_gas(n: u64) -> String {
     let s = n.to_string();
     let mut result = String::with_capacity(s.len() + s.len() / 3);

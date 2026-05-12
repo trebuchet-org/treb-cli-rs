@@ -186,11 +186,11 @@ pub fn partition_into_runs(
         let from = btx.transaction.from().unwrap_or_default();
 
         // Check if this tx extends the current run (same sender)
-        if let Some(current) = runs.last_mut() {
-            if current.sender_address == from {
-                current.tx_indices.push(idx);
-                continue;
-            }
+        if let Some(current) = runs.last_mut()
+            && current.sender_address == from
+        {
+            current.tx_indices.push(idx);
+            continue;
         }
 
         // New run — look up sender info
@@ -708,10 +708,10 @@ fn find_proposer_role(
     sender_configs: &HashMap<String, treb_config::SenderConfig>,
 ) -> String {
     // First try the config's proposer field
-    if let Some(config) = sender_configs.get(governor_role) {
-        if let Some(proposer_name) = &config.proposer {
-            return proposer_name.clone();
-        }
+    if let Some(config) = sender_configs.get(governor_role)
+        && let Some(proposer_name) = &config.proposer
+    {
+        return proposer_name.clone();
     }
     // Fall back to finding the proposer in resolved senders
     if let Some(ResolvedSender::Governor { proposer, .. }) = resolved_senders.get(governor_role) {
@@ -1156,23 +1156,23 @@ pub async fn execute_plan(
                         .map(|proposal| proposal.proposal_id.clone())
                         .unwrap_or_default(),
                 };
-                if let Some(state) = queued_state.as_deref_mut() {
-                    if !super::broadcast_writer::governor_proposal_completed(
+                if let Some(state) = queued_state.as_deref_mut()
+                    && !super::broadcast_writer::governor_proposal_completed(
                         state,
                         &format!("{:#x}", gov.governor_address),
                         &tx_ids,
-                    ) {
-                        super::broadcast_writer::mark_governor_proposal_queued(
-                            state,
-                            &format!("{:#x}", gov.governor_address),
-                            &tx_ids,
-                            Some(&proposal_id),
-                            Some(&proposal_id),
-                            None,
-                        )?;
-                        if let Some(sequence) = ctx.sequence.as_deref() {
-                            super::broadcast_writer::save_queued_checkpoint(sequence, state)?;
-                        }
+                    )
+                {
+                    super::broadcast_writer::mark_governor_proposal_queued(
+                        state,
+                        &format!("{:#x}", gov.governor_address),
+                        &tx_ids,
+                        Some(&proposal_id),
+                        Some(&proposal_id),
+                        None,
+                    )?;
+                    if let Some(sequence) = ctx.sequence.as_deref() {
+                        super::broadcast_writer::save_queued_checkpoint(sequence, state)?;
                     }
                 }
 
@@ -1230,23 +1230,23 @@ pub async fn execute_plan(
                     planned.queued.as_ref()
                 {
                     let tx_ids = tx_ids_for_run(&planned.run, recorded_txs);
-                    if let Some(state) = queued_state.as_deref_mut() {
-                        if !super::broadcast_writer::governor_proposal_completed(
+                    if let Some(state) = queued_state.as_deref_mut()
+                        && !super::broadcast_writer::governor_proposal_completed(
                             state,
                             &format!("{:#x}", governor_address),
                             &tx_ids,
-                        ) {
-                            super::broadcast_writer::mark_governor_proposal_queued(
-                                state,
-                                &format!("{:#x}", governor_address),
-                                &tx_ids,
-                                None,
-                                None,
-                                Some(&safe_tx_hash),
-                            )?;
-                            if let Some(sequence) = ctx.sequence.as_deref() {
-                                super::broadcast_writer::save_queued_checkpoint(sequence, state)?;
-                            }
+                        )
+                    {
+                        super::broadcast_writer::mark_governor_proposal_queued(
+                            state,
+                            &format!("{:#x}", governor_address),
+                            &tx_ids,
+                            None,
+                            None,
+                            Some(&safe_tx_hash),
+                        )?;
+                        if let Some(sequence) = ctx.sequence.as_deref() {
+                            super::broadcast_writer::save_queued_checkpoint(sequence, state)?;
                         }
                     }
                     queued_executions
@@ -1265,7 +1265,7 @@ pub async fn execute_plan(
     let run_results = plan
         .actions
         .iter()
-        .zip(final_results.into_iter())
+        .zip(final_results)
         .filter_map(|(planned, result)| {
             result.map(|result| {
                 (
@@ -1432,21 +1432,21 @@ async fn resume_wallet_run(
 
     // 1. Collect confirmed receipts from resume state
     for &(idx, status) in &classified {
-        if status == TxResumeStatus::Confirmed {
-            if let Some(tx_meta) = resume.sequence.transactions.get(idx) {
-                receipt_map.insert(
-                    idx,
-                    BroadcastReceipt {
-                        hash: tx_meta.hash.unwrap_or_default(),
-                        block_number: 0,
-                        gas_used: 0,
-                        status: true,
-                        contract_name: tx_meta.contract_name.clone(),
-                        contract_address: tx_meta.contract_address,
-                        raw_receipt: None,
-                    },
-                );
-            }
+        if status == TxResumeStatus::Confirmed
+            && let Some(tx_meta) = resume.sequence.transactions.get(idx)
+        {
+            receipt_map.insert(
+                idx,
+                BroadcastReceipt {
+                    hash: tx_meta.hash.unwrap_or_default(),
+                    block_number: 0,
+                    gas_used: 0,
+                    status: true,
+                    contract_name: tx_meta.contract_name.clone(),
+                    contract_address: tx_meta.contract_address,
+                    raw_receipt: None,
+                },
+            );
         }
     }
 
@@ -2038,11 +2038,11 @@ async fn broadcast_routable_txs_fork(
         receipts.push(br.clone());
 
         // Checkpoint: update sequence and save to disk
-        if can_checkpoint {
-            if let (Some(s), Some(idx)) = (&mut seq, tx_indices.and_then(|ti| ti.get(i))) {
-                super::broadcast_writer::update_sequence_checkpoint(s, *idx, &br);
-                super::broadcast_writer::save_sequence_checkpoint(s)?;
-            }
+        if can_checkpoint
+            && let (Some(s), Some(idx)) = (&mut seq, tx_indices.and_then(|ti| ti.get(i)))
+        {
+            super::broadcast_writer::update_sequence_checkpoint(s, *idx, &br);
+            super::broadcast_writer::save_sequence_checkpoint(s)?;
         }
 
         super::fork_routing::anvil_stop_impersonating(&provider, from).await;
@@ -2097,11 +2097,11 @@ async fn broadcast_routable_txs_live(
         let br = super::fork_routing::receipt_to_broadcast_receipt(&receipt);
 
         // Checkpoint: update sequence and save to disk
-        if can_checkpoint {
-            if let (Some(s), Some(idx)) = (&mut seq, tx_indices.and_then(|ti| ti.get(i))) {
-                super::broadcast_writer::update_sequence_checkpoint(s, *idx, &br);
-                super::broadcast_writer::save_sequence_checkpoint(s)?;
-            }
+        if can_checkpoint
+            && let (Some(s), Some(idx)) = (&mut seq, tx_indices.and_then(|ti| ti.get(i)))
+        {
+            super::broadcast_writer::update_sequence_checkpoint(s, *idx, &br);
+            super::broadcast_writer::save_sequence_checkpoint(s)?;
         }
 
         receipts.push(br);

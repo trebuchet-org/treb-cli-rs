@@ -9,7 +9,7 @@ use super::normalizer::{Normalizer, NormalizerChain};
 /// Returns `None` for the default (nightly) backend so that existing golden
 /// files work unchanged.
 fn foundry_backend_suffix() -> Option<String> {
-    // Prefer explicit env var from xtask (distinguishes v1.5.1 from v1.6.0-rc1)
+    // Prefer explicit env var from xtask (distinguishes v1.5.1 from v1.7.1)
     if let Ok(backend) = std::env::var("TREB_FOUNDRY_BACKEND") {
         if backend == "nightly" || backend.is_empty() {
             return None;
@@ -17,7 +17,13 @@ fn foundry_backend_suffix() -> Option<String> {
         return Some(backend.replace('.', "-"));
     }
     // Fallback to feature flag
-    if cfg!(feature = "foundry-v1-5-1") { Some("v1-5-1".to_string()) } else { None }
+    if cfg!(feature = "foundry-v1-5-1") {
+        Some("v1-5-1".to_string())
+    } else if cfg!(feature = "foundry-v1-7-1") {
+        Some("v1-7-1".to_string())
+    } else {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -85,15 +85,15 @@ pub fn extract_creations_from_trace(trace: &serde_json::Value) -> Vec<TracedCrea
 fn walk_trace_calls(call: &serde_json::Value, creations: &mut Vec<TracedCreation>) {
     let call_type = call.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
-    if call_type.eq_ignore_ascii_case("CREATE") || call_type.eq_ignore_ascii_case("CREATE2") {
-        if let Some(to) = call.get("to").and_then(|v| v.as_str()) {
-            let from = call.get("from").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            creations.push(TracedCreation {
-                address: to.to_string(),
-                from,
-                create_type: call_type.to_uppercase(),
-            });
-        }
+    if (call_type.eq_ignore_ascii_case("CREATE") || call_type.eq_ignore_ascii_case("CREATE2"))
+        && let Some(to) = call.get("to").and_then(|v| v.as_str())
+    {
+        let from = call.get("from").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        creations.push(TracedCreation {
+            address: to.to_string(),
+            from,
+            create_type: call_type.to_uppercase(),
+        });
     }
 
     // Recurse into sub-calls.
@@ -127,15 +127,14 @@ pub fn detect_proxy_patterns(trace: &serde_json::Value) -> Vec<DetectedProxy> {
 fn find_proxy_creates(call: &serde_json::Value, results: &mut Vec<DetectedProxy>) {
     let call_type = call.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
-    if call_type.eq_ignore_ascii_case("CREATE") || call_type.eq_ignore_ascii_case("CREATE2") {
-        if let Some(created_addr) = call.get("to").and_then(|v| v.as_str()) {
-            if let Some(impl_addr) = find_delegatecall_target(call, created_addr) {
-                results.push(DetectedProxy {
-                    proxy_address: created_addr.to_string(),
-                    implementation_address: impl_addr,
-                });
-            }
-        }
+    if (call_type.eq_ignore_ascii_case("CREATE") || call_type.eq_ignore_ascii_case("CREATE2"))
+        && let Some(created_addr) = call.get("to").and_then(|v| v.as_str())
+        && let Some(impl_addr) = find_delegatecall_target(call, created_addr)
+    {
+        results.push(DetectedProxy {
+            proxy_address: created_addr.to_string(),
+            implementation_address: impl_addr,
+        });
     }
 
     if let Some(calls) = call.get("calls").and_then(|v| v.as_array()) {
@@ -151,10 +150,10 @@ fn find_delegatecall_target(call: &serde_json::Value, from_addr: &str) -> Option
             let sub_type = subcall.get("type").and_then(|v| v.as_str()).unwrap_or("");
             if sub_type.eq_ignore_ascii_case("DELEGATECALL") {
                 let sub_from = subcall.get("from").and_then(|v| v.as_str()).unwrap_or("");
-                if sub_from.eq_ignore_ascii_case(from_addr) {
-                    if let Some(target) = subcall.get("to").and_then(|v| v.as_str()) {
-                        return Some(target.to_string());
-                    }
+                if sub_from.eq_ignore_ascii_case(from_addr)
+                    && let Some(target) = subcall.get("to").and_then(|v| v.as_str())
+                {
+                    return Some(target.to_string());
                 }
             }
             if let Some(found) = find_delegatecall_target(subcall, from_addr) {
@@ -300,15 +299,15 @@ pub fn match_governance_logs(
         }
 
         // ExecutionSuccess(bytes32 txHash, uint256 payment) — txHash is indexed (topic[1])
-        if topic0.eq_ignore_ascii_case(topics::EXECUTION_SUCCESS) {
-            if let Some(tx_hash_topic) = log_topics.get(1).and_then(|v| v.as_str()) {
-                let hash_lower = tx_hash_topic.to_lowercase();
-                for stx in pending_safe_txs {
-                    if stx.safe_tx_hash.to_lowercase() == hash_lower {
-                        return Some(GovernanceMatch::SafeTransaction {
-                            safe_tx_hash: stx.safe_tx_hash.clone(),
-                        });
-                    }
+        if topic0.eq_ignore_ascii_case(topics::EXECUTION_SUCCESS)
+            && let Some(tx_hash_topic) = log_topics.get(1).and_then(|v| v.as_str())
+        {
+            let hash_lower = tx_hash_topic.to_lowercase();
+            for stx in pending_safe_txs {
+                if stx.safe_tx_hash.to_lowercase() == hash_lower {
+                    return Some(GovernanceMatch::SafeTransaction {
+                        safe_tx_hash: stx.safe_tx_hash.clone(),
+                    });
                 }
             }
         }
@@ -534,15 +533,15 @@ pub async fn process_tx_receipt(rpc_url: &str, tx_hash: &str) -> anyhow::Result<
     };
 
     // Also check receipt contractAddress as safety net
-    if let Some(addr) = receipt_contract_address(&receipt) {
-        if !creations.iter().any(|c| c.address.eq_ignore_ascii_case(&addr)) {
-            let sender = receipt.get("from").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            creations.push(TracedCreation {
-                address: addr,
-                from: sender,
-                create_type: "CREATE".to_string(),
-            });
-        }
+    if let Some(addr) = receipt_contract_address(&receipt)
+        && !creations.iter().any(|c| c.address.eq_ignore_ascii_case(&addr))
+    {
+        let sender = receipt.get("from").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        creations.push(TracedCreation {
+            address: addr,
+            from: sender,
+            create_type: "CREATE".to_string(),
+        });
     }
 
     Ok(ProcessedReceipt {
@@ -602,53 +601,53 @@ pub fn apply_receipt_to_registry(
     // Process proxy upgrades from Upgraded events
     for upgrade in &processed.proxy_upgrades {
         let proxy_addr_lower = format!("{:#x}", upgrade.proxy_address).to_lowercase();
-        if let Some(dep_id) = addr_to_dep.get(&proxy_addr_lower) {
-            if let Some(dep) = registry.get_deployment(dep_id).cloned() {
-                let old_impl =
-                    dep.proxy_info.as_ref().map(|p| p.implementation.clone()).unwrap_or_default();
+        if let Some(dep_id) = addr_to_dep.get(&proxy_addr_lower)
+            && let Some(dep) = registry.get_deployment(dep_id).cloned()
+        {
+            let old_impl =
+                dep.proxy_info.as_ref().map(|p| p.implementation.clone()).unwrap_or_default();
 
-                let new_impl = format!("{:#x}", upgrade.new_implementation);
+            let new_impl = format!("{:#x}", upgrade.new_implementation);
 
-                // Update proxy_info
-                let mut updated = dep.clone();
-                let proxy_info = updated.proxy_info.get_or_insert_with(|| ProxyInfo {
-                    proxy_type: String::new(),
-                    implementation: String::new(),
-                    admin: String::new(),
-                    history: Vec::new(),
-                });
+            // Update proxy_info
+            let mut updated = dep.clone();
+            let proxy_info = updated.proxy_info.get_or_insert_with(|| ProxyInfo {
+                proxy_type: String::new(),
+                implementation: String::new(),
+                admin: String::new(),
+                history: Vec::new(),
+            });
 
-                // Add current implementation to history before updating
-                if !proxy_info.implementation.is_empty() {
-                    proxy_info.history.push(ProxyUpgrade {
-                        implementation_id: proxy_info.implementation.clone(),
-                        upgraded_at: Utc::now(),
-                        execution: Some(ExecutionRef {
-                            status: ExecutionStatus::External,
-                            kind: ExecutionKind::ExternalTx,
-                            artifact_file: String::new(),
-                            tx_hash: Some(tx_hash.to_string()),
-                            safe_tx_hash: None,
-                            proposal_id: None,
-                            propose_safe_tx_hash: None,
-                            script_tx_index: None,
-                        }),
-                        upgrade_tx_id: format!("tx-{tx_hash}"),
-                    });
-                }
-                proxy_info.implementation = new_impl.clone();
-                updated.updated_at = Utc::now();
-
-                registry.update_deployment(updated).map_err(|e| anyhow::anyhow!("{e}"))?;
-
-                upgraded_deployments.push(UpgradedDeployment {
-                    deployment_id: dep_id.clone(),
-                    contract_name: dep.contract_name.clone(),
-                    proxy_address: dep.address.clone(),
-                    old_implementation: old_impl,
-                    new_implementation: new_impl,
+            // Add current implementation to history before updating
+            if !proxy_info.implementation.is_empty() {
+                proxy_info.history.push(ProxyUpgrade {
+                    implementation_id: proxy_info.implementation.clone(),
+                    upgraded_at: Utc::now(),
+                    execution: Some(ExecutionRef {
+                        status: ExecutionStatus::External,
+                        kind: ExecutionKind::ExternalTx,
+                        artifact_file: String::new(),
+                        tx_hash: Some(tx_hash.to_string()),
+                        safe_tx_hash: None,
+                        proposal_id: None,
+                        propose_safe_tx_hash: None,
+                        script_tx_index: None,
+                    }),
+                    upgrade_tx_id: format!("tx-{tx_hash}"),
                 });
             }
+            proxy_info.implementation = new_impl.clone();
+            updated.updated_at = Utc::now();
+
+            registry.update_deployment(updated).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+            upgraded_deployments.push(UpgradedDeployment {
+                deployment_id: dep_id.clone(),
+                contract_name: dep.contract_name.clone(),
+                proxy_address: dep.address.clone(),
+                old_implementation: old_impl,
+                new_implementation: new_impl,
+            });
         }
     }
 

@@ -8,8 +8,9 @@ license.workspace = true
 
 [features]
 default = ["foundry-nightly"]
-foundry-nightly = ["treb-forge/foundry-nightly"]
-foundry-v1-5-1 = ["treb-forge/foundry-v1-5-1"]
+foundry-nightly = ["treb-forge/foundry-nightly", "treb-verify/foundry-nightly"]
+foundry-v1-7-1 = ["treb-forge/foundry-v1-7-1", "treb-verify/foundry-v1-7-1"]
+foundry-v1-5-1 = ["treb-forge/foundry-v1-5-1", "treb-verify/foundry-v1-5-1"]
 
 [dependencies]
 treb-core = { workspace = true }
@@ -17,7 +18,7 @@ treb-config = { workspace = true }
 treb-registry = { workspace = true }
 treb-forge = { path = "../treb-forge", default-features = false }
 treb-safe = { workspace = true }
-treb-verify = { workspace = true }
+treb-verify = { path = "../treb-verify", default-features = false }
 foundry-common = { workspace = true }
 serde = { workspace = true }
 chrono = { workspace = true }

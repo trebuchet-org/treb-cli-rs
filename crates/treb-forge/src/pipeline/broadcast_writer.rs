@@ -364,10 +364,10 @@ pub fn update_sequence_checkpoint(
     if let Some(tx_meta) = sequence.transactions.get_mut(tx_idx) {
         tx_meta.hash = Some(receipt.hash);
     }
-    if let Some(ref raw) = receipt.raw_receipt {
-        if let Ok(any_receipt) = serde_json::from_value(raw.clone()) {
-            sequence.receipts.push(any_receipt);
-        }
+    if let Some(ref raw) = receipt.raw_receipt
+        && let Ok(any_receipt) = serde_json::from_value(raw.clone())
+    {
+        sequence.receipts.push(any_receipt);
     }
 }
 
@@ -575,19 +575,19 @@ pub fn build_pre_routing_sequence(
         );
 
         // Set contract metadata from recorded transaction
-        if let Some(rt) = recorded_txs.get(i) {
-            if let Some(op) = rt.transaction.operations.first() {
-                if op.operation_type == "DEPLOY" {
-                    tx_meta.contract_name = Some(op.target.clone());
-                    if let Some(addr_val) = op.result.get("address") {
-                        if let Some(addr_str) = addr_val.as_str() {
-                            tx_meta.contract_address = addr_str.parse().ok();
-                        }
-                    }
+        if let Some(rt) = recorded_txs.get(i)
+            && let Some(op) = rt.transaction.operations.first()
+        {
+            if op.operation_type == "DEPLOY" {
+                tx_meta.contract_name = Some(op.target.clone());
+                if let Some(addr_val) = op.result.get("address")
+                    && let Some(addr_str) = addr_val.as_str()
+                {
+                    tx_meta.contract_address = addr_str.parse().ok();
                 }
-                if !op.method.is_empty() && op.method != "CREATE" {
-                    tx_meta.function = Some(op.method.clone());
-                }
+            }
+            if !op.method.is_empty() && op.method != "CREATE" {
+                tx_meta.function = Some(op.method.clone());
             }
         }
 
@@ -689,19 +689,19 @@ pub fn build_script_sequence(
                 );
 
                 // Set contract metadata from recorded transaction
-                if let Some(rt) = rt_by_index.get(&tx_idx) {
-                    if let Some(op) = rt.transaction.operations.first() {
-                        if op.operation_type == "DEPLOY" {
-                            tx_meta.contract_name = Some(op.target.clone());
-                            if let Some(addr_val) = op.result.get("address") {
-                                if let Some(addr_str) = addr_val.as_str() {
-                                    tx_meta.contract_address = addr_str.parse().ok();
-                                }
-                            }
+                if let Some(rt) = rt_by_index.get(&tx_idx)
+                    && let Some(op) = rt.transaction.operations.first()
+                {
+                    if op.operation_type == "DEPLOY" {
+                        tx_meta.contract_name = Some(op.target.clone());
+                        if let Some(addr_val) = op.result.get("address")
+                            && let Some(addr_str) = addr_val.as_str()
+                        {
+                            tx_meta.contract_address = addr_str.parse().ok();
                         }
-                        if !op.method.is_empty() && op.method != "CREATE" {
-                            tx_meta.function = Some(op.method.clone());
-                        }
+                    }
+                    if !op.method.is_empty() && op.method != "CREATE" {
+                        tx_meta.function = Some(op.method.clone());
                     }
                 }
 
@@ -718,12 +718,11 @@ pub fn build_script_sequence(
                 transactions.push_back(tx_meta);
 
                 // Add receipt if we have the raw JSON
-                if let Some(r) = receipt {
-                    if let Some(ref raw) = r.raw_receipt {
-                        if let Ok(any_receipt) = serde_json::from_value(raw.clone()) {
-                            receipts.push(any_receipt);
-                        }
-                    }
+                if let Some(r) = receipt
+                    && let Some(ref raw) = r.raw_receipt
+                    && let Ok(any_receipt) = serde_json::from_value(raw.clone())
+                {
+                    receipts.push(any_receipt);
                 }
             }
         }
@@ -977,14 +976,14 @@ pub async fn load_resume_state_from_path(
 
     // Load ScriptSequence
     let sequence: ScriptSequence = {
-        let contents = fs::read_to_string(&broadcast_path).ok()?;
+        let contents = fs::read_to_string(broadcast_path).ok()?;
         serde_json::from_str(&contents).ok()?
     };
 
     // Load queued operations (optional). Fall back to the legacy deferred
     // suffix so older checkpoints can still resume.
-    let queued_file = queued_path_from(&broadcast_path);
-    let legacy_deferred_file = legacy_deferred_path_from(&broadcast_path);
+    let queued_file = queued_path_from(broadcast_path);
+    let legacy_deferred_file = legacy_deferred_path_from(broadcast_path);
     let queued: Option<QueuedOperations> = if queued_file.exists() {
         fs::read_to_string(&queued_file).ok().and_then(|c| serde_json::from_str(&c).ok())
     } else if legacy_deferred_file.exists() {

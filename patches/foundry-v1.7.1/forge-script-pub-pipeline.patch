@@ -1,7 +1,7 @@
 diff --git a/crates/script/src/lib.rs b/crates/script/src/lib.rs
 --- a/crates/script/src/lib.rs
 +++ b/crates/script/src/lib.rs
-@@ -67,9 +67,9 @@
+@@ -65,9 +65,9 @@
  use serde::Serialize;
  use std::path::PathBuf;
 
@@ -14,7 +14,7 @@ diff --git a/crates/script/src/lib.rs b/crates/script/src/lib.rs
  mod multi_sequence;
  mod progress;
  mod providers;
-@@ -250,7 +250,7 @@ pub struct ScriptArgs {
+@@ -248,7 +248,7 @@ pub struct ScriptArgs {
 
  impl ScriptArgs {
      /// Loads config, resolves evm_opts (including network inference from fork), and returns them.
@@ -22,8 +22,8 @@ diff --git a/crates/script/src/lib.rs b/crates/script/src/lib.rs
 +    pub async fn resolved_evm_opts(&self) -> Result<(Config, EvmOpts)> {
          let (config, mut evm_opts) = self.load_config_and_evm_opts()?;
 
-         if self.tempo.is_tempo() {
-@@ -264,7 +264,7 @@ async fn resolved_evm_opts(&self) -> Result<(Config, EvmOpts)> {
+         if self.fee_token.is_some() {
+@@ -262,7 +262,7 @@ async fn resolved_evm_opts(&self) -> Result<(Config, EvmOpts)> {
          Ok((config, evm_opts))
      }
 

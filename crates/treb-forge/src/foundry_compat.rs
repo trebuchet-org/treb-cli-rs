@@ -5,38 +5,57 @@ use alloy_primitives::Address;
 
 pub type BroadcastableTransaction = foundry_cheatcodes::BroadcastableTransaction;
 
-#[cfg(feature = "foundry-nightly")]
+#[cfg(any(feature = "foundry-nightly", feature = "foundry-v1-7-1"))]
 pub type BroadcastableTransactions =
     foundry_cheatcodes::BroadcastableTransactions<alloy_network::Ethereum>;
 
 #[cfg(feature = "foundry-v1-5-1")]
 pub type BroadcastableTransactions = foundry_cheatcodes::BroadcastableTransactions;
 
-#[cfg(feature = "foundry-nightly")]
+#[cfg(any(feature = "foundry-nightly", feature = "foundry-v1-7-1"))]
 pub type ScriptSequence = forge_script_sequence::ScriptSequence<alloy_network::Ethereum>;
 
 #[cfg(feature = "foundry-v1-5-1")]
 pub type ScriptSequence = forge_script_sequence::ScriptSequence;
 
-#[cfg(feature = "foundry-nightly")]
+#[cfg(any(feature = "foundry-nightly", feature = "foundry-v1-7-1"))]
 pub type TransactionMaybeSigned = foundry_common::TransactionMaybeSigned<alloy_network::Ethereum>;
 
 #[cfg(feature = "foundry-v1-5-1")]
 pub type TransactionMaybeSigned = foundry_common::TransactionMaybeSigned;
 
-#[cfg(all(feature = "foundry-nightly", feature = "foundry-v1-5-1"))]
-compile_error!("foundry-nightly and foundry-v1-5-1 cannot both be enabled");
+#[cfg(any(
+    all(feature = "foundry-nightly", feature = "foundry-v1-5-1"),
+    all(feature = "foundry-nightly", feature = "foundry-v1-7-1"),
+    all(feature = "foundry-v1-5-1", feature = "foundry-v1-7-1"),
+))]
+compile_error!("exactly one Foundry backend feature must be enabled");
 
-#[cfg(not(any(feature = "foundry-nightly", feature = "foundry-v1-5-1")))]
+#[cfg(not(any(
+    feature = "foundry-nightly",
+    feature = "foundry-v1-7-1",
+    feature = "foundry-v1-5-1"
+)))]
 compile_error!("one Foundry backend feature must be enabled");
 
 pub fn make_tx_maybe_signed(
     request: alloy_rpc_types::TransactionRequest,
 ) -> TransactionMaybeSigned {
-    foundry_common::TransactionMaybeSigned::new(request.into())
+    // On nightly / v1.7.1, `TransactionMaybeSigned::new` takes a bare
+    // `TransactionRequest`. On v1.5.1 it takes a `WithOtherFields<TransactionRequest>`
+    // so the `.into()` does the wrap; on the modern backends `.into()` would be
+    // a useless conversion that clippy bans.
+    #[cfg(feature = "foundry-v1-5-1")]
+    {
+        foundry_common::TransactionMaybeSigned::new(request.into())
+    }
+    #[cfg(any(feature = "foundry-nightly", feature = "foundry-v1-7-1"))]
+    {
+        foundry_common::TransactionMaybeSigned::new(request)
+    }
 }
 
-#[cfg(feature = "foundry-nightly")]
+#[cfg(any(feature = "foundry-nightly", feature = "foundry-v1-7-1"))]
 pub fn broadcast_tx_to_address(tx: &BroadcastableTransaction) -> Option<Address> {
     tx.transaction.to()
 }
@@ -71,11 +90,11 @@ pub fn broadcast_tx_is_create(tx: &BroadcastableTransaction) -> bool {
 /// This macro abstracts over the API differences between foundry backends:
 /// - **Nightly**: `preprocess()` is private and takes `(config, evm_opts)` + a `FoundryEvmNetwork`
 ///   generic. We resolve config via `LoadConfig` and specialize on `EthEvmNetwork`.
-/// - **v1.5.1 / v1.6.0-rc1**: `preprocess()` is public on `ScriptArgs`, so we call it directly.
-///   Using a macro avoids naming the `PreprocessedState` type which lives in a private module.
+/// - **v1.5.1**: `preprocess()` is public on `ScriptArgs`, so we call it directly. Using a macro
+///   avoids naming the `PreprocessedState` type which lives in a private module.
 macro_rules! preprocess_script {
     ($args:expr) => {{
-        #[cfg(feature = "foundry-nightly")]
+        #[cfg(any(feature = "foundry-nightly", feature = "foundry-v1-7-1"))]
         {
             use foundry_cli::utils::LoadConfig as _;
             async {
@@ -103,14 +122,14 @@ pub(crate) use preprocess_script;
 // version of revm-inspectors that forge-script-sequence uses.
 pub use foundry_evm::traces::CallKind;
 
-#[cfg(feature = "foundry-nightly")]
+#[cfg(any(feature = "foundry-nightly", feature = "foundry-v1-7-1"))]
 pub type TransactionWithMetadata =
     forge_script_sequence::TransactionWithMetadata<alloy_network::Ethereum>;
 
 #[cfg(feature = "foundry-v1-5-1")]
 pub type TransactionWithMetadata = forge_script_sequence::TransactionWithMetadata;
 
-#[cfg(feature = "foundry-nightly")]
+#[cfg(any(feature = "foundry-nightly", feature = "foundry-v1-7-1"))]
 pub fn tx_meta_call_kind(tx: &TransactionWithMetadata) -> CallKind {
     tx.call_kind
 }
@@ -120,7 +139,7 @@ pub fn tx_meta_call_kind(tx: &TransactionWithMetadata) -> CallKind {
     tx.opcode
 }
 
-#[cfg(feature = "foundry-nightly")]
+#[cfg(any(feature = "foundry-nightly", feature = "foundry-v1-7-1"))]
 pub fn set_tx_meta_call_kind(tx: &mut TransactionWithMetadata, kind: CallKind) {
     tx.call_kind = kind;
 }

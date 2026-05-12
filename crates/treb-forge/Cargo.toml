@@ -9,6 +9,7 @@ license.workspace = true
 [features]
 default = ["foundry-nightly"]
 foundry-nightly = []
+foundry-v1-7-1 = []
 foundry-v1-5-1 = []
 
 [dependencies]

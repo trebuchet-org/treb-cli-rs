@@ -24,14 +24,13 @@ enum Commands {
     FoundryAll(FoundryAllArgs),
 }
 
-const ALL_BACKENDS: [Backend; 3] = [Backend::Nightly, Backend::V1_6_0_Rc1, Backend::V1_5_1];
+const ALL_BACKENDS: [Backend; 3] = [Backend::Nightly, Backend::V1_7_1, Backend::V1_5_1];
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 enum Backend {
     Nightly,
-    #[value(name = "v1.6.0-rc1")]
-    #[allow(non_camel_case_types)]
-    V1_6_0_Rc1,
+    #[value(name = "v1.7.1")]
+    V1_7_1,
     #[value(name = "v1.5.1")]
     V1_5_1,
 }
@@ -40,8 +39,8 @@ impl Backend {
     fn feature_name(self) -> &'static str {
         match self {
             Self::Nightly => "foundry-nightly",
-            // rc1 uses the same alloy 1.x non-generic API as v1.5.1
-            Self::V1_6_0_Rc1 | Self::V1_5_1 => "foundry-v1-5-1",
+            Self::V1_7_1 => "foundry-v1-7-1",
+            Self::V1_5_1 => "foundry-v1-5-1",
         }
     }
 
@@ -50,7 +49,7 @@ impl Backend {
     fn backend_dir(self) -> Option<&'static str> {
         match self {
             Self::Nightly => None,
-            Self::V1_6_0_Rc1 => Some("v1.6.0-rc1"),
+            Self::V1_7_1 => Some("v1.7.1"),
             Self::V1_5_1 => Some("v1.5.1"),
         }
     }
@@ -58,7 +57,7 @@ impl Backend {
     fn label(self) -> &'static str {
         match self {
             Self::Nightly => "nightly",
-            Self::V1_6_0_Rc1 => "v1.6.0-rc1",
+            Self::V1_7_1 => "v1.7.1",
             Self::V1_5_1 => "v1.5.1",
         }
     }
@@ -68,7 +67,9 @@ impl Backend {
     fn patches_dir(self) -> Option<&'static str> {
         match self {
             Self::Nightly => Some("foundry-nightly"),
-            Self::V1_6_0_Rc1 | Self::V1_5_1 => None,
+            // v1.7.1 also has a private `preprocess()` method we need to expose.
+            Self::V1_7_1 => Some("foundry-v1.7.1"),
+            Self::V1_5_1 => None,
         }
     }
 }
@@ -293,7 +294,7 @@ fn apply_cargo_source_patches(root: &Path, patches_dir: &str) -> Result<()> {
     let mut patches: Vec<_> = fs::read_dir(&patches_path)
         .with_context(|| format!("failed to read patches dir {}", patches_path.display()))?
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "patch"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "patch"))
         .map(|e| e.path())
         .collect();
     patches.sort();
@@ -316,7 +317,7 @@ fn apply_cargo_source_patches(root: &Path, patches_dir: &str) -> Result<()> {
             .stderr(Stdio::null())
             .status();
 
-        if reverse_check.map_or(false, |s| s.success()) {
+        if reverse_check.is_ok_and(|s| s.success()) {
             eprintln!("xtask: patch already applied: {patch_name}");
             // Touch patched files so cargo knows to recompile
             invalidate_forge_script_cache(root)?;
@@ -332,7 +333,7 @@ fn apply_cargo_source_patches(root: &Path, patches_dir: &str) -> Result<()> {
             .stderr(Stdio::null())
             .status();
 
-        if !forward_check.map_or(false, |s| s.success()) {
+        if !forward_check.is_ok_and(|s| s.success()) {
             bail!("patch does not apply cleanly: {patch_name}");
         }
 
@@ -362,7 +363,7 @@ fn apply_cargo_source_patches(root: &Path, patches_dir: &str) -> Result<()> {
 fn invalidate_forge_script_cache(root: &Path) -> Result<()> {
     // Remove incremental compilation artifacts for forge-script from
     // all target directories that might be in use.
-    for target_dir in &["target", "target/v1.5.1", "target/v1.6.0-rc1"] {
+    for target_dir in &["target", "target/v1.5.1", "target/v1.7.1"] {
         let deps_dir = root.join(target_dir).join("debug/.fingerprint");
         if !deps_dir.exists() {
             continue;

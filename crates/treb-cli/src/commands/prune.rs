@@ -118,10 +118,10 @@ pub fn find_prune_candidates(
     // ── Check deployments ────────────────────────────────────────────────
     for dep in registry.list_deployments() {
         // Apply chain filter.
-        if let Some(filter_id) = chain_id_filter {
-            if dep.chain_id != filter_id {
-                continue;
-            }
+        if let Some(filter_id) = chain_id_filter
+            && dep.chain_id != filter_id
+        {
+            continue;
         }
 
         // Flag deployments that point to a missing transaction.
@@ -144,10 +144,10 @@ pub fn find_prune_candidates(
     // ── Check transactions ───────────────────────────────────────────────
     for tx in registry.list_transactions() {
         // Apply chain filter.
-        if let Some(filter_id) = chain_id_filter {
-            if tx.chain_id != filter_id {
-                continue;
-            }
+        if let Some(filter_id) = chain_id_filter
+            && tx.chain_id != filter_id
+        {
+            continue;
         }
 
         // Flag transactions that reference missing deployments.
@@ -216,10 +216,10 @@ pub async fn find_onchain_prune_candidates(
 
     for dep in registry.list_deployments() {
         // Apply chain filter.
-        if let Some(filter_id) = chain_id_filter {
-            if dep.chain_id != filter_id {
-                continue;
-            }
+        if let Some(filter_id) = chain_id_filter
+            && dep.chain_id != filter_id
+        {
+            continue;
         }
 
         let address = &dep.address;

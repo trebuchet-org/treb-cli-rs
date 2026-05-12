@@ -383,7 +383,7 @@ impl ScriptConfig {
     /// Constructs `ScriptArgs` from `Default::default()` and sets all fields
     /// including EVM args (fork URL, sender, chain ID).
     pub fn into_script_args(self) -> treb_core::Result<ScriptArgs> {
-        // fork_url takes precedence over rpc_url; they both map to EvmArgs.fork_url
+        // fork_url takes precedence over rpc_url; they both map to EvmArgs.rpc.rpc_url
         let fork_url = self.fork_url.or(self.rpc_url);
 
         let mut args = ScriptArgs::default();
@@ -403,7 +403,14 @@ impl ScriptConfig {
         args.batch_size = 100;
 
         // EVM args
-        args.evm.fork_url = fork_url;
+        #[cfg(any(feature = "foundry-nightly", feature = "foundry-v1-7-1"))]
+        {
+            args.evm.rpc.rpc_url = fork_url;
+        }
+        #[cfg(feature = "foundry-v1-5-1")]
+        {
+            args.evm.fork_url = fork_url;
+        }
         args.evm.sender = self.sender;
         if let Some(id) = self.chain_id {
             args.evm.env.chain = Some(Chain::from(id));
@@ -527,10 +534,10 @@ pub fn build_script_config_with_senders(
     let mut all_keys: Vec<String> = Vec::new();
     for (role, sender) in resolved_senders {
         let key = crate::sender::extract_signing_key(role, sender, &resolved.senders);
-        if let Some(k) = key {
-            if !all_keys.contains(&k.to_string()) {
-                all_keys.push(k.to_string());
-            }
+        if let Some(k) = key
+            && !all_keys.contains(&k.to_string())
+        {
+            all_keys.push(k.to_string());
         }
     }
 
@@ -587,6 +594,9 @@ mod tests {
         assert!(!args.broadcast);
         assert!(!args.slow);
         assert!(!args.legacy);
+        #[cfg(any(feature = "foundry-nightly", feature = "foundry-v1-7-1"))]
+        assert!(args.evm.rpc.rpc_url.is_none());
+        #[cfg(feature = "foundry-v1-5-1")]
         assert!(args.evm.fork_url.is_none());
         assert!(args.evm.sender.is_none());
     }

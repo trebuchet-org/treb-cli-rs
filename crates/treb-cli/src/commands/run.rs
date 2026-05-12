@@ -530,19 +530,15 @@ pub async fn execute_script(
 
     if should_broadcast {
         // Pre-broadcast fork snapshot (if in fork mode)
-        if opts.is_fork {
-            if let Some(ref source) = opts.fork_run_source {
-                let treb_dir = cwd.join(TREB_DIR);
-                let mut store = ForkStateStore::new(&treb_dir);
-                if store.load().is_ok() && store.is_fork_mode_active() {
-                    super::fork::snapshot_fork_before_broadcast(
-                        &treb_dir,
-                        &mut store,
-                        source.clone(),
-                    )
+        if opts.is_fork
+            && let Some(ref source) = opts.fork_run_source
+        {
+            let treb_dir = cwd.join(TREB_DIR);
+            let mut store = ForkStateStore::new(&treb_dir);
+            if store.load().is_ok() && store.is_fork_mode_active() {
+                super::fork::snapshot_fork_before_broadcast(&treb_dir, &mut store, source.clone())
                     .await
                     .ok(); // best-effort
-                }
             }
         }
 
@@ -670,14 +666,12 @@ pub async fn run(
         // Extract the env var name from the foundry.toml raw_url template
         // (e.g., "${CELO_RPC_URL}" → "CELO_RPC_URL") and set it to the
         // fork's Anvil URL.
-        if let Some(ref net) = effective_network {
-            if let Ok(endpoints) = treb_config::resolve_rpc_endpoints(&cwd) {
-                if let Some(endpoint) = endpoints.get(net.as_str()) {
-                    if let Some(var) = extract_env_var_name(&endpoint.raw_url) {
-                        unsafe { env::set_var(var, &fork_entry.rpc_url) };
-                    }
-                }
-            }
+        if let Some(ref net) = effective_network
+            && let Ok(endpoints) = treb_config::resolve_rpc_endpoints(&cwd)
+            && let Some(endpoint) = endpoints.get(net.as_str())
+            && let Some(var) = extract_env_var_name(&endpoint.raw_url)
+        {
+            unsafe { env::set_var(var, &fork_entry.rpc_url) };
         }
     }
 
@@ -728,10 +722,10 @@ pub async fn run(
     }
 
     // ── Auto-fund senders on fork ──────────────────────────────────────
-    if active_fork.is_some() {
-        if let Some(ref rpc) = effective_rpc_url {
-            let _ = treb_forge::fund_senders_on_fork(rpc, &resolved_senders, 10_000).await;
-        }
+    if active_fork.is_some()
+        && let Some(ref rpc) = effective_rpc_url
+    {
+        let _ = treb_forge::fund_senders_on_fork(rpc, &resolved_senders, 10_000).await;
     }
 
     let is_safe = resolved_senders.get("deployer").is_some_and(|s| s.is_safe());
@@ -2048,17 +2042,17 @@ fn display_result_human(
     }
 
     // ── Traces ───────────────────────────────────────────────────────────
-    if verbose >= 3 {
-        if let Some(ref setup) = result.setup_traces {
-            println!("Setup Traces:");
-            println!("{setup}");
-        }
+    if verbose >= 3
+        && let Some(ref setup) = result.setup_traces
+    {
+        println!("Setup Traces:");
+        println!("{setup}");
     }
-    if verbose >= 1 {
-        if let Some(ref traces) = result.execution_traces {
-            println!("Traces:");
-            println!("{traces}");
-        }
+    if verbose >= 1
+        && let Some(ref traces) = result.execution_traces
+    {
+        println!("Traces:");
+        println!("{traces}");
     }
 }
 

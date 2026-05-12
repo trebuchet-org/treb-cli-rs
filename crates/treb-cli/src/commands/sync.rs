@@ -568,45 +568,45 @@ pub async fn run_tx_hash(
     if let Some(matched_record) = &matched {
         match matched_record {
             MatchedRecord::SafeTransaction(safe_tx_hash) => {
-                if let Some(stx) = registry.get_safe_transaction(safe_tx_hash).cloned() {
-                    if stx.status != TransactionStatus::Executed {
-                        let mut updated = stx;
-                        updated.status = TransactionStatus::Executed;
-                        updated.executed_at = Some(Utc::now());
-                        updated.execution_tx_hash = tx_hash.to_string();
+                if let Some(stx) = registry.get_safe_transaction(safe_tx_hash).cloned()
+                    && stx.status != TransactionStatus::Executed
+                {
+                    let mut updated = stx;
+                    updated.status = TransactionStatus::Executed;
+                    updated.executed_at = Some(Utc::now());
+                    updated.execution_tx_hash = tx_hash.to_string();
 
-                        // Update linked Transaction records
-                        for tx_id in &updated.transaction_ids {
-                            if let Some(tx) = registry.get_transaction(tx_id) {
-                                let mut tx = tx.clone();
-                                if tx.status != TransactionStatus::Executed {
-                                    tx.status = TransactionStatus::Executed;
-                                    tx.hash = tx_hash.to_string();
-                                    registry.update_transaction(tx).with_context(|| {
-                                        format!("failed to update transaction {tx_id}")
-                                    })?;
-                                }
+                    // Update linked Transaction records
+                    for tx_id in &updated.transaction_ids {
+                        if let Some(tx) = registry.get_transaction(tx_id) {
+                            let mut tx = tx.clone();
+                            if tx.status != TransactionStatus::Executed {
+                                tx.status = TransactionStatus::Executed;
+                                tx.hash = tx_hash.to_string();
+                                registry.update_transaction(tx).with_context(|| {
+                                    format!("failed to update transaction {tx_id}")
+                                })?;
                             }
                         }
-
-                        registry.update_safe_transaction(updated).with_context(|| {
-                            format!("failed to update safe transaction {safe_tx_hash}")
-                        })?;
                     }
+
+                    registry.update_safe_transaction(updated).with_context(|| {
+                        format!("failed to update safe transaction {safe_tx_hash}")
+                    })?;
                 }
             }
             MatchedRecord::GovernorProposal(proposal_id) => {
-                if let Some(proposal) = registry.get_governor_proposal(proposal_id).cloned() {
-                    if proposal.status != treb_core::types::ProposalStatus::Executed {
-                        let mut updated = proposal;
-                        updated.status = treb_core::types::ProposalStatus::Executed;
-                        updated.executed_at = Some(Utc::now());
-                        updated.execution_tx_hash = tx_hash.to_string();
+                if let Some(proposal) = registry.get_governor_proposal(proposal_id).cloned()
+                    && proposal.status != treb_core::types::ProposalStatus::Executed
+                {
+                    let mut updated = proposal;
+                    updated.status = treb_core::types::ProposalStatus::Executed;
+                    updated.executed_at = Some(Utc::now());
+                    updated.execution_tx_hash = tx_hash.to_string();
 
-                        // Update linked Transaction records
-                        let became_executed = true;
-                        persist_governor_proposal_update(&mut registry, updated, became_executed)?;
-                    }
+                    // Update linked Transaction records
+                    let became_executed = true;
+                    persist_governor_proposal_update(&mut registry, updated, became_executed)?;
                 }
             }
         }
@@ -748,14 +748,14 @@ fn match_tx_to_registry(
     }
 
     // Strategy 3: Trace-based matching (fallback)
-    if let Some(trace) = &processed.raw_trace {
-        if let Some(gov_match) = crate::commands::receipt::match_governance_trace(
+    if let Some(trace) = &processed.raw_trace
+        && let Some(gov_match) = crate::commands::receipt::match_governance_trace(
             trace,
             &pending_proposals,
             &pending_safe_txs,
-        ) {
-            return Some(governance_match_to_record(gov_match));
-        }
+        )
+    {
+        return Some(governance_match_to_record(gov_match));
     }
 
     None
@@ -971,33 +971,30 @@ fn update_queued_broadcast_files(cwd: &std::path::Path, registry: &Registry) {
         for proposal in &mut queued.safe_proposals {
             if proposal.status == "pending" || proposal.status == "queued" {
                 // Check if this safe tx hash is now executed in the registry
-                if let Some(stx) = registry.get_safe_transaction(&proposal.safe_tx_hash) {
-                    if stx.status == TransactionStatus::Executed {
-                        proposal.status = "executed".into();
-                        proposal.execution_tx_hash =
-                            Some(stx.execution_tx_hash.clone()).filter(|s| !s.is_empty());
-                        changed = true;
-                    }
+                if let Some(stx) = registry.get_safe_transaction(&proposal.safe_tx_hash)
+                    && stx.status == TransactionStatus::Executed
+                {
+                    proposal.status = "executed".into();
+                    proposal.execution_tx_hash =
+                        Some(stx.execution_tx_hash.clone()).filter(|s| !s.is_empty());
+                    changed = true;
                 }
             }
         }
 
         // Update Governor proposal statuses
         for proposal in &mut queued.governor_proposals {
-            if proposal.status == "pending" || proposal.status == "queued" {
-                if let Some(gp) = registry.get_governor_proposal(&proposal.proposal_id) {
-                    if gp.status == treb_core::types::ProposalStatus::Executed {
-                        proposal.status = "executed".into();
-                        changed = true;
-                    }
-                }
+            if (proposal.status == "pending" || proposal.status == "queued")
+                && let Some(gp) = registry.get_governor_proposal(&proposal.proposal_id)
+                && gp.status == treb_core::types::ProposalStatus::Executed
+            {
+                proposal.status = "executed".into();
+                changed = true;
             }
         }
 
-        if changed {
-            if let Ok(json) = serde_json::to_string_pretty(&queued) {
-                let _ = std::fs::write(path, json);
-            }
+        if changed && let Ok(json) = serde_json::to_string_pretty(&queued) {
+            let _ = std::fs::write(path, json);
         }
     }
 }

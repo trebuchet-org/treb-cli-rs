@@ -1,0 +1,173 @@
+# Foundry v1.7.1 backend manifest
+#
+# v1.7.1 was released 2026-05-08. It shares the alloy 2.x API surface with
+# the current foundry nightly (EvmArgs.rpc, RpcOpts.common, generic
+# BroadcastableTransactions<N>, private preprocess() needing a source patch)
+# but its anvil NodeHandle still has the old public fields and a Drop impl
+# that does not abort tasks, so the foundry-v1-7-1 feature mixes paths from
+# both nightly and v1.5.1 code branches.
+#
+# Usage:
+#   cargo xtask foundry --backend v1.7.1 -- check -p treb-cli --tests
+
+[workspace]
+members = ["crates/treb-cli", "crates/treb-core", "crates/treb-config", "crates/treb-registry", "crates/treb-forge", "crates/treb-verify", "crates/treb-safe", "crates/treb-sol", "xtask"]
+resolver = "3"
+
+[workspace.package]
+version = "2.0.0"
+edition = "2024"
+rust-version = "1.93"
+authors = ["treb contributors"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+treb-core = { path = "crates/treb-core" }
+treb-config = { path = "crates/treb-config" }
+treb-registry = { path = "crates/treb-registry" }
+treb-forge = { path = "crates/treb-forge" }
+treb-verify = { path = "crates/treb-verify" }
+treb-safe = { path = "crates/treb-safe" }
+treb-sol = { path = "crates/treb-sol" }
+
+# === Foundry v1.7.1 ===
+foundry-config = { git = "https://github.com/foundry-rs/foundry", tag = "v1.7.1" }
+foundry-common = { git = "https://github.com/foundry-rs/foundry", tag = "v1.7.1" }
+foundry-compilers = "0.20.0"
+forge-script = { git = "https://github.com/foundry-rs/foundry", tag = "v1.7.1" }
+forge-script-sequence = { git = "https://github.com/foundry-rs/foundry", tag = "v1.7.1" }
+foundry-evm = { git = "https://github.com/foundry-rs/foundry", tag = "v1.7.1" }
+foundry-cheatcodes = { git = "https://github.com/foundry-rs/foundry", tag = "v1.7.1" }
+foundry-wallets = "0.1.0"
+foundry-linking = { git = "https://github.com/foundry-rs/foundry", tag = "v1.7.1" }
+foundry-cli = { git = "https://github.com/foundry-rs/foundry", tag = "v1.7.1" }
+forge-verify = { git = "https://github.com/foundry-rs/foundry", tag = "v1.7.1" }
+anvil = { git = "https://github.com/foundry-rs/foundry", tag = "v1.7.1" }
+revm-inspectors = "0.39"
+
+# Alloy — pinned exactly to 2.0.1 because tempo-primitives at the v1.7.1
+# rev does not implement the `BlockHeaderMut` trait methods (`set_mix_hash`,
+# `set_extra_data`, `set_parent_beacon_block_root`) that alloy added in
+# 2.0.2+. A floating "2.0.1" requirement resolves to the latest 2.0.x and
+# breaks the build; an exact pin holds it at the version v1.7.1 was cut
+# against. alloy-primitives 1.5.x is unaffected.
+alloy-chains = "0.2"
+alloy-primitives = "1.5.2"
+alloy-json-abi = "1.5"
+alloy-signer = "=2.0.1"
+alloy-signer-ledger = "=2.0.1"
+alloy-signer-trezor = "=2.0.1"
+alloy-sol-types = "1.5.2"
+alloy-provider = { version = "=2.0.1", default-features = false, features = ["reqwest-rustls-tls"] }
+alloy-consensus = "=2.0.1"
+alloy-network = "=2.0.1"
+alloy-rpc-types = "=2.0.1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+toml = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+comfy-table = "7"
+nucleo-matcher = "0.3"
+dialoguer = { version = "0.11", features = ["fuzzy-select"] }
+console = "0.15"
+owo-colors = { version = "4", features = ["supports-colors"] }
+unicode-width = "0.2"
+
+# URL parsing
+url = "2"
+
+# Environment
+dotenvy = "0.15"
+
+# File locking
+fs2 = "0.4"
+
+# Testing
+num_cpus = "1"
+tempfile = "3"
+assert_cmd = "2"
+predicates = "3"
+regex = "1"
+similar = "2"
+
+# Error handling & async
+thiserror = "2"
+anyhow = "1"
+eyre = "0.6"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+handlebars = "6"
+
+# System (background anvil subprocess management)
+libc = "0.2"
+ureq = "3"
+
+
+# Patches: mirror foundry v1.7.1's own [patch.crates-io] section. The op-*
+# crates and tempo-* crates are pinned to the revs that v1.7.1 uses (note:
+# these are *different* from foundry nightly's revs). We also pin every
+# alloy 2.0.x sub-crate to git tag v2.0.1 because tempo's BlockHeaderMut
+# impl at the v1.7.1 rev doesn't compile against the new trait methods
+# added in alloy 2.0.2+, and `=2.0.1` constraints in `[workspace.dependencies]`
+# don't reach transitive crates like alloy-eips.
+[patch.crates-io]
+alloy = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-consensus-any = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-contract = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-eip5792 = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-ens = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-network = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-network-primitives = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-provider = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-pubsub = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-rpc-types-any = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-rpc-types-debug = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-rpc-types-txpool = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-serde = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-signer-aws = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-signer-gcp = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-signer-ledger = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-signer-local = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-signer-trezor = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-signer-turnkey = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-transport = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+alloy-tx-macros = { git = "https://github.com/alloy-rs/alloy", tag = "v2.0.1" }
+op-revm = { git = "https://github.com/ethereum-optimism/optimism", rev = "42f5117c2e7de0614cd3b96f274d0a3078f9701c" }
+op-alloy-consensus = { git = "https://github.com/ethereum-optimism/optimism", rev = "42f5117c2e7de0614cd3b96f274d0a3078f9701c" }
+op-alloy-network = { git = "https://github.com/ethereum-optimism/optimism", rev = "42f5117c2e7de0614cd3b96f274d0a3078f9701c" }
+op-alloy-rpc-types = { git = "https://github.com/ethereum-optimism/optimism", rev = "42f5117c2e7de0614cd3b96f274d0a3078f9701c" }
+alloy-op-evm = { git = "https://github.com/ethereum-optimism/optimism", rev = "42f5117c2e7de0614cd3b96f274d0a3078f9701c" }
+alloy-op-hardforks = { git = "https://github.com/ethereum-optimism/optimism", rev = "42f5117c2e7de0614cd3b96f274d0a3078f9701c" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "6b12498" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "6b12498" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "6b12498" }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "6b12498" }
+tempo-primitives = { git = "https://github.com/tempoxyz/tempo", rev = "1e5a82dff207e2cbd6cecdcfb8ff3cd2e39baa69" }
+tempo-alloy = { git = "https://github.com/tempoxyz/tempo", rev = "1e5a82dff207e2cbd6cecdcfb8ff3cd2e39baa69" }
+tempo-contracts = { git = "https://github.com/tempoxyz/tempo", rev = "1e5a82dff207e2cbd6cecdcfb8ff3cd2e39baa69" }
+solar = { package = "solar-compiler", git = "https://github.com/paradigmxyz/solar", rev = "530f129" }
+solar-interface = { package = "solar-interface", git = "https://github.com/paradigmxyz/solar", rev = "530f129" }
+solar-ast = { package = "solar-ast", git = "https://github.com/paradigmxyz/solar", rev = "530f129" }
+solar-sema = { package = "solar-sema", git = "https://github.com/paradigmxyz/solar", rev = "530f129" }

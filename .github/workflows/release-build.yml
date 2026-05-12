@@ -25,9 +25,9 @@ jobs:
           - name: nightly
             feature: foundry-nightly
             manifest: ""
-          - name: v1.6.0-rc1
-            feature: foundry-v1-5-1
-            manifest: backends/v1.6.0-rc1
+          - name: v1.7.1
+            feature: foundry-v1-7-1
+            manifest: backends/v1.7.1
           - name: v1.5.1
             feature: foundry-v1-5-1
             manifest: backends/v1.5.1

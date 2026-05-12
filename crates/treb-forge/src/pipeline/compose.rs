@@ -174,15 +174,13 @@ impl ComposePipeline {
                 Ok(sim) => {
                     // Replay broadcastable transactions on the ephemeral Anvil
                     // so the next script sees this script's state changes.
-                    if let Some(ref btxs) = sim.result_transactions {
-                        if let Some(ref url) = ephemeral_url {
-                            if let Err(e) = replay_transactions_on_fork(url, btxs).await {
-                                let _ =
-                                    treb_registry::restore_registry(&snapshot_dir, &registry_dir);
-                                let _ = std::fs::remove_dir_all(&snapshot_dir);
-                                return Err((results, name, e));
-                            }
-                        }
+                    if let Some(ref btxs) = sim.result_transactions
+                        && let Some(ref url) = ephemeral_url
+                        && let Err(e) = replay_transactions_on_fork(url, btxs).await
+                    {
+                        let _ = treb_registry::restore_registry(&snapshot_dir, &registry_dir);
+                        let _ = std::fs::remove_dir_all(&snapshot_dir);
+                        return Err((results, name, e));
                     }
 
                     // Write deployments AND collisions to registry between steps

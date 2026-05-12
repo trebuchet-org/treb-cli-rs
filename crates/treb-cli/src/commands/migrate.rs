@@ -558,6 +558,7 @@ fn synthesize_queued_from_safe_transactions(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn synthesize_queued_from_governor_proposals(
     project_root: &Path,
     transactions: &HashMap<String, Transaction>,
@@ -630,9 +631,9 @@ fn synthesize_queued_from_governor_proposals(
     Ok(())
 }
 
-fn build_safe_lookup_by_tx_ids<'a>(
-    safe_transactions: &'a HashMap<String, SafeTransaction>,
-) -> HashMap<String, &'a SafeTransaction> {
+fn build_safe_lookup_by_tx_ids(
+    safe_transactions: &HashMap<String, SafeTransaction>,
+) -> HashMap<String, &SafeTransaction> {
     let mut lookup = HashMap::new();
     for safe_tx in safe_transactions.values() {
         lookup.insert(tx_id_key(&safe_tx.transaction_ids), safe_tx);

@@ -180,13 +180,12 @@ fn load_raw_senders(
 }
 
 fn human_config_source(config_source: &str) -> &str {
-    if let Some((source_name, version)) = config_source.rsplit_once(" (v") {
-        if version
+    if let Some((source_name, version)) = config_source.rsplit_once(" (v")
+        && version
             .strip_suffix(')')
             .is_some_and(|v| !v.is_empty() && v.chars().all(|c| c.is_ascii_digit()))
-        {
-            return source_name;
-        }
+    {
+        return source_name;
     }
 
     config_source

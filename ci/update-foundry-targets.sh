@@ -18,14 +18,25 @@ STABLES=$(echo "$TAGS" \
   | awk -F. '{minor=$1"."$2; if(!seen[minor]++){print}}' \
   | head -2)
 
-# Latest RC
-LATEST_RC=$(echo "$TAGS" \
+# Latest RC, but only if it's newer than the latest stable (otherwise the RC
+# has been superseded — e.g. v1.6.0-rc1 once v1.7.x was released — and is no
+# longer interesting to test against).
+LATEST_RC_RAW=$(echo "$TAGS" \
   | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-rc' \
   | sort -V \
   | tail -1)
+LATEST_STABLE=$(echo "$STABLES" | head -1)
+LATEST_RC=""
+if [ -n "$LATEST_RC_RAW" ] && [ -n "$LATEST_STABLE" ]; then
+  RC_BASE="${LATEST_RC_RAW%-rc*}"
+  HIGHER=$(printf '%s\n%s\n' "$RC_BASE" "$LATEST_STABLE" | sort -V | tail -1)
+  if [ "$HIGHER" = "$RC_BASE" ] && [ "$RC_BASE" != "$LATEST_STABLE" ]; then
+    LATEST_RC="$LATEST_RC_RAW"
+  fi
+fi
 
 echo "Stable targets: $STABLES"
-echo "Latest RC: ${LATEST_RC:-none}"
+echo "Latest RC: ${LATEST_RC:-none (superseded by $LATEST_STABLE)}"
 
 # Read existing pins file to preserve manual [patches.*] sections
 EXISTING_PATCHES=""

@@ -304,14 +304,14 @@ pub async fn run(
 
             // Also check receipt contractAddress (direct CREATE may appear
             // at the top level of the trace, but add it as a safety net).
-            if let Some(addr) = receipt_contract_address(&receipt_result) {
-                if !creations.iter().any(|c| c.address.eq_ignore_ascii_case(&addr)) {
-                    creations.push(TracedCreation {
-                        address: addr,
-                        from: sender.clone(),
-                        create_type: "CREATE".to_string(),
-                    });
-                }
+            if let Some(addr) = receipt_contract_address(&receipt_result)
+                && !creations.iter().any(|c| c.address.eq_ignore_ascii_case(&addr))
+            {
+                creations.push(TracedCreation {
+                    address: addr,
+                    from: sender.clone(),
+                    create_type: "CREATE".to_string(),
+                });
             }
         }
         Err(_) => {
