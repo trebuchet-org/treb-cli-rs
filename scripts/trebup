@@ -6,13 +6,24 @@ set -eo pipefail
 # Install (use bash, not sh):
 #   curl -fsSL https://raw.githubusercontent.com/trebuchet-org/treb-cli-rs/main/scripts/trebup | bash
 #
-# Version scheme:
-#   v2.0.0--foundry-v1.5.1                  Rust stable + foundry stable
-#   nightly-{sha}--foundry-nightly-{sha}    Rust nightly + foundry nightly
-#   nightly-{sha}--foundry-v1.5.1           Rust nightly + foundry stable
-#   v1.0.0                                  Go CLI (frozen)
+# Tag scheme:
+#   v2.X.Y                           Rust stable (each release contains all backends)
+#   nightly-{treb-sha}               Rust nightly (each release contains all backends)
+#   v1.0.0                           Go CLI (frozen)
+#
+#   Legacy (still installable):
+#     v2.0.0--foundry-v1.5.1         Pre-multi-backend stable; one backend per tag
+#     nightly-{X}--foundry-nightly-{Y}   Pre-multi-backend nightly
+#
+# Backend selection (new-style tags only):
+#   --foundry nightly | v1.7.1 | v1.5.1
+#   Default: v1.7.1 for v2.* tags, nightly for nightly-* tags.
+#
+# Archive naming inside a new-style release:
+#   treb-{tag}+foundry-{backend}-{platform}-{arch}.tar.gz
 
-TREBUP_VERSION="2.0.0"
+TREBUP_VERSION="2.1.0"
+DEFAULT_FOUNDRY_STABLE="v1.7.1"
 
 BASE_DIR="${XDG_CONFIG_HOME:-$HOME}"
 DEFAULT_TREB_DIR="$BASE_DIR/.treb"
@@ -33,7 +44,7 @@ GO_REPO="trebuchet-org/treb-cli"
 main() {
   local cmd="install"
   local install_version=""
-  local foundry_channel="stable"
+  local foundry_channel=""   # empty = pick per-tag default in resolve_install
   local local_path=""
 
   while [[ -n $1 ]]; do
@@ -75,8 +86,12 @@ main() {
   need_cmd curl
   need_cmd tar
 
-  # Resolve what to install
-  RESOLVED_TAG="" ; RESOLVED_REPO=""
+  # Resolve what to install. resolve_install sets:
+  #   RESOLVED_TAG     — the github release tag
+  #   RESOLVED_REPO    — "trebuchet-org/treb-cli-rs" or "trebuchet-org/treb-cli"
+  #   RESOLVED_FOUNDRY — backend channel (nightly|v1.7.1|v1.5.1), empty for
+  #                      legacy tags that encode the backend in the tag name
+  RESOLVED_TAG="" ; RESOLVED_REPO="" ; RESOLVED_FOUNDRY=""
   resolve_install "$install_version" "$foundry_channel"
 
   if [ -z "$RESOLVED_TAG" ]; then
@@ -85,20 +100,37 @@ main() {
   or install a specific tag with: trebup --install <tag>"
   fi
 
-  say "installing treb ($RESOLVED_TAG)"
+  # Compose user-facing label for the install dir / .active entry.
+  # New-style tags: ${tag}+foundry-${backend} (multi-backend per tag).
+  # Legacy tags (--foundry-X embedded in tag): use tag verbatim.
+  local local_version
+  if [ -n "$RESOLVED_FOUNDRY" ]; then
+    local_version="${RESOLVED_TAG}+foundry-${RESOLVED_FOUNDRY}"
+  else
+    local_version="${RESOLVED_TAG}"
+  fi
+
+  say "installing treb ($local_version)"
 
   # Detect platform
   DETECTED_PLATFORM="" ; DETECTED_ARCH=""
   detect_platform
 
-  # Download + extract
-  # Go repo uses underscores: treb_tag_platform_arch.tar.gz
-  # Rust repo uses hyphens: treb-tag-platform-arch.tar.gz
+  # Build archive + checksum filenames. Rust repo: hyphenated.
+  # New-style: treb-${tag}+foundry-${backend}-${platform}-${arch}.tar.gz
+  # Legacy:    treb-${tag}-${platform}-${arch}.tar.gz
+  # Go repo:   treb_${tag}_${platform}_${arch}.tar.gz (underscores)
   local archive checksum_file
   case "$RESOLVED_REPO" in
     *treb-cli-rs)
-      archive="treb-${RESOLVED_TAG}-${DETECTED_PLATFORM}-${DETECTED_ARCH}.tar.gz"
-      checksum_file="treb-${RESOLVED_TAG}-${DETECTED_PLATFORM}-${DETECTED_ARCH}.sha256"
+      local base_name
+      if [ -n "$RESOLVED_FOUNDRY" ]; then
+        base_name="treb-${RESOLVED_TAG}+foundry-${RESOLVED_FOUNDRY}-${DETECTED_PLATFORM}-${DETECTED_ARCH}"
+      else
+        base_name="treb-${RESOLVED_TAG}-${DETECTED_PLATFORM}-${DETECTED_ARCH}"
+      fi
+      archive="${base_name}.tar.gz"
+      checksum_file="${base_name}.sha256"
       ;;
     *)
       archive="treb_${RESOLVED_TAG}_${DETECTED_PLATFORM}_${DETECTED_ARCH}.tar.gz"
@@ -106,13 +138,13 @@ main() {
       ;;
   esac
   local base_url="https://github.com/${RESOLVED_REPO}/releases/download/${RESOLVED_TAG}"
-  local version_dir="$TREB_VERSIONS_DIR/$RESOLVED_TAG"
+  local version_dir="$TREB_VERSIONS_DIR/$local_version"
 
   local tmp_dir
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 
-  say "downloading $DETECTED_ARCHive..."
+  say "downloading $archive..."
   curl -fsSL "${base_url}/${archive}" -o "${tmp_dir}/${archive}"
   if curl -fsSL "${base_url}/${checksum_file}" -o "${tmp_dir}/${checksum_file}" 2>/dev/null; then
     verify_checksum "$tmp_dir" "$checksum_file"
@@ -123,14 +155,14 @@ main() {
   ensure tar xzf "${tmp_dir}/${archive}" -C "$version_dir"
 
   # Activate
-  activate "$RESOLVED_TAG"
+  activate "$local_version"
 
   # Install shell completions from archive
   if [ -d "$version_dir/completions" ]; then
     install_completions "$version_dir/completions"
   fi
 
-  say "done! treb $RESOLVED_TAG installed to $TREB_BIN_DIR/treb"
+  say "done! treb $local_version installed to $TREB_BIN_DIR/treb"
   check_path
 }
 
@@ -155,12 +187,16 @@ do_list() {
     local marker="  "
     [ "$v" = "$active" ] && marker="* "
 
-    # Detect runtime from version prefix
+    # Extract backend label. Two layouts:
+    #   new-style: ${tag}+foundry-${backend}
+    #   legacy:    ${tag}--foundry-${backend...}
     local info=""
     case "$v" in
-      v1*)  info=" (go)" ;;
-      local-*) info=" (local build)" ;;
-      *--foundry-nightly*) info=" (foundry nightly)" ;;
+      v1*)                  info=" (go)" ;;
+      local-*)              info=" (local build)" ;;
+      *+foundry-nightly)    info=" (foundry nightly)" ;;
+      *+foundry-*)          info=" (foundry ${v##*+foundry-})" ;;
+      *--foundry-nightly*)  info=" (foundry nightly)" ;;
       *--foundry-v*)
         local fv="${v##*--foundry-}"
         info=" (foundry $fv)" ;;
@@ -187,25 +223,17 @@ do_available() {
   nightly_releases="$(echo "$all_rust" | grep "nightly" | head -10 || true)"
 
   if [ -n "$stable_releases" ]; then
-    echo "  Stable releases:"
+    echo "  Stable releases (each tag carries all backends; pick with --foundry):"
     for tag in $stable_releases; do
-      local marker="  "
-      [ "$tag" = "$active" ] && marker="* "
-      local installed=""
-      [ -d "$TREB_VERSIONS_DIR/$tag" ] && installed=" [installed]"
-      echo "    ${marker}${tag}${installed}"
+      list_release_line "$tag" "$active"
     done
     echo ""
   fi
 
   if [ -n "$nightly_releases" ]; then
-    echo "  Nightly (latest 10):"
+    echo "  Nightly (latest 10; each tag carries all backends; pick with --foundry):"
     for tag in $nightly_releases; do
-      local marker="  "
-      [ "$tag" = "$active" ] && marker="* "
-      local installed=""
-      [ -d "$TREB_VERSIONS_DIR/$tag" ] && installed=" [installed]"
-      echo "    ${marker}${tag}${installed}"
+      list_release_line "$tag" "$active"
     done
     echo ""
   fi
@@ -228,6 +256,36 @@ do_available() {
     done
     echo ""
   fi
+}
+
+# Print one line of `--available` output for a Rust tag.
+# For new-style tags (no `--foundry-` segment), show any installed
+# backend variants under the same tag; for legacy tags, just check the
+# bare directory.
+list_release_line() {
+  local tag="$1"
+  local active="$2"
+  local marker="  "
+  [ "$tag" = "$active" ] && marker="* "
+
+  local installed_note=""
+  if [[ "$tag" != *--foundry-* ]]; then
+    # New-style: collect installed variants `${tag}+foundry-*`
+    local variants=()
+    if [ -d "$TREB_VERSIONS_DIR" ]; then
+      for dir in "$TREB_VERSIONS_DIR/${tag}+foundry-"*; do
+        [ -d "$dir" ] || continue
+        variants+=("${dir##*+foundry-}")
+      done
+    fi
+    if [ ${#variants[@]} -gt 0 ]; then
+      installed_note=" [installed: $(IFS=, ; echo "${variants[*]}")]"
+    fi
+  else
+    [ -d "$TREB_VERSIONS_DIR/$tag" ] && installed_note=" [installed]"
+  fi
+
+  echo "    ${marker}${tag}${installed_note}"
 }
 
 do_use() {
@@ -262,17 +320,17 @@ do_update() {
 resolve_install() {
   local version="$1"
   local foundry_channel="$2"
-  # Returns via RESOLVED_TAG and RESOLVED_REPO globals
+  # Sets RESOLVED_TAG, RESOLVED_REPO, RESOLVED_FOUNDRY globals.
+  # RESOLVED_FOUNDRY is empty for legacy tags (which encode the backend
+  # in the tag itself); non-empty for new-style multi-backend tags.
 
-  # Default: latest Rust release (nightly or stable)
   if [ -z "$version" ]; then
     version="latest"
   fi
 
-  # Aliases
+  # Tag aliases that don't need foundry resolution.
   case "$version" in
     nightly)
-      # Find latest nightly release (any foundry channel)
       RESOLVED_REPO="$RUST_REPO"
       local resolved
       resolved="$(find_latest_release "$RUST_REPO" "^nightly-")"
@@ -280,11 +338,11 @@ resolve_install() {
         err "no nightly releases found"
       fi
       RESOLVED_TAG="$resolved"
-      say "resolved nightly → $resolved"
+      RESOLVED_FOUNDRY="$(resolve_foundry_channel_for_tag "$RESOLVED_TAG" "$foundry_channel")"
+      say "resolved nightly → ${RESOLVED_TAG}${RESOLVED_FOUNDRY:+ +foundry-${RESOLVED_FOUNDRY}}"
       return
       ;;
     latest)
-      # Find the latest release regardless of naming scheme
       RESOLVED_REPO="$RUST_REPO"
       local resolved
       resolved="$(find_latest_release "$RUST_REPO" "^v")"
@@ -292,20 +350,20 @@ resolve_install() {
         err "no releases found at $RUST_REPO"
       fi
       RESOLVED_TAG="$resolved"
-      say "resolved latest → $resolved"
+      RESOLVED_FOUNDRY="$(resolve_foundry_channel_for_tag "$RESOLVED_TAG" "$foundry_channel")"
+      say "resolved latest → ${RESOLVED_TAG}${RESOLVED_FOUNDRY:+ +foundry-${RESOLVED_FOUNDRY}}"
       return
       ;;
   esac
 
-  # Route by major version
   case "$version" in
     v1*)
       RESOLVED_REPO="$GO_REPO"
-      # Go CLI frozen at v1.0.0 — no nightly channel
-      RESOLVED_TAG="$version"
+      RESOLVED_TAG="$version"   # Go CLI frozen; no foundry selection
+      RESOLVED_FOUNDRY=""
       return
       ;;
-    v2*)
+    v2*|nightly-*)
       RESOLVED_REPO="$RUST_REPO"
       ;;
     *)
@@ -313,26 +371,56 @@ resolve_install() {
       ;;
   esac
 
-  # Rust stable: resolve foundry channel into FQID tag
-  if [[ "$version" == v2.* && "$version" != *--foundry-* ]]; then
-    # Stable version — try FQID, fall back to exact tag
-    local pattern resolved
-    if [ "$foundry_channel" = "nightly" ]; then
-      pattern="${version}--foundry-nightly-"
-    else
-      pattern="${version}--foundry-v"
-    fi
-
-    resolved="$(find_latest_release "$RUST_REPO" "$pattern")"
-    if [ -z "$resolved" ]; then
-      # Fall back to exact version tag (pre-FQID)
-      resolved="$version"
-    fi
-    RESOLVED_TAG="$resolved"
-  else
-    # Fully qualified — use as-is
+  # Legacy FQID tag — already encodes foundry; install verbatim.
+  if [[ "$version" == *--foundry-* ]]; then
     RESOLVED_TAG="$version"
+    RESOLVED_FOUNDRY=""
+    return
   fi
+
+  # New-style tag — use verbatim, foundry channel chosen separately.
+  RESOLVED_TAG="$version"
+  RESOLVED_FOUNDRY="$(resolve_foundry_channel_for_tag "$RESOLVED_TAG" "$foundry_channel")"
+}
+
+# Pick the backend label to install given the tag + user preference.
+# Per-tag defaults for new-style tags:
+#   nightly-*  → nightly  (mirror cadence)
+#   v2.*       → v1.7.1   (latest stable foundry)
+# Legacy tags (those with `--foundry-` embedded) already pin the backend
+# in the tag name; return empty so the caller skips the `+foundry-X`
+# suffix on archive/dir names.
+# User-supplied channel always wins for new-style tags; validates against
+# the known set.
+resolve_foundry_channel_for_tag() {
+  local tag="$1"
+  local requested="$2"
+
+  # Legacy FQID tag — backend already encoded in the tag.
+  if [[ "$tag" == *--foundry-* ]]; then
+    if [ -n "$requested" ]; then
+      warn "tag '$tag' already pins its foundry backend; --foundry $requested ignored"
+    fi
+    echo ""
+    return
+  fi
+
+  if [ -n "$requested" ]; then
+    case "$requested" in
+      nightly|v1.7.1|v1.5.1) echo "$requested"; return ;;
+      stable)
+        # Back-compat alias; map to current default stable foundry tag.
+        echo "$DEFAULT_FOUNDRY_STABLE"
+        return
+        ;;
+      *) err "unknown --foundry channel '$requested' (allowed: nightly, v1.7.1, v1.5.1)" ;;
+    esac
+  fi
+
+  case "$tag" in
+    nightly-*) echo "nightly" ;;
+    *)         echo "$DEFAULT_FOUNDRY_STABLE" ;;
+  esac
 }
 
 find_latest_release() {
@@ -513,8 +601,13 @@ migrate_if_needed() {
       local v
       v="$(basename "$dir")"
 
-      # Skip if already in FQID format
+      # Skip if already in a recognized format:
+      #   v1-*, v2-*  — migrated FQID layouts
+      #   v1.*, v2.*  — legacy single-backend stable tags (e.g. v2.0.1--foundry-v1.5.1)
+      #   nightly-*   — new-style nightly tag (with or without +foundry-X suffix)
+      #   local-*     — local builds installed via --path
       [[ "$v" == v1-* || "$v" == v2-* || "$v" == v1.* || "$v" == v2.* ]] && continue
+      [[ "$v" == nightly-* || "$v" == local-* ]] && continue
 
       # Probe the binary
       local detected=""
@@ -792,22 +885,28 @@ USAGE:
 OPTIONS:
     -h, --help            Print this help message
     -v, --version         Print trebup version
-    -i, --install TAG     Install a specific version
+    -i, --install TAG     Install a specific version (v2.X.Y, nightly-<sha>,
+                          nightly, latest, or v1.0.0 for the Go CLI)
     -p, --path PATH       Build and install treb from a local Rust checkout
     -u, --use TAG         Switch to an already-installed version
     -l, --list            List installed versions
     -a, --available       List available releases from GitHub
-    --foundry CHANNEL     Foundry channel: stable (default) or nightly
+    --foundry CHANNEL     Foundry backend: nightly | v1.7.1 | v1.5.1
+                          (default: v1.7.1 for stable tags, nightly for
+                          nightly tags; ignored for legacy FQID tags)
     -U, --update          Update trebup itself
 
 EXAMPLES:
-    trebup                              Install latest treb release
-    trebup --foundry nightly            Install with foundry nightly
-    trebup --install v2.0.0             Install specific version
+    trebup                              Install latest stable + foundry v1.7.1
+    trebup --install nightly            Install latest nightly + foundry nightly
+    trebup --install nightly --foundry v1.7.1
+                                        Latest nightly built against foundry v1.7.1
+    trebup --install v2.1.0 --foundry v1.5.1
+                                        v2.1.0 against foundry v1.5.1
     trebup --install v1.0.0             Install Go CLI (v1, frozen)
     trebup --path /path/to/treb-cli-rs  Build and install from a local checkout
     trebup --list                       List installed versions
-    trebup --use v2.0.0--foundry-v1.5.1
+    trebup --use v2.1.0+foundry-v1.7.1  Switch to a specific installed variant
 EOF
 }
 
