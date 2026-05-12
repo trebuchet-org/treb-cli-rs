@@ -74,12 +74,59 @@ jobs:
             echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
           fi
 
-      - name: Update Cargo.toml foundry dep
+      - name: Update Cargo.toml foundry dep + patch revs
         if: steps.check.outputs.updated == 'true'
         run: |
+          set -eo pipefail
           FOUNDRY_TAG="${{ steps.check.outputs.foundry_tag }}"
-          # Update all foundry git dep tags in Cargo.toml
+          FOUNDRY_HASH="${FOUNDRY_TAG#nightly-}"
+
+          # Bump the foundry git-tag pin on every line that has it.
           sed -i "s|tag = \"nightly-[a-f0-9]*\"|tag = \"${FOUNDRY_TAG}\"|g" Cargo.toml
+
+          # Mirror foundry's own [patch.crates-io] revs for the three repos
+          # we also patch. Foundry's nightly bumps these alongside its own
+          # source — pinning only the foundry tag leaves us with a stale
+          # tempo/op/solar that no longer satisfies the new alloy/reth/etc.
+          # trait surface (e.g. tempo at the previous rev missing
+          # `reth_codecs::Compact` impls demanded by the bumped reth-codecs).
+          FOUNDRY_CARGO=$(curl -fsSL \
+            "https://raw.githubusercontent.com/foundry-rs/foundry/${FOUNDRY_HASH}/Cargo.toml")
+
+          extract_rev() {
+            # First rev= for a given git URL in foundry's Cargo.toml.
+            local repo="$1"
+            echo "$FOUNDRY_CARGO" \
+              | grep -F "$repo" \
+              | grep -oP 'rev = "\K[a-f0-9]+(?=")' \
+              | head -1
+          }
+
+          NEW_OP_REV=$(extract_rev "ethereum-optimism/optimism")
+          NEW_TEMPO_REV=$(extract_rev "tempoxyz/tempo")
+          NEW_SOLAR_REV=$(extract_rev "paradigmxyz/solar")
+
+          echo "Foundry's pinned revs:"
+          echo "  ethereum-optimism/optimism @ ${NEW_OP_REV:-<absent>}"
+          echo "  tempoxyz/tempo             @ ${NEW_TEMPO_REV:-<absent>}"
+          echo "  paradigmxyz/solar          @ ${NEW_SOLAR_REV:-<absent>}"
+
+          substitute() {
+            local repo="$1" new_rev="$2"
+            if [ -z "$new_rev" ]; then
+              return 0
+            fi
+            # Match exactly `${repo}", rev = "<hex>"` to avoid stomping on
+            # unrelated patch entries pointing at the same repo with different
+            # commits.
+            sed -i -E \
+              "s|(${repo}\", rev = \")[a-f0-9]+(\")|\1${new_rev}\2|g" \
+              Cargo.toml
+          }
+
+          substitute "github.com/ethereum-optimism/optimism" "$NEW_OP_REV"
+          substitute "github.com/tempoxyz/tempo" "$NEW_TEMPO_REV"
+          substitute "github.com/paradigmxyz/solar" "$NEW_SOLAR_REV"
 
       - name: Test
         if: steps.check.outputs.updated == 'true'
@@ -96,7 +143,7 @@ jobs:
           git tag "${{ steps.check.outputs.tag }}"
           git push origin main "${{ steps.check.outputs.tag }}"
 
-      - name: Close old foundry-compat issues and open new one on failure
+      - name: Close stale foundry-compat issues and open one on failure
         if: failure() && steps.check.outputs.updated == 'true'
         uses: actions/github-script@v7
         with:
@@ -105,14 +152,26 @@ jobs:
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const title = `Foundry nightly ${tag} breaks treb tests`;
 
-            // Close all existing foundry-compat issues (old nightlies superseded)
+            // Split existing open issues with the foundry-compat label:
+            //   - same-tag → leave alone (one open issue per failing tag)
+            //   - other-tag → stale, close them
+            //
+            // Earlier versions closed everything first and *then* filtered
+            // the cached list for dupes; the cache still showed the just-
+            // closed issue as "open", so the create step skipped forever
+            // and we churned through close/recreate cycles on each run.
             const existing = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
               labels: 'foundry-compat',
               state: 'open',
             });
-            for (const issue of existing.data) {
+
+            const sameTag = existing.data.filter(i => i.title === title);
+            const otherTag = existing.data.filter(i => i.title !== title);
+
+            for (const issue of otherTag) {
+              core.info(`Closing stale issue #${issue.number}: ${issue.title}`);
               await github.rest.issues.update({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -122,10 +181,8 @@ jobs:
               });
             }
 
-            // Check if we already have an issue for this exact tag
-            const dupes = existing.data.filter(i => i.title === title);
-            if (dupes.length > 0) {
-              core.info(`Issue already exists for ${tag}, skipping`);
+            if (sameTag.length > 0) {
+              core.info(`Open issue already exists for ${tag} (#${sameTag[0].number}); skipping create`);
               return;
             }
 
