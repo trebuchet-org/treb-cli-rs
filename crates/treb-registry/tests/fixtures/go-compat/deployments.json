@@ -7,7 +7,6 @@
     "label": "v3.0.0",
     "address": "0x959597fD009876e6f53EbdB2F1c1Bc3f994579dF",
     "type": "SINGLETON",
-    "transactionId": "",
     "deploymentStrategy": {
       "method": "CREATE3",
       "salt": "0x32cb58b145d3f7e28c45ce4b2cc31fa94248b23f00ab81cc01eccdf4986f4073",
@@ -42,7 +41,6 @@
     "label": "v3.0.0",
     "address": "0x6A8ff60A89F3f359Fa16F45076d6DD1712B5e62e",
     "type": "SINGLETON",
-    "transactionId": "",
     "deploymentStrategy": {
       "method": "CREATE3",
       "salt": "0xfdff3fd0994fed8be208a7bee49970ea9707e68700ba36fe8559a80710b3ca9b",
@@ -74,7 +72,6 @@
     "label": "GBPm",
     "address": "0x39bb4E0a204412bB98e821d25e7d955e69d40Fd1",
     "type": "PROXY",
-    "transactionId": "",
     "deploymentStrategy": {
       "method": "CREATE3",
       "salt": "0xfdff3fd0994fed8be208a7bee49970ea9707e68700e803f5624bbc05aabae101",
@@ -110,7 +107,6 @@
     "label": "v3.0.0",
     "address": "0xaa6A9b01d02dDb3DB718669A83621C97c2e31823",
     "type": "SINGLETON",
-    "transactionId": "",
     "deploymentStrategy": {
       "method": "CREATE3",
       "salt": "0xfdff3fd0994fed8be208a7bee49970ea9707e687004c887255bef838a26b5a44",
@@ -142,7 +138,6 @@
     "label": "CDPLiquidityStrategy",
     "address": "0x4e78BD9565341EAbe99cDC024acB044d9BDcB985",
     "type": "PROXY",
-    "transactionId": "",
     "deploymentStrategy": {
       "method": "CREATE3",
       "salt": "0xfdff3fd0994fed8be208a7bee49970ea9707e687004a7a8ff9d3dea9cd3363d7",

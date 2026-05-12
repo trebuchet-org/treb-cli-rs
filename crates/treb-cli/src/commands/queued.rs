@@ -103,9 +103,9 @@ pub async fn queued_command(network: Option<String>, json: bool) -> anyhow::Resu
                 fork_sim,
             );
             if !p.governor_address.is_empty() || !p.timelock_address.is_empty() {
-                let mut detail = format!("  Governor {}", &p.governor_address);
+                let mut detail = format!("  Governor {}", p.governor_address);
                 if !p.timelock_address.is_empty() {
-                    detail.push_str(&format!(" -> Timelock {}", &p.timelock_address));
+                    detail.push_str(&format!(" -> Timelock {}", p.timelock_address));
                 }
                 if use_color {
                     println!("  {}", detail.style(color::GRAY));

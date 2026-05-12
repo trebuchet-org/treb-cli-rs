@@ -154,7 +154,22 @@ fn run_foundry_single(backend: Backend, cargo_args: Vec<String>) -> Result<()> {
 
     // Apply source patches to cargo git checkouts (after manifest swap so the
     // foundry tag in Cargo.toml matches the backend being built).
+    //
+    // `cargo fetch` first so the foundry git checkout is materialized in
+    // `$CARGO_HOME/git/checkouts/foundry-*/<commit>/` before the patch step
+    // tries to find it. Without this, a clean CI runner that has never built
+    // this backend before fails with "no matching checkout found".
     if let Some(patches_dir) = backend.patches_dir() {
+        let fetch_status = Command::new("cargo")
+            .args(["fetch", "--locked"])
+            .current_dir(&root)
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .status()
+            .context("failed to run cargo fetch before applying patches")?;
+        if !fetch_status.success() {
+            bail!("cargo fetch failed with status {fetch_status}");
+        }
         apply_cargo_source_patches(&root, patches_dir)?;
     }
 

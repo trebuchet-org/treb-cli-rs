@@ -133,11 +133,26 @@ impl Normalizer for VersionNormalizer {
         let treb_line = Regex::new(r"(?m)^treb .+$").unwrap();
         let result = treb_line.replace_all(input, "treb <VERSION>");
 
+        // Foundry nightly hash embedded in JSON: "nightly-<40 hex>".
+        // The pinned hash bumps every nightly so it shouldn't show up in
+        // goldens — collapse to a stable placeholder.
+        let foundry_nightly = Regex::new(r"\bnightly-[0-9a-f]{40}\b").unwrap();
+        let result = foundry_nightly.replace_all(&result, "nightly-<FOUNDRY_HASH>");
+
         // Semver versions elsewhere: v1.0.0-beta.1-95-g6a2e70e
         let semver = Regex::new(r"v\d+\.\d+\.\d+(-[a-zA-Z0-9.\-]+)?").unwrap();
         let result = semver.replace_all(&result, "v<VERSION>");
 
-        // Git commit in version strings: -g6a2e70e
+        // Git-describe commit count + commit hash: "-12-g1234567" → "-<COUNT>-g<COMMIT>".
+        // Must run before the bare "-g<COMMIT>" replacement below.
+        let describe_suffix = Regex::new(r"-(\d+)-g[a-f0-9]{7,}").unwrap();
+        let result = describe_suffix.replace_all(&result, "-<COUNT>-g<COMMIT>");
+
+        // Bare "-dirty" trailing marker; absent in clean CI checkouts.
+        let dirty = Regex::new(r"-dirty\b").unwrap();
+        let result = dirty.replace_all(&result, "");
+
+        // Git commit in version strings (without the count prefix): -g6a2e70e
         let git_commit = Regex::new(r"-g[a-f0-9]{7,}").unwrap();
         git_commit.replace_all(&result, "-g<COMMIT>").into_owned()
     }
@@ -587,6 +602,25 @@ mod tests {
         let n = VersionNormalizer;
         // Standalone git commit suffix (not part of semver)
         assert_eq!(n.normalize("built from -g6a2e70e"), "built from -g<COMMIT>");
+    }
+
+    #[test]
+    fn version_normalizer_foundry_nightly_hash() {
+        let n = VersionNormalizer;
+        // JSON field value bumps every nightly; collapse to a stable placeholder
+        assert_eq!(
+            n.normalize(r#""nightly-1b7d0bf1ee503555a4f4f03d0a3966fbe4b864b2""#),
+            r#""nightly-<FOUNDRY_HASH>""#
+        );
+    }
+
+    #[test]
+    fn version_normalizer_describe_count_and_dirty() {
+        let n = VersionNormalizer;
+        // git-describe count + commit suffix (clean tree)
+        assert_eq!(n.normalize("tag-8-g3a5f99c"), "tag-<COUNT>-g<COMMIT>");
+        // git-describe count + commit suffix + dirty (local dirty tree)
+        assert_eq!(n.normalize("tag-16-g3a5f99c-dirty"), "tag-<COUNT>-g<COMMIT>");
     }
 
     #[test]

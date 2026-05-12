@@ -343,9 +343,41 @@ fn go_compat_deployments_round_trip() {
         .expect("fixture deployment tags should exist");
     tags.push(Value::String("rust-round-trip".to_string()));
 
-    let saved = load_registry_json(&dir, DEPLOYMENTS_FILE);
-    assert_bare_registry_map(&saved, DEPLOYMENTS_FIXTURE_COUNT);
-    assert_go_compat_json(&expected, &saved, "$");
+    // Post-redesign DeploymentStore::save() removes the flat fixture file and
+    // writes a tree of `<namespace>/<chain_id>.json` group files under the
+    // store root. Walk those group files, assert each is still a bare JSON
+    // map (no `_format` wrapper) so the Go CLI can still consume them, then
+    // merge into a single map and compare to the expected Go-compat layout.
+    let mut merged = serde_json::Map::new();
+    let mut total = 0usize;
+    for namespace_entry in fs::read_dir(dir.path()).unwrap() {
+        let namespace_path = namespace_entry.unwrap().path();
+        if !namespace_path.is_dir() {
+            continue;
+        }
+        for chain_entry in fs::read_dir(&namespace_path).unwrap() {
+            let chain_path = chain_entry.unwrap().path();
+            if chain_path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            let raw = fs::read_to_string(&chain_path).unwrap();
+            let value: Value = serde_json::from_str(&raw).unwrap();
+            let object = value.as_object().unwrap_or_else(|| {
+                panic!("group file {} should be a bare JSON object", chain_path.display())
+            });
+            assert!(
+                !object.contains_key("_format") && !object.contains_key("entries"),
+                "group file {} reintroduced the legacy wrapper",
+                chain_path.display()
+            );
+            total += object.len();
+            for (id, deployment) in object {
+                merged.insert(id.clone(), deployment.clone());
+            }
+        }
+    }
+    assert_eq!(total, DEPLOYMENTS_FIXTURE_COUNT);
+    assert_go_compat_json(&expected, &Value::Object(merged), "$");
 }
 
 #[test]

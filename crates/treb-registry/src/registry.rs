@@ -672,11 +672,18 @@ mod tests {
             registry.insert_safe_transaction(stx).unwrap();
         }
 
-        // Re-read from disk and compare via serde_json::Value equality
+        // Re-read from disk and compare via serde_json::Value equality.
+        // Post-redesign: deployments are split into grouped `<namespace>/<chain_id>.json`
+        // files under `<root>/deployments/`, so we round-trip through DeploymentStore
+        // to reconstruct the flat `{id: Deployment}` map. Transactions and safe-txs
+        // are still single files under `<root>/.treb/`.
         let treb_dir = dir.path().join(REGISTRY_DIR);
+        let deployments_root = crate::deployments_dir(dir.path());
 
-        let saved_deps_raw = fs::read_to_string(treb_dir.join(crate::DEPLOYMENTS_FILE)).unwrap();
-        let saved_deps: serde_json::Value = serde_json::from_str(&saved_deps_raw).unwrap();
+        let mut reloaded_deployments = crate::store::DeploymentStore::new(&deployments_root);
+        reloaded_deployments.load().unwrap();
+        let saved_deps =
+            serde_json::to_value(reloaded_deployments.data()).expect("serialize deployments");
         assert_eq!(saved_deps, deployments_value, "deployments golden file round-trip");
 
         let saved_txs_raw = fs::read_to_string(treb_dir.join(crate::TRANSACTIONS_FILE)).unwrap();
@@ -740,8 +747,7 @@ mod tests {
 
         assert!(registry.list_addressbook_entries("10").unwrap().is_empty());
 
-        let raw = fs::read_to_string(dir.path().join(REGISTRY_DIR).join(crate::ADDRESSBOOK_FILE))
-            .unwrap();
+        let raw = fs::read_to_string(crate::addressbook_path(dir.path())).unwrap();
         let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(value, serde_json::json!({}));
     }

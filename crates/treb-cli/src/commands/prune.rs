@@ -354,7 +354,7 @@ fn print_candidate_sections(candidates: &[PruneCandidate]) {
             let status = c.status.as_deref().unwrap_or("Unknown");
             // Convert status to title case (e.g., "EXECUTED" -> "Executed") to match Go output.
             let status_display =
-                format!("{}{}", &status[..1].to_uppercase(), &status[1..].to_lowercase());
+                format!("{}{}", status[..1].to_uppercase(), status[1..].to_lowercase());
             println!("  - {} [{}] (reason: {})", c.id, status_display, c.reason);
         }
     }
