@@ -79,6 +79,14 @@ jobs:
           cp "${{ matrix.backend.manifest }}/Cargo.toml" Cargo.toml
           cp "${{ matrix.backend.manifest }}/Cargo.lock" Cargo.lock
 
+      # The nightly + v1.7.1 backends need foundry's private `preprocess()`
+      # method exposed via a source patch (see patches/foundry-*). Running
+      # `cargo build` directly bypasses xtask's auto-patch step, so we apply
+      # the patch explicitly here after the manifest swap and before the
+      # build. v1.5.1 has no patches and is a no-op.
+      - name: Apply backend source patches
+        run: cargo xtask apply-patches --backend ${{ matrix.backend.name }}
+
       - name: Build
         shell: bash
         run: |

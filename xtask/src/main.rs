@@ -22,6 +22,12 @@ enum Commands {
     Foundry(FoundryArgs),
     /// Run Cargo against all Foundry backends sequentially.
     FoundryAll(FoundryAllArgs),
+    /// Apply backend source patches without running cargo.
+    ///
+    /// Used by the release-build workflow which runs `cargo`/`cross build`
+    /// directly (not via `foundry` subcommand) — the patches must already
+    /// be applied to the cargo git checkout before that step runs.
+    ApplyPatches(ApplyPatchesArgs),
 }
 
 const ALL_BACKENDS: [Backend; 3] = [Backend::Nightly, Backend::V1_7_1, Backend::V1_5_1];
@@ -91,12 +97,52 @@ struct FoundryAllArgs {
     cargo_args: Vec<String>,
 }
 
+#[derive(Args)]
+struct ApplyPatchesArgs {
+    /// Foundry backend whose patches should be applied.
+    #[arg(long, value_enum)]
+    backend: Backend,
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Commands::Foundry(args) => run_foundry_single(args.backend, args.cargo_args),
         Commands::FoundryAll(args) => run_foundry_all(args.cargo_args),
+        Commands::ApplyPatches(args) => run_apply_patches(args.backend),
     }
+}
+
+/// Apply this backend's source patches to the cargo git checkout.
+///
+/// Runs `cargo fetch --locked` first to ensure the foundry git checkout
+/// is materialized, then applies every `.patch` in `patches/<patches_dir>`.
+/// No-op for backends with no patches (e.g. v1.5.1).
+///
+/// Used standalone by `release-build.yml`, which invokes
+/// `cargo`/`cross build` directly and so doesn't pick up the patch step
+/// embedded in `run_foundry_single`.
+fn run_apply_patches(backend: Backend) -> Result<()> {
+    let root = workspace_root()?;
+    let _workspace_lock = WorkspaceLock::acquire(&root)?;
+
+    let Some(patches_dir) = backend.patches_dir() else {
+        eprintln!("xtask: no patches needed for backend {}", backend.label());
+        return Ok(());
+    };
+
+    let fetch_status = Command::new("cargo")
+        .args(["fetch", "--locked"])
+        .current_dir(&root)
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .status()
+        .context("failed to run cargo fetch before applying patches")?;
+    if !fetch_status.success() {
+        bail!("cargo fetch failed with status {fetch_status}");
+    }
+
+    apply_cargo_source_patches(&root, patches_dir)
 }
 
 fn run_foundry_all(cargo_args: Vec<String>) -> Result<()> {
